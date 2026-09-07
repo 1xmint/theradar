@@ -114,6 +114,15 @@ jobs:
         with:
           # `--in-diff` diffs against the base, so the base has to be here.
           fetch-depth: 0
+          # And this job was the one checkout in the file without it.
+          #
+          # `cargo mutants` builds and runs the workspace with **deliberately
+          # damaged source**, hundreds of times, in a scratch tree. Of every job
+          # here it is the one where arbitrary code most plausibly executes, and
+          # it was the only one leaving a push token in `.git/config` for that
+          # code to find. The base is fetched with the same token either way;
+          # what changes is whether it is still on disk afterwards.
+          persist-credentials: false
       - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
       - uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4.0.0

@@ -539,7 +539,14 @@ async fn health(State(state): State<Arc<AppState>>) -> Json<Value> {
         // The agent's own account of itself, so `radar brief` can alarm on it
         // from the probe it already makes rather than by opening a second
         // connection to a component that might be the thing that is down.
-        "agent": chat::status(state.chat.as_ref()),
+        //
+        // **The public half of it.** This endpoint is reachable by anybody, and
+        // it carried the day's model spend and the provider's own refusal text
+        // — the first is a scoreboard for whoever is trying to exhaust the
+        // budget, the second is the platform's words about this account handed
+        // to a stranger. `chat::public_status` says whether it works; the
+        // figures moved to `/v1/store`, which is the operator's.
+        "agent": chat::public_status(state.chat.as_ref()),
     }))
 }
 
@@ -1081,7 +1088,17 @@ async fn store_counts(State(state): State<Arc<AppState>>) -> Response {
         Err(e) => return e.into_response(),
     };
     match api::store_counts(&state.store, AsOf::at(watermark)) {
-        Ok(counts) => Json(counts).into_response(),
+        Ok(counts) => {
+            // The operator's surface, so the agent's figures belong here: the
+            // day's model spend, the tool count, and the provider's refusal in
+            // its own words. `/health` is public and carries only whether it
+            // works.
+            let mut body = serde_json::to_value(&counts).unwrap_or_else(|_| json!({}));
+            if let Some(object) = body.as_object_mut() {
+                object.insert("agent".to_owned(), chat::status(state.chat.as_ref()));
+            }
+            Json(body).into_response()
+        }
         Err(e) => (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(json!({ "error": e.to_string() })),

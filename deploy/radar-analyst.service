@@ -56,6 +56,12 @@ ProtectControlGroups=true
 RestrictSUIDSGID=true
 RestrictNamespaces=true
 LockPersonality=true
+# Neither process generates code at runtime: both are Rust binaries that decode
+# bytes and write files. Denying pages that are both writable and executable
+# removes the step every memory-corruption exploit needs after the corruption,
+# and costs nothing here — `radar-signer.socket`'s unit has carried it since it
+# was written, and these two read far more untrusted input than the signer does.
+MemoryDenyWriteExecute=true
 SystemCallArchitectures=native
 
 # Smaller than the recorder's. This holds one page of mentions and one dossier

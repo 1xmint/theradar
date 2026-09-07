@@ -1490,8 +1490,14 @@ fn agent(probed: Option<&ServingProbe>) -> Check {
         .and_then(serde_json::Value::as_u64)
         .unwrap_or_default();
 
+    // **The public health body no longer carries the spend, and that is
+    // deliberate.** It is the scoreboard for whoever is trying to exhaust the
+    // day's model budget, so it moved to `/v1/store`, which is the operator's.
+    // This line says where it went rather than reporting a figure it does not
+    // have — an operator who reads "spend unknown" goes looking for a broken
+    // check, and there is not one.
     let today = spent.map_or_else(
-        || "spend unknown".to_owned(),
+        || "spend on /v1/store".to_owned(),
         |s| format!("${}.{:06} today", s / 1_000_000, s % 1_000_000),
     );
 
@@ -1506,11 +1512,16 @@ fn agent(probed: Option<&ServingProbe>) -> Check {
             format!("{provider} answering, {tools} read-only tool(s), {today}"),
         ),
         Some("failed") => {
+            // The reason is on the operator surface for the same reason the
+            // spend is: it is the provider's own words about this account, and
+            // a platform lock notice published on `/health` is the account's
+            // operational state handed to a stranger. The *fact* of the failure
+            // is health and stays here; the words are not.
             let why = agent
                 .get("last")
                 .and_then(|l| l.get("why"))
                 .and_then(serde_json::Value::as_str)
-                .unwrap_or("no reason given");
+                .unwrap_or("see /v1/store for what it said");
             Check::new(
                 Status::Fail,
                 "agent",

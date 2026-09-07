@@ -398,6 +398,47 @@ pub fn status(chat: Option<&Chat>) -> serde_json::Value {
     }
 }
 
+/// The same, with everything an unauthenticated reader has no business knowing
+/// removed.
+///
+/// # What is taken out, and why each one
+///
+/// `/health` is public. It carried the whole of [`status`], and two of those
+/// fields are operational secrets rather than health:
+///
+/// - **`spent_micro_usd`** says how much of the day's budget is left. That is
+///   directly useful to somebody trying to spend it: the cheapest attack on this
+///   account is to exhaust its allowance, and this field is the scoreboard for
+///   it.
+/// - **`last.why`** is the provider's own refusal text, verbatim. A platform
+///   lock reason, a policy notice or an upstream error body ends up there, and
+///   publishing it hands a stranger the account's operational state in the
+///   provider's own words.
+///
+/// What stays is enough to answer *is it working*: configured, which provider,
+/// and whether the last call succeeded — as a word, not as a reason.
+/// `radar brief` reads exactly that, so the monitor keeps working with no
+/// credential, and an operator who wants the figures reads `/v1/store`.
+#[must_use]
+pub fn public_status(chat: Option<&Chat>) -> serde_json::Value {
+    let full = status(chat);
+    if full.get("configured").and_then(serde_json::Value::as_bool) != Some(true) {
+        return full;
+    }
+    let last = match full.get("last").and_then(|l| l.get("last_call")) {
+        Some(v) => v.clone(),
+        // `LastCall` serialises `Never` without a `last_call` field on some
+        // shapes; an absent value is reported as absent rather than as a
+        // success, which is the same rule the rest of this file follows.
+        None => serde_json::Value::Null,
+    };
+    json!({
+        "configured": true,
+        "provider": full.get("provider"),
+        "last": { "last_call": last },
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -550,5 +591,61 @@ mod tests {
             (20_000..30_000).contains(&today),
             "days since 1970 is ~20,700 in 2026 and ~30,000 in 2052; got {today}"
         );
+    }
+
+    #[test]
+    fn an_unconfigured_agent_says_the_same_thing_to_everybody() {
+        // Nothing to hide, and nothing to differ about. A public view that
+        // diverged here would leak the one bit it is meant to publish.
+        assert_eq!(status(None), public_status(None));
+        assert_eq!(public_status(None), json!({ "configured": false }));
+    }
+
+    #[test]
+    fn the_public_view_drops_the_spend_and_the_refusal_text() {
+        // Finding H9. `/health` is reachable by anybody and it carried both.
+        //
+        // The spend is the scoreboard for whoever is trying to exhaust the
+        // day's budget, which is the cheapest attack on this account. The
+        // refusal text is the provider's own words about this account — a
+        // platform lock reason or a policy notice, published.
+        let chat = chat(Err(radar_model::Unreachable::NoContact("x".to_owned())));
+        *chat.last.lock().expect("not poisoned") = LastCall::Failed {
+            why: "your account is temporarily locked (code 326)".to_owned(),
+        };
+        let full = status(Some(&chat));
+        let public = public_status(Some(&chat));
+
+        // The full view still has them, because the operator needs them.
+        assert!(full.get("spent_micro_usd").is_some());
+        assert!(full.to_string().contains("326"));
+
+        // The public one has neither, by any route: asserted against the whole
+        // serialised body rather than field by field, because a nested field
+        // added later would otherwise slip through a per-field check.
+        let rendered = public.to_string();
+        assert!(!rendered.contains("326"), "{rendered}");
+        assert!(!rendered.contains("locked"), "{rendered}");
+        assert!(!rendered.contains("spent_micro_usd"), "{rendered}");
+        assert!(!rendered.contains("estimate_micro_usd"), "{rendered}");
+    }
+
+    #[test]
+    fn the_public_view_still_says_whether_the_last_call_worked() {
+        // The other half, and the one that keeps `radar brief` working without a
+        // credential: a view that published nothing would make the monitor
+        // permanently unable to see, which alarms for ever and is then ignored.
+        let good = chat(Err(radar_model::Unreachable::NoContact("x".to_owned())));
+        *good.last.lock().expect("not poisoned") = LastCall::Ok;
+        let ok = public_status(Some(&good));
+        assert_eq!(ok["configured"], json!(true));
+        assert_eq!(ok["last"]["last_call"], json!("ok"));
+
+        let failing = chat(Err(radar_model::Unreachable::NoContact("x".to_owned())));
+        *failing.last.lock().expect("not poisoned") = LastCall::Failed {
+            why: "whatever it was".to_owned(),
+        };
+        let bad = public_status(Some(&failing));
+        assert_eq!(bad["last"]["last_call"], json!("failed"));
     }
 }

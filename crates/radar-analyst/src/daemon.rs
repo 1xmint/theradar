@@ -514,10 +514,44 @@ pub fn run() -> ! {
     let mut spend = Spend::open(budget, prices, paths.ledger.clone(), day_of(now()));
 
     let client = radar_onchain::RpcClient::from_vars(&env);
-    let rates = BaseRates::load(radar_roast::baserates::DEFAULT_PATH).ok();
-    if rates.is_none() {
-        eprintln!("radar-analyst: no base rates; replies will carry no population context");
-    }
+    // **A stale snapshot is dropped, not quoted.**
+    //
+    // `is_stale_at` has existed since the module was written and had one caller
+    // — `radar roast`, which prints a warning to one person and then uses the
+    // figures anyway. That is defensible for a debugging command. It is not
+    // defensible here: this process publishes, and research 0024's own opening
+    // argument is that 0008's headline was wrong by 2.7x **nine days** later
+    // because the recipient distribution is a configuration of whatever tool
+    // the launchers are running rather than a law.
+    //
+    // So a month-old distribution quoted as current is a measurement about a
+    // population that no longer exists, said in public, by an account whose
+    // whole claim is that its numbers are measured.
+    //
+    // Dropped rather than fatal. The daemon already handles `None` — the reply
+    // carries no population context and says so — and taking the account off the
+    // air over a research file would be a larger outage than the fault. The
+    // threshold is `baserates::STALE_AFTER_DAYS`, not a second number invented
+    // here: two thresholds for one question is how they drift apart.
+    let rates = match BaseRates::load(radar_roast::baserates::DEFAULT_PATH) {
+        Ok(loaded) if loaded.is_stale_at(&crate::daily::date_of(now())) => {
+            eprintln!(
+                "radar-analyst: base rates were measured on {} and are stale after {} days; \
+                 dropping them, so replies will carry no population context until \
+                 research 0024 is re-run",
+                loaded.measured_on,
+                radar_roast::baserates::STALE_AFTER_DAYS
+            );
+            None
+        }
+        Ok(loaded) => Some(loaded),
+        Err(e) => {
+            eprintln!(
+                "radar-analyst: no base rates ({e}); replies will carry no population context"
+            );
+            None
+        }
+    };
     // The fact that makes one reply differ from another. Absent, every reply
     // about a fresh launch says the same thing, so its absence is reported
     // rather than left to be noticed in the output.
