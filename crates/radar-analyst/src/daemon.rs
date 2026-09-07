@@ -909,6 +909,50 @@ impl BioMarker {
     }
 }
 
+/// The bio to write now, or `None` when there is nothing to do.
+///
+/// **Every decision about whether to write is here**, so the function that
+/// actually writes has none left. That is not tidiness: `write_bio_if_changed`
+/// needs an X client and a filesystem, so nothing in it can be reached by a
+/// test -- and CI proved the point three times, killing no mutant of any
+/// comparison that lived there.
+///
+/// `None` for each of five reasons, and they are genuinely five:
+///
+/// - the week's record says nothing worth a bio ([`crate::bio::state_of`] --
+///   a voided week, a week past its claim window, a winner with no handle);
+/// - the render would not fit in [`crate::bio::MAX`] characters, and a bio the
+///   platform cuts mid-figure is a wrong figure with no record it was right;
+/// - it was written less than an hour ago;
+/// - the text has not changed;
+/// - the render fails the checks a reply passes.
+///
+/// The last is worth its own note. A refused reply falls back to the template;
+/// a refused **bio** falls back to the bio that is already there, which was
+/// checked when it was written. So refusing is strictly safe here, in a way it
+/// is not for a reply.
+fn bio_to_write(
+    bio: &crate::bio::Bio,
+    record: &radar_contest::Record,
+    marker: Option<&BioMarker>,
+    now: u64,
+) -> Option<String> {
+    let state = crate::bio::state_of(record, now)?;
+    let text = bio.render(&state)?;
+    if !bio_write_due(now, marker, &text) {
+        return None;
+    }
+    match crate::bio::check(&text, &state.authorised()) {
+        Ok(()) => Some(text),
+        Err(why) => {
+            eprintln!(
+                "radar-analyst: the bio was refused by its own checks and not written: {why}"
+            );
+            None
+        }
+    }
+}
+
 /// Whether to write the bio now.
 ///
 /// Two conditions, both of them cheap and both of them protecting the same
@@ -967,23 +1011,9 @@ fn write_bio_if_changed(x: Option<&X>, bio: &crate::bio::Bio, spend: &mut Spend,
     else {
         return;
     };
-    let Some(state) = crate::bio::state_of(&record, at) else {
+    let Some(text) = bio_to_write(bio, &record, marker.as_ref(), at) else {
         return;
     };
-    let Some(text) = bio.render(&state) else {
-        eprintln!(
-            "radar-analyst: the bio would not fit in {} characters; not written",
-            crate::bio::MAX
-        );
-        return;
-    };
-    if !bio_write_due(at, marker.as_ref(), &text) {
-        return;
-    }
-    if let Err(why) = crate::bio::check(&text, &state.authorised()) {
-        eprintln!("radar-analyst: the bio was refused by its own checks and not written: {why}");
-        return;
-    }
 
     // Metered like everything else a stranger's week can trigger. `Cost::Post`
     // rather than a price of its own: X lists a profile write near a post, and
@@ -1376,6 +1406,87 @@ pub fn tick(
 
 #[cfg(test)]
 mod tests {
+
+    /// A closed week with a winner who has a handle, for the bio planner.
+    fn bio_record() -> radar_contest::Record {
+        let entry = radar_contest::Entry {
+            reply_id: "r1".to_owned(),
+            summoner: "9001".to_owned(),
+            mention_id: Some("m1".to_owned()),
+            handle: Some("somebody".to_owned()),
+            mint: "M".to_owned(),
+            at: radar_contest::Week(2958).opens_at() + 10,
+            metrics: radar_contest::Metrics::default(),
+        };
+        radar_contest::Record::close(
+            radar_contest::Week(2958),
+            radar_contest::Ranking {
+                ranked: vec![radar_contest::Ranked { entry, score: 12 }],
+                excluded: Vec::new(),
+            },
+            &radar_contest::Rules::published(["op"]),
+        )
+    }
+
+    #[test]
+    fn the_bio_planner_holds_every_reason_not_to_write() {
+        // `write_bio_if_changed` needs an X client and a filesystem, so nothing
+        // in it can be reached by a test -- and CI proved that three times,
+        // killing no mutant of any comparison that lived there. Every decision
+        // is here now and the writer has none left.
+        let bio = crate::bio::Bio {
+            lead: "Automated.".to_owned(),
+        };
+        let record = bio_record();
+        let closed = radar_contest::Week(2958).closes_at();
+
+        // Nothing written yet: write it, and it says what the record says.
+        let first = bio_to_write(&bio, &record, None, closed + 60).expect("a bio");
+        assert!(first.starts_with("Automated."), "{first}");
+        assert!(first.contains("@somebody"), "{first}");
+        assert!(first.contains("2026-09-21"), "{first}");
+
+        // The same text an hour later is not a write.
+        let marker = BioMarker {
+            at: closed + 60,
+            text: first.clone(),
+        };
+        assert_eq!(
+            bio_to_write(&bio, &record, Some(&marker), closed + 60 + 7_200),
+            None,
+            "unchanged"
+        );
+
+        // Too soon is not a write either, even with something new to say.
+        let stale = BioMarker {
+            at: closed + 60,
+            text: "something else".to_owned(),
+        };
+        assert_eq!(
+            bio_to_write(&bio, &record, Some(&stale), closed + 60 + 60),
+            None,
+            "59 minutes"
+        );
+        assert!(
+            bio_to_write(&bio, &record, Some(&stale), closed + 60 + 3_600).is_some(),
+            "an hour later, with new text"
+        );
+
+        // A record with nothing to say writes nothing, however long it has been.
+        let mut voided = bio_record();
+        voided.voided = Some(radar_contest::ledger::Voided {
+            at: closed,
+            reason: "bought".to_owned(),
+        });
+        assert_eq!(bio_to_write(&bio, &voided, None, closed + 60), None);
+
+        // A lead that leaves no room writes nothing rather than a bio the
+        // platform would cut mid-figure.
+        let long = crate::bio::Bio {
+            lead: "x".repeat(crate::bio::MAX - 10),
+        };
+        assert_eq!(bio_to_write(&long, &record, None, closed + 60), None);
+    }
 
     #[test]
     fn the_bio_writer_is_off_unless_a_lead_is_written_and_says_which() {
