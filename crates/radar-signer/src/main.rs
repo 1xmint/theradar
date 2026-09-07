@@ -24,7 +24,7 @@ use std::path::PathBuf;
 
 use radar_risk::Policy;
 use radar_signer::privy::{AuthorizationKey, authorise};
-use radar_signer::protocol::{Envelope, PrivyAuthorization, Response, place_signature, slot_of};
+use radar_signer::protocol::{Envelope, PrivyAuthorization, Response, bounds_of, place_signature};
 use radar_signer::{Allowlist, Key, check};
 use radar_types::{Address, Slot};
 
@@ -194,7 +194,10 @@ fn handle_privy(privy: &PrivyAuthorization, config: &Config) -> Response {
         &wallet,
         &config.allowlist,
         &config.policy,
-        Slot(privy.now_slot),
+        radar_signer::verify::CallerBounds {
+            now: Slot(privy.now_slot),
+            max_lamports: privy.max_lamports,
+        },
     ) {
         Ok(signature) => Response::Authorised { signature },
         Err(why) => Response::refused(why.to_string()),
@@ -223,7 +226,7 @@ fn handle(line: &str, config: &Config) -> Response {
         &config.key.public(),
         &config.allowlist,
         &config.policy,
-        slot_of(&request),
+        bounds_of(&request),
     ) {
         Ok(c) => c,
         Err(rejections) => {

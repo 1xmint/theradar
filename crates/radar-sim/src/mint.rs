@@ -182,6 +182,23 @@ impl MintStructure {
         self.freeze_authority.is_some() || !self.exit_threats().is_empty()
     }
 
+    /// Whether the issuer can still mint more of this token.
+    ///
+    /// Deliberately **not** folded into [`can_be_stopped`](Self::can_be_stopped),
+    /// which asks whether somebody can cancel a sale. A live mint authority does
+    /// not stop the sale; it makes what is being sold worth less, without limit
+    /// and at the issuer's discretion. Two different facts, and a predicate that
+    /// answered both under one name would be a name that lies.
+    ///
+    /// `mint_authority` has been parsed here since the module was written and
+    /// gated nothing until 2026-09-07. On pump.fun both authorities are revoked
+    /// at launch, so a live one is not a normal launch — it is the shape of a
+    /// token whose supply can be doubled while a position is open.
+    #[must_use]
+    pub const fn can_be_diluted(&self) -> bool {
+        self.mint_authority.is_some()
+    }
+
     /// Reads a mint account.
     ///
     /// # Errors
@@ -314,6 +331,21 @@ mod tests {
         // Metadata extensions cannot stop a sale.
         assert!(m.exit_threats().is_empty());
         assert!(!m.can_be_stopped());
+    }
+
+    #[test]
+    fn a_live_mint_authority_is_dilution_and_not_a_stop() {
+        // The two facts are separate and the names say which is which. A token
+        // that can be minted cannot be *stopped* by that fact alone -- and a
+        // predicate that reported it as one would be a name that lies.
+        let m = MintStructure::parse(&classic_mint(true, false), TOKEN_PROGRAM).expect("parses");
+        assert!(m.can_be_diluted());
+        assert!(!m.can_be_stopped());
+        assert!(m.exit_threats().is_empty());
+
+        let revoked =
+            MintStructure::parse(&classic_mint(false, false), TOKEN_PROGRAM).expect("parses");
+        assert!(!revoked.can_be_diluted());
     }
 
     #[test]

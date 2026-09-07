@@ -224,7 +224,10 @@ fn a_transaction_outside_the_authorisation_never_reaches_turnkey() {
                 programs: vec![DEX, SYSTEM_PROGRAM],
             },
             policy: &permissive(),
-            now: Slot(1_000),
+            caller: radar_signer::verify::CallerBounds {
+                now: Slot(1_000),
+                max_lamports: u64::MAX,
+            },
         },
     );
     assert!(
@@ -266,7 +269,10 @@ fn the_shipped_policy_refuses_before_any_request_is_made() {
                 programs: vec![DEX, SYSTEM_PROGRAM],
             },
             policy: &Policy::SHIPPED,
-            now: Slot(1_000),
+            caller: radar_signer::verify::CallerBounds {
+                now: Slot(1_000),
+                max_lamports: u64::MAX,
+            },
         },
     );
     assert!(refused.is_err(), "the shipped policy authorises nothing");

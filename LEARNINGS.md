@@ -13,7 +13,7 @@ benefit of the doubt on everything else.
 
 ## Index
 
-**21 of these 30 name something mechanical that would catch a
+**24 of these 33 name something mechanical that would catch a
 recurrence. 9 name only a habit, and say so** — which is this file's opening
 standard rather than a gap in it. The habit-only rows are the ones worth reading
 twice; nothing will stop those repeating except somebody remembering.
@@ -57,6 +57,7 @@ quietly absent.
 | [30](#30-an-operators-file-that-named-a-variable-its-own-service-does-not-read) | An operator's file that named a variable its own service does not read | *habit only* |
 | [31](#31-a-runbook-that-named-a-real-domain-belonging-to-somebody-else) | A runbook that named a real domain belonging to somebody else | `looks_unsubstituted` |
 | [32](#32-the-sandbox-made-the-contest-impossible-to-close-and-it-took-six-days-to-show) | The sandbox made the contest impossible to close, and it took six days to show | `contest_writable_notice`, `brief::contest` |
+| [33](#33-the-composition-test-documented-the-hole-and-every-assertion-passed) | The composition test documented the hole, and every assertion passed | `the_size_the_signer_reads_is_the_size_this_crate_wrote`,… |
 
 ---
 
@@ -1579,3 +1580,57 @@ process cannot see from its own metadata. Both are pinned by tests that fail
 when the probe is removed. Neither catches the *general* case of a rarely-used
 path missing from `ReadWritePaths`; for that the habit is to read the unit's
 grants against every path the process writes on its slowest schedule.
+
+## 33. The composition test documented the hole, and every assertion passed
+
+`crates/radar-pumpfun/tests/the_signer_reads_what_this_crate_builds.rs` exists to
+prove rule 1 end to end: that the bytes Radar builds are bytes the signer can
+read and check. It built a `buy_exact_sol_in` for **20,000,000 lamports**, under
+an `Authorization` whose `max_notional` was **5,000,000**, and asserted the
+signer would sign it. It did. Green, for six days, in the one file whose whole
+job is that guarantee.
+
+The signer sized a transaction with `lamports_transferred`, which sums
+system-program `Transfer` instructions. **A swap makes none of those.** A
+pump.fun buy carries its lamports in the instruction's own data, which the signer
+never decoded, so every buy Radar could ever send scored **zero** against every
+ceiling — the authorisation's, the operator's policy, and `Canary`'s dust bound
+alike. AGENTS.md rule 1 says the signer "re-derives the transaction and checks it
+against the authorisation's bounds"; for the only kind of transaction Radar would
+ever sign, it did not.
+
+**What makes this its own entry.** Not that a check was missing — that is
+ordinary. That the file written to catch exactly this **wrote the hole down as a
+passing assertion**. Both numbers are visible on adjacent screens of the same
+file. Nothing was hidden, nothing was subtle, and reading the test told you the
+signer worked.
+
+The mechanism is worth naming, because it generalises past this file. Every
+number in that test was chosen to make the transaction *realistic* — 20,000,000
+lamports is a plausible buy, `MicroUsd(5_000_000)` is a plausible five-dollar
+authorisation. Neither was chosen to sit on a **boundary**. A composition test
+built from plausible values asks "does this run end to end", and a bound that is
+absent answers yes in exactly the same voice as a bound that holds. The two
+questions look identical from the outside, and only one of them was being asked.
+
+Note also that the ceiling reads micro-USD as lamports, which is *tighter* than
+the true bound at any real SOL price — so the fixture was over the ceiling by
+four times and still signed. Even the accidental conservatism did not save it,
+because the quantity being compared was never the quantity that mattered.
+
+**The generalisation.** A test that composes two components proves they *fit*.
+It proves nothing about a **bound** unless a value sits on one side of it and
+another value sits on the other. Where a guarantee is numeric, the test has to
+name the number and step over it — one under, one over — or it is testing the
+plumbing and reporting on the guarantee.
+
+**What catches a recurrence:**
+`the_signer_reads_what_this_crate_builds::the_size_the_signer_reads_is_the_size_this_crate_wrote`
+walks the ceiling from one lamport under it to one over, so the value the signer
+used is pinned to what this crate wrote rather than merely being *some* value
+that fitted; `a_buy_larger_than_the_authorisation_is_refused` asserts the
+refusal itself. Inside the signer, `verify::tests` covers each variant's field
+order, buys split across instructions, a buy that accepted any price, and a large
+sell that must **not** be refused — the false positive that would trap a position
+and the reason the old exemption existed. None of these pass against the code as
+it stood on 2026-09-06.

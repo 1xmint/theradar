@@ -11,6 +11,12 @@ authors.workspace = true
 
 [dependencies]
 ed25519-dalek.workspace = true
+# The signer re-decodes what it signs, and a swap carries its size in
+# instruction data. Without this the size check saw only system-program
+# transfers, which a swap makes none of. `radar-decode` is the right dependency
+# rather than a second table here: it forbids unsafe code, has no network, and
+# its discriminators are captured from mainnet rather than copied (ADR 0001).
+radar-decode.workspace = true
 radar-risk.workspace = true
 ring = { version = "0.17", default-features = false }
 radar-types.workspace = true
@@ -20,6 +26,7 @@ thiserror.workspace = true
 
 [dev-dependencies]
 ed25519-dalek.workspace = true
+radar-decode.workspace = true
 radar-risk.workspace = true
 radar-types.workspace = true
 ring = { version = "0.17", default-features = false }

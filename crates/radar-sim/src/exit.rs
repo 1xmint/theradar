@@ -95,6 +95,8 @@ pub struct ExitReport {
     pub structural_threats: Vec<Extension>,
     /// Whether someone can stop a holder selling.
     pub can_be_stopped: bool,
+    /// Whether the issuer can still mint more of this token.
+    pub can_be_diluted: bool,
     /// How much of this was measured.
     pub confidence: Confidence,
 }
@@ -121,7 +123,10 @@ impl ExitReport {
     /// a good price on an exit that can be revoked is not a good price.
     #[must_use]
     pub fn is_exitable(&self) -> bool {
-        !self.can_be_stopped && self.confidence != Confidence::Unknown && !self.curve.is_empty()
+        !self.can_be_stopped
+            && !self.can_be_diluted
+            && self.confidence != Confidence::Unknown
+            && !self.curve.is_empty()
     }
 
     /// Builds a report from structure and a set of quotes.
@@ -151,6 +156,9 @@ impl ExitReport {
         // No structure read means nothing is known about whether a sale can be
         // stopped, and unknown is not the same as safe.
         let can_be_stopped = structure.as_ref().is_none_or(MintStructure::can_be_stopped);
+        // Same rule 9 default as above: no structure read means the supply could
+        // be anything, and unknown is not safe.
+        let can_be_diluted = structure.as_ref().is_none_or(MintStructure::can_be_diluted);
 
         let confidence = if structure.is_none() || curve.is_empty() {
             Confidence::Unknown
@@ -167,6 +175,7 @@ impl ExitReport {
             no_route_at,
             structural_threats,
             can_be_stopped,
+            can_be_diluted,
             confidence,
         }
     }
@@ -462,6 +471,18 @@ mod tests {
         let mut data = vec![0u8; 82];
         data[44] = 6;
         data[45] = 1;
+        MintStructure::parse(&data, TOKEN_PROGRAM).expect("parses")
+    }
+
+    /// A mint whose issuer can still print more of it. Nothing else is wrong
+    /// with it: freeze revoked, no extensions, so a report that refuses this one
+    /// is refusing it for the supply and nothing else.
+    fn dilutable_structure() -> MintStructure {
+        let mut data = vec![0u8; 82];
+        data[44] = 6;
+        data[45] = 1;
+        data[0..4].copy_from_slice(&1u32.to_le_bytes());
+        data[4..36].copy_from_slice(&[7u8; 32]);
         MintStructure::parse(&data, TOKEN_PROGRAM).expect("parses")
     }
 
@@ -926,6 +947,47 @@ mod tests {
         );
         assert!(!report.curve.is_empty(), "the quotes are fine");
         assert!(report.can_be_stopped);
+        assert!(!report.is_exitable());
+    }
+
+    #[test]
+    fn a_token_the_issuer_can_still_mint_is_not_exitable() {
+        // `mint_authority` was parsed and gated nothing until 2026-09-07. A live
+        // one does not cancel the sale, so `can_be_stopped` stays false and the
+        // structural threats stay empty -- which is why this needed its own
+        // field rather than a wider reading of an existing one. What it does is
+        // make the supply the position was sized against a number the issuer can
+        // change while the position is open.
+        let report = probe(
+            &Pool {
+                depth_tokens: 10_000_000_000,
+            },
+            &mint(),
+            Some(dilutable_structure()),
+            1_000,
+        );
+        assert!(!report.curve.is_empty(), "the quotes are fine");
+        assert!(!report.can_be_stopped, "nothing can cancel the sale");
+        assert!(
+            report.structural_threats.is_empty(),
+            "no extension is involved"
+        );
+        assert!(report.can_be_diluted);
+        assert!(!report.is_exitable());
+    }
+
+    #[test]
+    fn an_unread_mint_account_is_dilutable_rather_than_assumed_safe() {
+        // Rule 9. No structure read is not a revoked authority.
+        let report = probe(
+            &Pool {
+                depth_tokens: 10_000_000_000,
+            },
+            &mint(),
+            None,
+            1_000,
+        );
+        assert!(report.can_be_diluted);
         assert!(!report.is_exitable());
     }
 

@@ -9,7 +9,7 @@
 //! modules it calls.
 
 use radar_risk::Authorization;
-use radar_types::{Address, MicroUsd, Signature};
+use radar_types::{Address, MicroUsd, Signature, Slot};
 
 use crate::economics::{Costs, Economics, FailureRisk, evaluate};
 use crate::route::{Route, RouteError};
@@ -37,11 +37,35 @@ pub trait Routing {
 pub trait Signing {
     /// Returns the signed transaction, or the reasons it was refused.
     ///
+    /// `bounds` is what this executor asserts about the transaction it built:
+    /// the chain head it read, and the size it meant to spend. Both can only
+    /// narrow what the authorization already permits — see
+    /// [`radar_signer::verify::CallerBounds`]. They are passed rather than
+    /// derived inside the signer because the signer has no clock and no price
+    /// feed, deliberately.
+    ///
     /// # Errors
     ///
     /// Returns the signer's refusal reasons verbatim.
-    fn sign(&self, authorization: &Authorization, transaction: &str)
-    -> Result<String, Vec<String>>;
+    fn sign(
+        &self,
+        authorization: &Authorization,
+        transaction: &str,
+        bounds: Bounds,
+    ) -> Result<String, Vec<String>>;
+}
+
+/// What the executor asserts about a transaction it built.
+///
+/// Mirrors `radar_signer::verify::CallerBounds` without depending on it: this
+/// crate talks to the signer over a socket, so the shape crosses as JSON and a
+/// type dependency here would be a compile-time coupling the wire does not have.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Bounds {
+    /// The chain head this executor read.
+    pub now: Slot,
+    /// The most lamports this executor intended the transaction to spend.
+    pub max_lamports: u64,
 }
 
 /// Something that can send a transaction.
@@ -62,7 +86,21 @@ pub struct Attempt {
     /// The wallet trading.
     pub wallet: Address,
     /// How much to commit, in lamports.
+    ///
+    /// Also the size bound sent to the signer: this is what the executor
+    /// *intends* to spend, and the signer checks the transaction the router
+    /// actually built against it. A router that returned a larger buy than it
+    /// was asked for is caught by the process holding the key.
     pub size_lamports: u64,
+    /// The chain head the kernel judged against.
+    ///
+    /// Sent to the signer so its expiry check has something real to compare to.
+    /// Until 2026-09-07 the client hard-coded zero, which is inside every
+    /// window, so [ADR 0008](https://github.com/hey-vera/radar/blob/main/docs/adr/0008-the-signer-holds-its-own-policy.md)'s
+    /// staleness check could never fire — and the first debugging move on the
+    /// resulting refusals would have been to widen `max_input_staleness`, which
+    /// is the check itself.
+    pub now: Slot,
     /// The gross edge the strategy expects.
     pub expected_edge: MicroUsd,
     /// Costs known before routing: fees, tip, modelled slippage.
@@ -188,7 +226,11 @@ pub fn execute<R: Routing, S: Signing, T: Sending>(
         };
     };
 
-    let ready = match signer.sign(&attempt.authorization, &route.transaction) {
+    let bounds = Bounds {
+        now: attempt.now,
+        max_lamports: attempt.size_lamports,
+    };
+    let ready = match signer.sign(&attempt.authorization, &route.transaction, bounds) {
         Ok(s) => s,
         Err(reasons) => return Outcome::Refused { reasons },
     };
@@ -224,6 +266,8 @@ mod tests {
     /// A signer that records whether it was asked at all.
     struct CountingSigner {
         asked: Cell<u32>,
+        /// What the pipeline told the signer about the transaction it built.
+        saw: Cell<Option<Bounds>>,
         answer: Result<String, Vec<String>>,
     }
 
@@ -231,6 +275,7 @@ mod tests {
         fn signing() -> Self {
             Self {
                 asked: Cell::new(0),
+                saw: Cell::new(None),
                 answer: Ok("c2lnbmVk".to_owned()),
             }
         }
@@ -238,14 +283,16 @@ mod tests {
         fn refusing() -> Self {
             Self {
                 asked: Cell::new(0),
+                saw: Cell::new(None),
                 answer: Err(vec!["mint absent".to_owned()]),
             }
         }
     }
 
     impl Signing for CountingSigner {
-        fn sign(&self, _: &Authorization, _: &str) -> Result<String, Vec<String>> {
+        fn sign(&self, _: &Authorization, _: &str, bounds: Bounds) -> Result<String, Vec<String>> {
             self.asked.set(self.asked.get() + 1);
+            self.saw.set(Some(bounds));
             self.answer.clone()
         }
     }
@@ -290,6 +337,7 @@ mod tests {
                 expires_after: Slot(1_150),
                 needs_operator_signature: false,
             },
+            now: Slot(1_100),
             wallet: Address::new([3u8; 32]),
             size_lamports: 10_000_000,
             expected_edge: edge,
@@ -436,5 +484,29 @@ mod tests {
         let mut deduped = sorted.to_vec();
         deduped.dedup();
         assert_eq!(deduped.len(), labels.len());
+    }
+
+    #[test]
+    fn the_signer_is_told_the_head_and_the_size_this_attempt_asked_for() {
+        // The size bound is the executor's *intent*. The signer then checks the
+        // transaction the router actually built against it, so a router that
+        // returned a larger buy than it was asked for is caught by the process
+        // holding the key rather than by the one that asked.
+        let signer = CountingSigner::signing();
+        let a = attempt(MicroUsd::from_dollars(10.0));
+        let outcome = execute(
+            &a,
+            &FixedRoute(Ok(route(0))),
+            &signer,
+            &CountingSender::sending(),
+        );
+        assert!(matches!(outcome, Outcome::Submitted { .. }), "{outcome:?}");
+        assert_eq!(
+            signer.saw.get(),
+            Some(Bounds {
+                now: a.now,
+                max_lamports: a.size_lamports,
+            })
+        );
     }
 }
