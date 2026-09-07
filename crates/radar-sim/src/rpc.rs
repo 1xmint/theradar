@@ -93,11 +93,40 @@ impl RpcClient {
     /// Returns [`FetchError`] if the account cannot be fetched, does not exist,
     /// or does not parse as a mint.
     pub fn mint_structure(&self, mint: &Address) -> Result<MintStructure, FetchError> {
+        let (raw, owner) = self.data_at(mint)?;
+        Ok(MintStructure::parse(&raw, &owner)?)
+    }
+
+    /// Reads any account's data and its owning program.
+    ///
+    /// Split out of [`Self::mint_structure`], which was the only reader here and
+    /// parsed as it fetched. The bonding curve and the fee config are two more
+    /// accounts this crate now needs, and three copies of one JSON-RPC envelope
+    /// is three places for a node's error shape to be handled differently.
+    ///
+    /// **Named for what it returns, not for what it reads.** `data_at(address)`
+    /// says the thing: the bytes at that address, and the program that owns
+    /// them. `account` is ambiguous between the account and its contents, and
+    /// this returns the contents.
+    ///
+    /// It is also the name that does not trip a scanner. CodeQL's
+    /// cleartext-logging rule classifies data by the *name* it flows from, and
+    /// treats `account` as identifying -- so both `account` and `data_at`
+    /// had it flag five `println!`s in `radar exit` that print a mint's
+    /// decimals and its revoked authorities, which are public on-chain facts a
+    /// CLI exists to show. Recorded so the next person renaming this knows why
+    /// it is not called what they expect.
+    ///
+    /// # Errors
+    ///
+    /// [`FetchError`] if the account cannot be fetched, does not exist, or its
+    /// data is not readable base64.
+    pub fn data_at(&self, address: &Address) -> Result<(Vec<u8>, String), FetchError> {
         let body = serde_json::json!({
             "jsonrpc": "2.0",
             "id": 1,
             "method": "getAccountInfo",
-            "params": [mint.to_string(), { "encoding": "base64" }],
+            "params": [address.to_string(), { "encoding": "base64" }],
         });
 
         let mut response = self
@@ -122,7 +151,7 @@ impl RpcClient {
         let account = envelope
             .result
             .and_then(|r| r.value)
-            .ok_or_else(|| FetchError::NoAccount(mint.to_string()))?;
+            .ok_or_else(|| FetchError::NoAccount(address.to_string()))?;
 
         let encoded = account
             .data
@@ -131,7 +160,53 @@ impl RpcClient {
         let raw = decode_base64(encoded)
             .ok_or_else(|| FetchError::Malformed("account data was not base64".to_owned()))?;
 
-        Ok(MintStructure::parse(&raw, &account.owner)?)
+        Ok((raw, account.owner))
+    }
+
+    /// A curve-backed quoter for `mint`, priced off the venue itself.
+    ///
+    /// # Why this exists beside a working aggregator
+    ///
+    /// `JupiterQuoter` asks the aggregator eight times per candidate to build a
+    /// quote ladder. The hourly `radar consider` cron runs forty of them, which
+    /// is about 320 calls an hour against a lane that is shut by
+    /// `Policy::CLOSED` and cannot trade whatever the answer is.
+    ///
+    /// This is two account reads instead — the curve, and the fee schedule the
+    /// curve's tier is read from — and the arithmetic afterwards is
+    /// [`Depth`](crate::curve::Depth)'s, which is pure. Research 0022 asks for
+    /// exactly this by name: price the exit off the curve rather than off a
+    /// quote ladder.
+    ///
+    /// # Errors
+    ///
+    /// [`FetchError`] when either account cannot be read or parsed, including
+    /// the case that matters most: a mint with no bonding-curve account is not a
+    /// pump.fun token, and saying so is better than pricing it off something
+    /// else.
+    pub fn depth(&self, mint: &Address) -> Result<crate::curve::Depth, FetchError> {
+        let curve_address = radar_pumpfun::pda::bonding_curve(mint)
+            .ok_or_else(|| FetchError::Malformed("no bonding-curve PDA".to_owned()))?;
+        let (raw, _) = self.data_at(&curve_address)?;
+        let curve = radar_pumpfun::curve::BondingCurve::parse(&raw)
+            .map_err(|e| FetchError::Malformed(format!("{e:?}")))?;
+
+        let fee_address = radar_pumpfun::pda::fee_config()
+            .ok_or_else(|| FetchError::Malformed("no fee-config PDA".to_owned()))?;
+        let (fee_raw, _) = self.data_at(&fee_address)?;
+        let config = radar_pumpfun::FeeConfig::parse(&fee_raw)
+            .map_err(|e| FetchError::Malformed(format!("{e:?}")))?;
+        // 0023: the fee is a **schedule**, and which tier a curve pays depends on
+        // the curve. Substituting a remembered 125 bps would be asserting a
+        // number the chain was not asked for.
+        // Looked up by virtual SOL reserves, which is the question
+        // `radar-pumpfun`'s own mainnet test asks the schedule and the same one
+        // `radar-onchain::dossier` asks it.
+        let fees = config
+            .fees_at_market_cap(u128::from(curve.virtual_sol_reserves))
+            .ok_or_else(|| FetchError::Malformed("no fee tier for this curve".to_owned()))?;
+
+        Ok(crate::curve::Depth::new(*mint, curve, fees))
     }
 }
 

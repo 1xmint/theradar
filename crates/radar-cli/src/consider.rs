@@ -52,6 +52,7 @@ pub fn run(
     window: u64,
     cap: usize,
     record_to: Option<&str>,
+    pricing: Pricing,
 ) -> Result<(), String> {
     let watermark = reader
         .watermark()
@@ -122,7 +123,11 @@ pub fn run(
         println!("Examining the first {budget} of them this pass.");
     }
 
+    // One aggregator call whichever instrument is chosen: the SOL price has no
+    // other source here, and a wrong one silently rescales every position in the
+    // system. One call a pass against 320 is the whole of this change.
     let quoter = JupiterQuoter::default();
+    println!("exit pricing : {}", pricing.label());
     let Some(sol_price) = radar_sim::sol_price_micro_usd(&quoter) else {
         // A wrong SOL price silently rescales every position in the system, so
         // an absent one stops the pass rather than defaulting.
@@ -149,6 +154,7 @@ pub fn run(
             blocks: &blocks,
             structures: &rpc,
             quoter: &quoter,
+            pricing,
         },
         sol_price,
         watermark,
@@ -248,11 +254,81 @@ pub trait Structures {
     /// and the strategy refuses on an unreadable structure rather than treating
     /// it as clean (rule 9).
     fn mint_structure(&self, mint: &Address) -> Option<radar_sim::MintStructure>;
+
+    /// A curve-backed quoter for this mint, or `None` when the curve could not
+    /// be read.
+    ///
+    /// `None` is "cannot price the exit", never "no limit" — the caller builds a
+    /// report with an empty curve, which is not exitable. Rule 9: an
+    /// unmeasurable capacity is `None`, and `None` means cannot exit.
+    fn depth(&self, mint: &Address) -> Option<radar_sim::curve::Depth>;
 }
 
 impl Structures for RpcClient {
     fn mint_structure(&self, mint: &Address) -> Option<radar_sim::MintStructure> {
         RpcClient::mint_structure(self, mint).ok()
+    }
+
+    fn depth(&self, mint: &Address) -> Option<radar_sim::curve::Depth> {
+        RpcClient::depth(self, mint).ok()
+    }
+}
+
+/// Where an exit's price comes from.
+///
+/// # Why this is a choice and not a constant
+///
+/// `radar consider` runs hourly on the box with `--cap 40`, and
+/// `JupiterQuoter` asks the aggregator **eight times per candidate** to build a
+/// quote ladder — about 320 calls an hour, against a lane shut by
+/// `Policy::CLOSED` that cannot trade whatever the answer is. Radar is a guest
+/// on that free tier (ADR 0002), and spending it on a question nothing acts on
+/// is the shape of cost this repository keeps finding in its own instruments.
+///
+/// The curve is two account reads and pure arithmetic afterwards, and research
+/// 0022 asks for it by name: *price the exit off the curve rather than off a
+/// quote ladder*. It is also the same instrument on both sides, which is
+/// `0016`'s lesson — the most expensive mistake in this repository's history was
+/// an entry priced as a bid against an exit priced as a mid.
+///
+/// Jupiter stays reachable behind `--quoter jupiter` because the two are
+/// different instruments and the difference is a measurement somebody should
+/// take. LEARNINGS 18: two instruments compared as if they were one.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum Pricing {
+    /// The bonding curve itself.
+    #[default]
+    Curve,
+    /// The aggregator's quote ladder.
+    Jupiter,
+}
+
+impl Pricing {
+    /// Reads the `--quoter` value.
+    ///
+    /// # Errors
+    ///
+    /// An unrecognised value is refused rather than defaulted: a typo that
+    /// silently picked one instrument while the operator believed they had the
+    /// other is the arrangement LEARNINGS 18 is about.
+    pub fn parse(value: &str) -> Result<Self, String> {
+        match value {
+            "curve" => Ok(Self::Curve),
+            "jupiter" => Ok(Self::Jupiter),
+            other => Err(format!(
+                "unknown --quoter {other}; expected curve or jupiter"
+            )),
+        }
+    }
+
+    /// What to print beside the pass, so a reader knows which instrument
+    /// produced the capacity they are looking at.
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Curve => "curve (two account reads per candidate)",
+            Self::Jupiter => "jupiter (eight quotes per candidate)",
+        }
     }
 }
 
@@ -316,8 +392,39 @@ pub struct Sources<'s, B, S, Q> {
     pub blocks: &'s B,
     /// Mint accounts.
     pub structures: &'s S,
-    /// The exit quoter.
+    /// The exit quoter, used only under [`Pricing::Jupiter`].
     pub quoter: &'s Q,
+    /// Which instrument prices the exit.
+    pub pricing: Pricing,
+}
+
+/// The exit report for one mint, from whichever instrument was chosen.
+///
+/// Both arms call the same search with the same budget; only the quoter
+/// differs, which is what makes the two comparable at all. Split out of
+/// [`paid_tier`] because it is the whole of the instrument choice, and that
+/// function is already at its length.
+fn capacity_of<B, S, Q>(
+    sources: &Sources<'_, B, S, Q>,
+    quoter: &Q,
+    mint: &Address,
+    structure: Option<radar_sim::MintStructure>,
+    search: radar_sim::exit::Search,
+) -> radar_sim::ExitReport
+where
+    S: Structures,
+    Q: radar_sim::Quoter,
+{
+    match sources.pricing {
+        Pricing::Jupiter => radar_sim::discover_capacity(quoter, mint, structure, search),
+        Pricing::Curve => match sources.structures.depth(mint) {
+            Some(depth) => radar_sim::discover_capacity(&depth, mint, structure, search),
+            // Rule 9. A curve that could not be read is an unmeasurable exit,
+            // and an empty report is not exitable: it is not a capacity of zero
+            // and it is certainly not "no limit found".
+            None => radar_sim::ExitReport::build(*mint, structure, Vec::new()),
+        },
+    }
 }
 
 fn paid_tier<'a, B, S, Q>(
@@ -454,7 +561,7 @@ where
         // so the "capacity" it measured was worth a fraction of a cent and every
         // candidate was refused as CapacityBelowFloor. Zero proposals read as a
         // fact about the market and was a fact about the probe. LEARNINGS 10.
-        let exit = radar_sim::discover_capacity(quoter, mint, structure, search_for(strategy));
+        let exit = capacity_of(sources, quoter, mint, structure, search_for(strategy));
         let Some(candidate) = universe.candidate(mint, Some(exit), Some(sol_price)) else {
             continue;
         };
@@ -1151,6 +1258,13 @@ mod tests {
         fn mint_structure(&self, _: &Address) -> Option<radar_sim::MintStructure> {
             None
         }
+
+        // And no curve either. These tests are about what happens when the
+        // chain cannot be read at all, so both halves have to be absent or the
+        // fixture describes a state the product does not have.
+        fn depth(&self, _: &Address) -> Option<radar_sim::curve::Depth> {
+            None
+        }
     }
 
     /// A quoter with nothing to sell at any size.
@@ -1810,6 +1924,7 @@ mod tests {
                 blocks: &blocks,
                 structures: &NoStructures,
                 quoter: &UnusedQuoter,
+                pricing: Pricing::Jupiter,
             },
             radar_types::MicroUsd::from_dollars(200.0),
             slot,
@@ -1907,6 +2022,7 @@ mod tests {
                 blocks: &blocks,
                 structures: &NoStructures,
                 quoter: &NoDepth,
+                pricing: Pricing::Jupiter,
             },
             radar_types::MicroUsd::from_dollars(200.0),
             slot,
@@ -1962,6 +2078,7 @@ mod tests {
                 blocks: &blocks,
                 structures: &NoStructures,
                 quoter: &UnusedQuoter,
+                pricing: Pricing::Jupiter,
             },
             radar_types::MicroUsd::from_dollars(200.0),
             slot,
@@ -2003,6 +2120,7 @@ mod tests {
                 blocks: &blocks,
                 structures: &NoStructures,
                 quoter: &UnusedQuoter,
+                pricing: Pricing::Jupiter,
             },
             radar_types::MicroUsd::from_dollars(200.0),
             slot,
@@ -2014,5 +2132,49 @@ mod tests {
             pass.look_failed, 0,
             "a failed sweep is not an unread launch block"
         );
+    }
+
+    #[test]
+    fn the_quoter_flag_names_an_instrument_and_refuses_a_typo() {
+        // LEARNINGS 18: two instruments compared as if they were one. A typo
+        // that silently picked the aggregator while the operator believed they
+        // had the curve would produce exactly that comparison, in a decision
+        // record nobody could tell apart afterwards.
+        assert_eq!(Pricing::parse("curve"), Ok(Pricing::Curve));
+        assert_eq!(Pricing::parse("jupiter"), Ok(Pricing::Jupiter));
+        assert!(Pricing::parse("Curve").is_err(), "case is not guessed at");
+        assert!(Pricing::parse("").is_err());
+        let why = Pricing::parse("jupitor").expect_err("a typo");
+        assert!(why.contains("jupitor"), "the message must name it: {why}");
+    }
+
+    #[test]
+    fn the_default_is_the_one_that_spends_nothing() {
+        // The hourly cron runs with no `--quoter`. The aggregator costs eight
+        // calls a candidate against a lane `Policy::CLOSED` will not let trade,
+        // so the default has to be the curve or this change does nothing where
+        // it matters.
+        assert_eq!(Pricing::default(), Pricing::Curve);
+    }
+
+    #[test]
+    fn each_instrument_says_which_it_is_and_what_it_costs() {
+        // Printed above the pass. A capacity figure whose instrument is not on
+        // the same screen is a figure somebody will compare with last week's.
+        assert!(Pricing::Curve.label().contains("curve"));
+        assert!(Pricing::Curve.label().contains("account reads"));
+        assert!(Pricing::Jupiter.label().contains("jupiter"));
+        assert!(Pricing::Jupiter.label().contains("eight"));
+    }
+
+    #[test]
+    fn a_curve_that_cannot_be_read_is_not_exitable_rather_than_unbounded() {
+        // Rule 9, at the point the instrument changed. `NoStructures` reads
+        // neither the mint nor the curve, so the report has an empty ladder --
+        // which must mean "cannot exit", never "no limit found". The two are
+        // opposite facts and only one of them lets a position be opened.
+        let report = radar_sim::ExitReport::build(Address::new([9u8; 32]), None, Vec::new());
+        assert!(!report.is_exitable());
+        assert_eq!(report.capacity_lamports(10_000), None);
     }
 }
