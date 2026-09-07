@@ -1161,4 +1161,200 @@ mod tests {
             "four hours at two an hour is eight, and the burst is ten so nothing is clipped"
         );
     }
+
+    #[test]
+    fn the_latest_answer_for_a_mint_is_the_one_restored() {
+        // `restore` walks the log in order and keeps the newest line per mint.
+        // The comparison that decides it survived three mutations -- flipped,
+        // widened, and `&&` turned to `||` -- because every existing test had
+        // exactly one line per mint, where all four versions agree.
+        //
+        // Two answers for one mint, out of order in the file, so only the
+        // *comparison* can pick the right one.
+        let at = DAY + 100;
+        let mut older = entry("m1", "alice", "MintOne", at, Some("first"));
+        let mut newer = entry("m2", "bob", "MintOne", at + 60, Some("second"));
+        older.at = at;
+        newer.at = at + 60;
+        // Deliberately appended newest-first, which the reply log never is --
+        // the point is that the comparison decides, not the iteration order.
+        let log = vec![newer, older];
+
+        let mut gate = Gate::new(limits(), Vec::new());
+        gate.restore(&log, at + 120);
+        match gate.admit("carol", "MintOne", at + 120) {
+            Admitted::No(Refused::AlreadyAnswered { reply_id }) => {
+                assert_eq!(
+                    reply_id, "second",
+                    "the later answer wins, whatever the file order"
+                );
+            }
+            other => panic!("expected the later answer, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn both_halves_of_the_dedupe_restore_have_to_hold() {
+        // `newer && inside_the_window` -- mutated to `||`, a line that is old
+        // enough to be irrelevant is restored anyway as long as it is the
+        // newest, and the account stops answering a coin it answered yesterday.
+        //
+        // This is the case that separates them: the only line for this mint is
+        // the newest by definition, and it is outside the window. `&&` drops it;
+        // `||` keeps it.
+        let at = DAY;
+        let log = vec![entry("m1", "alice", "MintOne", at, Some("r1"))];
+        let mut gate = Gate::new(limits(), Vec::new());
+        // `limits()` dedupes for an hour; two have passed.
+        gate.restore(&log, at + 7_200);
+        assert_eq!(
+            gate.admit("bob", "MintOne", at + 7_200),
+            Admitted::Yes,
+            "an answer from two hours ago must not still be deduping"
+        );
+        assert_eq!(gate.answered_recently(), 0);
+    }
+
+    #[test]
+    fn the_dedupe_window_edge_is_the_same_on_restore_as_it_is_live() {
+        // `<` mutated to `<=` moves the edge by one second. Live and restored
+        // must agree, or a restart changes who gets answered -- which is the
+        // whole class of bug `restore` exists to remove.
+        let at = DAY;
+        let window = limits().dedupe_seconds;
+        let log = vec![entry("m1", "alice", "MintOne", at, Some("r1"))];
+
+        // One second inside: deduped, both live and restored.
+        let mut restored = Gate::new(limits(), Vec::new());
+        restored.restore(&log, at + window - 1);
+        assert!(matches!(
+            restored.admit("bob", "MintOne", at + window - 1),
+            Admitted::No(Refused::AlreadyAnswered { .. })
+        ));
+
+        let mut live = Gate::new(limits(), Vec::new());
+        assert_eq!(live.admit("alice", "MintOne", at), Admitted::Yes);
+        live.record("alice", "MintOne", "r1", at);
+        assert!(matches!(
+            live.admit("bob", "MintOne", at + window - 1),
+            Admitted::No(Refused::AlreadyAnswered { .. })
+        ));
+
+        // Exactly at the window: answered again, both ways.
+        //
+        // Asserted on the **map** and not only on `admit`. `admit` applies the
+        // same window itself, so a restore that wrongly kept the entry is
+        // invisible from the outside -- the live check refuses to dedupe it
+        // anyway and both versions answer `Yes`. `<` mutated to `<=` survives
+        // any test that only asks `admit`.
+        let mut restored = Gate::new(limits(), Vec::new());
+        restored.restore(&log, at + window);
+        assert_eq!(
+            restored.answered_recently(),
+            0,
+            "an answer exactly one window old is outside it, and is not restored"
+        );
+        assert_eq!(restored.admit("bob", "MintOne", at + window), Admitted::Yes);
+        assert_eq!(live.admit("bob", "MintOne", at + window), Admitted::Yes);
+
+        // And one second inside it is restored, so the edge is an edge rather
+        // than the map being empty for some other reason.
+        let mut inside = Gate::new(limits(), Vec::new());
+        inside.restore(&log, at + window - 1);
+        assert_eq!(inside.answered_recently(), 1);
+    }
+
+    #[test]
+    fn answered_recently_counts_the_map_rather_than_a_constant() {
+        // The line an operator reads on a restart. Mutated to `0` it reports the
+        // failure `restore` exists to prevent, on a gate that restored
+        // correctly; mutated to `1` it reports success on one that did not.
+        // Both are worse than no line.
+        let at = DAY + 100;
+        let mut gate = Gate::new(limits(), Vec::new());
+        assert_eq!(
+            gate.answered_recently(),
+            0,
+            "a fresh gate has answered nothing"
+        );
+
+        gate.restore(
+            &[
+                entry("m1", "alice", "MintOne", at, Some("r1")),
+                entry("m2", "bob", "MintTwo", at, Some("r2")),
+                entry("m3", "carol", "MintThree", at, Some("r3")),
+            ],
+            at + 10,
+        );
+        assert_eq!(gate.answered_recently(), 3);
+    }
+
+    #[test]
+    fn a_pointer_spends_one_reply_and_one_token() {
+        // `record_post` is the pointer's whole cost. Mutated to subtract, the
+        // day's total runs backwards and the cap never binds; mutated to
+        // multiply it stays at zero for ever, which is the same hole. Neither
+        // is visible without asserting the counter itself.
+        let mut gate = Gate::new(wide(), Vec::new());
+        let at = DAY;
+        assert_eq!(gate.sent_today(), 0);
+        assert_eq!(gate.tokens_left(), 10);
+
+        gate.record_post(at);
+        assert_eq!(gate.sent_today(), 1, "a pointer is a post");
+        assert_eq!(gate.tokens_left(), 9, "and it spends an hourly token");
+
+        gate.record_post(at);
+        assert_eq!(gate.sent_today(), 2);
+        assert_eq!(gate.tokens_left(), 8);
+
+        // And it touches neither the summoner's allowance nor the dedupe map --
+        // the two things `Entry::pointed_at` exists to keep it out of.
+        assert_eq!(gate.answered_recently(), 0);
+        assert_eq!(gate.admit("anyone", "MintOne", at), Admitted::Yes);
+    }
+
+    #[test]
+    fn the_refill_marker_moves_forward_by_the_time_it_paid_for() {
+        // `refilled_at += earned * 3600 / per_hour`, mutated to `*=`. The marker
+        // lands in the far future; the next call sees `now < refilled_at` and
+        // re-bases it to *now*.
+        //
+        // **That re-base is why this needs a careful test.** `answer` calls
+        // `admit` and then `record`, and `record` rolls the clock too -- so the
+        // re-base happens immediately and lands on the same instant the correct
+        // code would have, and every sequence built out of `answer` agrees. The
+        // first version of this test did exactly that and passed against the
+        // mutant.
+        //
+        // What the mutant actually destroys is the **carried fraction between
+        // two reads**. Two admissions with nothing in between: the marker has to
+        // still be at the moment of the first one, or the second earns nothing.
+        //
+        // `wide()` refills two an hour, so a token costs thirty minutes.
+        let mut gate = Gate::new(wide(), Vec::new());
+        let at = 30 * DAY;
+        for n in 0..10 {
+            assert_eq!(
+                answer(&mut gate, &format!("s{n}"), &format!("M{n}"), at),
+                Admitted::Yes
+            );
+        }
+        assert_eq!(gate.tokens_left(), 0);
+
+        // Thirty minutes: one token earned, and deliberately *not* recorded, so
+        // nothing re-bases the marker behind the test's back.
+        assert_eq!(gate.admit("asker", "Half", at + 1_800), Admitted::Yes);
+        assert_eq!(gate.tokens_left(), 1);
+
+        // Thirty more: a second token, which only a marker sitting at the first
+        // one can have earned. Under `*=` the marker was re-based to this
+        // instant instead and nothing accrues.
+        assert_eq!(gate.admit("asker", "Hour", at + 3_600), Admitted::Yes);
+        assert_eq!(
+            gate.tokens_left(),
+            2,
+            "thirty minutes after the last refill is another token; a marker              that jumped and was re-based has lost the interval"
+        );
+    }
 }

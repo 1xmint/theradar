@@ -50,12 +50,12 @@ cargo := env("RADAR_CARGO", "cargo")
 # it to make a red run green is the thing that must never happen; if the number
 # has to come down, the commit says which tests went and why they went with
 # their subject.
-# Raised 1591 -> 2010 on 2026-09-07. It had drifted 406 behind, which is the
-# drift the 2026-09-04 note describes happening again: the floor was set to the
-# count then and twenty commits of tests have landed since without it moving.
-# Raising it is part of adding tests. This branch contributes the signer's swap
-# bounds and the mint-authority gate.
-export MIN_TESTS := "2010"
+# Raised 1591 -> 2016 on 2026-09-07. The floor was set to the count on
+# 2026-09-04 and never moved as tests landed, so it had drifted 425 behind --
+# the same drift the note above describes. Raising it is part of adding tests.
+# This branch contributes the gate restore, the hourly bucket, the cursor drop,
+# the ticker reply, the pointer and the metered week close.
+export MIN_TESTS := "2016"
 
 _default:
     @just --list --unsorted
