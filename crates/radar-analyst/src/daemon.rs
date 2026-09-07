@@ -161,6 +161,59 @@ pub fn unfunded_notice(budget: Budget) -> Option<&'static str> {
     )
 }
 
+/// The base rates to publish with, and what to say about them.
+///
+/// # Why a stale snapshot is dropped rather than quoted
+///
+/// `is_stale_at` has existed since the module was written and had one caller —
+/// `radar roast`, which prints a warning to one person and then uses the figures
+/// anyway. That is fine for a debugging command. It is not fine for a process
+/// that publishes: research 0024's opening argument is that 0008's headline was
+/// wrong by **2.7× nine days later**, because the recipient distribution is a
+/// configuration of whatever tool the launchers are running rather than a law.
+/// A month-old distribution quoted as current is a measurement about a
+/// population that no longer exists, said in public, by an account whose whole
+/// claim is that its numbers are measured.
+///
+/// Dropped rather than fatal. The daemon already handles `None` — the reply
+/// carries no population context and says so — and taking the account off the
+/// air over a research file would be a larger outage than the fault.
+///
+/// The threshold is [`radar_roast::baserates::STALE_AFTER_DAYS`], not a second
+/// number invented here: two thresholds for one question is how they drift.
+///
+/// **Pure, and separate from `run` for that reason.** Inside the loop the
+/// staleness guard was unreachable by any test — `run` never returns — and the
+/// mutation gate reported it as a survivor in both directions.
+fn rates_in_use(
+    loaded: Result<BaseRates, radar_roast::baserates::NotLoaded>,
+    today: &str,
+) -> (Option<BaseRates>, String) {
+    match loaded {
+        Ok(rates) if rates.is_stale_at(today) => {
+            let notice = format!(
+                "radar-analyst: base rates were measured on {} and are stale after {} days; \
+                 dropping them, so replies will carry no population context until \
+                 research 0024 is re-run",
+                rates.measured_on,
+                radar_roast::baserates::STALE_AFTER_DAYS
+            );
+            (None, notice)
+        }
+        Ok(rates) => {
+            let notice = format!(
+                "radar-analyst: base rates measured on {}",
+                rates.measured_on
+            );
+            (Some(rates), notice)
+        }
+        Err(e) => (
+            None,
+            format!("radar-analyst: no base rates ({e}); replies will carry no population context"),
+        ),
+    }
+}
+
 /// The admission limits, or ones that refuse everything.
 ///
 /// Takes a getter, for the reason [`budget_from`] does.
@@ -514,10 +567,11 @@ pub fn run() -> ! {
     let mut spend = Spend::open(budget, prices, paths.ledger.clone(), day_of(now()));
 
     let client = radar_onchain::RpcClient::from_vars(&env);
-    let rates = BaseRates::load(radar_roast::baserates::DEFAULT_PATH).ok();
-    if rates.is_none() {
-        eprintln!("radar-analyst: no base rates; replies will carry no population context");
-    }
+    let (rates, rates_notice) = rates_in_use(
+        BaseRates::load(radar_roast::baserates::DEFAULT_PATH),
+        &crate::daily::date_of(now()),
+    );
+    eprintln!("{rates_notice}");
     // The fact that makes one reply differ from another. Absent, every reply
     // about a fresh launch says the same thing, so its absence is reported
     // rather than left to be noticed in the output.
@@ -2382,5 +2436,75 @@ mod tests {
         ));
         assert!(both.contains("UNUSABLE"), "{both}");
         assert!(both.contains("RADAR_MODEL_OPENAI_KEY"), "{both}");
+    }
+
+    /// The published snapshot, read from the file the daemon reads.
+    ///
+    /// Not a hand-written fixture: this is the shape `is_stale_at` actually
+    /// sees, and a fixture that drifted from it would test a parser nobody runs.
+    const BASE_RATES: &str = include_str!("../../../docs/research/data/0024-base-rates.json");
+
+    #[test]
+    fn a_fresh_snapshot_is_used_and_named() {
+        // The ordinary case, and the half a one-directional guard would break:
+        // dropping every snapshot would leave every reply without population
+        // context for ever, which reads as a working account saying less.
+        let rates = radar_roast::BaseRates::parse(BASE_RATES).expect("the fixture parses");
+        let measured = rates.measured_on.clone();
+        let (used, notice) = rates_in_use(Ok(rates), &measured);
+        assert!(used.is_some(), "{notice}");
+        assert!(notice.contains(&measured), "{notice}");
+        assert!(!notice.contains("stale"), "{notice}");
+    }
+
+    #[test]
+    fn a_snapshot_past_the_threshold_is_dropped_and_says_why() {
+        // Research 0024's own argument: 0008's headline was wrong by 2.7x nine
+        // days later, because the recipient distribution is a configuration of
+        // whatever tool the launchers are running rather than a law.
+        //
+        // The mutation gate reported this guard as a survivor in *both*
+        // directions while it sat inside `run`, which never returns. Extracted,
+        // both directions are one line each.
+        let rates = radar_roast::BaseRates::parse(BASE_RATES).expect("the fixture parses");
+        let long_after = "2027-01-01";
+        let (used, notice) = rates_in_use(Ok(rates), long_after);
+        assert!(used.is_none(), "a stale distribution is not quoted");
+        assert!(notice.contains("stale"), "{notice}");
+        assert!(
+            notice.contains(&radar_roast::baserates::STALE_AFTER_DAYS.to_string()),
+            "the notice names the threshold it applied: {notice}"
+        );
+    }
+
+    #[test]
+    fn the_edge_of_the_window_is_the_crates_own_threshold() {
+        // Not a second number invented here. Two thresholds for one question is
+        // how they drift apart, and the drift would be invisible: both sides
+        // would keep working, on different definitions of current.
+        let rates = radar_roast::BaseRates::parse(BASE_RATES).expect("the fixture parses");
+        let measured = rates.measured_on.clone();
+        assert!(
+            !rates.is_stale_at(&measured),
+            "the day it was measured is not stale"
+        );
+        let (used, _) = rates_in_use(Ok(rates), &measured);
+        assert!(used.is_some());
+    }
+
+    #[test]
+    fn a_snapshot_that_would_not_load_is_absent_rather_than_fatal() {
+        // Rule 8's shape. No snapshot means the reply says less and says why;
+        // it does not mean falling back on remembered numbers, and it does not
+        // mean the account stops answering.
+        let (used, notice) = rates_in_use(
+            Err(radar_roast::baserates::NotLoaded::Unreadable {
+                path: "nowhere.json".to_owned(),
+                why: "no such file".to_owned(),
+            }),
+            "2026-09-07",
+        );
+        assert!(used.is_none());
+        assert!(notice.contains("no base rates"), "{notice}");
     }
 }

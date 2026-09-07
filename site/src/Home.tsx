@@ -109,16 +109,28 @@ function Hero({ s }: { s: Stats }) {
         <div className="mb-5">
           <Act n="01">Solana · pump.fun · measured since August</Act>
         </div>
+        {/* This read "Most launches are coordinated" until 2026-09-07, with
+            the measurement contradicting it in the card immediately below:
+            70.5% of launches pay one to three recipients, and 0.02% of those
+            are bought out instantly. So the most-read sentence on the property
+            was a verdict, it was the wrong verdict, and the rule this whole
+            product runs on is to publish the measurement and never the
+            verdict — the same rule `radar-roast::forbidden` enforces on every
+            reply the account posts.
+
+            What replaces it is a claim the card underneath can be read as
+            evidence for, rather than one it refutes. */}
         <h1 className="display max-w-3xl text-[length:var(--text-display)] leading-[1.03] font-semibold text-balance">
-          Most launches are coordinated.{" "}
+          Coordination is visible in the launch block.{" "}
           <span className="text-[var(--color-signal)]">
-            You can see it before you buy.
+            Before you buy.
           </span>
         </h1>
         <p className="mt-6 max-w-2xl text-[length:var(--text-lead)] text-[var(--color-dim)]">
           When capital is committed to a token <em>before</em> it exists, the
           evidence is sitting in the launch block — the very first block of the
-          coin's life. Cabal Hunter has been reading every one of them.
+          coin's life. Cabal Hunter has been reading every one of them. Most
+          launches show nothing; the ones that do are the point.
         </p>
 
         {/* The claim above is only worth as much as the number under it, so the

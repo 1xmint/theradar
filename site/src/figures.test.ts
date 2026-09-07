@@ -186,3 +186,62 @@ describe("the fee ladder the tokenomics page renders", () => {
     expect(ladder.curve.creator_bps).toBe(30);
   });
 });
+
+describe("the page states measurements rather than verdicts", () => {
+  // Finding H4. The hero said "Most launches are coordinated" while the card
+  // directly under it measured the opposite: 70.5% of launches pay one to three
+  // recipients and 0.02% of those are bought out instantly. The most-read
+  // sentence on the property was a verdict, it was the wrong verdict, and it
+  // contradicted its own evidence.
+  //
+  // **Comments are stripped before the check**, and the first version of this
+  // test was not — it failed on the comment that explains why the sentence was
+  // removed, which is the one place the old wording legitimately survives. A
+  // check on published copy has to read published copy.
+  //
+  // Asserted as an absence, which is the weaker kind of test and the right one
+  // here: the sentence that replaces it is prose and will be edited, and pinning
+  // its wording would fail on every rewrite. What must not come back is the
+  // shape. The positive half is the test under it.
+  const HOME = repoFile("src/Home.tsx");
+
+  /** Source with its comments removed: HTML, JSX and line comments. */
+  function copyOnly(text: string): string {
+    return text
+      .replace(/<!--[\s\S]*?-->/g, " ")
+      .replace(/\{\/\*[\s\S]*?\*\/\}/g, " ")
+      .replace(/^\s*\/\/.*$/gm, " ")
+      .toLowerCase();
+  }
+
+  it.each([
+    ["index.html", INDEX_HTML],
+    ["Home.tsx", HOME],
+  ])("%s makes no claim about most launches", (_name, text) => {
+    const copy = copyOnly(text);
+    expect(copy).not.toContain("most launches are coordinated");
+    expect(copy).not.toContain("most launches on pump.fun are coordinated");
+  });
+
+  it("the comment stripper actually removes a comment", () => {
+    // Otherwise the test above passes because it reads nothing. The stripper is
+    // the only moving part in it.
+    expect(copyOnly("<!-- most launches are coordinated -->")).not.toContain(
+      "coordinated",
+    );
+    expect(copyOnly("{/* most launches are coordinated */}")).not.toContain(
+      "coordinated",
+    );
+    expect(copyOnly("most launches are coordinated")).toContain("coordinated");
+  });
+
+  it("the band the hero cites is still the one the fixture measures", () => {
+    // The positive half. An absence test alone would pass on a page that had
+    // deleted the claim entirely, and the claim is the product.
+    const top = s.bands.rows.reduce((a, b) =>
+      b.x_base_instant > a.x_base_instant ? b : a,
+    );
+    expect(top.x_base_instant).toBeGreaterThan(1);
+    expect(INDEX_HTML).toContain(`${top.lo}\u2013${top.hi} recipients`);
+  });
+});

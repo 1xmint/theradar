@@ -145,22 +145,59 @@ fn customer_lane() -> Result<
     ))
 }
 
+/// The address to listen on, or why the configured one cannot be used.
+///
+/// # A typo does not become a different address
+///
+/// This used to fall back to `127.0.0.1:8080` on anything it could not parse, so
+/// `RADAR_BIND=127.0.0.1;8402` started a server on a port nothing was pointed
+/// at. The process is up, the unit is green, `systemctl status` says running --
+/// and Caddy answers 502 for a reason nothing on the box reports. An operator
+/// debugging that reads the unit, the env file and the logs, every one of which
+/// names the right port.
+///
+/// Rule 8's shape: a configuration value that cannot be read is a refusal to
+/// start, not a guess. The default when the variable is **absent** stays, since
+/// absence is a state with an obvious right answer and a typo is not.
+///
+/// # Errors
+///
+/// A message naming the value, for the operator who has to find the typo.
+fn bind_address(configured: Option<&str>) -> Result<SocketAddr, String> {
+    let Some(value) = configured else {
+        return Ok(SocketAddr::from(([127, 0, 0, 1], 8080)));
+    };
+    value.parse().map_err(|e| {
+        format!(
+            "RADAR_BIND={value:?} is not an address ({e}); refusing to start on a port              nobody asked for"
+        )
+    })
+}
+
+/// Prints why the server will not start, and the status that says so.
+///
+/// Every refusal here reads the same way on purpose: one line on stderr, named
+/// process first, and a non-zero exit so systemd records a failure rather than a
+/// clean stop. Written once because there are several of them and a refusal that
+/// looked different from its neighbours would read as a different kind of event.
+fn refused(why: &str) -> ExitCode {
+    eprintln!("radar-serve: {why}");
+    ExitCode::FAILURE
+}
+
 #[tokio::main]
 async fn main() -> ExitCode {
     let store_dir = std::env::var("RADAR_STORE").unwrap_or_else(|_| "./data/store".to_owned());
-    let bind: SocketAddr = std::env::var("RADAR_BIND")
-        .unwrap_or_else(|_| "127.0.0.1:8080".to_owned())
-        .parse()
-        .unwrap_or_else(|_| SocketAddr::from(([127, 0, 0, 1], 8080)));
+    let bind = match bind_address(std::env::var("RADAR_BIND").ok().as_deref()) {
+        Ok(address) => address,
+        Err(why) => return refused(&why),
+    };
 
     // Before anything binds a socket. A server that starts and then discovers
     // it does not know who may look has already answered a request by then.
     let access = match access::Mode::from_vars(&|k| std::env::var(k).ok()) {
         Ok(mode) => mode,
-        Err(why) => {
-            eprintln!("radar-serve: {why}");
-            return ExitCode::FAILURE;
-        }
+        Err(why) => return refused(&why),
     };
 
     // Same reasoning, one step weaker. An absent Privy app id is not a
@@ -279,4 +316,45 @@ async fn main() -> ExitCode {
         return ExitCode::FAILURE;
     }
     ExitCode::SUCCESS
+}
+
+#[cfg(test)]
+mod tests {
+    use super::bind_address;
+
+    #[test]
+    fn an_absent_variable_uses_the_documented_default() {
+        // Absence is a state with an obvious right answer, and it is the state
+        // a workstation runs in.
+        let bound = bind_address(None).expect("a default");
+        assert_eq!(bound.to_string(), "127.0.0.1:8080");
+    }
+
+    #[test]
+    fn a_configured_address_is_used_as_written() {
+        assert_eq!(
+            bind_address(Some("127.0.0.1:8402"))
+                .expect("an address")
+                .to_string(),
+            "127.0.0.1:8402"
+        );
+    }
+
+    #[test]
+    fn a_typo_refuses_to_start_rather_than_binding_somewhere_else() {
+        // The failure this replaces: a semicolon for a colon started a healthy
+        // server on port 8080, which nothing was pointed at. `systemctl status`
+        // said running, the unit and the env file both named 8402, and Caddy
+        // answered 502 for a reason nothing on the box reported.
+        //
+        // Re-apply by restoring `.unwrap_or_else(|_| SocketAddr::from(...))`:
+        // every one of these becomes the default and this test fails four times.
+        for wrong in ["127.0.0.1;8402", "8402", "localhost:8402", ""] {
+            let why = bind_address(Some(wrong)).expect_err("not an address");
+            assert!(
+                why.contains(wrong),
+                "the message must name the value: {why}"
+            );
+        }
+    }
 }

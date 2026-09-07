@@ -43,6 +43,27 @@ updates:
     commit-message:
       prefix: "deps"
 
+  # `/site` as well as `/web`, and it was missing.
+  #
+  # `/web` is the operator's interface, embedded in `radar-serve` and served
+  # behind Cloudflare Access to one person. `/site` is cabalhunter.org: the page
+  # every stranger loads, deployed straight to the edge by Cloudflare Pages. It
+  # is the half of the frontend with an audience, and it was the half nothing
+  # watched.
+  - package-ecosystem: npm
+    directory: /site
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    groups:
+      npm-minor-and-patch:
+        update-types:
+          - minor
+          - patch
+    commit-message:
+      prefix: "deps"
+
   # The workflows themselves. Every action in this repository is SHA-pinned,
   # which is the right call and makes them invisible to a human reading a diff —
   # a pinned SHA never looks out of date. This is what notices.
