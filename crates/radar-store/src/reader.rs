@@ -289,15 +289,47 @@ impl Reader {
                     if opened_at > as_of.slot() {
                         continue;
                     }
+                    // **And it applies to the close as well.** A position row is
+                    // updated in place when the position closes, so a row read
+                    // at an earlier watermark carries a `closed_at` from the
+                    // future. Filtering only on `opened_at` admitted that close,
+                    // and the position read as *shut* at a moment when it was
+                    // open.
+                    //
+                    // This is the one watermark leak that ran in the permissive
+                    // direction, which is why it is worth the extra branch. A
+                    // closed position counts against no exposure limit; an open
+                    // one counts against every single one. So a replay saw less
+                    // exposure than the live run had, and the kernel's limits
+                    // were judged against a portfolio that was smaller than the
+                    // real one — a backtest that permits what production
+                    // refused, silently and only for positions that later
+                    // closed.
+                    //
+                    // The close is dropped rather than the row: as of the
+                    // watermark this position was **open**, and reporting it as
+                    // absent would understate exposure too, in the same
+                    // direction.
+                    let closed_at = closed
+                        .is_valid(i)
+                        .then(|| Slot(closed.value(i)))
+                        .filter(|at| *at <= as_of.slot());
+                    let closed_yet = closed_at.is_some();
                     out.push(crate::Position {
                         mint: parse(mint.value(i), "mint")?,
                         creator: parse(creator.value(i), "creator")?,
                         opened_at,
                         notional_micro_usd: notional.value(i),
                         entry_price: cell(entry, i),
-                        closed_at: closed.is_valid(i).then(|| Slot(closed.value(i))),
-                        exit_price: cell(exit, i),
-                        realised_micro_usd: realised.is_valid(i).then(|| realised.value(i)),
+                        closed_at,
+                        // Both belong to the close. Carrying an exit price for a
+                        // position that has not closed yet would be a price from
+                        // the future on a row that reads as open, which is the
+                        // same leak wearing a different field.
+                        exit_price: closed_yet.then(|| cell(exit, i)).flatten(),
+                        realised_micro_usd: closed_yet
+                            .then(|| realised.is_valid(i).then(|| realised.value(i)))
+                            .flatten(),
                     });
                 }
             }

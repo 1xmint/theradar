@@ -40,13 +40,37 @@ pub fn read_cursor(store: &Path) -> Option<i64> {
 
 /// Writes the follow cursor.
 ///
+/// # Why this is a rename and not a write
+///
+/// Every other state file in the workspace is written to a temporary path and
+/// renamed over the target — `poll::write_cursor`, `spend`, `contest`, `daily`,
+/// the payout ledger, the serving ledger. This one was a plain `fs::write`, and
+/// it is the one file where a torn write is worst.
+///
+/// `read_cursor` reports an unparseable file as `None`, because `None` is the
+/// state of a store that has never been followed. A half-written cursor —
+/// power loss, a full disk, a kill between the truncate and the write — is
+/// therefore indistinguishable from a store nobody has ever recorded into. The
+/// recorder responds to `None` by restarting near *now*
+/// (`radar-backfill`'s follow loop), so the window between the real cursor and
+/// the restart is skipped, and nothing says so. A silent hole in the record is
+/// the failure this project is organised against; a monitor watching cursor
+/// *age* cannot see it, because the cursor after the restart is fresh.
+///
+/// `rename` on the same filesystem is atomic, so a reader sees either the old
+/// cursor or the new one. Never half of one.
+///
 /// # Errors
 ///
 /// Returns the underlying message if the store directory or the file cannot be
-/// written.
+/// written, or if the rename fails. A caller that cannot save its place must
+/// stop rather than carry on.
 pub fn write_cursor(store: &Path, at: i64) -> Result<(), String> {
     std::fs::create_dir_all(store).map_err(|e| e.to_string())?;
-    std::fs::write(store.join(CURSOR_FILE), from_epoch(at)).map_err(|e| e.to_string())
+    let target = store.join(CURSOR_FILE);
+    let temporary = store.join(format!("{CURSOR_FILE}.new"));
+    std::fs::write(&temporary, from_epoch(at)).map_err(|e| e.to_string())?;
+    std::fs::rename(&temporary, &target).map_err(|e| e.to_string())
 }
 
 /// Seconds since the epoch for a `YYYY-MM-DD HH:MM:SS` timestamp, treated as UTC.
@@ -157,5 +181,50 @@ mod tests {
         let at = to_epoch("2026-08-24 20:11:52").expect("parse");
         write_cursor(dir.path(), at).expect("write");
         assert_eq!(read_cursor(dir.path()), Some(at));
+    }
+
+    #[test]
+    fn the_cursor_is_never_seen_half_written() {
+        // The property, asserted the only way it can be from inside the
+        // process: the target path is never the thing being written to, so
+        // there is no moment at which a reader could observe a partial value.
+        //
+        // A test cannot interrupt `fs::write` at a byte boundary, so it asserts
+        // the *mechanism* instead — that an existing cursor survives intact
+        // while a new one is being staged, and that the staging file is gone
+        // afterwards. Replace the rename with a direct `fs::write` and the
+        // first assertion still passes; drop the temporary and the second
+        // fails, which is what pins the shape.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let first = to_epoch("2026-08-24 20:11:52").expect("parse");
+        write_cursor(dir.path(), first).expect("write");
+
+        // Stage a partial file by hand at the path the writer uses, then write
+        // properly. A reader must see the old cursor, never the fragment.
+        std::fs::write(dir.path().join(format!("{CURSOR_FILE}.new")), "2026-08-2").expect("stage");
+        assert_eq!(
+            read_cursor(dir.path()),
+            Some(first),
+            "a fragment beside the cursor is not the cursor"
+        );
+
+        let second = to_epoch("2026-08-25 06:00:00").expect("parse");
+        write_cursor(dir.path(), second).expect("write");
+        assert_eq!(read_cursor(dir.path()), Some(second));
+        assert!(
+            !dir.path().join(format!("{CURSOR_FILE}.new")).exists(),
+            "the staging file must be renamed away, not left beside the cursor"
+        );
+    }
+
+    #[test]
+    fn an_unparseable_cursor_reads_as_absent_which_is_why_the_write_must_be_atomic() {
+        // Not a fix — a statement of the hazard the atomic write removes. This
+        // is what a torn cursor looked like to every reader: identical to a
+        // store nobody had ever recorded into, which the recorder answers by
+        // restarting near now and skipping the gap in silence.
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::write(dir.path().join(CURSOR_FILE), "2026-08-2").expect("write");
+        assert_eq!(read_cursor(dir.path()), None);
     }
 }
