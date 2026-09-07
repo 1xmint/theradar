@@ -73,10 +73,27 @@ Also stated plainly, because a security policy that lists only strengths is a
 marketing document:
 
 - **There is no threat model document yet.** It is planned and not written.
-- **There is no spend meter in the running system.** `radar-provider` implements
-  one and nothing depends on it, so there is no daily ceiling on paid calls today
-  ([AGENTS.md](AGENTS.md) rule 8 records this).
-- **Property and fuzz testing are absent.** The decoders are tested on chosen
-  inputs and a small deterministic byte sweep, which is not the same thing.
-- **The public server has no authentication.** Everything it serves is intended
-  to be public; the paid surface is metered by x402 rather than by identity.
+- **Fuzz testing is absent.** The decoders are tested on chosen inputs and a
+  small deterministic byte sweep, which is not the same thing. Property testing
+  is not absent — `radar-risk` carries `proptest` — but it covers the kernel and
+  not the decoders, which are where a hostile byte string arrives.
+- **The signer trusts the caller's price.** It bounds a swap in lamports now
+  (research 0030, C1), and the ceiling it compares against is the
+  authorisation's micro-USD notional read *as* lamports, because this process has
+  no price feed by design. That fails closed and cannot size a real trade. The
+  fix is a lamport-denominated `Policy`, which is a decision about what the
+  operator's limit means and belongs in an ADR.
+- **There is no rate limit in `radar-serve`.** The analyst's gate limits what the
+  X account answers; nothing limits what the HTTP surface serves, and the edge
+  cache in front of it is not applying (research 0030, H9).
+
+Three claims that used to stand here were true when written and are not now, and
+they are listed rather than quietly deleted:
+
+- *"There is no spend meter in the running system."* There is.
+  `radar_analyst::spend::Spend` meters every mention read, model call, reply and
+  post; `radar-agent` carries its own ledger; both persist across a restart.
+- *"Property and fuzz testing are absent."* Half true, and corrected above.
+- *"The public server has no authentication."* `radar_serve::access` decides an
+  audience per exact path, and the operator surface is behind Cloudflare Access.
+  Everything on the public paths is still intended to be public.

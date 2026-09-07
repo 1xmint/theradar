@@ -292,6 +292,17 @@ and `radar-signer`'s real `verify::check` reads a transaction that crate built
 including refusing one whose authorisation names a different mint. The venue was
 never the obstacle: every capture behind that crate is a **legacy** transaction.
 
+**That file also documented a hole as passing, for six days, and it is worth
+knowing what was wrong with it.** It built a 20,000,000-lamport buy under an
+authorisation whose ceiling was 5,000,000 and asserted the signer would sign it —
+and it did, because the signer sized a transaction by summing system-program
+transfers and **a swap makes none**. Every buy Radar could send scored zero
+against every ceiling. Fixed on 2026-09-07 (research 0030 C1): the signer decodes
+the trade instruction through `radar-decode` and counts the buy's lamports.
+LEARNINGS 33 is the general form — a composition test built from plausible values
+proves that two components *fit*, and proves nothing about a bound unless a value
+sits on each side of it.
+
 What it does not give you: nothing has been signed by a wallet, sent, or filled.
 A simulation with `sigVerify: false` proves the instruction is well formed and the
 accounts resolve. It does not prove a signed transaction lands, or at what price.
@@ -644,6 +655,10 @@ against the chain and append-only against its own log.
   including the data-sourcing landscape and the freshness/caching design.
 - [`docs/adr/`](../docs/adr/) — decisions, with what each one costs.
 - `crates/radar-provider` — the spend meter, and as of 2026-09-04 nothing else.
+  It has callers now: `radar-analyst`'s `Spend` meters every mention read, model
+  call, reply and post, and `radar-agent` keeps its own ledger. `SECURITY.md`
+  said there was no spend meter in the running system until 2026-09-07, which is
+  the shape LEARNINGS 13 describes.
 
   What runs, and did before: `radar-agent` reserves against `Budget`, `Ledger`,
   `Meter` and `Commitment` for every model call, and
