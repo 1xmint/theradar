@@ -176,6 +176,19 @@ fn workspace(name: &str) -> String {
     dir.to_str().expect("a path").to_owned()
 }
 
+/// The analyst directory inside a workspace, created.
+///
+/// **`Paths::under` puts the contest directory beside the analyst's, not inside
+/// it.** Passing a workspace directly would therefore put every close test in
+/// the *same* contest directory — shared between them and across runs — and
+/// `close_if_due` is idempotent on the record existing, so one leftover file
+/// makes every later run return early and assert nothing. Found the hard way.
+fn analyst_under(workspace: &str) -> String {
+    let dir = format!("{workspace}/analyst");
+    std::fs::create_dir_all(&dir).expect("an analyst directory");
+    dir
+}
+
 fn prices() -> Prices {
     Prices {
         mention_read: MicroUsd(1_000),
@@ -1180,8 +1193,12 @@ fn a_week_whose_reads_the_budget_will_not_cover_does_not_close_and_does_not_call
     // checked `is_none()` would pass either way. What separates the two is
     // whether the request happened at all.
     let (base, seen) = platform(r#"{"data":[]}"#);
-    let dir = workspace("close-unfunded");
-    let paths = Paths::under(&dir);
+    // **`Paths::under` puts the contest directory beside the analyst's, not
+    // inside it**, so passing the workspace directly would put every close test
+    // in the *same* contest directory -- shared between them and across runs.
+    // `close_if_due` is idempotent on the record existing, so one leftover file
+    // makes every later run return early and assert nothing. Found the hard way.
+    let paths = Paths::under(&analyst_under(&workspace("close-unfunded")));
 
     // One published reply inside the week being closed, so there is something
     // to score and the empty-week path is not what is being tested.
@@ -1232,4 +1249,71 @@ fn a_week_whose_reads_the_budget_will_not_cover_does_not_close_and_does_not_call
     // And nothing was written, so the next run tries again with the next day's
     // budget rather than finding a record scored on nothing.
     assert!(!std::path::Path::new(&format!("{}/{}.json", paths.contest_dir, week.0)).exists());
+}
+
+#[test]
+fn a_week_that_can_afford_the_metrics_but_not_the_accounts_still_does_not_close() {
+    // The **second** of the two guards in `scored_reads`, which the test above
+    // cannot reach: with nothing in the budget the first one fires and the
+    // function returns before the second is evaluated.
+    //
+    // So this budget covers exactly one post read and no user read. The metrics
+    // call happens; the accounts call must not, and the week must not close.
+    // With the guard inverted the close proceeds on entrant ages nobody paid
+    // for and **writes a record**, which is the difference asserted here — a
+    // week scored on reads that did not happen, written down as final.
+    let (base, _seen) = platform(r#"{"data":[]}"#);
+    // Its own tree, for the reason the test above gives.
+    let paths = Paths::under(&analyst_under(&workspace("close-half-funded")));
+
+    let week = radar_contest::Week(2957);
+    radar_analyst::log::append(
+        &paths.log,
+        &radar_analyst::log::Entry {
+            at: week.opens_at() + 10,
+            mention_id: "m1".to_owned(),
+            summoner: "alice".to_owned(),
+            mint: Some("MintOne".to_owned()),
+            read_at_slot: Some(1),
+            fact_sheet: String::new(),
+            reply: "measured".to_owned(),
+            fellback: None,
+            reply_id: Some("r1".to_owned()),
+            signals: Some(Vec::new()),
+            pointed_at: None,
+        },
+    )
+    .expect("append");
+
+    // `prices()`: a post read is 5,000 and a user read is 20,000. Ten thousand
+    // in the day covers the first and not the second.
+    let mut spend = Spend::open(
+        Budget {
+            per_call_max: MicroUsd(20_000),
+            daily_max: MicroUsd(10_000),
+        },
+        prices(),
+        paths.ledger.clone(),
+        radar_analyst::daemon::day_of(week.closes_at() + 5),
+    );
+    let x = X::at(base, "tok", "u42");
+    let rules = radar_contest::score::Rules::published(["radar"]);
+
+    let closed = radar_analyst::contest::close_if_due(
+        Some(&x),
+        &paths,
+        week.closes_at() + 5,
+        &rules,
+        3,
+        &mut spend,
+    )
+    .expect("io");
+
+    assert!(closed.is_none(), "the entrants' ages could not be paid for");
+    assert!(
+        !std::path::Path::new(&format!("{}/{}.json", paths.contest_dir, week.0)).exists(),
+        "a week scored on reads that did not happen must not be written down as final"
+    );
+    // The metrics read was affordable and was charged; nothing beyond it was.
+    assert_eq!(spend.spent_today(), MicroUsd(5_000));
 }

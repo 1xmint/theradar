@@ -188,10 +188,22 @@ const KEPT_BODY: usize = 300;
 
 /// The first [`KEPT_BODY`] bytes of a body, on a character boundary.
 pub(crate) fn truncated(body: &str) -> String {
-    let mut end = KEPT_BODY.min(body.len());
-    while end > 0 && !body.is_char_boundary(end) {
-        end -= 1;
-    }
+    let limit = KEPT_BODY.min(body.len());
+    // Searched backwards rather than walked backwards. A `while` with a manual
+    // decrement is one mutation away from never advancing -- `-=` replaced by
+    // `/=` hangs on the first multibyte character -- and cargo-mutants cannot
+    // tell an infinite loop from a slow one, so it reports `inconclusive`
+    // rather than a survivor. `.rev().find()` over a fixed range cannot loop
+    // for ever whatever is done to it, and says the same thing more directly:
+    // the largest boundary at or below the limit.
+    //
+    // `is_char_boundary(0)` is always true, so the fallback is unreachable; it
+    // is there because a panic in the error path of the process that holds the
+    // account is the worst place to put one.
+    let end = (0..=limit)
+        .rev()
+        .find(|&n| body.is_char_boundary(n))
+        .unwrap_or(0);
     let mut out = body[..end].to_owned();
     if end < body.len() {
         out.push('…');
