@@ -155,6 +155,12 @@ pub fn run(args: &[String]) -> Result<(), String> {
                 eprintln!("    {} is not on the fact sheet", fab.literal);
             }
         }
+        Some(Fellback::NotSubstituted(why)) => {
+            // The line to read first when the fifty tagged replies are being
+            // checked by hand. "Wrote a figure" and "named a fact it was not
+            // given" are different drifts and want different prompt changes.
+            eprintln!("(deterministic template: the model {why})");
+        }
     }
     Ok(())
 }

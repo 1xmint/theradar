@@ -194,6 +194,78 @@ pub const RULES: &[Rule] = &[
         phrase: "one person",
         because: "an identity the recipient count cannot carry (0012)",
     },
+    // Added 2026-09-07, from reading the list against what a savage reply
+    // actually reaches for. Every one of these is a verdict this account may
+    // not deliver, and every one of them passed: the list had thirty-one
+    // phrases and none of them was the word a sharp model would pick.
+    //
+    // **This is the weaker half of the defence and is meant to be.** A
+    // substring list can only ever refuse the phrasings somebody thought of;
+    // `crate::tags` is the half that works by construction, and it removes the
+    // *numbers* rather than the words. These are here because they are obvious
+    // once named, not because the list is now complete.
+    Rule {
+        phrase: "honeypot",
+        because: "a verdict about an identifiable project",
+    },
+    Rule {
+        phrase: "exit liquidity",
+        because: "a verdict about an identifiable project",
+    },
+    Rule {
+        phrase: "dumped on",
+        because: "a verdict about an identifiable project",
+    },
+    Rule {
+        phrase: "dumping on",
+        because: "a verdict about an identifiable project",
+    },
+    Rule {
+        // The most-quoted number-shaped claim in the market, and it is a price
+        // prediction wearing a multiple.
+        phrase: "100x",
+        because: "a price prediction",
+    },
+    Rule {
+        phrase: "10x",
+        because: "a price prediction",
+    },
+    Rule {
+        phrase: "bullish",
+        because: "a price prediction",
+    },
+    Rule {
+        phrase: "bearish",
+        because: "a price prediction",
+    },
+    Rule {
+        phrase: "don't buy",
+        because: "advice, not commentary",
+    },
+    Rule {
+        // The same words without the apostrophe, and without the *typographic*
+        // one. A model writing prose uses U+2019 as often as U+0027, and a list
+        // that only knows the ASCII form refuses one spelling of a sentence and
+        // publishes the other.
+        phrase: "dont buy",
+        because: "advice, not commentary",
+    },
+    Rule {
+        phrase: "don\u{2019}t buy",
+        because: "advice, not commentary",
+    },
+    Rule {
+        // A verdict, and the one word on this list that is also an ordinary
+        // adjective. It is here for "the launch looks clean", which is
+        // reassurance in the same sense "is safe" is — an unknown rendered as
+        // an all-clear, which is the thing that gets acted on.
+        phrase: "looks clean",
+        because: "reassurance -- unknown rendered as safe",
+    },
+    Rule {
+        phrase: "is clean",
+        because: "reassurance -- unknown rendered as safe",
+    },
 ];
 
 /// The account's own site, which the "cabal" rule would otherwise refuse.
@@ -321,6 +393,48 @@ mod tests {
         for rule in RULES {
             assert_eq!(rule.phrase, rule.phrase.to_lowercase(), "{}", rule.phrase);
             assert!(!rule.because.is_empty());
+        }
+    }
+
+    #[test]
+    fn the_phrases_added_on_the_seventh_are_actually_refused() {
+        // Each of these passed the thirty-one-phrase list, and each is a verdict
+        // this account may not deliver. Asserted one at a time rather than as a
+        // loop over `RULES`, which would only prove the list contains what the
+        // list contains.
+        for said in [
+            "classic honeypot",
+            "you are the exit liquidity here",
+            "the creator dumped on buyers",
+            "this is a 100x",
+            "looks bullish to me",
+            "bearish, obviously",
+            "don\u{2019}t buy this one",
+            "dont buy it",
+            "the launch looks clean",
+        ] {
+            assert!(!check(said).is_empty(), "{said:?} must be refused");
+        }
+    }
+
+    #[test]
+    fn the_new_phrases_do_not_refuse_ordinary_measured_sentences() {
+        // The rule AGENTS.md sets: a check that fires on a change a reasonable
+        // person would make is worse than no check, because it spends the
+        // credibility of every other check. These are sentences the account
+        // should be able to publish, and each sits next to one of the new
+        // phrases.
+        for said in [
+            "nothing here was measured",
+            "the creator has launched three and none filled a curve",
+            "cleanly decoded, and the block says nothing else",
+            "buyers paid the round trip twice",
+        ] {
+            assert!(
+                check(said).is_empty(),
+                "{said:?} must survive: {:?}",
+                check(said)
+            );
         }
     }
 }

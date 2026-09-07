@@ -326,11 +326,11 @@ fn a_clean_measured_reply_still_survives_every_check() {
         None,
         None,
     );
+    // Written the way the prompt asks for: prose with slots, and not one digit
+    // the model chose. `[F1]` is the first fact on whatever sheet this dossier
+    // produces, so this stays true if the sheet grows a fact.
     let good = Says(
-        "Six token accounts received this in its own launch block. 25.1% of \
-         instantly-graduating launches look like that, against 5.5% of the ones that never \
-         graduated. Read at slot 444007820."
-            .to_owned(),
+        "[F1] in the launch block, and nothing measured here says what happens next.".to_owned(),
     );
     let reply = voice::write(&sheet, Some(&good));
     assert!(!reply.is_template(), "{:?}", reply.fellback);
