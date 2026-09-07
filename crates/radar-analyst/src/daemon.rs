@@ -874,22 +874,68 @@ pub fn bio_notice(bio: Option<&crate::bio::Bio>) -> String {
     }
 }
 
-/// Whether the bio may be rewritten yet.
+/// The marker a bio write leaves: when, and what it said.
 ///
-/// **At most once an hour**, counted from the marker the last write left. The
-/// endpoint is metered and the bio changes at most three times a week, so a
-/// writer that tried on every tick would spend the day's budget discovering
-/// that nothing had changed.
-///
-/// Pure, and split out because the comparison is the whole of it: `>=` against
-/// `>` is the difference between hourly and never, and neither is observable
-/// from `run`.
-#[must_use]
-pub fn bio_due(now: u64, last_written: Option<u64>) -> bool {
-    match last_written {
-        None => true,
-        Some(then) => now.saturating_sub(then) >= 3_600,
+/// One file rather than two, because the two facts are only useful together --
+/// "written an hour ago" and "said this" answer one question, which is whether
+/// to write again.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BioMarker {
+    /// When the last accepted write happened.
+    pub at: u64,
+    /// Exactly what it wrote.
+    pub text: String,
+}
+
+impl BioMarker {
+    /// Parses the marker file, or `None` when there is not one.
+    ///
+    /// A file that will not parse is `None`, which means *write again*. That
+    /// is the safe direction here: the alternative is a torn marker freezing
+    /// the bio at whatever it happened to say.
+    #[must_use]
+    pub fn parse(text: &str) -> Option<Self> {
+        let (head, rest) = text.split_once('\n')?;
+        Some(Self {
+            at: head.trim().parse().ok()?,
+            text: rest.to_owned(),
+        })
     }
+
+    /// The file's contents for a write at `at` saying `text`.
+    #[must_use]
+    pub fn render(at: u64, text: &str) -> String {
+        format!("{at}\n{text}")
+    }
+}
+
+/// Whether to write the bio now.
+///
+/// Two conditions, both of them cheap and both of them protecting the same
+/// thing -- a metered endpoint that overwrites the only copy of a public
+/// profile:
+///
+/// - **At most once an hour.** The bio changes at most three times a week, so
+///   a writer that tried on every tick would spend the day's budget
+///   discovering that nothing had changed.
+/// - **Only when the text differs.** The ordinary case is that it does not.
+///
+/// Pure, and split out of [`write_bio_if_changed`] because the two comparisons
+/// are the whole of the decision and neither is observable from a function that
+/// needs a platform to run. CI proved that twice: inverting the freshness guard
+/// writes *only* when it is too soon, and inverting the text comparison writes
+/// *only* when nothing changed -- which is a bio frozen at its first value
+/// forever, being paid for on every tick.
+#[must_use]
+pub fn bio_write_due(now: u64, marker: Option<&BioMarker>, text: &str) -> bool {
+    let Some(marker) = marker else {
+        // Never written here. Write it.
+        return true;
+    };
+    if now.saturating_sub(marker.at) < 3_600 {
+        return false;
+    }
+    marker.text != text
 }
 
 /// Writes the bio if the week's state changed and an hour has passed.
@@ -911,15 +957,9 @@ fn write_bio_if_changed(x: Option<&X>, bio: &crate::bio::Bio, spend: &mut Spend,
         return;
     };
     let at = now();
-    let marker = format!("{}/bio.last", paths.contest_dir);
-    let previous = std::fs::read_to_string(&marker).ok();
-    let (last_at, last_text) = previous.as_deref().map_or((None, None), |t| {
-        let (head, rest) = t.split_once('\n').unwrap_or((t, ""));
-        (head.trim().parse::<u64>().ok(), Some(rest))
-    });
-    if !bio_due(at, last_at) {
-        return;
-    }
+    let path = format!("{}/bio.last", paths.contest_dir);
+    let previous = std::fs::read_to_string(&path).ok();
+    let marker = previous.as_deref().and_then(BioMarker::parse);
 
     let Some(record) = radar_contest::records_in(std::path::Path::new(&paths.contest_dir))
         .into_iter()
@@ -937,7 +977,7 @@ fn write_bio_if_changed(x: Option<&X>, bio: &crate::bio::Bio, spend: &mut Spend,
         );
         return;
     };
-    if last_text == Some(text.as_str()) {
+    if !bio_write_due(at, marker.as_ref(), &text) {
         return;
     }
     if let Err(why) = crate::bio::check(&text, &state.authorised()) {
@@ -961,7 +1001,7 @@ fn write_bio_if_changed(x: Option<&X>, bio: &crate::bio::Bio, spend: &mut Spend,
             // The marker is the record, and it is written *after* the platform
             // accepted -- a marker written first would make a failed write look
             // like a done one and the bio would then never be retried.
-            if let Err(e) = std::fs::write(&marker, format!("{at}\n{text}")) {
+            if let Err(e) = std::fs::write(&path, BioMarker::render(at, &text)) {
                 eprintln!("radar-analyst: the bio was written but not recorded: {e}");
             }
         }
@@ -1355,21 +1395,58 @@ mod tests {
     }
 
     #[test]
-    fn the_bio_is_written_at_most_hourly_and_always_at_least_once() {
-        // The endpoint is metered and the bio changes at most three times a
-        // week, so a writer that tried every tick would spend the day's budget
-        // discovering nothing had changed.
+    fn the_bio_is_written_at_most_hourly_and_only_when_the_text_changed() {
+        // Two guards on a metered endpoint that overwrites the only copy of a
+        // public profile, and CI killed neither until they moved out of a
+        // function that needs a platform to run.
         //
-        // `>=` re-applied as `>` is not hourly, it is never-on-the-hour; as
-        // `<` it is every tick. Both are caught here.
-        assert!(bio_due(1_000_000, None), "never written before");
-        assert!(!bio_due(1_000_000, Some(1_000_000)), "just written");
-        assert!(!bio_due(1_000_000 + 3_599, Some(1_000_000)), "59 minutes");
-        assert!(bio_due(1_000_000 + 3_600, Some(1_000_000)), "on the hour");
-        assert!(bio_due(1_000_000 + 7_200, Some(1_000_000)));
-        // A marker from the future does not unlock it either -- a clock that
-        // went backwards must not turn this into every tick.
-        assert!(!bio_due(1_000, Some(1_000_000)));
+        // Inverting the freshness guard writes ONLY when it is too soon.
+        // Inverting the text comparison writes ONLY when nothing changed --
+        // a bio frozen at its first value forever, paid for on every tick.
+        let then = 1_000_000;
+        let old = BioMarker {
+            at: then,
+            text: "old".to_owned(),
+        };
+
+        assert!(bio_write_due(then, None, "anything"), "never written here");
+        assert!(!bio_write_due(then, Some(&old), "new"), "just written");
+        assert!(
+            !bio_write_due(then + 3_599, Some(&old), "new"),
+            "59 minutes"
+        );
+        assert!(
+            bio_write_due(then + 3_600, Some(&old), "new"),
+            "on the hour"
+        );
+        // The whole point of the second guard: an hour has passed and the text
+        // is the same, so there is nothing to pay for.
+        assert!(
+            !bio_write_due(then + 7_200, Some(&old), "old"),
+            "unchanged text is not a write"
+        );
+        // A marker from the future does not unlock it -- a clock that went
+        // backwards must not turn this into every tick.
+        assert!(!bio_write_due(1_000, Some(&old), "new"));
+    }
+
+    #[test]
+    fn a_marker_that_will_not_parse_means_write_again() {
+        // The safe direction: the alternative is a torn marker freezing the
+        // bio at whatever it happened to say, with nothing saying why.
+        assert_eq!(BioMarker::parse(""), None);
+        assert_eq!(BioMarker::parse("no newline"), None);
+        assert_eq!(BioMarker::parse("not-a-number\ntext"), None);
+
+        let parsed = BioMarker::parse("1700000000\nthe bio").expect("parses");
+        assert_eq!(parsed.at, 1_700_000_000);
+        assert_eq!(parsed.text, "the bio");
+        // Round-trips, so what was written is what is compared next time. A
+        // render that did not match the parser would make every tick a write.
+        assert_eq!(
+            BioMarker::parse(&BioMarker::render(parsed.at, &parsed.text)),
+            Some(parsed)
+        );
     }
 
     /// A funded meter on its own ledger file, so these tests do not share one.

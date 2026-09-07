@@ -450,8 +450,21 @@ mod tests {
 
         // A winner inside the window: the claim instruction.
         let record = record_with_winner();
-        let state = state_of(&record, closed + 60).expect("a winner");
-        assert!(matches!(state, State::Won { .. }), "{state:?}");
+        // The dates, not just the shape. CI turned `secs / 86_400` in `day_of`
+        // into `%` and `*` and nothing failed, because nothing read what the
+        // dates actually were -- so the bio could have invited the winner to
+        // claim by 1970-01-01.
+        //
+        // Week 2958 opens Monday 2026-09-07 and closes 2026-09-14; the claim
+        // window is seven days from the close.
+        assert_eq!(
+            state_of(&record, closed + 60),
+            Some(State::Won {
+                week: "2026-09-07".to_owned(),
+                handle: "somebody".to_owned(),
+                until: "2026-09-21".to_owned(),
+            })
+        );
 
         // Paid wins over everything: the money moved and that is the fact.
         let mut paid = record_with_winner();
