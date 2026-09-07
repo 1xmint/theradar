@@ -1,6 +1,11 @@
 # SPDX-License-Identifier: Apache-2.0
 #
-# cargo-deny configuration. Checked in CI on every pull request and daily, since
+# cargo-deny configuration. Checked in CI on every pull request. **Not daily**,
+# whatever an earlier version of this line said: no workflow in
+# `.github/workflows/` carries a `schedule:`, and a comment claiming a run that
+# does not happen is worse than no comment — somebody reads it and stops looking.
+# Adding the schedule is a decision about CI minutes and about who reads the
+# result at 03:00, so it is left to be made rather than made here. Since
 # advisories land continuously and a clean run last week means very little.
 #
 # This project will eventually run a process that holds a signing key with real

@@ -1,11 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
-//! Execution: route, gate, sign, submit, reconcile.
+//! Execution: route, gate, sign, submit.
 //!
 //! The last stage, and the one holding the least authority. By the time control
 //! reaches here the kernel has already decided the trade is permitted and bounded
 //! it; this crate's remaining jobs are to build a transaction that fits inside
-//! those bounds, to check the trade still pays for itself after costs, and to
-//! find out what actually happened.
+//! those bounds and to check the trade still pays for itself after costs.
+//!
+//! **There is no reconcile stage.** This line named one until 2026-09-07 and
+//! there has never been a module behind it: `submit` sends and reports what the
+//! node said, and nothing here goes back afterwards to find out what actually
+//! happened on chain. Said plainly because a named stage reads as a built one,
+//! and the gap between them is where a fill nobody checked would live.
 //!
 //! It cannot sign. The key is in another process, reached over a pipe, and that
 //! process re-decodes whatever this one built. So a compromised executor can
