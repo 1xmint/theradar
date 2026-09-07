@@ -300,6 +300,54 @@ exclude_re = [
     # reported -- adding them would be a claim nobody has checked.
     'replace weeks -> Response with Default::default\(\)',
     'replace hunters -> Response with Default::default\(\)',
+    # `radar_types::build_sha` replaced with `None`.
+    #
+    # It is `option_env!("RADAR_BUILD_SHA")`, and **in every test build that is
+    # already `None`** -- only the one release-CI step that produces the
+    # artifact sets the variable, and `option_env!` is resolved when the crate
+    # is compiled, which `cargo mutants` does without it. The mutation and the
+    # original are the same value under any test that could run here.
+    #
+    # Neither category above, and worth saying exactly rather than filing it
+    # under the nearest one. It is not *equivalent* -- in a release build the
+    # mutation would erase the commit from `/health`, from the analyst's start
+    # line, and from `radar brief`'s reading. It is not unreachable for want of
+    # a `.git` either. It is unobservable because the input is fixed at compile
+    # time and no test compiles the crate twice.
+    #
+    # The other four mutants of this pair are caught, and that is what makes
+    # this entry narrow rather than a hole: `Some("")`, `Some("xyzzy")`, `""`
+    # and `"xyzzy"` all fail
+    # `a_build_outside_release_ci_says_unknown_rather_than_a_blank_or_a_hash`,
+    # which pins the value an operator actually reads off a hand-built binary.
+    'replace build_sha -> Option<&.static str> with None',
+
+    # `brief::running_exe`: the pid filter and the name comparison.
+    #
+    # The thin impure edge of the `binaries` check, and the same argument as
+    # `X::from_env` above. It walks `/proc`, and the decision it feeds --
+    # whether a running process is holding a replaced executable -- was split
+    # into `binaries_with`, which takes the lookup and is tested at four
+    # shapes. This function is what is left: read the directory, skip what is
+    # not a pid, compare `comm`, `read_link` the exe.
+    #
+    # Why the obvious test does not work, established by running it rather than
+    # assumed. Asking for a name nothing is running under should return `None`,
+    # and inverting either predicate should make it return some *other*
+    # process's executable instead. It does not: a non-root process cannot
+    # `readlink` another user's `/proc/<pid>/exe`, so the `.ok()` swallows it
+    # and both versions return `None`. On the workstation this repository is
+    # checked out on there is no `/proc` at all.
+    #
+    # A test that returned early on Windows and asserted `None` on Linux was
+    # written, ran green under both mutations, and was **deleted** -- it is the
+    # "check that cannot fail" the note at the foot of this file warns about,
+    # and keeping it would have been worse than this entry.
+    #
+    # The mutation's effect is also the safe direction: a lookup that finds
+    # nothing makes `binaries` report `Unknown`, which alarms.
+    'delete ! in running_exe',
+    'replace != with == in running_exe',
 
     # --- category 2: unreachable in the mutation sandbox ---------------------
     #
