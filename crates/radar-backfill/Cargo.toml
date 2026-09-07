@@ -11,6 +11,12 @@ authors.workspace = true
 
 [dependencies]
 bs58.workspace = true
+# For `log::read`, and for that alone: the seven-day checkpoint needs the set
+# of mints this account has answered about, and the reply log's format has one
+# reader. A second parser of `replies.jsonl` here is the failure
+# `radar_store::cursor`'s own docs argue against -- two things that can drift,
+# whose drift shows up as a monitor reporting that ingestion is fine.
+radar-analyst.workspace = true
 radar-asof.workspace = true
 radar-decode.workspace = true
 radar-graph.workspace = true

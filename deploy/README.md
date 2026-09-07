@@ -705,6 +705,30 @@ thousand queries and several hours. It paces itself deliberately — Radar is a
 guest on a free public endpoint (ADR 0002) — so run it under `tmux` or `nohup`
 rather than a session that will disconnect.
 
+## Measuring outcomes, and the coins the account has answered about
+
+`--outcomes` measures what became of every token already in the store. It is the
+pass every signal is validated against, and it runs on its own schedule rather
+than under one of the units in this directory.
+
+**Add `--analyst-dir` on the box that runs the account.** Its only effect is to
+give the mints in `replies.jsonl` a fourth measurement at seven days; every
+other token still settles at a day, which is what keeps the pass bounded by
+launch rate rather than by history.
+
+```bash
+ssh guardian-vps-tail '
+  ~/bin/radar-backfill --outcomes \
+      --store ~/radar/data/store \
+      --analyst-dir ~/radar/data/analyst'
+```
+
+Without the flag the pass behaves exactly as it did, and the daily post reports
+the store's last checkpoint — up to a day after launch — which it now says out
+loud instead of calling it a week. With the flag, that post can say something
+about a week for the coins it is actually about. The set is a few mints a day
+against roughly 35,000 daily launches, so the extra cost is not measurable.
+
 ## Running without the units — and why not to
 
 Both binaries run fine under `setsid nohup`, which is how the first deployment

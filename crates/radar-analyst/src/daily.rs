@@ -150,21 +150,49 @@ pub fn render(rows: &Rows, vault: Option<&Vault>) -> Rendered {
         authorised.push(v as f64);
     }
 
+    // # What this post is allowed to say, and what it said
+    //
+    // The post is a week old; **the measurements are not.** `checkpoints`
+    // measures a token at one hour, six hours and a day after launch and then
+    // never again, so every figure here is what the store had by its last
+    // checkpoint. Saying "seven days later" over a day-old measurement is the
+    // account claiming an observation nobody made — on the one post whose whole
+    // value is that its numbers are measured.
+    //
+    // So the copy says what was measured. The file names, the marker and the
+    // directory keep the old label: they name a *schedule*, and renaming them
+    // would strand the markers already on disk.
+    //
+    // The quiet clause is now conditional. Before this it counted rows whose
+    // `quiet_since_reply` was `Some(true)`, and that value was true by
+    // arithmetic for any coin older than a day when it was asked about — see
+    // `seven_days::build`. With that fixed, most days have nothing to say here,
+    // and a clause that reads "0 have had no transfer" on every post is a
+    // sentence that stops being read.
     let mut text = format!(
-        "Seven days later: {n} {} we were asked about on {}. {graduated} graduated, {instant} of \
-         them inside the launch block; {quiet} {} had no transfer since we answered.",
-        if n == 1 { "coin" } else { "coins" },
+        "Seven days on from {}: {n} {} we were asked about. {graduated} graduated, {instant} \
+         inside the launch block.",
         rows.asked_on,
-        if quiet == 1 { "has" } else { "have" },
+        if n == 1 { "coin" } else { "coins" },
     );
+    if quiet > 0 {
+        let _ = write!(
+            text,
+            " {quiet} {} not moved between our answer and the store's last checkpoint.",
+            if quiet == 1 { "has" } else { "have" },
+        );
+    }
     if !held.is_empty() {
         let median = held[held.len() / 2];
         // The scanner reads digits, so a negative figure authorises its
         // magnitude; the sign is prose.
         authorised.push(median.unsigned_abs() as f64);
+        // "Held" without a horizon reads as held for the week, which is the
+        // same overclaim the headline made. The horizon is the store's last
+        // checkpoint — a day after launch — and it is named.
         let _ = write!(
             text,
-            " Of {} priced, the median held from first fill to last price is {median} bps.",
+            " Of {} priced, first fill to a day after launch: {median} bps median.",
             held.len()
         );
     }
@@ -312,31 +340,38 @@ mod tests {
         };
         assert!(
             post.text
-                .starts_with("Seven days later: 4 coins we were asked about on 2026-08-29."),
+                .starts_with("Seven days on from 2026-08-29: 4 coins we were asked about."),
             "{}",
             post.text
         );
         assert!(
-            post.text
-                .contains("2 graduated, 1 of them inside the launch block"),
+            post.text.contains("2 graduated, 1 inside the launch block"),
             "{}",
             post.text
         );
+        // **Named horizons, both of them.** The post is a week old and the
+        // measurements are a day old, and every clause now says which. Before
+        // this it said "had no transfer since we answered" and "the median
+        // held" — two claims about a week that nothing measured over a week.
         assert!(
             post.text
-                .contains("1 has had no transfer since we answered"),
+                .contains("1 has not moved between our answer and the store's last checkpoint"),
             "{}",
             post.text
         );
         // Three priced: -5981, -3228, 120 -> the middle one.
         assert!(
-            post.text.contains(
-                "Of 3 priced, the median held from first fill to last price is -3228 bps."
-            ),
+            post.text
+                .contains("Of 3 priced, first fill to a day after launch: -3228 bps median."),
             "{}",
             post.text
         );
         assert!(post.text.contains("Pool: 0.500 SOL at"), "{}", post.text);
+        assert!(
+            !post.text.contains("Seven days later"),
+            "the old label claimed an observation nobody made: {}",
+            post.text
+        );
         assert!(
             post.text.chars().count() <= 280,
             "{}: {}",
