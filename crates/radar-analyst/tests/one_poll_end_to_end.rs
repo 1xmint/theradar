@@ -1166,3 +1166,70 @@ fn a_restart_reads_the_days_replies_back_off_disk() {
         "the day's total survives a restart, whatever the process forgot"
     );
 }
+
+#[test]
+fn a_week_whose_reads_the_budget_will_not_cover_does_not_close_and_does_not_call() {
+    // The week close makes two platform reads of unbounded size -- one post
+    // resource per entry, one user resource per entrant -- and until 2026-09-07
+    // neither was metered at all, next to an engager scan that was carefully
+    // budgeted. A ceiling with a hole beside it is not a ceiling.
+    //
+    // **Asserted by what the platform saw, not by the return value.** With the
+    // guard inverted the close still fails, because the fake below is reached
+    // and the week is scored on reads nobody paid for -- so a test that only
+    // checked `is_none()` would pass either way. What separates the two is
+    // whether the request happened at all.
+    let (base, seen) = platform(r#"{"data":[]}"#);
+    let dir = workspace("close-unfunded");
+    let paths = Paths::under(&dir);
+
+    // One published reply inside the week being closed, so there is something
+    // to score and the empty-week path is not what is being tested.
+    let week = radar_contest::Week(2957);
+    radar_analyst::log::append(
+        &paths.log,
+        &radar_analyst::log::Entry {
+            at: week.opens_at() + 10,
+            mention_id: "m1".to_owned(),
+            summoner: "alice".to_owned(),
+            mint: Some("MintOne".to_owned()),
+            read_at_slot: Some(1),
+            fact_sheet: String::new(),
+            reply: "measured".to_owned(),
+            fellback: None,
+            reply_id: Some("r1".to_owned()),
+            signals: Some(Vec::new()),
+            pointed_at: None,
+        },
+    )
+    .expect("append");
+
+    // A meter with nothing in it. `Budget::CLOSED` refuses the first charge.
+    let mut spend = Spend::open(
+        Budget::CLOSED,
+        prices(),
+        paths.ledger.clone(),
+        radar_analyst::daemon::day_of(week.closes_at() + 5),
+    );
+    let x = X::at(base, "tok", "u42");
+    let rules = radar_contest::score::Rules::published(["radar"]);
+
+    let closed = radar_analyst::contest::close_if_due(
+        Some(&x),
+        &paths,
+        week.closes_at() + 5,
+        &rules,
+        3,
+        &mut spend,
+    )
+    .expect("io");
+
+    assert!(closed.is_none(), "an unaffordable week does not close");
+    assert!(
+        seen.recv_timeout(Duration::from_millis(500)).is_err(),
+        "the platform must not be read when the budget cannot cover it"
+    );
+    // And nothing was written, so the next run tries again with the next day's
+    // budget rather than finding a record scored on nothing.
+    assert!(!std::path::Path::new(&format!("{}/{}.json", paths.contest_dir, week.0)).exists());
+}

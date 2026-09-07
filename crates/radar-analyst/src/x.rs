@@ -1510,4 +1510,81 @@ mod tests {
         assert_eq!(e.summoner, "a1");
         assert!(e.reply_id.is_none());
     }
+
+    #[test]
+    fn a_short_body_is_kept_whole_and_unmarked() {
+        // The common case: X's error objects are a few hundred bytes and the
+        // useful part -- the code and the detail -- is at the front.
+        assert_eq!(truncated(""), "");
+        assert_eq!(
+            truncated(r#"{"errors":[{"code":326,"message":"locked"}]}"#),
+            r#"{"errors":[{"code":326,"message":"locked"}]}"#
+        );
+    }
+
+    #[test]
+    fn a_long_body_is_cut_to_the_limit_and_says_it_was_cut() {
+        // An HTML error page must not land whole in a journal line, and a body
+        // that was cut has to look cut -- otherwise the last thing an operator
+        // reads is a sentence the platform did not finish.
+        let long = "a".repeat(1_000);
+        let out = truncated(&long);
+        assert_eq!(
+            out.chars().count(),
+            KEPT_BODY + 1,
+            "the limit plus the mark"
+        );
+        assert!(out.ends_with('…'));
+        assert!(out.starts_with("aaaa"));
+
+        // Exactly at the limit is not cut. `<` mutated to `<=` marks a body
+        // that lost nothing, which is a lie about the evidence.
+        let exact = "b".repeat(KEPT_BODY);
+        assert_eq!(truncated(&exact), exact);
+        assert!(!truncated(&exact).ends_with('…'));
+
+        // One past it is.
+        let over = "b".repeat(KEPT_BODY + 1);
+        assert!(truncated(&over).ends_with('…'));
+    }
+
+    #[test]
+    fn a_multibyte_character_is_never_split_in_half() {
+        // The reason the loop exists. The body is untrusted bytes chosen by
+        // somebody else, and `&s[..n]` on a byte that is not a character
+        // boundary is a **panic** -- in the error path of the process that
+        // holds the account, which is the worst place to put one.
+        //
+        // Every one of these puts a boundary at a different offset relative to
+        // the limit, so the loop has to walk back one, two and three bytes.
+        for pad in 0..4 {
+            let body = format!("{}{}", "a".repeat(KEPT_BODY - pad), "🚀".repeat(8));
+            let out = truncated(&body);
+            assert!(out.ends_with('…'), "pad {pad}");
+            // The kept part is a prefix of the input and is never longer than
+            // the limit. `-=` mutated to `+=` walks the wrong way and overruns.
+            let kept = out.trim_end_matches('…');
+            assert!(body.starts_with(kept), "pad {pad}: {kept:?}");
+            assert!(kept.len() <= KEPT_BODY, "pad {pad}: {} bytes", kept.len());
+            // And it kept as much as it could: dropping fewer than four bytes
+            // means the loop stopped at the first boundary rather than
+            // wandering.
+            assert!(
+                kept.len() + 4 > KEPT_BODY,
+                "pad {pad}: {} bytes",
+                kept.len()
+            );
+        }
+    }
+
+    #[test]
+    fn a_body_that_is_one_long_character_run_still_terminates() {
+        // `end > 0` is what stops the walk-back at the front. Without it a body
+        // whose every byte-boundary check fails would loop past zero and
+        // underflow -- a hang or a panic in the error path.
+        let body = "🚀".repeat(400);
+        let out = truncated(&body);
+        assert!(out.ends_with('…'));
+        assert!(body.starts_with(out.trim_end_matches('…')));
+    }
 }

@@ -1043,4 +1043,122 @@ mod tests {
             Admitted::No(Refused::Unconfigured)
         );
     }
+
+    // --- the bucket's arithmetic, at its boundaries -------------------------
+    //
+    // CI reported eight survivors across `burst`, `per_hour`, `refill_to` and
+    // `tokens_left`. Every one of them is a comparison or an operator whose
+    // wrong version still produces a bucket that fills and empties -- just at
+    // the wrong rate, which is exactly the failure nobody notices.
+
+    fn with_daily(global_daily: u32) -> Limits {
+        Limits {
+            per_summoner_daily: 100,
+            global_daily,
+            dedupe_seconds: 3_600,
+        }
+    }
+
+    #[test]
+    fn the_burst_is_the_smaller_of_ten_and_the_day() {
+        // A burst larger than the day is not a burst. `<` mutated to `<=` or
+        // `==` changes the answer only at exactly ten, which is why the
+        // boundary is walked rather than sampled.
+        assert_eq!(Gate::burst(with_daily(0)), 0, "no day, no burst");
+        assert_eq!(Gate::burst(with_daily(3)), 3);
+        assert_eq!(Gate::burst(with_daily(9)), 9);
+        assert_eq!(Gate::burst(with_daily(10)), 10, "ten is not under ten");
+        assert_eq!(Gate::burst(with_daily(11)), 10);
+        assert_eq!(Gate::burst(with_daily(50)), 10, "the box's setting");
+    }
+
+    #[test]
+    fn the_refill_is_the_day_spread_over_a_day_and_never_zero() {
+        // A cap under twenty-four would refill at zero an hour by integer
+        // division, so the bucket would be a cap of `burst` per process
+        // lifetime -- which is the bug this whole mechanism replaces, one level
+        // down.
+        assert_eq!(Gate::per_hour(with_daily(0)), 1, "never zero");
+        assert_eq!(Gate::per_hour(with_daily(1)), 1);
+        assert_eq!(Gate::per_hour(with_daily(23)), 1);
+        assert_eq!(Gate::per_hour(with_daily(24)), 1, "exactly one an hour");
+        assert_eq!(Gate::per_hour(with_daily(25)), 1);
+        assert_eq!(Gate::per_hour(with_daily(48)), 2);
+        assert_eq!(Gate::per_hour(with_daily(50)), 2, "the box's setting");
+    }
+
+    #[test]
+    fn tokens_left_reports_the_bucket_rather_than_a_constant() {
+        // Mutated to return `0`, every test that asserts an empty bucket still
+        // passes. So this asserts it is *full* at the start and falls one at a
+        // time, which no constant satisfies.
+        let mut gate = Gate::new(wide(), Vec::new());
+        assert_eq!(gate.tokens_left(), 10, "a fresh gate can answer a flurry");
+        assert_eq!(answer(&mut gate, "a", "M1", DAY), Admitted::Yes);
+        assert_eq!(gate.tokens_left(), 9);
+        assert_eq!(answer(&mut gate, "b", "M2", DAY), Admitted::Yes);
+        assert_eq!(gate.tokens_left(), 8);
+    }
+
+    #[test]
+    fn a_clock_that_went_backwards_re_bases_rather_than_freezing() {
+        // NTP steps, a container clock, a host resuming from sleep. Without the
+        // `now < refilled_at` branch the subtraction below it underflows to a
+        // saturating zero and the bucket never refills again -- the account goes
+        // quiet until somebody restarts it, which is the outage `restore` exists
+        // to prevent arriving by a different door.
+        //
+        // Mutated to `==` or `<=` the branch stops covering the backwards case,
+        // and this fails.
+        let mut gate = Gate::new(wide(), Vec::new());
+        let at = 10 * DAY;
+        for n in 0..10 {
+            assert_eq!(
+                answer(&mut gate, &format!("s{n}"), &format!("M{n}"), at),
+                Admitted::Yes
+            );
+        }
+        // The clock jumps back an hour, then forward again.
+        assert!(matches!(
+            gate.admit("late", "Nope", at - 3_600),
+            Admitted::No(Refused::GlobalRate { .. })
+        ));
+        assert_eq!(
+            answer(&mut gate, "late", "Yes", at + 3_600),
+            Admitted::Yes,
+            "an hour after the step, the bucket has earned again"
+        );
+    }
+
+    #[test]
+    fn the_refill_clock_advances_by_what_it_paid_for_and_no_further() {
+        // `refilled_at += earned * 3600 / per_hour` -- mutated to `*=`, or with
+        // the division flipped to a multiplication, the marker lands somewhere
+        // in the far future or the far past and the refill rate stops being a
+        // rate at all.
+        //
+        // Asserted as a *rate* over four hours rather than as a field: at two an
+        // hour, four hours earns exactly eight and not seven or nine.
+        let mut gate = Gate::new(wide(), Vec::new());
+        let at = 20 * DAY;
+        for n in 0..10 {
+            assert_eq!(
+                answer(&mut gate, &format!("s{n}"), &format!("M{n}"), at),
+                Admitted::Yes
+            );
+        }
+        assert_eq!(gate.tokens_left(), 0);
+
+        let later = at + 4 * 3_600;
+        let mut earned = 0;
+        for n in 0..12 {
+            if answer(&mut gate, "asker", &format!("L{n}"), later) == Admitted::Yes {
+                earned += 1;
+            }
+        }
+        assert_eq!(
+            earned, 8,
+            "four hours at two an hour is eight, and the burst is ten so nothing is clipped"
+        );
+    }
 }

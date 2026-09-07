@@ -2355,4 +2355,105 @@ mod tests {
         assert!(closed.is_none());
         assert!(!std::path::Path::new(&record_path(&paths.contest_dir, next)).exists());
     }
+
+    /// A meter with room for a whole engager scan and then some.
+    fn funded() -> crate::spend::Spend {
+        crate::spend::Spend::open(
+            radar_provider::Budget {
+                per_call_max: radar_types::MicroUsd(20_000),
+                daily_max: radar_types::MicroUsd(20_000_000),
+            },
+            crate::spend::Prices {
+                mention_read: radar_types::MicroUsd(1_000),
+                post_read: radar_types::MicroUsd(5_000),
+                reply: radar_types::MicroUsd(10_000),
+                post: radar_types::MicroUsd(15_000),
+                model_call: radar_types::MicroUsd(2_000),
+                user_read: radar_types::MicroUsd(20_000),
+            },
+            std::env::temp_dir()
+                .join(format!("radar-contest-funded-{}", std::process::id()))
+                .to_string_lossy()
+                .into_owned(),
+            1,
+        )
+    }
+
+    #[test]
+    fn the_budget_meter_charges_what_the_read_billed_and_gives_back_the_rest() {
+        // CI reported three survivors on `n < resources` -- `==`, `>` and `<=`.
+        // Every one of them still reserves and still settles; they differ only
+        // in *how much* ends up on the ledger, which nothing was asserting.
+        //
+        // The arithmetic that matters: reserve the bound, charge the two the
+        // read actually billed, release 298. At 20,000 micro-USD a user read
+        // that is a difference of nearly six dollars per entry scanned.
+        let path = std::env::temp_dir().join(format!("radar-meter-{}", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+        let mut spend = funded();
+        {
+            let mut meter = BudgetMeter {
+                spend: &mut spend,
+                day: 1,
+                held: Vec::new(),
+            };
+            assert!(meter.reserve(WORST_CASE_RESOURCES));
+            meter.settle(2);
+        }
+        assert_eq!(
+            spend.spent_today(),
+            radar_types::MicroUsd(40_000),
+            "two user reads at 20,000, not three hundred and not nothing"
+        );
+    }
+
+    #[test]
+    fn a_scan_that_read_nothing_costs_nothing() {
+        // The failed-read path. Settling at zero must release the whole
+        // reservation, or a platform having a bad afternoon drains the day's
+        // budget one refused scan at a time.
+        let mut spend = funded();
+        {
+            let mut meter = BudgetMeter {
+                spend: &mut spend,
+                day: 1,
+                held: Vec::new(),
+            };
+            assert!(meter.reserve(WORST_CASE_RESOURCES));
+            meter.settle(0);
+        }
+        assert_eq!(spend.spent_today(), radar_types::MicroUsd(0));
+    }
+
+    #[test]
+    fn a_reservation_the_budget_cannot_cover_is_all_or_nothing() {
+        // A half-reserved scan would read three pages it could only pay part
+        // of. `reserve` gives back everything it took before refusing, so a
+        // refusal costs the day nothing.
+        let mut spend = unfunded();
+        {
+            let mut meter = BudgetMeter {
+                spend: &mut spend,
+                day: 1,
+                held: Vec::new(),
+            };
+            assert!(!meter.reserve(WORST_CASE_RESOURCES));
+        }
+        assert_eq!(spend.spent_today(), radar_types::MicroUsd(0));
+    }
+
+    #[test]
+    fn charging_for_a_lookup_stops_at_the_budget_rather_than_overrunning_it() {
+        // `charge_post_reads` and `charge_user_reads` both walk a count and stop
+        // at the first refusal. The `false` they return is what keeps a week
+        // from closing on reads nobody could pay for -- see `scored_reads`.
+        let mut spend = funded();
+        assert!(charge_post_reads(&mut spend, 3, 1));
+        assert_eq!(spend.spent_today(), radar_types::MicroUsd(15_000));
+
+        let mut broke = unfunded();
+        assert!(!charge_post_reads(&mut broke, 1, 1));
+        assert!(!charge_user_reads(&mut broke, 1, 1));
+        assert_eq!(broke.spent_today(), radar_types::MicroUsd(0));
+    }
 }
