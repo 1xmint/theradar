@@ -328,6 +328,48 @@ pub fn ignored(x: Option<&X>) -> Vec<String> {
     x.map(|x| vec![x.user_id().to_owned()]).unwrap_or_default()
 }
 
+/// What to say when the contest's directory cannot be written, or `None`.
+///
+/// # Why this is a start-up check and not a runtime one
+///
+/// The analyst writes the contest's records **once a week**, at 00:00 UTC on
+/// the Monday. Everything else it does -- polling, answering, posting, metering
+/// -- touches only its own directory. So a deployment that grants write to the
+/// analyst's directory and not the contest's looks perfect for six days and
+/// then cannot close the week, and the only symptom is a line in a journal at
+/// midnight.
+///
+/// That is not hypothetical. `deploy/radar-analyst.service` had exactly one
+/// `ReadWritePaths` entry, `Paths::under` puts the contest directory *beside*
+/// the analyst's rather than inside it, and on 2026-09-07 the close said
+/// `Read-only file system (os error 30)` every five minutes for ninety minutes
+/// into a journal nobody was reading. The contest could not have closed at all.
+///
+/// So the probe runs at start, where somebody is looking, and it names the
+/// systemd directive rather than the symptom -- the operator reading this has
+/// a unit file open, not a strace.
+///
+/// It creates and removes a file rather than checking permissions, because the
+/// thing that failed was not a permission: the directory was `0755` and owned
+/// by the right user, and the kernel refused the write anyway because of a
+/// sandbox the process cannot see from its own metadata.
+#[must_use]
+pub fn contest_writable_notice(contest_dir: &str) -> Option<String> {
+    let probe = std::path::Path::new(contest_dir).join(".radar-write-probe");
+    if std::fs::create_dir_all(contest_dir)
+        .and_then(|()| std::fs::write(&probe, b""))
+        .is_ok()
+    {
+        let _ = std::fs::remove_file(&probe);
+        return None;
+    }
+    Some(format!(
+        "radar-analyst: {contest_dir} CANNOT BE WRITTEN, so the week will not close and \
+         no prize can be recorded. Replies still work. If this is a systemd unit, add it \
+         to ReadWritePaths -- it is a sibling of the analyst's directory, not a child."
+    ))
+}
+
 /// What to say when no model provider was built.
 ///
 /// Rule 8's other half. An **unconfigured** provider is a resting state; a
@@ -392,6 +434,11 @@ pub fn run() -> ! {
     // silently leaves the managing account eligible to win the prize, and the
     // only visible difference is this number.
     eprintln!("{}", build_notice(operator_ids(x.as_ref()).len()));
+    // Once, at start, where somebody is looking. See the doc comment: this
+    // failure is silent for six days and then loses a week.
+    if let Some(notice) = contest_writable_notice(&paths.contest_dir) {
+        eprintln!("{notice}");
+    }
 
     // The free lane, on its own token, its own switch, its own caps and its
     // own log (design 0009 L5). Same rule 8 shape as X: no token, nothing read.
@@ -1254,6 +1301,42 @@ mod tests {
         let three = reserve_thread(&mut spend, 3, 1);
         settle_thread(&mut spend, three, 0);
         assert_eq!(spend.spent_today(), radar_types::MicroUsd::ZERO);
+    }
+
+    #[test]
+    fn a_contest_directory_that_cannot_be_written_is_said_at_start_not_at_midnight() {
+        // The analyst writes the contest's records once a week. A deployment
+        // that grants write to the analyst's directory and not the contest's
+        // looks perfect for six days and then cannot close the week -- which
+        // is what `deploy/radar-analyst.service` did until 2026-09-07, with
+        // the only symptom a line in a journal at midnight.
+        //
+        // Re-apply by returning `None` unconditionally: the second assertion
+        // fails, and the box goes back to finding out on a Monday.
+        let dir = std::env::temp_dir().join(format!("radar-contest-w{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let ok = dir.to_string_lossy().into_owned();
+        assert_eq!(
+            contest_writable_notice(&ok),
+            None,
+            "a directory it can create is writable"
+        );
+        // The probe cleans up after itself: a stray file in the contest
+        // directory is a file `records_in` has to skip.
+        assert!(!dir.join(".radar-write-probe").exists());
+
+        // A path under a file is the closest thing to a read-only mount that a
+        // test can produce without one: the create fails for a different
+        // reason, and what is asserted is that a failure to write is *said*.
+        let blocked = dir.join("a-file").to_string_lossy().into_owned();
+        std::fs::write(&blocked, b"not a directory").expect("write");
+        let notice = contest_writable_notice(&format!("{blocked}/contest"))
+            .expect("a directory it cannot write is named");
+        assert!(notice.contains("CANNOT BE WRITTEN"), "{notice}");
+        // The directive, not the symptom: whoever reads this has a unit file
+        // open, not an strace.
+        assert!(notice.contains("ReadWritePaths"), "{notice}");
+        assert!(notice.contains("sibling"), "{notice}");
     }
 
     /// One entrant, with the summons the claim prompt should reply to.

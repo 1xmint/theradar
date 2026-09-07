@@ -38,9 +38,18 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=read-only
-# Its own directory, and only its own: the reply log, the cursor and the spend
-# ledger. It has no business writing where the recorder writes.
-ReadWritePaths=/home/guardian/radar/data/analyst
+# Its own directory and the contest's, and nothing else. It has no business
+# writing where the recorder writes.
+#
+# **The contest directory is a second entry because it is a sibling, not a
+# child.** `Paths::under` puts it beside the analyst's directory on purpose --
+# `radar-serve` reads the same records as `RADAR_CONTEST_DIR`, and one ledger
+# with two readers must not be two locations. This unit granted only the first
+# for a day, and the failure was invisible until it mattered: every poll
+# worked, every reply posted, and at 00:00 UTC on the Monday the close said
+# `Read-only file system (os error 30)` every five minutes into a journal
+# nobody was reading. **The contest could not close, ever.**
+ReadWritePaths=/home/guardian/radar/data/analyst /home/guardian/radar/data/contest
 ProtectKernelTunables=true
 ProtectKernelModules=true
 ProtectControlGroups=true

@@ -56,6 +56,7 @@ quietly absent.
 | [29](#29-a-sentence-that-was-false-on-the-day-it-was-written-in-two-documents-at-once) | A sentence that was false on the day it was written, in two documents at once | `repo-conformance`'s `the_documented_dependency_claims_are_true`,… |
 | [30](#30-an-operators-file-that-named-a-variable-its-own-service-does-not-read) | An operator's file that named a variable its own service does not read | *habit only* |
 | [31](#31-a-runbook-that-named-a-real-domain-belonging-to-somebody-else) | A runbook that named a real domain belonging to somebody else | `looks_unsubstituted` |
+| [32](#32-the-sandbox-made-the-contest-impossible-to-close-and-it-took-six-days-to-show) | The sandbox made the contest impossible to close, and it took six days to show | `contest_writable_notice`, `brief::contest` |
 
 ---
 
@@ -1513,3 +1514,68 @@ reader who substitutes a wrong-but-well-formed domain, and no startup check can:
 the server has no way to know which tenant it was supposed to belong to. The
 runbook now says how to read the real one out of a login redirect, which is the
 cheapest check that does not depend on remembering.
+
+## 32. The sandbox made the contest impossible to close, and it took six days to show
+
+`deploy/radar-analyst.service` grants `ProtectSystem=strict` with one
+`ReadWritePaths` entry:
+
+```
+ReadWritePaths=/home/guardian/radar/data/analyst
+```
+
+`Paths::under` puts the contest's directory **beside** the analyst's rather than
+inside it, on purpose: `radar-serve` reads the same records as
+`RADAR_CONTEST_DIR`, and one ledger with two readers must not be two locations.
+So the analyst could write its log, its cursor and its spend ledger, and could
+not write the thing the whole contest is made of.
+
+**Nothing showed for six days.** Every poll worked. Every reply posted. The
+account looked healthy from outside and from `systemctl status`. Then at 00:00
+UTC on the Monday:
+
+```
+radar-analyst: cannot write the week's record: Read-only file system (os error 30)
+```
+
+— every five minutes, into a journal nobody was reading, for ninety minutes
+before anybody looked. The contest could not have closed. Ever.
+
+**What makes this its own entry rather than a typo.** The failure is *timed*.
+A directory the process writes on every tick fails on the first tick, which is
+while somebody is watching a deploy. A directory it writes **once a week** fails
+at the one moment nobody is watching, and until then every signal available says
+the deployment is correct. `radar brief` was reporting a five-day-old record as
+the healthy state, because a five-day-old record is what a healthy Wednesday
+looks like.
+
+**The three fixes are at three different levels, and that is the point** —
+AGENTS.md §5 is about the cheapest level that can *hold* a property, and here
+none of them holds it alone:
+
+1. **The unit file**, which is where the bug was. Fixes every future install and
+   nothing already installed.
+2. **A start-up probe in the analyst**, which creates and removes a file in the
+   contest directory and says so if it cannot — naming `ReadWritePaths` rather
+   than the symptom, because whoever reads it has a unit file open, not an
+   strace. Fixes the *timing*: the failure now arrives at a restart, where
+   somebody is looking, instead of at midnight.
+3. **`radar brief`'s `contest` check**, which does the same probe **before**
+   reading the records. A start-up line scrolls away; the brief runs on a timer.
+   Before is deliberate: "no week has closed here" is a true sentence about an
+   unwritable directory and it is the wrong one — it sends the operator to look
+   at the analyst instead of the unit file. The worse fact wins.
+
+**The generalisation worth carrying.** A permission a process needs *rarely* is
+a permission nothing tests until it is needed. When a sandbox grants paths, the
+list has to be checked against every path the process writes on its **slowest**
+schedule, not the paths it writes while you are watching it start.
+
+**What catches a recurrence:** `daemon::contest_writable_notice` at every start
+and `brief::contest`'s probe on every timer run, both of which write and remove
+a file rather than reading permissions — the directory was `0755` and owned by
+the right user, and the kernel refused the write anyway because of a sandbox the
+process cannot see from its own metadata. Both are pinned by tests that fail
+when the probe is removed. Neither catches the *general* case of a rarely-used
+path missing from `ReadWritePaths`; for that the habit is to read the unit's
+grants against every path the process writes on its slowest schedule.

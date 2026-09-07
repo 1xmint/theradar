@@ -1070,6 +1070,37 @@ fn contest(dir: &str, declared: bool) -> Check {
     } else {
         Status::Ok
     };
+    // **A week that closed is not a week that can close, and this is checked
+    // first.** The analyst writes here once a week, so a directory it cannot
+    // write looks identical to a healthy one for six days -- and on 2026-09-07
+    // that is exactly what happened: `deploy/radar-analyst.service` granted
+    // `ReadWritePaths` for the analyst's directory and not the contest's,
+    // which is a *sibling*, and the close said `Read-only file system` every
+    // five minutes into a journal nobody was reading.
+    //
+    // Before the records are read, and deliberately. "No week has closed here"
+    // is a true sentence about an unwritable directory and it is the wrong
+    // one: it sends the operator to look at the analyst instead of the unit
+    // file. The worse fact wins.
+    //
+    // Checked here as well as at the analyst's start because a start-up line
+    // scrolls away and this is the thing that runs on a timer.
+    let probe = std::path::Path::new(dir).join(".radar-write-probe");
+    let writable = std::fs::create_dir_all(dir)
+        .and_then(|()| std::fs::write(&probe, b""))
+        .is_ok();
+    if writable {
+        let _ = std::fs::remove_file(&probe);
+    } else {
+        return Check::new(
+            Status::Fail,
+            "contest",
+            format!(
+                "{dir} cannot be written, so no week can close whatever is already in it.                  If the analyst runs under systemd, add this directory to ReadWritePaths --                  it is a sibling of the analyst's directory, not a child"
+            ),
+        );
+    }
+
     let mut records = radar_contest::records_in(std::path::Path::new(dir));
     let Some(latest) = records.iter().max_by_key(|r| r.week.0).cloned() else {
         return Check::new(
@@ -1081,6 +1112,7 @@ fn contest(dir: &str, declared: bool) -> Check {
         );
     };
     records.sort_by_key(|r| r.week.0);
+
     let standing = match (&latest.winner, &latest.claim, &latest.payout) {
         (None, _, _) => "no winner, the pool rolls over".to_owned(),
         (Some(_), None, _) => format!(
@@ -1401,6 +1433,59 @@ mod tests {
         assert!(empty.detail.contains("no sha256"), "{}", empty.detail);
     }
 
+    #[test]
+    fn a_contest_directory_that_cannot_be_written_fails_rather_than_reading_healthy() {
+        // The failure that ran for ninety minutes on 2026-09-07: the analyst
+        // writes here once a week, so a directory it cannot write is
+        // indistinguishable from a healthy one for six days. The brief was
+        // reporting a five-day-old record as fine.
+        //
+        // Re-apply by deleting the probe: this reads `ok` with a record on
+        // disk and a directory nothing can write.
+        let dir = std::env::temp_dir().join(format!("radar-brief-c{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("mkdir");
+        let path = dir.to_string_lossy().into_owned();
+
+        let record = radar_contest::Record::close(
+            radar_contest::Week(2957),
+            radar_contest::Ranking::default(),
+            &radar_contest::Rules::published(["op"]),
+        );
+        std::fs::write(dir.join("2957.json"), record.to_json().expect("json")).expect("write");
+
+        // Writable: the ordinary line.
+        let fine = contest(&path, true);
+        assert!(matches!(fine.status, Status::Ok), "{}", fine.detail);
+        assert!(fine.detail.contains("week 2957"), "{}", fine.detail);
+        // And the probe leaves nothing behind for `records_in` to skip.
+        assert!(!dir.join(".radar-write-probe").exists());
+
+        // Not writable: a FAIL that names the directive, not the symptom.
+        // A path under a file is the closest a test gets to a read-only mount.
+        let blocked = dir.join("2957.json").to_string_lossy().into_owned();
+        let under = format!("{blocked}/nope");
+        let broken = contest(&under, true);
+        assert!(matches!(broken.status, Status::Fail), "{}", broken.detail);
+        assert!(
+            broken.detail.contains("cannot be written"),
+            "{}",
+            broken.detail
+        );
+        // The directive, not the symptom, and not "no week has closed here" --
+        // which is true of an unwritable directory and sends the operator to
+        // look at the analyst instead of the unit file.
+        assert!(
+            broken.detail.contains("ReadWritePaths"),
+            "{}",
+            broken.detail
+        );
+        assert!(
+            !broken.detail.contains("no week records"),
+            "{}",
+            broken.detail
+        );
+    }
     use super::*;
 
     #[test]
