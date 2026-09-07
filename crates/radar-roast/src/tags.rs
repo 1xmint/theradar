@@ -115,14 +115,31 @@ pub fn substitute(
     sheet: &FactSheet,
     headline: Option<&str>,
 ) -> Result<String, NotSubstituted> {
+    // # Why this is a `for` and not a `while` over a cursor
+    //
+    // It was a cursor, and the mutation gate reported **five timeouts** across
+    // three shards. Every one of them was a mutant that stopped the cursor
+    // advancing, and cargo-mutants cannot tell an infinite loop from a slow one
+    // — the justfile's own note says a timeout is `inconclusive`, never a pass,
+    // and shard 3 failed on a timeout with no survivors at all.
+    //
+    // A `for` over a fixed iterator cannot loop forever whatever a mutant does
+    // to the body. `consumed` is the tag's remaining characters, skipped rather
+    // than jumped over: mutated to add instead of subtract it skips more, which
+    // is wrong and terminates and is therefore *catchable*. That is AGENTS.md
+    // §5's ladder applied to a check rather than to a behaviour — the hang was
+    // made impossible instead of tested for.
+    let chars: Vec<char> = written.chars().collect();
     let mut out = String::new();
-    let bytes: Vec<char> = written.chars().collect();
-    let mut i = 0;
+    let mut consumed = 0usize;
 
-    while i < bytes.len() {
-        let c = bytes[i];
+    for (i, &c) in chars.iter().enumerate() {
+        if consumed > 0 {
+            consumed -= 1;
+            continue;
+        }
         if c == '[' {
-            if let Some((tag, after)) = read_tag(&bytes, i) {
+            if let Some((tag, after)) = read_tag(&chars, i) {
                 // Resolved against the sheet, and the result is **appended**
                 // rather than re-scanned. Rule 1: a fact whose rendering
                 // contains a bracket cannot expand a second time.
@@ -130,28 +147,27 @@ pub fn substitute(
                     Some(text) => out.push_str(&text),
                     None => return Err(NotSubstituted::UnknownTag { tag }),
                 }
-                i = after;
+                // The tag spans `i..after`; this iteration has consumed the
+                // character at `i`, so the rest are skipped.
+                consumed = after.saturating_sub(i).saturating_sub(1);
                 continue;
             }
             // Not a tag: an ordinary bracket, kept.
             out.push(c);
-            i += 1;
             continue;
         }
         if c.is_ascii_digit() {
             // Rule 2. The whole run is reported, so an operator reading the log
             // sees the number the model tried to write rather than its first
-            // digit.
-            let mut found = String::new();
-            let mut j = i;
-            while j < bytes.len() && (bytes[j].is_ascii_digit() || bytes[j] == '.') {
-                found.push(bytes[j]);
-                j += 1;
-            }
+            // digit. `take_while` rather than an index walk, for the same reason
+            // the outer loop is a `for`.
+            let found: String = chars[i..]
+                .iter()
+                .take_while(|d| d.is_ascii_digit() || **d == '.')
+                .collect();
             return Err(NotSubstituted::Digits { found });
         }
         out.push(c);
-        i += 1;
     }
 
     if out.trim().is_empty() {
@@ -166,23 +182,28 @@ pub fn substitute(
 /// `[H]`. Anything else is not a tag, which is what makes `[F[F1]]` resolve to
 /// the inner tag inside two literal brackets rather than to something nested.
 fn read_tag(chars: &[char], at: usize) -> Option<(String, usize)> {
-    let mut i = at + 1;
-    if chars.get(i) == Some(&'H') && chars.get(i + 1) == Some(&']') {
-        return Some((HEADLINE_TAG.to_owned(), i + 2));
+    let opener = at + 1;
+    if chars.get(opener) == Some(&'H') && chars.get(opener + 1) == Some(&']') {
+        return Some((HEADLINE_TAG.to_owned(), opener + 2));
     }
-    if chars.get(i) != Some(&'F') {
+    if chars.get(opener) != Some(&'F') {
         return None;
     }
-    i += 1;
-    let start = i;
-    while chars.get(i).is_some_and(char::is_ascii_digit) {
-        i += 1;
-    }
-    if i == start || chars.get(i) != Some(&']') {
+    let start = opener + 1;
+    // Counted rather than walked, for the reason `substitute`'s outer loop is a
+    // `for`: a manual cursor is one mutation away from never advancing, and a
+    // hang is reported as `inconclusive` rather than caught. `take_while`
+    // cannot loop forever whatever is done to it.
+    let digits: String = chars
+        .get(start..)?
+        .iter()
+        .take_while(|c| c.is_ascii_digit())
+        .collect();
+    let end = start + digits.chars().count();
+    if digits.is_empty() || chars.get(end) != Some(&']') {
         return None;
     }
-    let digits: String = chars[start..i].iter().collect();
-    Some((format!("[F{digits}]"), i + 1))
+    Some((format!("[F{digits}]"), end + 1))
 }
 
 /// The text a tag stands for, or `None` if it names nothing.
@@ -367,5 +388,88 @@ mod tests {
             .expect("no tags is fine"),
             "Nothing here was measured, and the absence is the fact."
         );
+    }
+
+    #[test]
+    fn a_digit_run_at_the_very_end_is_reported_whole() {
+        // The boundary the old index walk got wrong: `j < len` mutated to `<=`
+        // survived because no test drove the run to the end of the input. It is
+        // a `take_while` now and has no index to compare, but the case is worth
+        // a test on its own terms — a model that ends a sentence on a figure is
+        // the most likely way this fires.
+        assert_eq!(
+            substitute("launches 97", &sheet(), None),
+            Err(NotSubstituted::Digits {
+                found: "97".to_owned()
+            })
+        );
+        assert_eq!(
+            substitute("5", &sheet(), None),
+            Err(NotSubstituted::Digits {
+                found: "5".to_owned()
+            })
+        );
+    }
+
+    #[test]
+    fn a_tag_is_skipped_by_exactly_its_own_length() {
+        // `consumed` is what replaced the cursor jump. Too few and the tag's
+        // own digits leak out as a fabricated number; too many and the
+        // characters after it vanish from the reply.
+        //
+        // Both directions are asserted here because they fail differently: the
+        // first is a wrong refusal, the second is a sentence missing its end.
+        assert_eq!(
+            substitute("[F1] launches, and that is all", &sheet(), None).expect("resolves"),
+            "3 launches, and that is all"
+        );
+        assert_eq!(
+            substitute("[F10]", &sheet(), None),
+            Err(NotSubstituted::UnknownTag {
+                tag: "[F10]".to_owned()
+            }),
+            "a two-digit tag is read whole"
+        );
+        // Two tags back to back, with nothing between them to absorb an
+        // off-by-one.
+        assert_eq!(
+            substitute("[F1][F2]", &sheet(), None).expect("resolves"),
+            "3850 bps"
+        );
+        // And the headline tag, which is a different length again.
+        assert_eq!(
+            substitute("[H]x", &sheet(), Some("Three.")).expect("resolves"),
+            "Three.x"
+        );
+    }
+
+    #[test]
+    fn each_refusal_says_something_only_it_could_say() {
+        // `Display` is what `radar roast` prints and what the daemon logs, and
+        // it is the line somebody reads when the fifty tagged replies are being
+        // checked by hand. Mutated to render the empty string, every other test
+        // here still passed -- so this asserts each variant names its own
+        // failure rather than merely being non-empty.
+        let digits = NotSubstituted::Digits {
+            found: "97.1".to_owned(),
+        }
+        .to_string();
+        assert!(digits.contains("97.1"), "{digits}");
+        assert!(digits.contains("digits"), "{digits}");
+
+        let unknown = NotSubstituted::UnknownTag {
+            tag: "[F9]".to_owned(),
+        }
+        .to_string();
+        assert!(unknown.contains("[F9]"), "{unknown}");
+        assert!(unknown.contains("no fact"), "{unknown}");
+
+        let empty = NotSubstituted::Empty.to_string();
+        assert!(empty.contains("nothing"), "{empty}");
+
+        // And no two of them read the same, which is the property a caller
+        // relies on when it puts one in a log line.
+        assert_ne!(digits, unknown);
+        assert_ne!(unknown, empty);
     }
 }
