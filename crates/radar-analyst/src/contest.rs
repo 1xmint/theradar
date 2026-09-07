@@ -57,6 +57,8 @@ pub enum RefusalKind {
     SummonerDaily,
     /// The account's whole daily cap was spent.
     GlobalDaily,
+    /// The account was answering as fast as it is allowed to.
+    GlobalRate,
     /// Somebody had already asked about this mint inside the dedupe window.
     AlreadyAnswered,
     /// Radar, or an account it never answers.
@@ -71,6 +73,7 @@ impl RefusalKind {
             Refused::Unconfigured => Self::Unconfigured,
             Refused::SummonerDaily { .. } => Self::SummonerDaily,
             Refused::GlobalDaily { .. } => Self::GlobalDaily,
+            Refused::GlobalRate { .. } => Self::GlobalRate,
             Refused::AlreadyAnswered { .. } => Self::AlreadyAnswered,
             Refused::SelfOrIgnored => Self::SelfOrIgnored,
         }
@@ -84,7 +87,8 @@ impl RefusalKind {
     /// coin somebody else asked about an hour ago was out for the week
     /// (`AlreadyAnswered`), and anybody could spend the global cap early on
     /// Monday and put **every** later summoner out until Sunday
-    /// (`GlobalDaily`). Neither is a thing the entrant did.
+    /// (`GlobalDaily`). Neither is a thing the entrant did, and neither is
+    /// `GlobalRate` — arriving while the account is busy is not misbehaviour.
     #[must_use]
     pub const fn costs_the_week(self) -> bool {
         matches!(self, Self::SummonerDaily)
@@ -214,7 +218,7 @@ pub fn scan_ranking(
     ranked: &[radar_contest::Ranked],
     closes_at: u64,
     min_age_days: u32,
-    mut charge: impl FnMut(usize) -> bool,
+    meter: &mut dyn ScanMeter,
 ) -> BTreeMap<String, Verified> {
     let mut found: BTreeMap<String, Verified> = BTreeMap::new();
     let mut best = 0u64;
@@ -224,17 +228,19 @@ pub fn scan_ranking(
         if best >= r.entry.metrics.raw_score() && i > 0 {
             break;
         }
-        let engagers = match read(&r.entry.reply_id) {
-            Ok(e) => e,
-            Err(e) => {
-                eprintln!(
-                    "radar-analyst: cannot scan {}: {e}; the week is scored on what was read",
-                    r.entry.reply_id
-                );
-                break;
-            }
-        };
-        if !charge(engagers.billed_resources()) {
+        // **Reserved before the read, settled at what it actually billed.**
+        //
+        // This used to read three pages from the platform and *then* ask the
+        // meter whether it could afford them. The money is gone by the time a
+        // page comes back, so a ceiling checked afterwards is not a ceiling --
+        // exactly the reasoning the daemon applies to the model call, which is
+        // reserved before `answer` because `answer` makes the call inside.
+        //
+        // The worst case has to be the reservation because the true cost is the
+        // number of user resources X returns, and that is not knowable until it
+        // has returned them. Settled immediately after, so the reservation is
+        // head-room for one call rather than a charge.
+        if !meter.reserve(WORST_CASE_RESOURCES) {
             eprintln!(
                 "radar-analyst: the day's budget will not cover scanning {}; \
                  the week is scored on what was read",
@@ -242,6 +248,19 @@ pub fn scan_ranking(
             );
             break;
         }
+        let engagers = match read(&r.entry.reply_id) {
+            Ok(e) => e,
+            Err(e) => {
+                // Nothing was delivered, so nothing is charged.
+                meter.settle(0);
+                eprintln!(
+                    "radar-analyst: cannot scan {}: {e}; the week is scored on what was read",
+                    r.entry.reply_id
+                );
+                break;
+            }
+        };
+        meter.settle(engagers.billed_resources());
         let verified = verified_from(&engagers, closes_at, min_age_days);
         best = best.max(verified.score());
         found.insert(r.entry.reply_id.clone(), verified);
@@ -288,6 +307,90 @@ fn charge_user_reads(spend: &mut Spend, resources: usize, day: u64) -> bool {
         spend.settle(commitment, charged);
     }
     true
+}
+
+/// Charges for a lookup that bills one post resource per id.
+///
+/// Reserved and settled in one step, the way [`charge_user_reads`] is: the
+/// number of resources is the number of ids asked for, which is known before
+/// the call rather than after it. That is what makes this simpler than the
+/// engager scan, and it is the only reason the two differ.
+fn charge_post_reads(spend: &mut Spend, resources: usize, day: u64) -> bool {
+    for _ in 0..resources {
+        let Ok(commitment) = spend.authorize(Cost::PostRead, day) else {
+            return false;
+        };
+        let charged = commitment.reserved();
+        spend.settle(commitment, charged);
+    }
+    true
+}
+
+/// The most user resources one engager scan can bill for.
+///
+/// [`crate::x::X::engagers`] makes three requests — reposts, likes and quotes —
+/// and X returns at most 100 results per page on each. Three hundred is the
+/// ceiling on what one entry's scan can cost, and it is what the meter reserves
+/// before the read.
+///
+/// Deliberately a bound and not an estimate. A reservation that is usually
+/// right is a ceiling that is occasionally wrong, and the direction it would be
+/// wrong in is the one that spends money nobody approved.
+pub const WORST_CASE_RESOURCES: usize = 300;
+
+/// What a scan asks before it reads, and tells after.
+///
+/// A trait rather than two closures because both halves need the same `&mut
+/// Spend`, and two closures cannot each hold it. A trait object also lets the
+/// tests drive the ordering directly — a meter that records the sequence of
+/// calls is the only way to assert "reserved *before* the read", which is the
+/// whole property.
+pub trait ScanMeter {
+    /// Reserves head-room for one entry's scan. `false` stops the walk with
+    /// nothing read and nothing charged.
+    fn reserve(&mut self, worst_case: usize) -> bool;
+    /// Settles the outstanding reservation at what the read actually billed,
+    /// giving back the rest.
+    fn settle(&mut self, resources: usize);
+}
+
+/// The real meter: reservations against the day's budget.
+struct BudgetMeter<'a> {
+    spend: &'a mut Spend,
+    day: u64,
+    /// The reservations made for the read in flight, given back on settlement.
+    held: Vec<radar_provider::Commitment>,
+}
+
+impl ScanMeter for BudgetMeter<'_> {
+    fn reserve(&mut self, worst_case: usize) -> bool {
+        for _ in 0..worst_case {
+            let Ok(commitment) = self.spend.authorize(Cost::UserRead, self.day) else {
+                // All or nothing. A half-reserved scan would read three pages
+                // it could only pay part of.
+                for held in self.held.drain(..) {
+                    self.spend.release(held);
+                }
+                return false;
+            };
+            self.held.push(commitment);
+        }
+        true
+    }
+
+    fn settle(&mut self, resources: usize) {
+        for (n, commitment) in self.held.drain(..).enumerate() {
+            if n < resources {
+                let charged = commitment.reserved();
+                self.spend.settle(commitment, charged);
+            } else {
+                // The head-room the read did not use. Given back rather than
+                // settled: an over-stated total is a budget that stops early
+                // for a cost nobody incurred.
+                self.spend.release(commitment);
+            }
+        }
+    }
 }
 
 /// The published X replies posted in `week`, with a mint: the week's entries.
@@ -550,6 +653,89 @@ pub fn record_path(contest_dir: &str, week: Week) -> String {
 pub fn hunter_path(contest_dir: &str, week: Week) -> String {
     format!("{contest_dir}/hunter-{}.json", week.0)
 }
+/// The week's public metrics and its entrants' accounts, both metered.
+///
+/// Extracted from [`close_if_due`] because it is a self-contained decision with
+/// its own failure mode: either both reads are affordable and arrived, or the
+/// week does not close. `None` means exactly that, and the caller returns
+/// without writing a record.
+///
+/// # Why a refusal does not close the week
+///
+/// A week scored on metrics the account could not afford to read is a week
+/// scored on nothing, and it would be written down as final. Leaving it open is
+/// recoverable: the next run tries again with the next day's budget.
+fn scored_reads(
+    x: Option<&X>,
+    week: Week,
+    entries: &[&Entry],
+    spend: &mut Spend,
+    now: u64,
+) -> Option<(
+    BTreeMap<String, Metrics>,
+    BTreeMap<String, crate::x::Account>,
+)> {
+    let Some(x) = x else {
+        eprintln!(
+            "radar-analyst: week {} has {} entries and no X client to score them; not closing",
+            week.0,
+            entries.len()
+        );
+        return None;
+    };
+    let ids: Vec<String> = entries.iter().filter_map(|e| e.reply_id.clone()).collect();
+    let summoners: Vec<String> = entries
+        .iter()
+        .map(|e| e.summoner.clone())
+        .collect::<BTreeSet<String>>()
+        .into_iter()
+        .collect();
+
+    // **Both reads are metered now, and neither was.** The week close made
+    // two platform calls of unbounded size -- one post resource per entry,
+    // one user resource per entrant -- outside the meter entirely, next to
+    // an engager scan that was carefully budgeted. A ceiling with a hole in
+    // it beside it is not a ceiling; it is a number that looks like one.
+    //
+    // Reserved before the call and settled at what came back, the same
+    // shape as everything else here. A refusal does not close the week: a
+    // week scored on metrics the account could not afford to read is a week
+    // scored on nothing, and leaving it open is recoverable.
+    let day = day_of(now);
+    if !charge_post_reads(spend, ids.len(), day) {
+        eprintln!(
+            "radar-analyst: the day's budget will not cover reading {} replies' metrics; \
+             not closing week {}",
+            ids.len(),
+            week.0
+        );
+        return None;
+    }
+    let metrics = match x.metrics(&ids) {
+        Ok(m) => m,
+        Err(e) => {
+            eprintln!("radar-analyst: cannot read the week's metrics: {e}; not closing");
+            return None;
+        }
+    };
+    if !charge_user_reads(spend, summoners.len(), day) {
+        eprintln!(
+            "radar-analyst: the day's budget will not cover reading {} entrants' accounts; \
+             not closing week {}",
+            summoners.len(),
+            week.0
+        );
+        return None;
+    }
+    let accounts = match x.accounts(&summoners) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("radar-analyst: cannot read the entrants' accounts: {e}; not closing");
+            return None;
+        }
+    };
+    Some((metrics, accounts))
+}
 
 /// Closes the most recent week if its record does not exist yet.
 ///
@@ -592,31 +778,10 @@ pub fn close_if_due(
     let (metrics, accounts) = if entries.is_empty() {
         (BTreeMap::new(), BTreeMap::new())
     } else {
-        let Some(x) = x else {
-            eprintln!(
-                "radar-analyst: week {} has {} entries and no X client to score them; not closing",
-                week.0,
-                entries.len()
-            );
+        let Some(read) = scored_reads(x, week, &entries, spend, now) else {
             return Ok(None);
         };
-        let ids: Vec<String> = entries.iter().filter_map(|e| e.reply_id.clone()).collect();
-        let summoners: BTreeSet<String> = entries.iter().map(|e| e.summoner.clone()).collect();
-        let metrics = match x.metrics(&ids) {
-            Ok(m) => m,
-            Err(e) => {
-                eprintln!("radar-analyst: cannot read the week's metrics: {e}; not closing");
-                return Ok(None);
-            }
-        };
-        let accounts = match x.accounts(&summoners.into_iter().collect::<Vec<_>>()) {
-            Ok(c) => c,
-            Err(e) => {
-                eprintln!("radar-analyst: cannot read the entrants' accounts: {e}; not closing");
-                return Ok(None);
-            }
-        };
-        (metrics, accounts)
+        read
     };
 
     let refusals = read_refusals(&paths.refusals);
@@ -642,13 +807,20 @@ pub fn close_if_due(
     // mutants of it survived. The only real condition is whether there is a
     // client to read with.
     let scanned = match x {
-        Some(x) => scan_ranking(
-            |id| x.engagers(id),
-            &raw.ranking.ranked,
-            week.closes_at(),
-            rules.min_engager_age_days,
-            |resources| charge_user_reads(spend, resources, day_of(now)),
-        ),
+        Some(x) => {
+            let mut meter = BudgetMeter {
+                spend,
+                day: day_of(now),
+                held: Vec::new(),
+            };
+            scan_ranking(
+                |id| x.engagers(id),
+                &raw.ranking.ranked,
+                week.closes_at(),
+                rules.min_engager_age_days,
+                &mut meter,
+            )
+        }
         None => BTreeMap::new(),
     };
     let metrics = merge_verified(metrics, &scanned);
@@ -862,7 +1034,7 @@ mod tests {
             &ranked,
             at,
             30,
-            |_| true,
+            &mut Unmetered,
         );
         assert_eq!(asked, ["r1"], "one read, then the arithmetic settles it");
         assert_eq!(found.len(), 1);
@@ -888,7 +1060,7 @@ mod tests {
             &ranked,
             at,
             30,
-            |_| true,
+            &mut Unmetered,
         );
         assert_eq!(asked, 1, "the top entry is read even when it scored zero");
         assert_eq!(found["r1"], Verified::default());
@@ -917,7 +1089,7 @@ mod tests {
             &ranked,
             at,
             30,
-            |_| true,
+            &mut Unmetered,
         );
         assert_eq!(asked, ["r1", "r2"], "30 raw is not settled by 3 verified");
     }
@@ -947,7 +1119,7 @@ mod tests {
             &ranked,
             at,
             30,
-            |_| true,
+            &mut Unmetered,
         );
         assert_eq!(found.len(), 1, "the first survives the second's failure");
         assert!(found.contains_key("r1"));
@@ -964,9 +1136,14 @@ mod tests {
         // and continues on a refused one, so nothing is ever scanned.
         let at = WEEK.closes_at();
         let ranked = [ranked_with("r1", 0, 10), ranked_with("r2", 0, 10)];
-        let mut charges = 0;
+        let mut meter = Recording {
+            allow: 1,
+            ..Recording::default()
+        };
+        let mut reads = 0;
         let found = scan_ranking(
             |_| {
+                reads += 1;
                 Ok(Engagers {
                     reposted: old_accounts(1, at),
                     quoted: BTreeMap::new(),
@@ -976,14 +1153,69 @@ mod tests {
             &ranked,
             at,
             30,
-            |_| {
-                charges += 1;
-                charges == 1
-            },
+            &mut meter,
         );
         assert_eq!(found.len(), 1, "only what the budget covered");
         assert!(found.contains_key("r1"));
         assert!(!found.contains_key("r2"));
+        // **The entry it could not pay for was never read.** Before this, the
+        // three pages were fetched and the meter was asked afterwards, so a
+        // refused budget still cost three calls to the platform.
+        assert_eq!(reads, 1, "the unaffordable entry must not be read");
+        assert_eq!(meter.steps, vec!["reserve", "settle", "reserve"]);
+    }
+
+    #[test]
+    fn a_scan_settles_at_what_the_read_actually_billed() {
+        // The other half of reserving the worst case: the reservation is
+        // head-room, not a charge. A meter told `WORST_CASE_RESOURCES` here
+        // would over-state every week's scan by whatever the pages came back
+        // short, and a budget that stops early for a cost nobody incurred is
+        // the same outage as one that ran out.
+        let at = WEEK.closes_at();
+        let ranked = [ranked_with("r1", 0, 10)];
+        let mut meter = Recording {
+            allow: 9,
+            ..Recording::default()
+        };
+        let found = scan_ranking(
+            |_| {
+                Ok(Engagers {
+                    reposted: old_accounts(2, at),
+                    quoted: BTreeMap::new(),
+                    liked: BTreeMap::new(),
+                })
+            },
+            &ranked,
+            at,
+            30,
+            &mut meter,
+        );
+        assert_eq!(found.len(), 1);
+        assert_eq!(meter.settled, vec![2], "two resources, not three hundred");
+    }
+
+    #[test]
+    fn a_read_that_failed_settles_at_nothing() {
+        // Nothing was delivered, so nothing is charged -- the same rule the
+        // mentions poll applies when the platform does not answer. Leaving the
+        // reservation outstanding would leak the day's budget one failed scan
+        // at a time.
+        let at = WEEK.closes_at();
+        let ranked = [ranked_with("r1", 0, 10)];
+        let mut meter = Recording {
+            allow: 9,
+            ..Recording::default()
+        };
+        let found = scan_ranking(
+            |_| Err(crate::x::Unreachable::Transport("no".to_owned())),
+            &ranked,
+            at,
+            30,
+            &mut meter,
+        );
+        assert!(found.is_empty());
+        assert_eq!(meter.settled, vec![0]);
     }
 
     #[test]
@@ -1205,6 +1437,53 @@ mod tests {
 
     const WEEK: Week = Week(2957);
 
+    /// A meter with no budget behind it, for the tests about *scoring* rather
+    /// than about spending. Every reservation succeeds and every settlement is
+    /// a no-op, so a refusal in one of those tests is about the rule.
+    struct Unmetered;
+
+    impl ScanMeter for Unmetered {
+        fn reserve(&mut self, _worst_case: usize) -> bool {
+            true
+        }
+        fn settle(&mut self, _resources: usize) {}
+    }
+
+    /// A meter that records the order it was called in, and stops paying after
+    /// `allow` reservations.
+    ///
+    /// The ordering is the property. A meter that only counted calls would pass
+    /// against the code as it stood on 2026-09-06, which read three pages from
+    /// the platform and then asked whether it could afford them.
+    #[derive(Default)]
+    struct Recording {
+        allow: usize,
+        reserved: usize,
+        /// `reserve`, `read` and `settle` in the order they happened.
+        steps: Vec<&'static str>,
+        /// What each settlement was told the read actually billed.
+        settled: Vec<usize>,
+    }
+
+    impl ScanMeter for Recording {
+        fn reserve(&mut self, worst_case: usize) -> bool {
+            assert_eq!(
+                worst_case, WORST_CASE_RESOURCES,
+                "the reservation is the bound, not a guess"
+            );
+            self.steps.push("reserve");
+            if self.reserved >= self.allow {
+                return false;
+            }
+            self.reserved += 1;
+            true
+        }
+        fn settle(&mut self, resources: usize) {
+            self.steps.push("settle");
+            self.settled.push(resources);
+        }
+    }
+
     fn entry(
         id: &str,
         summoner: &str,
@@ -1223,6 +1502,7 @@ mod tests {
             fellback: None,
             reply_id: reply.map(str::to_owned),
             signals: signals.map(|n| vec![radar_roast::sheet::Signal::CreatorBoughtOwnLaunch; n]),
+            pointed_at: None,
         }
     }
 
@@ -1578,6 +1858,7 @@ mod tests {
             fellback: None,
             reply_id: Some("r1".to_owned()),
             signals: None,
+            pointed_at: None,
         }];
         let metrics: BTreeMap<String, Metrics> = [("r1".to_owned(), Metrics::default())]
             .into_iter()
@@ -2073,5 +2354,106 @@ mod tests {
         .expect("io");
         assert!(closed.is_none());
         assert!(!std::path::Path::new(&record_path(&paths.contest_dir, next)).exists());
+    }
+
+    /// A meter with room for a whole engager scan and then some.
+    fn funded() -> crate::spend::Spend {
+        crate::spend::Spend::open(
+            radar_provider::Budget {
+                per_call_max: radar_types::MicroUsd(20_000),
+                daily_max: radar_types::MicroUsd(20_000_000),
+            },
+            crate::spend::Prices {
+                mention_read: radar_types::MicroUsd(1_000),
+                post_read: radar_types::MicroUsd(5_000),
+                reply: radar_types::MicroUsd(10_000),
+                post: radar_types::MicroUsd(15_000),
+                model_call: radar_types::MicroUsd(2_000),
+                user_read: radar_types::MicroUsd(20_000),
+            },
+            std::env::temp_dir()
+                .join(format!("radar-contest-funded-{}", std::process::id()))
+                .to_string_lossy()
+                .into_owned(),
+            1,
+        )
+    }
+
+    #[test]
+    fn the_budget_meter_charges_what_the_read_billed_and_gives_back_the_rest() {
+        // CI reported three survivors on `n < resources` -- `==`, `>` and `<=`.
+        // Every one of them still reserves and still settles; they differ only
+        // in *how much* ends up on the ledger, which nothing was asserting.
+        //
+        // The arithmetic that matters: reserve the bound, charge the two the
+        // read actually billed, release 298. At 20,000 micro-USD a user read
+        // that is a difference of nearly six dollars per entry scanned.
+        let path = std::env::temp_dir().join(format!("radar-meter-{}", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+        let mut spend = funded();
+        {
+            let mut meter = BudgetMeter {
+                spend: &mut spend,
+                day: 1,
+                held: Vec::new(),
+            };
+            assert!(meter.reserve(WORST_CASE_RESOURCES));
+            meter.settle(2);
+        }
+        assert_eq!(
+            spend.spent_today(),
+            radar_types::MicroUsd(40_000),
+            "two user reads at 20,000, not three hundred and not nothing"
+        );
+    }
+
+    #[test]
+    fn a_scan_that_read_nothing_costs_nothing() {
+        // The failed-read path. Settling at zero must release the whole
+        // reservation, or a platform having a bad afternoon drains the day's
+        // budget one refused scan at a time.
+        let mut spend = funded();
+        {
+            let mut meter = BudgetMeter {
+                spend: &mut spend,
+                day: 1,
+                held: Vec::new(),
+            };
+            assert!(meter.reserve(WORST_CASE_RESOURCES));
+            meter.settle(0);
+        }
+        assert_eq!(spend.spent_today(), radar_types::MicroUsd(0));
+    }
+
+    #[test]
+    fn a_reservation_the_budget_cannot_cover_is_all_or_nothing() {
+        // A half-reserved scan would read three pages it could only pay part
+        // of. `reserve` gives back everything it took before refusing, so a
+        // refusal costs the day nothing.
+        let mut spend = unfunded();
+        {
+            let mut meter = BudgetMeter {
+                spend: &mut spend,
+                day: 1,
+                held: Vec::new(),
+            };
+            assert!(!meter.reserve(WORST_CASE_RESOURCES));
+        }
+        assert_eq!(spend.spent_today(), radar_types::MicroUsd(0));
+    }
+
+    #[test]
+    fn charging_for_a_lookup_stops_at_the_budget_rather_than_overrunning_it() {
+        // `charge_post_reads` and `charge_user_reads` both walk a count and stop
+        // at the first refusal. The `false` they return is what keeps a week
+        // from closing on reads nobody could pay for -- see `scored_reads`.
+        let mut spend = funded();
+        assert!(charge_post_reads(&mut spend, 3, 1));
+        assert_eq!(spend.spent_today(), radar_types::MicroUsd(15_000));
+
+        let mut broke = unfunded();
+        assert!(!charge_post_reads(&mut broke, 1, 1));
+        assert!(!charge_user_reads(&mut broke, 1, 1));
+        assert_eq!(broke.spent_today(), radar_types::MicroUsd(0));
     }
 }

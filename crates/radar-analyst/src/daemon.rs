@@ -21,7 +21,7 @@ use radar_provider::Budget;
 use radar_roast::{BaseRates, Billed};
 use radar_types::{Address, MicroUsd};
 
-use crate::admission::{Gate, Limits};
+use crate::admission::{Gate, Limits, Refused};
 use crate::answer::{Answered, Answering};
 use crate::poll;
 use crate::publish::{DryRun, Publisher};
@@ -81,6 +81,21 @@ impl Paths {
             daily_dir: format!("{dir}/daily"),
         }
     }
+}
+
+/// What the account says to the second person who asks about the same mint.
+///
+/// A URL rather than a bare id, so it is one tap on a phone. The account's own
+/// handle is not needed: X resolves `/i/web/status/<id>` to the post whoever
+/// wrote it, which also means this line cannot go stale if the handle changes.
+///
+/// Deliberately short, and deliberately not a summary. Restating the answer
+/// here would be a second public statement about a coin, made from a fact sheet
+/// nobody rebuilt at a slot nobody read — which is the whole thing the fact
+/// sheet boundary exists to stop.
+#[must_use]
+pub fn pointer_reply(reply_id: &str) -> String {
+    format!("Asked and answered within the hour: https://x.com/i/web/status/{reply_id}")
 }
 
 /// Seconds since the epoch.
@@ -478,6 +493,24 @@ pub fn run() -> ! {
 
     let limits = limits_from(&env);
     let mut gate = Gate::new(limits, ignored(x.as_ref()));
+    // **Rebuilt from disk, not started empty.** Every count in the gate lived
+    // only in memory, and this daemon runs under `Restart=always`: it restarted
+    // three times on the night of 2026-09-06, and each restart handed every
+    // summoner a fresh allowance, emptied the day's total and forgot every mint
+    // answered in the last hour. A crash loop was a spending loop.
+    //
+    // Read through the same functions the rest of the crate uses, and a missing
+    // file is no history rather than a failure to start -- a first run has
+    // neither log.
+    {
+        let replies = crate::log::read(&paths.log).unwrap_or_default();
+        gate.restore(&replies, now());
+        eprintln!(
+            "radar-analyst: gate restored — {} sent today, {} mints inside the dedupe window",
+            gate.sent_today(),
+            gate.answered_recently()
+        );
+    }
     let mut spend = Spend::open(budget, prices, paths.ledger.clone(), day_of(now()));
 
     let client = radar_onchain::RpcClient::from_vars(&env);
@@ -1266,6 +1299,16 @@ pub fn tick(
     };
 
     let mut answered = 0;
+    // **The cursor advances only over mentions this loop actually finished.**
+    //
+    // It used to be computed from the whole page, whatever happened inside. So
+    // a log write that failed on the second of five mentions broke the loop --
+    // correctly, an account that cannot record what it says must stop saying
+    // things -- and then advanced the cursor past all five. The remaining three
+    // were never polled again. The module doc says the log-before-post rule
+    // exists so nothing is published unrecorded; dropping the mention entirely
+    // is the other half of the same failure, and it was silent.
+    let mut handled: Vec<&str> = Vec::new();
     for mention in &mentions {
         // A winner naming an address inside the claim window is claiming, not
         // summoning. Checked first, and at the cost of a directory listing
@@ -1282,6 +1325,7 @@ pub fn tick(
                 "radar-analyst: {} -> claim recorded for week {}",
                 mention.id, week.0
             );
+            handled.push(&mention.id);
             continue;
         }
 
@@ -1338,11 +1382,46 @@ pub fn tick(
             Answered::Reply { entry, .. } => {
                 let mint = entry.mint.clone().unwrap_or_default();
                 let Ok(reply_cost) = spend.authorize(Cost::Reply, today) else {
-                    eprintln!("radar-analyst: budget spent; {} not answered", mention.id);
-                    continue;
+                    // `break`, not `continue`. The day's reply budget is spent,
+                    // so every mention behind this one would be refused for the
+                    // same reason -- and `continue` advanced the cursor over
+                    // each of them, which is a mention answered by nobody, ever.
+                    // Stopping leaves the cursor where it is, so they are polled
+                    // again when the budget rolls.
+                    //
+                    // The sheet is written down before stopping. It was built
+                    // and paid for; discarding it loses the evidence for a
+                    // decision the account actually made, which is the one
+                    // thing `log` exists to prevent.
+                    eprintln!(
+                        "radar-analyst: reply budget spent; {} not answered, and \
+                         nothing behind it is polled past",
+                        mention.id
+                    );
+                    if let Err(e) = crate::log::append(&paths.log, &entry) {
+                        eprintln!("radar-analyst: cannot write {}: {e}", paths.log);
+                    }
+                    if let Err(e) = crate::contest::append_refusal(
+                        &paths.refusals,
+                        &crate::contest::RefusalLine {
+                            at,
+                            summoner: mention.author.clone(),
+                            why: "the day's reply budget is spent".to_owned(),
+                            // Not a gate refusal at all, and deliberately not
+                            // dressed as one: `kind` is `None`, which the
+                            // week-close job reads as unknown and excludes.
+                            // Nobody should lose a week because the operator's
+                            // budget ran out.
+                            kind: None,
+                        },
+                    ) {
+                        eprintln!("radar-analyst: cannot write {}: {e}", paths.refusals);
+                    }
+                    break;
                 };
                 match crate::publish::publish(publisher, &paths.log, *entry) {
                     Ok(written) => {
+                        handled.push(&mention.id);
                         if let Some(id) = &written.reply_id {
                             let charged = reply_cost.reserved();
                             spend.settle(reply_cost, charged);
@@ -1365,11 +1444,134 @@ pub fn tick(
                     }
                 }
             }
+            // **A symbol gets an answer.** `$DOGE` names nothing on chain --
+            // symbols are not unique, and guessing which token one meant is how
+            // a measurement gets published about the wrong project. Saying
+            // exactly that is the honest reply and the best content available.
+            //
+            // Design 0009 asks for it and nothing called it: the daemon printed
+            // the text to its own terminal and the person who asked got
+            // silence, which reads as an account that ignores you. `answer` now
+            // gates these on the symbol, so answering them does not put one
+            // reply shape outside every cap in this module.
+            Answered::Ticker { key, text } => {
+                let Ok(reply_cost) = spend.authorize(Cost::Reply, today) else {
+                    eprintln!(
+                        "radar-analyst: reply budget spent; {} not answered",
+                        mention.id
+                    );
+                    break;
+                };
+                let entry = crate::log::Entry {
+                    at,
+                    mention_id: mention.id.clone(),
+                    summoner: mention.author.clone(),
+                    // No mint, and that is the *content* of the reply rather
+                    // than a gap in the record: a symbol identifies nothing.
+                    mint: None,
+                    read_at_slot: None,
+                    // Nothing was read, so there is no evidence to carry. An
+                    // empty sheet beside a reply that states no fact about a
+                    // coin is the honest pairing; inventing one would put a
+                    // measurement next to a reply that made none.
+                    fact_sheet: String::new(),
+                    reply: text,
+                    fellback: None,
+                    reply_id: None,
+                    signals: Some(Vec::new()),
+                    pointed_at: None,
+                };
+                match crate::publish::publish(publisher, &paths.log, entry) {
+                    Ok(written) => {
+                        handled.push(&mention.id);
+                        if let Some(id) = &written.reply_id {
+                            let charged = reply_cost.reserved();
+                            spend.settle(reply_cost, charged);
+                            // Against the same key `answer` admitted on, which
+                            // is why the key is carried on the variant rather
+                            // than re-derived here: two derivations of one key
+                            // is how a dedupe map fills with entries nothing
+                            // ever looks up.
+                            gate.record(&mention.author, &key, id, at);
+                            answered += 1;
+                        } else {
+                            spend.release(reply_cost);
+                        }
+                    }
+                    Err(e) => {
+                        spend.release(reply_cost);
+                        eprintln!("radar-analyst: cannot write {}: {e}", paths.log);
+                        break;
+                    }
+                }
+            }
             other => {
                 // Refusals, symbols and unreadable chains cost nothing and are
                 // not published. They are still worth a line: an account that
                 // answers nothing should say what it is seeing.
                 eprintln!("radar-analyst: {} -> {other:?}", mention.id);
+                handled.push(&mention.id);
+
+                // **A duplicate gets pointed at the answer.**
+                //
+                // `AlreadyAnswered` has carried the existing reply's id since
+                // the day it was written and nothing ever read it: the daemon
+                // printed the refusal and the asker got nothing back. Two costs,
+                // and the second is the one that matters. A real person asking
+                // about a coin somebody else asked about ten minutes ago was
+                // answered with silence -- and because the *first* asker's
+                // reply is their contest entry, a script that asks first about
+                // every trending launch owns the entry on the hottest coins. The
+                // contest rewarded speed and automation, which is the exact
+                // behaviour this account exists to expose.
+                //
+                // A pointer costs one post: no model call, no chain read. It is
+                // recorded in the reply log like every other public statement,
+                // carrying `pointed_at` so the restore can tell it from an
+                // answer -- see `log::Entry::pointed_at`.
+                //
+                // A refused reply budget is not a failure here. The pointer is
+                // a courtesy; skipping it leaves the refusal recorded and the
+                // loop moving, which is why this is an `if let` chain rather
+                // than a `break`.
+                if let Answered::Refused(Refused::AlreadyAnswered { reply_id }) = &other
+                    && let Ok(reply_cost) = spend.authorize(Cost::Reply, today)
+                {
+                    let entry = crate::log::Entry {
+                        at,
+                        mention_id: mention.id.clone(),
+                        summoner: mention.author.clone(),
+                        mint: None,
+                        read_at_slot: None,
+                        fact_sheet: String::new(),
+                        reply: pointer_reply(reply_id),
+                        fellback: None,
+                        reply_id: None,
+                        signals: Some(Vec::new()),
+                        pointed_at: Some(reply_id.clone()),
+                    };
+                    match crate::publish::publish(publisher, &paths.log, entry) {
+                        Ok(written) => {
+                            if written.reply_id.is_some() {
+                                let charged = reply_cost.reserved();
+                                spend.settle(reply_cost, charged);
+                                // The day's allowance and an hourly token, and
+                                // nothing else: not the summoner's, which the
+                                // gate refused before charging, and not the
+                                // dedupe map, which already holds the answer
+                                // this points at.
+                                gate.record_post(at);
+                            } else {
+                                spend.release(reply_cost);
+                            }
+                        }
+                        Err(e) => {
+                            spend.release(reply_cost);
+                            eprintln!("radar-analyst: cannot write {}: {e}", paths.log);
+                            break;
+                        }
+                    }
+                }
                 // A gate refusal is also a fact the contest needs: an account
                 // refused during the week does not win it. Appended, never
                 // fatal -- a refusal that could not be written is a line on
@@ -1391,7 +1593,7 @@ pub fn tick(
         }
     }
 
-    if let Some(next) = poll::next_cursor(mentions.iter().map(|m| m.id.as_str()), cursor.as_deref())
+    if let Some(next) = poll::next_cursor(handled.iter().copied(), cursor.as_deref())
         && let Err(e) = poll::write_cursor(&paths.cursor, &next)
     {
         // Not fatal, and loud: the next start re-reads from the old cursor,

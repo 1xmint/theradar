@@ -389,6 +389,43 @@ exclude_re = [
     # and the third is `*tried += 1`, whose mutants are named `replace += with
     # *=` and do not match this.
     'replace \+ with \* in search',
+
+    # `Gate::burst` and `Gate::per_hour`: `<` widened to `<=`.
+    #
+    # Both are of the shape `if x < K { a } else { b }`, and at the only input
+    # where the two versions take different branches, **the branches return the
+    # same value**:
+    #
+    #   burst:    `if global_daily < 10 { global_daily } else { 10 }`
+    #             at 10 the then-branch yields 10 and the else-branch yields 10.
+    #   per_hour: `if global_daily < 24 { 1 } else { global_daily / 24 }`
+    #             at 24 the then-branch yields 1 and 24 / 24 is 1.
+    #
+    # So no input distinguishes them. Applied by hand, both at once, on
+    # 2026-09-07: the suite passes, and it passes because there is nothing to
+    # catch rather than because nothing looks.
+    # `the_burst_is_the_smaller_of_ten_and_the_day` and
+    # `the_refill_is_the_day_spread_over_a_day_and_never_zero` walk both
+    # boundaries, so the `==` and `>` mutants on the same lines are caught --
+    # which is what makes this a claim about these two and not about the
+    # comparison being untested.
+    'replace < with <= in Gate::burst',
+    'replace < with <= in Gate::per_hour',
+
+    # `Gate::refill_to`: the clock-went-backwards guard, `<` widened to `<=`.
+    #
+    #   `if now < self.refilled_at { self.refilled_at = now; return; }`
+    #
+    # They differ only at `now == refilled_at`. Taking the branch assigns `now`
+    # to a field that already equals `now` and returns; falling through computes
+    # `elapsed = 0`, then `earned = 0`, and returns at the `earned == 0` guard
+    # two lines later. Neither path touches `tokens`, and both leave
+    # `refilled_at` at the same value.
+    #
+    # Applied by hand on 2026-09-07. `a_clock_that_went_backwards_re_bases_rather_than_freezing`
+    # covers the branch itself, and the `==` mutant on this line is caught, so
+    # the guard is not merely untested.
+    'replace < with <= in Gate::refill_to',
 ]
 
 # A note on what does NOT belong here, learned on 2026-09-03 and worth the four

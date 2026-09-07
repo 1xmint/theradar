@@ -177,12 +177,13 @@ impl Telegram {
     pub fn updates(&self, offset: Option<&str>) -> Result<Page, Unreachable> {
         // The same two calls `X` makes, unsigned: the token is in the path, so
         // there is no header to add and nothing to redact from one.
-        let response = ureq::get(&self.updates_url(offset)).call();
+        let response = crate::x::agent().get(&self.updates_url(offset)).call();
         parse_updates(&body_of(response)?)
     }
 
     fn send(&self, body: &str) -> Result<String, Unreachable> {
-        let response = ureq::post(&format!("{}/bot{}/sendMessage", self.base, self.token))
+        let response = crate::x::agent()
+            .post(format!("{}/bot{}/sendMessage", self.base, self.token))
             .header("Content-Type", "application/json")
             .send(body);
         body_of(response)
@@ -190,14 +191,30 @@ impl Telegram {
 }
 
 /// Turns a ureq result into a body or a typed failure.
+///
+/// Deliberately identical to [`crate::x::X::body_of`], including the truncated
+/// refusal body: two lanes that read the same platform shape differently is how
+/// one of them ends up with a failure the other can explain. `getUpdates`
+/// answers a `409 Conflict` when a second poller exists and a `401` when the
+/// token is revoked, and both put the reason in the body.
 fn body_of(
     response: Result<ureq::http::Response<ureq::Body>, ureq::Error>,
 ) -> Result<String, Unreachable> {
     match response {
-        Ok(mut ok) => ok
-            .body_mut()
-            .read_to_string()
-            .map_err(|e| Unreachable::Transport(e.to_string())),
+        Ok(mut ok) => {
+            let status = ok.status().as_u16();
+            let body = ok
+                .body_mut()
+                .read_to_string()
+                .map_err(|e| Unreachable::Transport(e.to_string()))?;
+            if status >= 400 {
+                return Err(Unreachable::Refused {
+                    status,
+                    body: crate::x::truncated(&body),
+                });
+            }
+            Ok(body)
+        }
         Err(ureq::Error::StatusCode(status)) => Err(Unreachable::Refused {
             status,
             body: String::new(),

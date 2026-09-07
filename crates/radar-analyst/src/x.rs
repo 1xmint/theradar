@@ -137,6 +137,80 @@ pub fn backoff(attempt: u32, status: Option<u16>) -> Option<Duration> {
     }
 }
 
+/// How long any one platform call may take, in total.
+///
+/// # Why a timeout at all
+///
+/// `ureq`'s free functions have **no timeout**. The analyst is a single
+/// threaded loop: one tick reads mentions, answers them, closes the week when
+/// it is time, posts the daily line and sets the bio. Every one of those is a
+/// call into this module or `telegram`, and one socket that opens and never
+/// answers stops all of them — not just the call, the whole account, until
+/// somebody restarts it. The failure looks like an account that went quiet,
+/// which is indistinguishable from an account nobody mentioned.
+///
+/// Fifteen seconds is well past any healthy X response and well inside the
+/// five-minute tick, so a hung call costs one call rather than the day.
+///
+/// `timeout_global` rather than a per-phase timeout: what matters here is the
+/// wall clock the loop loses, and a call that resolves fast, connects fast and
+/// then trickles a body for an hour has cost exactly as much as one that never
+/// connected.
+const CALL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
+
+/// The HTTP agent every call in this module goes through.
+///
+/// Two settings, and both change behaviour:
+///
+/// 1. [`CALL_TIMEOUT`], so a hung socket cannot stop the loop.
+/// 2. `http_status_as_error(false)`, so a 4xx or 5xx arrives as a **response**
+///    rather than as `Error::StatusCode`. That error carries the status and
+///    nothing else, which is why [`Unreachable::Refused`] used to be built with
+///    `body: String::new()` — the platform's own explanation was read and
+///    thrown away at the point it was needed. A lock (code 326), a policy
+///    notice, a rate-limit reset: all of them are in that body, and all of them
+///    were invisible.
+pub(crate) fn agent() -> ureq::Agent {
+    ureq::Agent::config_builder()
+        .timeout_global(Some(CALL_TIMEOUT))
+        .http_status_as_error(false)
+        .build()
+        .into()
+}
+
+/// How much of a refusal body to keep.
+///
+/// Enough for the platform's error object — X's are a few hundred bytes and put
+/// the code and detail first — and short enough that a full HTML error page
+/// does not land in a journal line. Truncated on a character boundary, because
+/// the body is untrusted bytes and slicing one in half is a panic.
+const KEPT_BODY: usize = 300;
+
+/// The first [`KEPT_BODY`] bytes of a body, on a character boundary.
+pub(crate) fn truncated(body: &str) -> String {
+    let limit = KEPT_BODY.min(body.len());
+    // Searched backwards rather than walked backwards. A `while` with a manual
+    // decrement is one mutation away from never advancing -- `-=` replaced by
+    // `/=` hangs on the first multibyte character -- and cargo-mutants cannot
+    // tell an infinite loop from a slow one, so it reports `inconclusive`
+    // rather than a survivor. `.rev().find()` over a fixed range cannot loop
+    // for ever whatever is done to it, and says the same thing more directly:
+    // the largest boundary at or below the limit.
+    //
+    // `is_char_boundary(0)` is always true, so the fallback is unreachable; it
+    // is there because a panic in the error path of the process that holds the
+    // account is the worst place to put one.
+    let end = (0..=limit)
+        .rev()
+        .find(|&n| body.is_char_boundary(n))
+        .unwrap_or(0);
+    let mut out = body[..end].to_owned();
+    if end < body.len() {
+        out.push('…');
+    }
+    out
+}
+
 /// The client.
 ///
 /// Holds the credential and nothing else. It does not decide what to say, and
@@ -335,7 +409,8 @@ impl X {
 
     /// GETs a URL with the bearer token.
     fn get(&self, url: &str) -> Result<String, Unreachable> {
-        let response = ureq::get(url)
+        let response = agent()
+            .get(url)
             .header("Authorization", &format!("Bearer {}", self.bearer))
             .call();
         Self::body_of(response)
@@ -370,7 +445,8 @@ impl X {
             crate::daemon::now(),
             &crate::oauth::nonce(),
         );
-        let response = ureq::post(url)
+        let response = agent()
+            .post(url)
             .header("Authorization", &authorization)
             .header("Content-Type", "application/json")
             .send(body);
@@ -422,7 +498,8 @@ impl X {
             crate::daemon::now(),
             &crate::oauth::nonce(),
         );
-        let response = ureq::post(&url)
+        let response = agent()
+            .post(&url)
             .header("Authorization", &authorization)
             .send_form([("description", description)]);
         Self::body_of(response).map(|_| ())
@@ -433,10 +510,28 @@ impl X {
         response: Result<ureq::http::Response<ureq::Body>, ureq::Error>,
     ) -> Result<String, Unreachable> {
         match response {
-            Ok(mut ok) => ok
-                .body_mut()
-                .read_to_string()
-                .map_err(|e| Unreachable::Transport(e.to_string())),
+            Ok(mut ok) => {
+                let status = ok.status().as_u16();
+                let body = ok
+                    .body_mut()
+                    .read_to_string()
+                    .map_err(|e| Unreachable::Transport(e.to_string()))?;
+                if status >= 400 {
+                    // The agent is configured not to turn a status into an
+                    // error, so the body is still here to be read. It is the
+                    // only place the platform says *which* refusal this is --
+                    // a lock, a policy notice, a rate-limit reset -- and it was
+                    // discarded until 2026-09-07.
+                    return Err(Unreachable::Refused {
+                        status,
+                        body: truncated(&body),
+                    });
+                }
+                Ok(body)
+            }
+            // Still matched, because `http_status_as_error(false)` is a
+            // configuration and a caller that built an agent without it would
+            // otherwise get `Transport` for a refusal.
             Err(ureq::Error::StatusCode(status)) => Err(Unreachable::Refused {
                 status,
                 body: String::new(),
@@ -918,6 +1013,7 @@ pub fn entry_for(mention: &Mention, at: u64) -> Entry {
         reply: String::new(),
         fellback: None,
         signals: None,
+        pointed_at: None,
         reply_id: None,
     }
 }
@@ -1425,5 +1521,82 @@ mod tests {
         assert_eq!(e.mention_id, "m1");
         assert_eq!(e.summoner, "a1");
         assert!(e.reply_id.is_none());
+    }
+
+    #[test]
+    fn a_short_body_is_kept_whole_and_unmarked() {
+        // The common case: X's error objects are a few hundred bytes and the
+        // useful part -- the code and the detail -- is at the front.
+        assert_eq!(truncated(""), "");
+        assert_eq!(
+            truncated(r#"{"errors":[{"code":326,"message":"locked"}]}"#),
+            r#"{"errors":[{"code":326,"message":"locked"}]}"#
+        );
+    }
+
+    #[test]
+    fn a_long_body_is_cut_to_the_limit_and_says_it_was_cut() {
+        // An HTML error page must not land whole in a journal line, and a body
+        // that was cut has to look cut -- otherwise the last thing an operator
+        // reads is a sentence the platform did not finish.
+        let long = "a".repeat(1_000);
+        let out = truncated(&long);
+        assert_eq!(
+            out.chars().count(),
+            KEPT_BODY + 1,
+            "the limit plus the mark"
+        );
+        assert!(out.ends_with('…'));
+        assert!(out.starts_with("aaaa"));
+
+        // Exactly at the limit is not cut. `<` mutated to `<=` marks a body
+        // that lost nothing, which is a lie about the evidence.
+        let exact = "b".repeat(KEPT_BODY);
+        assert_eq!(truncated(&exact), exact);
+        assert!(!truncated(&exact).ends_with('…'));
+
+        // One past it is.
+        let over = "b".repeat(KEPT_BODY + 1);
+        assert!(truncated(&over).ends_with('…'));
+    }
+
+    #[test]
+    fn a_multibyte_character_is_never_split_in_half() {
+        // The reason the loop exists. The body is untrusted bytes chosen by
+        // somebody else, and `&s[..n]` on a byte that is not a character
+        // boundary is a **panic** -- in the error path of the process that
+        // holds the account, which is the worst place to put one.
+        //
+        // Every one of these puts a boundary at a different offset relative to
+        // the limit, so the loop has to walk back one, two and three bytes.
+        for pad in 0..4 {
+            let body = format!("{}{}", "a".repeat(KEPT_BODY - pad), "🚀".repeat(8));
+            let out = truncated(&body);
+            assert!(out.ends_with('…'), "pad {pad}");
+            // The kept part is a prefix of the input and is never longer than
+            // the limit. `-=` mutated to `+=` walks the wrong way and overruns.
+            let kept = out.trim_end_matches('…');
+            assert!(body.starts_with(kept), "pad {pad}: {kept:?}");
+            assert!(kept.len() <= KEPT_BODY, "pad {pad}: {} bytes", kept.len());
+            // And it kept as much as it could: dropping fewer than four bytes
+            // means the loop stopped at the first boundary rather than
+            // wandering.
+            assert!(
+                kept.len() + 4 > KEPT_BODY,
+                "pad {pad}: {} bytes",
+                kept.len()
+            );
+        }
+    }
+
+    #[test]
+    fn a_body_that_is_one_long_character_run_still_terminates() {
+        // `end > 0` is what stops the walk-back at the front. Without it a body
+        // whose every byte-boundary check fails would loop past zero and
+        // underflow -- a hang or a panic in the error path.
+        let body = "🚀".repeat(400);
+        let out = truncated(&body);
+        assert!(out.ends_with('…'));
+        assert!(body.starts_with(out.trim_end_matches('…')));
     }
 }

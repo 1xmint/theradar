@@ -282,16 +282,48 @@ pub fn teardown(sheet: &FactSheet, reply: &Reply) -> Post {
 ///
 /// Every violation, in words, so the log line says what was refused.
 pub fn check(post: &Post) -> Result<(), Vec<String>> {
-    let mut why: Vec<String> = radar_roast::forbidden::check(&post.text)
+    checked_text(post).map(|_| ())
+}
+
+/// The text to publish, or the reasons it must not be.
+///
+/// # Why the account's own posts go through the reply sanitiser
+///
+/// [`radar_roast::render::for_publication`] strips zero-width and bidirectional
+/// characters and caps the text at 280. Every **reply** goes through it. Every
+/// post this account writes about *itself* — the weekly result, the teardown,
+/// the daily "seven days later" — did not, and the two checks that did run scan
+/// the raw text.
+///
+/// So both checks were defeatable by one invisible character. `forbidden` and
+/// `fidelity` normalise case and nothing else, and
+/// `hone{a zero-width space}ypot` matches neither a substring nor a literal — while X renders
+/// it as the word. Nothing in the pipeline was inserting one; the point is that
+/// the *content* of these posts is assembled from a week's engagement figures
+/// and, in the daily line, from mints somebody else named, and a check whose
+/// bypass is a character an attacker can put in a token symbol is not a check.
+/// The 280 cap was equally unenforced: an over-long post is refused by the
+/// platform after the log says it was said.
+///
+/// **Sanitised first, then checked, then published — in that order.** Checking
+/// before cleaning finds nothing in text that will be cleaned afterwards, and
+/// publishing text other than the checked text makes the check decorative.
+///
+/// # Errors
+///
+/// Every reason the post is refused, so an operator sees the whole picture.
+pub fn checked_text(post: &Post) -> Result<String, Vec<String>> {
+    let text = radar_roast::render::for_publication(&post.text);
+    let mut why: Vec<String> = radar_roast::forbidden::check(&text)
         .into_iter()
         .map(|v| format!("forbidden: {v:?}"))
         .collect();
     why.extend(
-        radar_roast::fidelity::check(&post.text, &post.authorised)
+        radar_roast::fidelity::check(&text, &post.authorised)
             .into_iter()
             .map(|f| format!("unauthorised number: {}", f.literal)),
     );
-    if why.is_empty() { Ok(()) } else { Err(why) }
+    if why.is_empty() { Ok(text) } else { Err(why) }
 }
 
 /// Publishes a thread: the first post top-level, each later one as a reply to
@@ -339,6 +371,7 @@ pub fn publish_under(
     let mut first: Option<String> = None;
     let mut parent: Option<String> = under.map(str::to_owned);
     for (n, post) in posts.iter().enumerate() {
+        let checked = checked_text(post);
         let mut entry = Entry {
             at: now,
             mention_id: format!("{label}:{n}"),
@@ -346,24 +379,37 @@ pub fn publish_under(
             mint: None,
             read_at_slot: None,
             fact_sheet: post.source.clone(),
-            reply: post.text.clone(),
+            // **The sanitised text, and it is what gets posted below.** The
+            // record has to be what was said; logging the raw text and
+            // publishing a cleaned one would put a different sentence in the
+            // log than the one on the timeline.
+            reply: match &checked {
+                Ok(text) => text.clone(),
+                // Refused, so nothing is said and the raw text is the honest
+                // record of what was refused.
+                Err(_) => post.text.clone(),
+            },
             fellback: None,
             reply_id: None,
             signals: None,
+            pointed_at: None,
         };
-        if let Err(why) = check(post) {
-            entry.fellback = Some(format!("refused: {}", why.join("; ")));
-            crate::log::append(posts_log, &entry)?;
-            eprintln!(
-                "radar-analyst: {label} post {n} refused: {}",
-                why.join("; ")
-            );
-            break;
-        }
+        let text = match checked {
+            Ok(text) => text,
+            Err(why) => {
+                entry.fellback = Some(format!("refused: {}", why.join("; ")));
+                crate::log::append(posts_log, &entry)?;
+                eprintln!(
+                    "radar-analyst: {label} post {n} refused: {}",
+                    why.join("; ")
+                );
+                break;
+            }
+        };
         crate::log::append(posts_log, &entry)?;
         let result = match &parent {
-            None => publisher.post(&post.text),
-            Some(id) => publisher.reply(id, &post.text),
+            None => publisher.post(&text),
+            Some(id) => publisher.reply(id, &text),
         };
         match result {
             Ok(id) => {
@@ -639,12 +685,18 @@ mod tests {
         // is unauthorised and the first assertion below is what fails.
         let mut post = summary(&record(true), Some(&vault()));
         assert_eq!(check(&post), Ok(()));
-        post.text.push_str(" Up 420% this week.");
+        // Inserted at the front rather than appended, and that is not a
+        // stylistic choice. `checked_text` sanitises before it checks, which
+        // includes the 280-character cap, and this summary is already close to
+        // it -- text appended past the cap is cut off, so it is never checked
+        // and never published either. What is checked is exactly what goes out,
+        // which is the property the ordering exists for.
+        post.text.insert_str(0, "Up 420% this week. ");
         let why = check(&post).expect_err("a fabricated number");
         assert!(why.iter().any(|w| w.contains("420")), "{why:?}");
 
         let mut post = summary(&record(true), None);
-        post.text.push_str(" This one is safe.");
+        post.text.insert_str(0, "This one is safe. ");
         let why = check(&post).expect_err("a forbidden phrase");
         assert!(why.iter().any(|w| w.starts_with("forbidden")), "{why:?}");
     }

@@ -719,6 +719,7 @@ mod tests {
             reply: "measured".to_owned(),
             fellback: None,
             signals: None,
+            pointed_at: None,
             reply_id: reply_id.map(str::to_owned),
         }
     }

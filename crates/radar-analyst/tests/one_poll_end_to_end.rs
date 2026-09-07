@@ -176,6 +176,19 @@ fn workspace(name: &str) -> String {
     dir.to_str().expect("a path").to_owned()
 }
 
+/// The analyst directory inside a workspace, created.
+///
+/// **`Paths::under` puts the contest directory beside the analyst's, not inside
+/// it.** Passing a workspace directly would therefore put every close test in
+/// the *same* contest directory — shared between them and across runs — and
+/// `close_if_due` is idempotent on the record existing, so one leftover file
+/// makes every later run return early and assert nothing. Found the hard way.
+fn analyst_under(workspace: &str) -> String {
+    let dir = format!("{workspace}/analyst");
+    std::fs::create_dir_all(&dir).expect("an analyst directory");
+    dir
+}
+
 fn prices() -> Prices {
     Prices {
         mention_read: MicroUsd(1_000),
@@ -942,4 +955,365 @@ fn the_model_call_is_charged_for_the_mention_that_made_one_and_no_other() {
         MicroUsd(2_234),
         "the model call must be charged once, at what it reported"
     );
+}
+
+/// A publisher that always succeeds, so a test can reach the paths a dry run
+/// never does — the gate being recorded, the cursor moving past a real reply,
+/// and the pointer that answers a duplicate.
+#[derive(Debug, Default)]
+struct Posting(std::sync::Mutex<Vec<(String, String)>>);
+
+impl radar_analyst::publish::Publisher for Posting {
+    fn reply(&self, to: &str, text: &str) -> Result<String, radar_analyst::publish::Undeliverable> {
+        let mut said = self.0.lock().expect("not poisoned");
+        said.push((to.to_owned(), text.to_owned()));
+        Ok(format!("p{}", said.len()))
+    }
+
+    fn post(&self, _text: &str) -> Result<String, radar_analyst::publish::Undeliverable> {
+        Ok("p0".to_owned())
+    }
+
+    fn name(&self) -> &'static str {
+        "posting"
+    }
+}
+
+#[test]
+fn a_symbol_gets_an_answer_rather_than_silence() {
+    // Design 0009 asks for it and nothing called it: `ticker_reply` had no
+    // caller in the daemon, so the loop printed the text to its own terminal
+    // and the person who asked got nothing back. From the outside that reads as
+    // an account that ignores you, which is the opposite of the product.
+    let page = r#"{"data":[
+        {"id":"2001","author_id":"alice","text":"@radar what about $ABC"}
+    ]}"#;
+    let (base, _seen) = platform(page);
+    let dir = workspace("ticker");
+    let paths = Paths::under(&dir);
+    let mut gate = Gate::new(open_limits(), vec!["radar".to_owned()]);
+    let mut spend = funded(&paths);
+    let publisher = Posting::default();
+
+    let answered = tick(
+        Some(&X::at(base, "t", "u42")),
+        &publisher,
+        &mut gate,
+        &mut spend,
+        &no_chain(),
+        None,
+        None,
+        None,
+        None,
+        &paths,
+    );
+
+    assert_eq!(answered, 1, "the symbol was answered");
+    let said = publisher.0.lock().expect("not poisoned");
+    assert_eq!(said.len(), 1);
+    assert_eq!(said[0].0, "2001", "as a reply to the mention that asked");
+    assert!(
+        said[0].1.to_lowercase().contains("mint"),
+        "it has to say why a symbol is not an answer: {}",
+        said[0].1
+    );
+
+    // Recorded like every other public statement, with an empty sheet: nothing
+    // was read, and inventing evidence beside a reply that made no measurement
+    // is the failure the log exists to prevent.
+    let recorded = radar_analyst::log::read(&paths.log).expect("the log");
+    let said_line = recorded
+        .iter()
+        .find(|e| e.reply_id.is_some())
+        .expect("a record");
+    assert_eq!(said_line.mint, None);
+    assert_eq!(said_line.fact_sheet, "");
+    assert_eq!(said_line.pointed_at, None);
+}
+
+#[test]
+fn a_second_asker_is_pointed_at_the_answer_rather_than_ignored() {
+    // Two people ask about the same mint in one page. The first is answered;
+    // the second is refused as a duplicate — and until now that refusal went
+    // nowhere. `AlreadyAnswered` has carried the existing reply's id since the
+    // day it was written and nothing read it.
+    //
+    // The cost of the silence is not only rudeness. The first asker's reply is
+    // their contest entry, so a script that asks first about every trending
+    // launch owns the entry on the hottest coins — the contest rewarded speed
+    // and automation, which is the exact behaviour this account exists to
+    // expose.
+    let page = r#"{"data":[
+        {"id":"3001","author_id":"alice","text":"@radar what about $ABC"},
+        {"id":"3002","author_id":"bob","text":"@radar and $ABC again"}
+    ]}"#;
+    let (base, _seen) = platform(page);
+    let dir = workspace("pointer");
+    let paths = Paths::under(&dir);
+    let mut gate = Gate::new(open_limits(), vec!["radar".to_owned()]);
+    let mut spend = funded(&paths);
+    let publisher = Posting::default();
+
+    tick(
+        Some(&X::at(base, "t", "u42")),
+        &publisher,
+        &mut gate,
+        &mut spend,
+        &no_chain(),
+        None,
+        None,
+        None,
+        None,
+        &paths,
+    );
+
+    let said = publisher.0.lock().expect("not poisoned");
+    assert_eq!(said.len(), 2, "both askers got something back");
+    assert_eq!(said[1].0, "3002");
+    assert!(
+        said[1].1.contains("p1"),
+        "the pointer must carry the id of the reply it points at: {}",
+        said[1].1
+    );
+
+    // The pointer is in the record, marked as one. Everything downstream keys
+    // off that: it counts against the day, spends no summoner allowance, and
+    // never becomes the answer a third asker is pointed at.
+    let log = radar_analyst::log::read(&paths.log).expect("the log");
+    let pointer = log
+        .iter()
+        .find(|e| e.pointed_at.is_some() && e.reply_id.is_some())
+        .expect("a pointer was recorded");
+    assert_eq!(pointer.pointed_at.as_deref(), Some("p1"));
+    assert_eq!(pointer.mint, None, "a pointer states no fact about a coin");
+
+    // And the refusal is still on the record for the week-close job.
+    let refusals = radar_analyst::contest::read_refusals(&paths.refusals);
+    assert_eq!(refusals.len(), 1);
+    assert_eq!(refusals[0].summoner, "bob");
+}
+
+#[test]
+fn a_log_that_cannot_be_written_does_not_drop_the_questions_behind_it() {
+    // The failure this file's module note names, and the loop had it.
+    //
+    // A log write that fails breaks the loop — correctly: an account that
+    // cannot record what it says must stop saying things. The cursor was then
+    // computed from the **whole page**, so every mention behind the break was
+    // advanced past and never polled again. Silent, permanent, and the exact
+    // shape of the failure log-before-post exists to prevent.
+    //
+    // The log is made unwritable by putting a *directory* where the file goes,
+    // which fails on every platform this runs on and needs no permissions.
+    let page = r#"{"data":[
+        {"id":"4001","author_id":"alice","text":"@radar what about $AAA"},
+        {"id":"4002","author_id":"bob","text":"@radar what about $BBB"},
+        {"id":"4003","author_id":"carol","text":"@radar what about $CCC"}
+    ]}"#;
+    let (base, _seen) = platform(page);
+    let dir = workspace("cursor-drop");
+    let paths = Paths::under(&dir);
+    std::fs::create_dir_all(&paths.log).expect("a directory where the log goes");
+
+    let mut gate = Gate::new(open_limits(), vec!["radar".to_owned()]);
+    let mut spend = funded(&paths);
+
+    tick(
+        Some(&X::at(base, "t", "u42")),
+        &Posting::default(),
+        &mut gate,
+        &mut spend,
+        &no_chain(),
+        None,
+        None,
+        None,
+        None,
+        &paths,
+    );
+
+    // Nothing could be recorded, so nothing was handled, so the cursor did not
+    // move at all. Every one of the three is polled again next tick.
+    assert_eq!(
+        radar_analyst::read_cursor(&paths.cursor),
+        None,
+        "a cursor that moved over an unanswered mention has dropped it for good"
+    );
+}
+
+#[test]
+fn a_restart_reads_the_days_replies_back_off_disk() {
+    // The composition the unit tests cannot make: a log written by one tick,
+    // read back by a gate built the way `run` builds one.
+    let page = r#"{"data":[
+        {"id":"5001","author_id":"alice","text":"@radar what about $ABC"}
+    ]}"#;
+    let (base, _seen) = platform(page);
+    let dir = workspace("restart");
+    let paths = Paths::under(&dir);
+    let mut spend = funded(&paths);
+    let publisher = Posting::default();
+
+    let mut gate = Gate::new(open_limits(), vec!["radar".to_owned()]);
+    tick(
+        Some(&X::at(base, "t", "u42")),
+        &publisher,
+        &mut gate,
+        &mut spend,
+        &no_chain(),
+        None,
+        None,
+        None,
+        None,
+        &paths,
+    );
+    assert_eq!(gate.sent_today(), 1);
+
+    // The restart. A fresh gate knows nothing until it reads.
+    let mut fresh = Gate::new(open_limits(), vec!["radar".to_owned()]);
+    assert_eq!(fresh.sent_today(), 0, "a new gate starts empty");
+    let replies = radar_analyst::log::read(&paths.log).expect("the log");
+    fresh.restore(&replies, radar_analyst::daemon::now());
+    assert_eq!(
+        fresh.sent_today(),
+        1,
+        "the day's total survives a restart, whatever the process forgot"
+    );
+}
+
+#[test]
+fn a_week_whose_reads_the_budget_will_not_cover_does_not_close_and_does_not_call() {
+    // The week close makes two platform reads of unbounded size -- one post
+    // resource per entry, one user resource per entrant -- and until 2026-09-07
+    // neither was metered at all, next to an engager scan that was carefully
+    // budgeted. A ceiling with a hole beside it is not a ceiling.
+    //
+    // **Asserted by what the platform saw, not by the return value.** With the
+    // guard inverted the close still fails, because the fake below is reached
+    // and the week is scored on reads nobody paid for -- so a test that only
+    // checked `is_none()` would pass either way. What separates the two is
+    // whether the request happened at all.
+    let (base, seen) = platform(r#"{"data":[]}"#);
+    // **`Paths::under` puts the contest directory beside the analyst's, not
+    // inside it**, so passing the workspace directly would put every close test
+    // in the *same* contest directory -- shared between them and across runs.
+    // `close_if_due` is idempotent on the record existing, so one leftover file
+    // makes every later run return early and assert nothing. Found the hard way.
+    let paths = Paths::under(&analyst_under(&workspace("close-unfunded")));
+
+    // One published reply inside the week being closed, so there is something
+    // to score and the empty-week path is not what is being tested.
+    let week = radar_contest::Week(2957);
+    radar_analyst::log::append(
+        &paths.log,
+        &radar_analyst::log::Entry {
+            at: week.opens_at() + 10,
+            mention_id: "m1".to_owned(),
+            summoner: "alice".to_owned(),
+            mint: Some("MintOne".to_owned()),
+            read_at_slot: Some(1),
+            fact_sheet: String::new(),
+            reply: "measured".to_owned(),
+            fellback: None,
+            reply_id: Some("r1".to_owned()),
+            signals: Some(Vec::new()),
+            pointed_at: None,
+        },
+    )
+    .expect("append");
+
+    // A meter with nothing in it. `Budget::CLOSED` refuses the first charge.
+    let mut spend = Spend::open(
+        Budget::CLOSED,
+        prices(),
+        paths.ledger.clone(),
+        radar_analyst::daemon::day_of(week.closes_at() + 5),
+    );
+    let x = X::at(base, "tok", "u42");
+    let rules = radar_contest::score::Rules::published(["radar"]);
+
+    let closed = radar_analyst::contest::close_if_due(
+        Some(&x),
+        &paths,
+        week.closes_at() + 5,
+        &rules,
+        3,
+        &mut spend,
+    )
+    .expect("io");
+
+    assert!(closed.is_none(), "an unaffordable week does not close");
+    assert!(
+        seen.recv_timeout(Duration::from_millis(500)).is_err(),
+        "the platform must not be read when the budget cannot cover it"
+    );
+    // And nothing was written, so the next run tries again with the next day's
+    // budget rather than finding a record scored on nothing.
+    assert!(!std::path::Path::new(&format!("{}/{}.json", paths.contest_dir, week.0)).exists());
+}
+
+#[test]
+fn a_week_that_can_afford_the_metrics_but_not_the_accounts_still_does_not_close() {
+    // The **second** of the two guards in `scored_reads`, which the test above
+    // cannot reach: with nothing in the budget the first one fires and the
+    // function returns before the second is evaluated.
+    //
+    // So this budget covers exactly one post read and no user read. The metrics
+    // call happens; the accounts call must not, and the week must not close.
+    // With the guard inverted the close proceeds on entrant ages nobody paid
+    // for and **writes a record**, which is the difference asserted here — a
+    // week scored on reads that did not happen, written down as final.
+    let (base, _seen) = platform(r#"{"data":[]}"#);
+    // Its own tree, for the reason the test above gives.
+    let paths = Paths::under(&analyst_under(&workspace("close-half-funded")));
+
+    let week = radar_contest::Week(2957);
+    radar_analyst::log::append(
+        &paths.log,
+        &radar_analyst::log::Entry {
+            at: week.opens_at() + 10,
+            mention_id: "m1".to_owned(),
+            summoner: "alice".to_owned(),
+            mint: Some("MintOne".to_owned()),
+            read_at_slot: Some(1),
+            fact_sheet: String::new(),
+            reply: "measured".to_owned(),
+            fellback: None,
+            reply_id: Some("r1".to_owned()),
+            signals: Some(Vec::new()),
+            pointed_at: None,
+        },
+    )
+    .expect("append");
+
+    // `prices()`: a post read is 5,000 and a user read is 20,000. Ten thousand
+    // in the day covers the first and not the second.
+    let mut spend = Spend::open(
+        Budget {
+            per_call_max: MicroUsd(20_000),
+            daily_max: MicroUsd(10_000),
+        },
+        prices(),
+        paths.ledger.clone(),
+        radar_analyst::daemon::day_of(week.closes_at() + 5),
+    );
+    let x = X::at(base, "tok", "u42");
+    let rules = radar_contest::score::Rules::published(["radar"]);
+
+    let closed = radar_analyst::contest::close_if_due(
+        Some(&x),
+        &paths,
+        week.closes_at() + 5,
+        &rules,
+        3,
+        &mut spend,
+    )
+    .expect("io");
+
+    assert!(closed.is_none(), "the entrants' ages could not be paid for");
+    assert!(
+        !std::path::Path::new(&format!("{}/{}.json", paths.contest_dir, week.0)).exists(),
+        "a week scored on reads that did not happen must not be written down as final"
+    );
+    // The metrics read was affordable and was charged; nothing beyond it was.
+    assert_eq!(spend.spent_today(), MicroUsd(5_000));
 }

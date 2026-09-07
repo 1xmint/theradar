@@ -67,6 +67,26 @@ pub struct Entry {
     /// absent field reads as `None` because that is what serde does with an
     /// `Option`; the test below pins that this schema relies on it.
     pub signals: Option<Vec<radar_roast::sheet::Signal>>,
+    /// The earlier reply this one points at, when this reply says nothing of
+    /// its own.
+    ///
+    /// A **pointer** is what the account says to the second person who asks
+    /// about a mint answered minutes ago: a link to the answer rather than
+    /// silence. It is a public statement, so it is recorded here like every
+    /// other one — but it is not an *answer*, and three things follow from
+    /// that, all of them read by [`Gate::restore`](crate::admission::Gate::restore):
+    ///
+    /// 1. It **counts** against the day's allowance. It cost a post.
+    /// 2. It does **not** enter the dedupe map. A pointer that became the
+    ///    canonical answer for a mint would point the third asker at the
+    ///    pointer, and the fourth at that.
+    /// 3. It does **not** spend the summoner's allowance. The gate refused
+    ///    before it charged, which is the whole reason a pointer exists.
+    ///
+    /// `None` on every reply that answers for itself, which is nearly all of
+    /// them, and on every line written before 2026-09-07.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pointed_at: Option<String>,
 }
 
 /// Appends to a log file.
@@ -189,6 +209,7 @@ mod tests {
             reply: "Six token accounts.".to_owned(),
             fellback: None,
             signals: None,
+            pointed_at: None,
             reply_id: Some("r1".to_owned()),
         }
     }

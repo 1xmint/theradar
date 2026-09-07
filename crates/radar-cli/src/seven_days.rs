@@ -151,6 +151,7 @@ mod tests {
             fellback: None,
             reply_id: reply.map(str::to_owned),
             signals: None,
+            pointed_at: None,
         }
     }
 

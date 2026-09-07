@@ -189,7 +189,7 @@ fn answer(
 
     let entry = match radar_analyst::answer(mention, gate, ctx) {
         Answered::Reply { entry, .. } => *entry,
-        Answered::Ticker(reply) => {
+        Answered::Ticker { text: reply, .. } => {
             println!("--> {reply}");
             return Ok(());
         }
