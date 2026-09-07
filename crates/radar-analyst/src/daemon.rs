@@ -439,6 +439,12 @@ pub fn run() -> ! {
     if let Some(notice) = contest_writable_notice(&paths.contest_dir) {
         eprintln!("{notice}");
     }
+    // The bio noticeboard, which is off unless somebody wrote a lead. Said at
+    // start either way: "the bio is not being written" and "the bio is being
+    // written and you did not know" are both things an operator should be able
+    // to read off a restart.
+    let bio = crate::bio::Bio::from_vars(&env);
+    eprintln!("{}", bio_notice(bio.as_ref()));
 
     // The free lane, on its own token, its own switch, its own caps and its
     // own log (design 0009 L5). Same rule 8 shape as X: no token, nothing read.
@@ -582,6 +588,12 @@ pub fn run() -> ! {
         }
         // Every tick, not only at close: see the function's note.
         prompt_claim_if_due(publisher.as_ref(), &mut spend, &paths);
+        // The bio, when one is configured. Last of the three, because it is
+        // the only one that overwrites rather than appends, and the cheapest
+        // to skip.
+        if let Some(bio) = bio.as_ref() {
+            write_bio_if_changed(x.as_ref(), bio, &mut spend, &paths);
+        }
         // The daily post, from the rows the timer job wrote, once past the
         // hour. Priced as one top-level post when it goes out on X.
         announce_day(
@@ -839,6 +851,194 @@ fn announce_week(
         at,
     ) {
         eprintln!("radar-analyst: cannot write {}: {e}", paths.telegram_log);
+    }
+}
+
+/// What the process says about the bio writer on start.
+///
+/// A line whether or not it is on. "The bio is not being written" and "the bio
+/// is being written and you did not know" are both states an operator should be
+/// able to read off a restart -- and the second one matters more, because a bio
+/// write overwrites the only copy of whatever was there.
+#[must_use]
+pub fn bio_notice(bio: Option<&crate::bio::Bio>) -> String {
+    match bio {
+        None => "radar-analyst: the bio is not written (RADAR_BIO_LEAD unset), so the \
+                 account's own copy stands."
+            .to_owned(),
+        Some(b) => format!(
+            "radar-analyst: the bio IS written, at most hourly, as \"{}\" plus the week's \
+             status. Whatever is in the profile now will be replaced.",
+            b.lead
+        ),
+    }
+}
+
+/// The marker a bio write leaves: when, and what it said.
+///
+/// One file rather than two, because the two facts are only useful together --
+/// "written an hour ago" and "said this" answer one question, which is whether
+/// to write again.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BioMarker {
+    /// When the last accepted write happened.
+    pub at: u64,
+    /// Exactly what it wrote.
+    pub text: String,
+}
+
+impl BioMarker {
+    /// Parses the marker file, or `None` when there is not one.
+    ///
+    /// A file that will not parse is `None`, which means *write again*. That
+    /// is the safe direction here: the alternative is a torn marker freezing
+    /// the bio at whatever it happened to say.
+    #[must_use]
+    pub fn parse(text: &str) -> Option<Self> {
+        let (head, rest) = text.split_once('\n')?;
+        Some(Self {
+            at: head.trim().parse().ok()?,
+            text: rest.to_owned(),
+        })
+    }
+
+    /// The file's contents for a write at `at` saying `text`.
+    #[must_use]
+    pub fn render(at: u64, text: &str) -> String {
+        format!("{at}\n{text}")
+    }
+}
+
+/// The bio to write now, or `None` when there is nothing to do.
+///
+/// **Every decision about whether to write is here**, so the function that
+/// actually writes has none left. That is not tidiness: `write_bio_if_changed`
+/// needs an X client and a filesystem, so nothing in it can be reached by a
+/// test -- and CI proved the point three times, killing no mutant of any
+/// comparison that lived there.
+///
+/// `None` for each of five reasons, and they are genuinely five:
+///
+/// - the week's record says nothing worth a bio ([`crate::bio::state_of`] --
+///   a voided week, a week past its claim window, a winner with no handle);
+/// - the render would not fit in [`crate::bio::MAX`] characters, and a bio the
+///   platform cuts mid-figure is a wrong figure with no record it was right;
+/// - it was written less than an hour ago;
+/// - the text has not changed;
+/// - the render fails the checks a reply passes.
+///
+/// The last is worth its own note. A refused reply falls back to the template;
+/// a refused **bio** falls back to the bio that is already there, which was
+/// checked when it was written. So refusing is strictly safe here, in a way it
+/// is not for a reply.
+fn bio_to_write(
+    bio: &crate::bio::Bio,
+    record: &radar_contest::Record,
+    marker: Option<&BioMarker>,
+    now: u64,
+) -> Option<String> {
+    let state = crate::bio::state_of(record, now)?;
+    let text = bio.render(&state)?;
+    if !bio_write_due(now, marker, &text) {
+        return None;
+    }
+    match crate::bio::check(&text, &state.authorised()) {
+        Ok(()) => Some(text),
+        Err(why) => {
+            eprintln!(
+                "radar-analyst: the bio was refused by its own checks and not written: {why}"
+            );
+            None
+        }
+    }
+}
+
+/// Whether to write the bio now.
+///
+/// Two conditions, both of them cheap and both of them protecting the same
+/// thing -- a metered endpoint that overwrites the only copy of a public
+/// profile:
+///
+/// - **At most once an hour.** The bio changes at most three times a week, so
+///   a writer that tried on every tick would spend the day's budget
+///   discovering that nothing had changed.
+/// - **Only when the text differs.** The ordinary case is that it does not.
+///
+/// Pure, and split out of [`write_bio_if_changed`] because the two comparisons
+/// are the whole of the decision and neither is observable from a function that
+/// needs a platform to run. CI proved that twice: inverting the freshness guard
+/// writes *only* when it is too soon, and inverting the text comparison writes
+/// *only* when nothing changed -- which is a bio frozen at its first value
+/// forever, being paid for on every tick.
+#[must_use]
+pub fn bio_write_due(now: u64, marker: Option<&BioMarker>, text: &str) -> bool {
+    let Some(marker) = marker else {
+        // Never written here. Write it.
+        return true;
+    };
+    if now.saturating_sub(marker.at) < 3_600 {
+        return false;
+    }
+    marker.text != text
+}
+
+/// Writes the bio if the week's state changed and an hour has passed.
+///
+/// # The three things that stop a write
+///
+/// 1. **Nothing to say.** `state_of` returns `None` for a voided week, a week
+///    past its claim window, and a winner whose handle was never read. The
+///    previous bio stands, which was true when it was written.
+/// 2. **The same text.** Compared against the marker's contents, so an
+///    unchanged week costs nothing. This is the ordinary case: the bio changes
+///    at most three times a week.
+/// 3. **A failed check.** `bio::check` is the two checks a reply passes. A
+///    render that fails is recorded and not written -- and *not written* is the
+///    safe direction here in a way it is not for a reply, because there is no
+///    previous reply to fall back to and there is always a previous bio.
+fn write_bio_if_changed(x: Option<&X>, bio: &crate::bio::Bio, spend: &mut Spend, paths: &Paths) {
+    let Some(x) = x else {
+        return;
+    };
+    let at = now();
+    let path = format!("{}/bio.last", paths.contest_dir);
+    let previous = std::fs::read_to_string(&path).ok();
+    let marker = previous.as_deref().and_then(BioMarker::parse);
+
+    let Some(record) = radar_contest::records_in(std::path::Path::new(&paths.contest_dir))
+        .into_iter()
+        .max_by_key(|r| r.week)
+    else {
+        return;
+    };
+    let Some(text) = bio_to_write(bio, &record, marker.as_ref(), at) else {
+        return;
+    };
+
+    // Metered like everything else a stranger's week can trigger. `Cost::Post`
+    // rather than a price of its own: X lists a profile write near a post, and
+    // a seventh required price would take this instance silent until somebody
+    // set it -- `Prices::from_vars` is all-or-nothing, which is rule 8 working
+    // and the wrong trade for an optional feature.
+    let Ok(reservation) = spend.authorize(Cost::Post, day_of(at)) else {
+        eprintln!("radar-analyst: budget spent; the bio is not written");
+        return;
+    };
+    match x.update_profile(&text) {
+        Ok(()) => {
+            let charged = reservation.reserved();
+            spend.settle(reservation, charged);
+            // The marker is the record, and it is written *after* the platform
+            // accepted -- a marker written first would make a failed write look
+            // like a done one and the bio would then never be retried.
+            if let Err(e) = std::fs::write(&path, BioMarker::render(at, &text)) {
+                eprintln!("radar-analyst: the bio was written but not recorded: {e}");
+            }
+        }
+        Err(e) => {
+            spend.release(reservation);
+            eprintln!("radar-analyst: the bio was refused by the platform: {e}");
+        }
     }
 }
 
@@ -1206,6 +1406,159 @@ pub fn tick(
 
 #[cfg(test)]
 mod tests {
+
+    /// A closed week with a winner who has a handle, for the bio planner.
+    fn bio_record() -> radar_contest::Record {
+        let entry = radar_contest::Entry {
+            reply_id: "r1".to_owned(),
+            summoner: "9001".to_owned(),
+            mention_id: Some("m1".to_owned()),
+            handle: Some("somebody".to_owned()),
+            mint: "M".to_owned(),
+            at: radar_contest::Week(2958).opens_at() + 10,
+            metrics: radar_contest::Metrics::default(),
+        };
+        radar_contest::Record::close(
+            radar_contest::Week(2958),
+            radar_contest::Ranking {
+                ranked: vec![radar_contest::Ranked { entry, score: 12 }],
+                excluded: Vec::new(),
+            },
+            &radar_contest::Rules::published(["op"]),
+        )
+    }
+
+    #[test]
+    fn the_bio_planner_holds_every_reason_not_to_write() {
+        // `write_bio_if_changed` needs an X client and a filesystem, so nothing
+        // in it can be reached by a test -- and CI proved that three times,
+        // killing no mutant of any comparison that lived there. Every decision
+        // is here now and the writer has none left.
+        let bio = crate::bio::Bio {
+            lead: "Automated.".to_owned(),
+        };
+        let record = bio_record();
+        let closed = radar_contest::Week(2958).closes_at();
+
+        // Nothing written yet: write it, and it says what the record says.
+        let first = bio_to_write(&bio, &record, None, closed + 60).expect("a bio");
+        assert!(first.starts_with("Automated."), "{first}");
+        assert!(first.contains("@somebody"), "{first}");
+        assert!(first.contains("2026-09-21"), "{first}");
+
+        // The same text an hour later is not a write.
+        let marker = BioMarker {
+            at: closed + 60,
+            text: first.clone(),
+        };
+        assert_eq!(
+            bio_to_write(&bio, &record, Some(&marker), closed + 60 + 7_200),
+            None,
+            "unchanged"
+        );
+
+        // Too soon is not a write either, even with something new to say.
+        let stale = BioMarker {
+            at: closed + 60,
+            text: "something else".to_owned(),
+        };
+        assert_eq!(
+            bio_to_write(&bio, &record, Some(&stale), closed + 60 + 60),
+            None,
+            "59 minutes"
+        );
+        assert!(
+            bio_to_write(&bio, &record, Some(&stale), closed + 60 + 3_600).is_some(),
+            "an hour later, with new text"
+        );
+
+        // A record with nothing to say writes nothing, however long it has been.
+        let mut voided = bio_record();
+        voided.voided = Some(radar_contest::ledger::Voided {
+            at: closed,
+            reason: "bought".to_owned(),
+        });
+        assert_eq!(bio_to_write(&bio, &voided, None, closed + 60), None);
+
+        // A lead that leaves no room writes nothing rather than a bio the
+        // platform would cut mid-figure.
+        let long = crate::bio::Bio {
+            lead: "x".repeat(crate::bio::MAX - 10),
+        };
+        assert_eq!(bio_to_write(&long, &record, None, closed + 60), None);
+    }
+
+    #[test]
+    fn the_bio_writer_is_off_unless_a_lead_is_written_and_says_which() {
+        // A bio write overwrites the only copy of whatever the account says.
+        // "It is being written and you did not know" is the state worth being
+        // told about on a restart, so both are said.
+        let off = bio_notice(None);
+        assert!(off.contains("not written"), "{off}");
+        assert!(off.contains("RADAR_BIO_LEAD"), "{off}");
+
+        let on = bio_notice(Some(&crate::bio::Bio {
+            lead: "Automated.".to_owned(),
+        }));
+        assert!(on.contains("IS written"), "{on}");
+        assert!(on.contains("will be replaced"), "{on}");
+        assert!(on.contains("Automated."), "{on}");
+    }
+
+    #[test]
+    fn the_bio_is_written_at_most_hourly_and_only_when_the_text_changed() {
+        // Two guards on a metered endpoint that overwrites the only copy of a
+        // public profile, and CI killed neither until they moved out of a
+        // function that needs a platform to run.
+        //
+        // Inverting the freshness guard writes ONLY when it is too soon.
+        // Inverting the text comparison writes ONLY when nothing changed --
+        // a bio frozen at its first value forever, paid for on every tick.
+        let then = 1_000_000;
+        let old = BioMarker {
+            at: then,
+            text: "old".to_owned(),
+        };
+
+        assert!(bio_write_due(then, None, "anything"), "never written here");
+        assert!(!bio_write_due(then, Some(&old), "new"), "just written");
+        assert!(
+            !bio_write_due(then + 3_599, Some(&old), "new"),
+            "59 minutes"
+        );
+        assert!(
+            bio_write_due(then + 3_600, Some(&old), "new"),
+            "on the hour"
+        );
+        // The whole point of the second guard: an hour has passed and the text
+        // is the same, so there is nothing to pay for.
+        assert!(
+            !bio_write_due(then + 7_200, Some(&old), "old"),
+            "unchanged text is not a write"
+        );
+        // A marker from the future does not unlock it -- a clock that went
+        // backwards must not turn this into every tick.
+        assert!(!bio_write_due(1_000, Some(&old), "new"));
+    }
+
+    #[test]
+    fn a_marker_that_will_not_parse_means_write_again() {
+        // The safe direction: the alternative is a torn marker freezing the
+        // bio at whatever it happened to say, with nothing saying why.
+        assert_eq!(BioMarker::parse(""), None);
+        assert_eq!(BioMarker::parse("no newline"), None);
+        assert_eq!(BioMarker::parse("not-a-number\ntext"), None);
+
+        let parsed = BioMarker::parse("1700000000\nthe bio").expect("parses");
+        assert_eq!(parsed.at, 1_700_000_000);
+        assert_eq!(parsed.text, "the bio");
+        // Round-trips, so what was written is what is compared next time. A
+        // render that did not match the parser would make every tick a write.
+        assert_eq!(
+            BioMarker::parse(&BioMarker::render(parsed.at, &parsed.text)),
+            Some(parsed)
+        );
+    }
 
     /// A funded meter on its own ledger file, so these tests do not share one.
     fn a_spend() -> Spend {
