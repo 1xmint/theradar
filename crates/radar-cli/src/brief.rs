@@ -123,18 +123,31 @@ pub fn run(store: &Path, serve_url: Option<&str>) -> bool {
     // reporting the agent as broken because the server is.
     let probe = serve_url.map(|url| (url, probe_serving(url)));
     checks.push(agent(probe.as_ref().map(|(_, p)| p)));
+    // Read before `serving` takes the probe. The manifest is read here too so
+    // both users of it -- this and `binaries` -- see one file read rather than
+    // two, which is also two chances to disagree.
+    let build_info = std::env::var("RADAR_BUILD_INFO").unwrap_or_else(|_| {
+        // Beside the binaries, which is where the runbook installs it.
+        "/home/guardian/bin/BUILD-INFO.txt".to_owned()
+    });
+    let manifest = std::fs::read_to_string(&build_info).ok();
+    checks.push(deployed(
+        probe.as_ref().map(|(_, p)| p),
+        manifest.as_deref(),
+    ));
     checks.push(serving(probe));
     // The getter is read twice and it says two different things: where the log
     // is, and whether anybody has claimed the analyst runs on this host.
-    let get = |k: &str| std::env::var(k).ok();
+    let get = |k: &str| set_to_something(std::env::var(k).ok());
+    let tree = Tree::around(store);
     checks.push(analyst(
-        &analyst_dir(&get),
+        &analyst_dir(&get, &tree),
         get("RADAR_ANALYST_DIR").is_some(),
     ));
     // The contest and the vault, on the same claim rule as the analyst: the
     // variable that says where the records are is the claim that a contest
     // runs here, and without it absence is a fact rather than an alarm.
-    let contest_dir = get("RADAR_CONTEST_DIR").unwrap_or_else(|| "data/contest".to_owned());
+    let contest_dir = get("RADAR_CONTEST_DIR").unwrap_or_else(|| tree.contest.clone());
     checks.push(contest(&contest_dir, get("RADAR_CONTEST_DIR").is_some()));
     checks.push(vault(
         &contest_dir,
@@ -142,14 +155,10 @@ pub fn run(store: &Path, serve_url: Option<&str>) -> bool {
         u64::try_from(now).unwrap_or(0),
     ));
     checks.push(creator_index(
-        &get("RADAR_CREATOR_INDEX")
-            .unwrap_or_else(|| radar_roast::creator::DEFAULT_PATH.to_owned()),
+        &get("RADAR_CREATOR_INDEX").unwrap_or_else(|| tree.creator_index.clone()),
         now,
     ));
-    checks.push(binaries(&get("RADAR_BUILD_INFO").unwrap_or_else(|| {
-        // Beside the binaries, which is where the runbook installs it.
-        "/home/guardian/bin/BUILD-INFO.txt".to_owned()
-    })));
+    checks.push(binaries(&build_info));
     checks.push(trading_lane());
 
     println!("radar brief — {}\n", from_epoch(now));
@@ -372,8 +381,99 @@ fn ingestion(store: &Path, now: i64) -> Check {
 /// Takes a getter for the reason the daemon's config readers do: the rule is
 /// then testable without setting a process-wide variable that parallel tests
 /// would fight over.
-fn analyst_dir(get: &impl Fn(&str) -> Option<String>) -> String {
-    get("RADAR_ANALYST_DIR").unwrap_or_else(|| "data/analyst".to_owned())
+fn analyst_dir(get: &impl Fn(&str) -> Option<String>, tree: &Tree) -> String {
+    get("RADAR_ANALYST_DIR").unwrap_or_else(|| tree.analyst.clone())
+}
+
+/// An environment value, or `None` if it is blank.
+///
+/// An empty value is **unset**, not a path of `""`. `RADAR_ANALYST_DIR=` in an
+/// EnvironmentFile is how a variable gets commented out badly, and it would
+/// otherwise be wrong twice at once: every path derived from it collapses to
+/// `/replies.jsonl`, *and* the variable still reads as the claim that the
+/// analyst runs on this host, which turns a legitimate absence into an alarm.
+///
+/// The signer's key reader already reads its environment this way; this is the
+/// same rule where the consequence is a monitor rather than a signature.
+fn set_to_something(value: Option<String>) -> Option<String> {
+    value.filter(|v| !v.trim().is_empty())
+}
+
+/// Where the brief's other subjects live, derived from the one path it is
+/// always given.
+///
+/// # Why derived and not defaulted
+///
+/// Every one of these used to be a relative literal — `data/analyst`,
+/// `data/contest`, `docs/research/data/creator-index.json` — resolved against
+/// the **process's working directory**. `deploy/radar-brief.service` sets no
+/// `WorkingDirectory`, so systemd starts the unit in `/`, and on 2026-09-07 the
+/// live output was:
+///
+/// ```text
+/// [FAIL] contest    data/contest cannot be written
+/// [ok]   analyst    no reply log … it has never run
+/// [ok]   index      no creator index … timer is not installed
+/// ```
+///
+/// All three false. The contest directory had been written an hour earlier, the
+/// reply log had two lines in it, and the creator-index timer had run that
+/// evening. The unit exited unhealthy every fifteen minutes into the alert
+/// channel that had just been set up, and two of the three wrong lines were
+/// **`[ok]`** — a monitor reporting health about a directory that does not
+/// exist, which is worse than the one that alarmed.
+///
+/// The store path is the one thing the brief is never wrong about: it is passed
+/// explicitly and every store check already reads through it. So the rest hang
+/// off it. `RADAR_ANALYST_DIR`, `RADAR_CONTEST_DIR` and `RADAR_CREATOR_INDEX`
+/// still override, and still carry their second meaning — that somebody has
+/// *claimed* the analyst or the contest runs on this host.
+///
+/// The layout mirrors `radar_analyst::daemon::Paths::under`: the analyst's
+/// directory and the contest's are siblings under `data/`, and the creator
+/// index sits in the checkout beside them.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Tree {
+    analyst: String,
+    contest: String,
+    creator_index: String,
+}
+
+impl Tree {
+    /// Derives the siblings of a store directory.
+    ///
+    /// Falls back to the old relative literals when the store path has no
+    /// parent to hang them off — which is the workstation's `--store
+    /// data/store` after one `..`, and a bare `store` with none. A relative
+    /// default is right there and wrong on the box; the difference is that on
+    /// the box the store path is absolute, so the derivation always fires.
+    fn around(store: &Path) -> Self {
+        let data = store.parent();
+        let checkout = data.and_then(Path::parent);
+        let under = |base: Option<&Path>, name: &str, fallback: &str| -> String {
+            match base {
+                // An empty parent is `data/store`'s grandparent: joining onto it
+                // would produce a path that looks absolute on Unix and names the
+                // wrong tree. The literal is the right answer there.
+                // `format!` rather than `Path::join`, mirroring
+                // `Paths::under` exactly: the separator stays `/` on both
+                // platforms, so the string a Windows brief prints is the same
+                // shape as the one the box reads, and the two derivations
+                // cannot drift apart on a detail neither of them is about.
+                Some(p) if !p.as_os_str().is_empty() => format!("{}/{name}", p.display()),
+                _ => fallback.to_owned(),
+            }
+        };
+        Self {
+            analyst: under(data, "analyst", "data/analyst"),
+            contest: under(data, "contest", "data/contest"),
+            creator_index: under(
+                checkout,
+                radar_roast::creator::DEFAULT_PATH,
+                radar_roast::creator::DEFAULT_PATH,
+            ),
+        }
+    }
 }
 
 /// How old the creator index may be before the timer is considered stopped.
@@ -1049,6 +1149,110 @@ fn probe_serving(url: &str) -> ServingProbe {
         }
         Err(e) => ServingProbe::Unreachable(e.to_string()),
     }
+}
+
+/// Whether the server answering is the build the box was given.
+///
+/// # Why this exists
+///
+/// **Merge is not deploy, and it has now been the same surprise three times.**
+/// The site deploys itself on merge (Cloudflare Pages); `radar-serve` is
+/// installed by hand, because `guardian` has full sudo and no NOPASSWD entry for
+/// radar and that is deliberate (AGENTS.md §7). So the two halves of one release
+/// drift apart silently, and the symptom arrives as a *user-facing* bug: on
+/// 2026-09-07 the site's History page called `/v1/public/weeks` on a server four
+/// merges old, which answered `403 no Cloudflare Access assertion`. Nothing on
+/// the box was failing. The server was healthy; it was simply not the one the
+/// site had been built against.
+///
+/// Design 0010 A-4 — ship by tag, the box pulls and verifies — is the real
+/// answer and is unbuilt. This is the cheap half: `BUILD-INFO.txt` records the
+/// commit the box was *given*, `/health` reports the commit the process was
+/// *built from*, and they are the same field from the same workflow run. When
+/// they differ, somebody copied binaries and did not restart, or restarted
+/// something else.
+///
+/// A server that reports no build at all predates the field (#188) and is
+/// therefore behind by definition — reported as a failure rather than as
+/// `Unknown`, because "I cannot tell" and "it is old" are the same fact here.
+fn deployed(probe: Option<&ServingProbe>, manifest: Option<&str>) -> Check {
+    let Some(ServingProbe::Answered { body, .. }) = probe else {
+        // Nothing to compare against. `serving` already alarms when the endpoint
+        // is unset or unreachable, and a second alarm for the same cause is
+        // noise that makes the first one cheaper to ignore.
+        return Check::new(
+            Status::Unknown,
+            "deployed",
+            "no answer from the serving endpoint to read a build from",
+        );
+    };
+    let Some(manifest) = manifest else {
+        return Check::new(
+            Status::Unknown,
+            "deployed",
+            "no BUILD-INFO.txt, so what the box was given cannot be compared",
+        );
+    };
+    let Some(given) = manifest
+        .lines()
+        .find_map(|l| l.strip_prefix("commit:"))
+        .map(str::trim)
+        .filter(|c| !c.is_empty())
+    else {
+        return Check::new(
+            Status::Unknown,
+            "deployed",
+            "BUILD-INFO.txt names no commit",
+        );
+    };
+    let Some(running) = build_field(body) else {
+        return Check::new(
+            Status::Fail,
+            "deployed",
+            format!(
+                "the server reports no build, so it predates the field; the box was given {}",
+                short(given)
+            ),
+        );
+    };
+    if running == given {
+        return Check::new(
+            Status::Ok,
+            "deployed",
+            format!("serving {}, which is what the box was given", short(given)),
+        );
+    }
+    Check::new(
+        Status::Fail,
+        "deployed",
+        format!(
+            "serving {} but the box was given {} — binaries copied and not restarted, \
+             or the deploy never happened",
+            short(running),
+            short(given)
+        ),
+    )
+}
+
+/// The first seven characters of a commit, the way git prints one.
+fn short(commit: &str) -> String {
+    commit.chars().take(7).collect()
+}
+
+/// Reads `"build"` out of a health body.
+///
+/// A string scan rather than a JSON parse, matching how `serving` reads
+/// `"status"` beside it: the brief must be readable against a body that is not
+/// valid JSON at all, which is the case worth surviving — something else
+/// listening on the port.
+fn build_field(body: &str) -> Option<&str> {
+    let at = body.find("\"build\"")?;
+    let rest = &body[at + 7..];
+    let open = rest.find('"')?;
+    let after = &rest[open + 1..];
+    let close = after.find('"')?;
+    let value = &after[..close];
+    (!value.is_empty() && value != "unknown").then_some(value)
 }
 
 /// What the trading lane is doing, which is nothing.
@@ -2610,12 +2814,177 @@ mod tests {
     }
 
     #[test]
+    fn a_blank_override_is_unset_rather_than_a_path_of_nothing() {
+        // Found by running the brief from `/` with `RADAR_ANALYST_DIR=` set,
+        // which is what a badly commented-out line in an EnvironmentFile looks
+        // like. It produced `no reply log at /replies.jsonl` *and* counted as
+        // the claim that the analyst runs here -- wrong path, wrong severity,
+        // one blank character.
+        assert_eq!(set_to_something(None), None);
+        assert_eq!(set_to_something(Some(String::new())), None);
+        assert_eq!(set_to_something(Some("   ".to_owned())), None);
+        assert_eq!(
+            set_to_something(Some("/srv/a".to_owned())),
+            Some("/srv/a".to_owned())
+        );
+    }
+
+    #[test]
+    fn the_briefs_subjects_hang_off_the_one_path_it_is_given() {
+        // The bug, stated as an arrangement rather than as a path.
+        //
+        // `deploy/radar-brief.service` sets no `WorkingDirectory`, so systemd
+        // starts the unit in `/` and every relative literal in this module
+        // resolved against the root of the filesystem. Two of the three wrong
+        // lines it produced were `[ok]` -- a monitor reporting health about a
+        // directory that does not exist.
+        //
+        // The box's real layout, from `deploy/alert.env.example`.
+        let tree = Tree::around(Path::new("/home/guardian/radar/data/store"));
+        assert_eq!(tree.analyst, "/home/guardian/radar/data/analyst");
+        assert_eq!(tree.contest, "/home/guardian/radar/data/contest");
+        assert_eq!(
+            tree.creator_index,
+            "/home/guardian/radar/docs/research/data/creator-index.json"
+        );
+    }
+
+    #[test]
+    fn the_derived_layout_is_the_one_the_daemon_writes() {
+        // Not "the same strings", which would be two literals agreeing by
+        // coincidence: the same *derivation*. `Paths::under` puts the contest
+        // directory beside the analyst's rather than inside it, and a brief
+        // that folded it inside would report every week as unwritten.
+        let store = "/srv/radar/data/store";
+        let tree = Tree::around(Path::new(store));
+        let paths = radar_analyst::daemon::Paths::under(&tree.analyst);
+        assert_eq!(paths.contest_dir, tree.contest);
+        assert_eq!(paths.log, format!("{}/replies.jsonl", tree.analyst));
+    }
+
+    #[test]
+    fn a_relative_store_keeps_the_workstation_default() {
+        // The other direction, and the one a fix like this breaks by accident.
+        // `--store data/store` is what this checkout uses, and its grandparent
+        // is the empty path -- joining onto which produces something that looks
+        // absolute on Unix and names a tree nobody has. The literal is right
+        // there.
+        let tree = Tree::around(Path::new("data/store"));
+        assert_eq!(tree.analyst, "data/analyst");
+        assert_eq!(tree.contest, "data/contest");
+        assert_eq!(tree.creator_index, radar_roast::creator::DEFAULT_PATH);
+
+        // And a store path with no parent at all.
+        let bare = Tree::around(Path::new("store"));
+        assert_eq!(bare.analyst, "data/analyst");
+        assert_eq!(bare.creator_index, radar_roast::creator::DEFAULT_PATH);
+    }
+
+    /// A health body carrying a build, in the shape `radar-serve` emits.
+    fn health_reporting(build: &str) -> ServingProbe {
+        ServingProbe::Answered {
+            status: 200,
+            body: format!("{{\"status\":\"ok\",\"version\":\"0.0.1\",\"build\":\"{build}\"}}"),
+        }
+    }
+
+    fn manifest_for(commit: &str) -> String {
+        format!(
+            "commit: {commit}\nbuilt:  2026-09-07T02:00:00Z\n\n\
+             aaaa  radar-serve\n"
+        )
+    }
+
+    #[test]
+    fn a_server_older_than_the_binaries_the_box_was_given_is_a_failure() {
+        // Merge is not deploy, third occurrence. The site deploys itself on
+        // merge and `radar-serve` does not, so the symptom arrives as a
+        // user-facing bug on a box where nothing is failing.
+        let old = "1f38b0a4c2d1e0f9a8b7c6d5e4f3a2b1c0d9e8f7";
+        let new = "634d3849f0e1d2c3b4a5968778695a4b3c2d1e0f";
+        let check = deployed(Some(&health_reporting(old)), Some(&manifest_for(new)));
+        assert_eq!(check.status, Status::Fail, "{}", check.detail);
+        assert!(check.detail.contains("1f38b0a"), "{}", check.detail);
+        assert!(check.detail.contains("634d384"), "{}", check.detail);
+    }
+
+    #[test]
+    fn a_server_running_what_the_box_was_given_is_fine() {
+        // The other half. A check that failed on everything would pass the test
+        // above and be deleted within a week for crying wolf -- which is what
+        // the monitor this branch fixes was actually doing.
+        let commit = "634d3849f0e1d2c3b4a5968778695a4b3c2d1e0f";
+        let check = deployed(Some(&health_reporting(commit)), Some(&manifest_for(commit)));
+        assert_eq!(check.status, Status::Ok, "{}", check.detail);
+    }
+
+    #[test]
+    fn a_server_that_reports_no_build_is_behind_by_definition() {
+        // The live case on 2026-09-07: `/health` had no `build` field at all,
+        // because the running binary predates the merge that added one. "I
+        // cannot tell" and "it is old" are the same fact here, so this is a
+        // failure and not `Unknown`.
+        let probe = ServingProbe::Answered {
+            status: 200,
+            body: "{\"status\":\"ok\",\"version\":\"0.0.1\"}".to_owned(),
+        };
+        let check = deployed(
+            Some(&probe),
+            Some(&manifest_for("634d3849f0e1d2c3b4a5968778695a4b3c2d1e0f")),
+        );
+        assert_eq!(check.status, Status::Fail, "{}", check.detail);
+
+        // A hand-built binary reports `"unknown"`, which is the same situation
+        // said out loud rather than by omission.
+        let named = deployed(
+            Some(&health_reporting("unknown")),
+            Some(&manifest_for("634d3849f0e1d2c3b4a5968778695a4b3c2d1e0f")),
+        );
+        assert_eq!(named.status, Status::Fail, "{}", named.detail);
+    }
+
+    #[test]
+    fn without_a_manifest_or_an_endpoint_the_build_check_says_it_cannot_see() {
+        // Rule 8, and not a second alarm: `serving` already fails when the
+        // endpoint is unset or unreachable, and two alarms for one cause make
+        // the first one cheaper to ignore.
+        assert_eq!(
+            deployed(None, Some(&manifest_for("abc"))).status,
+            Status::Unknown
+        );
+        assert_eq!(
+            deployed(Some(&health_reporting("abc")), None).status,
+            Status::Unknown
+        );
+        assert_eq!(
+            deployed(Some(&health_reporting("abc")), Some("built:  whenever\n")).status,
+            Status::Unknown,
+            "a manifest naming no commit cannot be compared against"
+        );
+    }
+
+    #[test]
+    fn a_body_that_is_not_radar_serve_yields_no_build_rather_than_a_guess() {
+        // Something else on the port. `serving` reports that; this must not
+        // invent a commit out of whatever the other thing said.
+        assert_eq!(build_field("<html>build 1234</html>"), None);
+        assert_eq!(build_field("{\"build\":\"\"}"), None);
+        assert_eq!(build_field("{\"build\":\"unknown\"}"), None);
+        assert_eq!(build_field("{\"build\":\"634d384\"}"), Some("634d384"));
+    }
+
+    #[test]
     fn the_analyst_directory_falls_back_to_the_daemons_own_default() {
         // The same default and the same variable the daemon uses. A brief
         // looking somewhere else reports a healthy analyst as never having run.
-        assert_eq!(analyst_dir(&|_| None), "data/analyst");
+        let tree = Tree::around(Path::new("data/store"));
+        assert_eq!(analyst_dir(&|_| None, &tree), "data/analyst");
+
         assert_eq!(
-            analyst_dir(&|k| (k == "RADAR_ANALYST_DIR").then(|| "/srv/a".to_owned())),
+            analyst_dir(
+                &|k| (k == "RADAR_ANALYST_DIR").then(|| "/srv/a".to_owned()),
+                &tree
+            ),
             "/srv/a"
         );
     }
