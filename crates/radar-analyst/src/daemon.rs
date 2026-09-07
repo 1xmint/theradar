@@ -564,6 +564,73 @@ pub fn next_wait(found: usize, found_telegram: usize, previous: Duration) -> Dur
 /// mutants turned this `>` into `==` inside two functions nothing could call
 /// from a test, and a meter that settles the empty case and releases the
 /// real one is a meter that runs out on quiet weeks and never on busy ones.
+/// What to say when the budget covered only part of the thread, or `None`.
+///
+/// A function rather than an `if` inside [`announce_week`], for the reason
+/// [`unfunded_notice`] gives and one more: CI mutated this comparison into
+/// `==`, `>` and `<=` and nothing failed, because `announce_week` needs a
+/// platform to run at all. `>` in particular is the dangerous one -- it prints
+/// a shortfall on every ordinary week and says nothing on the one week that
+/// actually lost a post.
+///
+/// `None` when the whole thread is covered. Silence is the right output for
+/// the ordinary case: a line on every close is a line nobody reads by the
+/// third week.
+#[must_use]
+fn short_thread_notice(reserved: usize, wanted: usize) -> Option<String> {
+    (reserved < wanted).then(|| {
+        format!(
+            "radar-analyst: budget covers {reserved} of the week's {wanted} posts; \
+             the rest are not published"
+        )
+    })
+}
+
+/// Reserves a thread: one [`Cost::Post`] and a [`Cost::Reply`] for each post
+/// after it.
+///
+/// Returns **as many reservations as the budget covers**, which may be fewer
+/// than asked for and may be none. The caller cuts the thread to fit rather
+/// than posting what it cannot pay for -- a shorter thread of true posts is a
+/// smaller loss than a spend nobody authorised, and the summary is always
+/// first, so what gets dropped is the least load-bearing end.
+///
+/// Split out and returning a `Vec` because the alternative -- one commitment
+/// for the whole thread -- is what was wrong: `announce_week` charged a single
+/// `Cost::Post` for up to three posts, so the day's cap was computed from a
+/// number smaller than what was actually spent.
+fn reserve_thread(spend: &mut Spend, posts: usize, day: u64) -> Vec<radar_provider::Commitment> {
+    let mut out = Vec::with_capacity(posts);
+    for n in 0..posts {
+        let cost = if n == 0 { Cost::Post } else { Cost::Reply };
+        match spend.authorize(cost, day) {
+            Ok(c) => out.push(c),
+            // The first refusal ends it. Reserving past one would leave a hole
+            // in the middle of a thread, and a reply with no parent is not a
+            // shorter thread, it is a different post.
+            Err(_) => break,
+        }
+    }
+    out
+}
+
+/// Settles a thread against what actually landed.
+///
+/// `publish_under` stops the thread when the platform refuses a post, so a
+/// partial thread is an ordinary state and not an error. The posts that landed
+/// are charged and the rest are given back -- the same rule
+/// [`settle_if_sent`] applies to one post, applied per post.
+fn settle_thread(spend: &mut Spend, reservations: Vec<radar_provider::Commitment>, sent: usize) {
+    for (n, reservation) in reservations.into_iter().enumerate() {
+        if n < sent {
+            let charged = reservation.reserved();
+            spend.settle(reservation, charged);
+        } else {
+            spend.release(reservation);
+        }
+    }
+}
+
 fn settle_if_sent(spend: &mut Spend, reservation: radar_provider::Commitment, sent: usize) {
     if sent > 0 {
         let charged = reservation.reserved();
@@ -652,13 +719,45 @@ fn announce_week(
         }
     }
 
-    // One top-level post and up to one reply, priced as such. Refused by the
-    // meter means recorded and not said, like everything else here.
+    // The hunters, from the board the week close already wrote beside the
+    // record. Read rather than recomputed: the board on disk is the one the
+    // public endpoint serves, and a post naming a different three would be a
+    // second answer to the same question.
+    let board: Vec<radar_contest::hunter::Placing> =
+        std::fs::read_to_string(crate::contest::hunter_path(&paths.contest_dir, record.week))
+            .ok()
+            .and_then(|text| serde_json::from_str(&text).ok())
+            .unwrap_or_default();
+    if let Some(post) = crate::weekly::hunters(record, &board) {
+        posts.push(post);
+    }
+
+    // A post and a reply for each one after it, priced as what they are. This
+    // charged **one** `Cost::Post` for the whole thread until 2026-09-06 --
+    // already short by the teardown, and short by two once the hunters post
+    // joined it. A meter that under-reports the one billable thing a stranger
+    // can trigger is worse than no meter, because the daily cap is computed
+    // from it.
+    //
+    // The thread is cut to what the budget covers rather than posted in full
+    // and charged for part of it. A thread of two true posts is a smaller loss
+    // than a spend nobody authorised, and the summary is first in the list, so
+    // what gets dropped is the least load-bearing end.
     let today = day_of(at);
-    let Ok(reservation) = spend.authorize(Cost::Post, today) else {
+    let reservations = reserve_thread(spend, posts.len(), today);
+    if reservations.is_empty() {
         eprintln!("radar-analyst: budget spent; the week's post is not published");
         return;
-    };
+    }
+    if let Some(notice) = short_thread_notice(reservations.len(), posts.len()) {
+        eprintln!("{notice}");
+    }
+    // Unconditional, because `truncate` to a length at or past the end is a
+    // no-op. The comparison that decides whether to *say* something lives in
+    // `short_thread_notice`, where it can be tested -- CI mutated it here into
+    // `==`, `>` and `<=` and none of them failed, because nothing can call
+    // `announce_week` without a platform.
+    posts.truncate(reservations.len());
     match crate::weekly::publish(
         publisher,
         &paths.posts,
@@ -666,9 +765,11 @@ fn announce_week(
         &posts,
         at,
     ) {
-        Ok(sent) => settle_if_sent(spend, reservation, sent),
+        Ok(sent) => settle_thread(spend, reservations, sent),
         Err(e) => {
-            spend.release(reservation);
+            for r in reservations {
+                spend.release(r);
+            }
             eprintln!("radar-analyst: cannot write {}: {e}", paths.posts);
             return;
         }
@@ -1030,6 +1131,102 @@ pub fn tick(
 
 #[cfg(test)]
 mod tests {
+
+    /// A funded meter on its own ledger file, so these tests do not share one.
+    fn a_spend() -> Spend {
+        let dir = std::env::temp_dir().join(format!(
+            "radar-daemon-thread-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        std::fs::create_dir_all(&dir).expect("a temp dir");
+        let ledger = dir.join("ledger.json").to_string_lossy().into_owned();
+        let _ = std::fs::remove_file(&ledger);
+        Spend::open(
+            Budget {
+                per_call_max: MicroUsd(50_000),
+                daily_max: MicroUsd(1_000_000),
+            },
+            Prices {
+                mention_read: MicroUsd(1_000),
+                post_read: MicroUsd(5_000),
+                reply: MicroUsd(10_000),
+                post: MicroUsd(15_000),
+                model_call: MicroUsd(2_000),
+                user_read: MicroUsd(20_000),
+            },
+            ledger,
+            1,
+        )
+    }
+
+    #[test]
+    fn a_thread_is_priced_as_a_post_and_a_reply_for_each_one_after_it() {
+        // `announce_week` charged ONE `Cost::Post` for the whole thread until
+        // 2026-09-06 -- already short by the teardown, and short by two once
+        // the hunters post joined it. A meter that under-reports the one
+        // billable thing a stranger can trigger is worse than no meter,
+        // because the daily cap is computed from it.
+        let mut spend = a_spend();
+        let one = reserve_thread(&mut spend, 1, 1);
+        let before = spend.spent_today();
+        assert_eq!(one.len(), 1);
+
+        // A post, and a reply for each one after it. The exact total, not
+        // "more than one": CI turned the `n == 0` into `n != 0`, which prices
+        // the *first* post as a reply and every one after it as a post -- a
+        // different, larger number that still passes any "more than" check.
+        assert_eq!(before, MicroUsd(15_000), "one post is one Post");
+
+        let mut spend = a_spend();
+        let three = reserve_thread(&mut spend, 3, 1);
+        assert_eq!(three.len(), 3);
+        assert_eq!(
+            spend.spent_today(),
+            MicroUsd(15_000 + 10_000 + 10_000),
+            "a post and two replies"
+        );
+    }
+
+    #[test]
+    fn a_thread_the_budget_only_half_covers_says_so_and_says_nothing_otherwise() {
+        // `>` is the dangerous mutation of this comparison: it prints a
+        // shortfall on every ordinary week and stays silent on the one week
+        // that actually lost a post -- an alarm that fires when nothing is
+        // wrong and not when something is.
+        assert_eq!(
+            short_thread_notice(3, 3),
+            None,
+            "the ordinary week is silent"
+        );
+        assert_eq!(short_thread_notice(1, 1), None);
+        let short = short_thread_notice(2, 3).expect("a shortfall is said");
+        assert!(short.contains("2 of the week's 3"), "{short}");
+        // A thread whose reservations somehow exceed its posts is not a
+        // shortfall, and must not be announced as one.
+        assert_eq!(short_thread_notice(4, 3), None);
+    }
+
+    #[test]
+    fn a_thread_that_lands_in_part_is_charged_for_the_part_that_landed() {
+        // `publish_under` stops the thread when the platform refuses a post,
+        // so a partial thread is an ordinary state. Charging for the planned
+        // posts would spend the day's budget on posts nobody received --
+        // which is the failure `settle_if_sent` was written to prevent for
+        // one post, applied per post here.
+        let mut spend = a_spend();
+        let three = reserve_thread(&mut spend, 3, 1);
+        let reserved = spend.spent_today();
+        settle_thread(&mut spend, three, 1);
+        let after_one = spend.spent_today();
+        assert!(after_one < reserved, "{after_one:?} vs {reserved:?}");
+
+        // And a thread where nothing landed costs nothing.
+        let mut spend = a_spend();
+        let three = reserve_thread(&mut spend, 3, 1);
+        settle_thread(&mut spend, three, 0);
+        assert_eq!(spend.spent_today(), radar_types::MicroUsd::ZERO);
+    }
 
     /// One entrant, with the summons the claim prompt should reply to.
     fn entrant(reply_id: &str, mention_id: &str) -> radar_contest::Ranked {
