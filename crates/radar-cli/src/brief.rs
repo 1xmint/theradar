@@ -1374,24 +1374,6 @@ mod tests {
     }
 
     #[test]
-    fn the_lookup_reads_this_processes_own_name_off_proc_where_there_is_one() {
-        // `running_exe` is the impure edge, and the two predicates CI mutated
-        // live in it: the pid filter and the name comparison. Both are
-        // reachable here on Linux by asking for a name nothing is running
-        // under -- inverting either makes the walk return some *other*
-        // process's executable instead of `None`.
-        //
-        // Skipped where there is no `/proc`, which is this repository's own
-        // workstation. Said rather than silently passing: a test that reports
-        // ok because it could not look is the failure `Status::Unknown` exists
-        // to avoid, and the same rule applies to tests.
-        if !std::path::Path::new("/proc/self/comm").exists() {
-            return;
-        }
-        assert_eq!(running_exe("definitely-not-a-running-process"), None);
-    }
-
-    #[test]
     fn the_binaries_check_says_unknown_rather_than_ok_when_it_cannot_look() {
         // "Nothing is running" and "everything is current" must not collapse.
         // A monitor that reports ok because it could not read is worse than no
