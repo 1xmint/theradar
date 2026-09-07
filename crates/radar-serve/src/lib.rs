@@ -1360,6 +1360,7 @@ mod tests {
                 reply: "text".to_owned(),
                 fellback: None,
                 signals: None,
+                pointed_at: None,
                 reply_id: None,
             };
             radar_analyst::log::append(&log, &entry).expect("intent");

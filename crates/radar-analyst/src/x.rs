@@ -137,6 +137,68 @@ pub fn backoff(attempt: u32, status: Option<u16>) -> Option<Duration> {
     }
 }
 
+/// How long any one platform call may take, in total.
+///
+/// # Why a timeout at all
+///
+/// `ureq`'s free functions have **no timeout**. The analyst is a single
+/// threaded loop: one tick reads mentions, answers them, closes the week when
+/// it is time, posts the daily line and sets the bio. Every one of those is a
+/// call into this module or `telegram`, and one socket that opens and never
+/// answers stops all of them — not just the call, the whole account, until
+/// somebody restarts it. The failure looks like an account that went quiet,
+/// which is indistinguishable from an account nobody mentioned.
+///
+/// Fifteen seconds is well past any healthy X response and well inside the
+/// five-minute tick, so a hung call costs one call rather than the day.
+///
+/// `timeout_global` rather than a per-phase timeout: what matters here is the
+/// wall clock the loop loses, and a call that resolves fast, connects fast and
+/// then trickles a body for an hour has cost exactly as much as one that never
+/// connected.
+const CALL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
+
+/// The HTTP agent every call in this module goes through.
+///
+/// Two settings, and both change behaviour:
+///
+/// 1. [`CALL_TIMEOUT`], so a hung socket cannot stop the loop.
+/// 2. `http_status_as_error(false)`, so a 4xx or 5xx arrives as a **response**
+///    rather than as `Error::StatusCode`. That error carries the status and
+///    nothing else, which is why [`Unreachable::Refused`] used to be built with
+///    `body: String::new()` — the platform's own explanation was read and
+///    thrown away at the point it was needed. A lock (code 326), a policy
+///    notice, a rate-limit reset: all of them are in that body, and all of them
+///    were invisible.
+pub(crate) fn agent() -> ureq::Agent {
+    ureq::Agent::config_builder()
+        .timeout_global(Some(CALL_TIMEOUT))
+        .http_status_as_error(false)
+        .build()
+        .into()
+}
+
+/// How much of a refusal body to keep.
+///
+/// Enough for the platform's error object — X's are a few hundred bytes and put
+/// the code and detail first — and short enough that a full HTML error page
+/// does not land in a journal line. Truncated on a character boundary, because
+/// the body is untrusted bytes and slicing one in half is a panic.
+const KEPT_BODY: usize = 300;
+
+/// The first [`KEPT_BODY`] bytes of a body, on a character boundary.
+pub(crate) fn truncated(body: &str) -> String {
+    let mut end = KEPT_BODY.min(body.len());
+    while end > 0 && !body.is_char_boundary(end) {
+        end -= 1;
+    }
+    let mut out = body[..end].to_owned();
+    if end < body.len() {
+        out.push('…');
+    }
+    out
+}
+
 /// The client.
 ///
 /// Holds the credential and nothing else. It does not decide what to say, and
@@ -335,7 +397,8 @@ impl X {
 
     /// GETs a URL with the bearer token.
     fn get(&self, url: &str) -> Result<String, Unreachable> {
-        let response = ureq::get(url)
+        let response = agent()
+            .get(url)
             .header("Authorization", &format!("Bearer {}", self.bearer))
             .call();
         Self::body_of(response)
@@ -370,7 +433,8 @@ impl X {
             crate::daemon::now(),
             &crate::oauth::nonce(),
         );
-        let response = ureq::post(url)
+        let response = agent()
+            .post(url)
             .header("Authorization", &authorization)
             .header("Content-Type", "application/json")
             .send(body);
@@ -422,7 +486,8 @@ impl X {
             crate::daemon::now(),
             &crate::oauth::nonce(),
         );
-        let response = ureq::post(&url)
+        let response = agent()
+            .post(&url)
             .header("Authorization", &authorization)
             .send_form([("description", description)]);
         Self::body_of(response).map(|_| ())
@@ -433,10 +498,28 @@ impl X {
         response: Result<ureq::http::Response<ureq::Body>, ureq::Error>,
     ) -> Result<String, Unreachable> {
         match response {
-            Ok(mut ok) => ok
-                .body_mut()
-                .read_to_string()
-                .map_err(|e| Unreachable::Transport(e.to_string())),
+            Ok(mut ok) => {
+                let status = ok.status().as_u16();
+                let body = ok
+                    .body_mut()
+                    .read_to_string()
+                    .map_err(|e| Unreachable::Transport(e.to_string()))?;
+                if status >= 400 {
+                    // The agent is configured not to turn a status into an
+                    // error, so the body is still here to be read. It is the
+                    // only place the platform says *which* refusal this is --
+                    // a lock, a policy notice, a rate-limit reset -- and it was
+                    // discarded until 2026-09-07.
+                    return Err(Unreachable::Refused {
+                        status,
+                        body: truncated(&body),
+                    });
+                }
+                Ok(body)
+            }
+            // Still matched, because `http_status_as_error(false)` is a
+            // configuration and a caller that built an agent without it would
+            // otherwise get `Transport` for a refusal.
             Err(ureq::Error::StatusCode(status)) => Err(Unreachable::Refused {
                 status,
                 body: String::new(),
@@ -918,6 +1001,7 @@ pub fn entry_for(mention: &Mention, at: u64) -> Entry {
         reply: String::new(),
         fellback: None,
         signals: None,
+        pointed_at: None,
         reply_id: None,
     }
 }

@@ -79,7 +79,14 @@ pub enum Answered {
     /// Carries the reply that says so — the honest answer, and the best content
     /// available: guessing which token a symbol meant is how measurements get
     /// published about the wrong project.
-    Ticker(String),
+    Ticker {
+        /// The key the gate admitted this on, so the caller records against the
+        /// same one. Derived here rather than by the caller: two derivations of
+        /// one key is how a dedupe map ends up with entries nothing looks up.
+        key: String,
+        /// What to say.
+        text: String,
+    },
     /// Nothing usable was found in the mention.
     Nothing,
     /// The gate refused it.
@@ -102,7 +109,7 @@ impl Answered {
     pub const fn billed(&self) -> Billed {
         match self {
             Self::Reply { billed, .. } => *billed,
-            Self::Ticker(_)
+            Self::Ticker { .. }
             | Self::Nothing
             | Self::Refused(_)
             | Self::NotAnAddress
@@ -125,7 +132,25 @@ impl Answered {
 pub fn answer(mention: &Mention, gate: &mut Gate, ctx: &Answering<'_>) -> Answered {
     let mint_text = match crate::mention::read(&mention.text) {
         Asked::Mint(m) => m,
-        Asked::Ticker(t) => return Answered::Ticker(crate::ticker_reply(&t)),
+        Asked::Ticker(t) => {
+            // **Gated, like a mint.** This returned before the gate until
+            // 2026-09-07, which was harmless only because nothing published a
+            // ticker reply. Answering them without a gate would put one reply
+            // shape outside every cap in this module: `$A`, `$B`, `$C` for
+            // ever, one post each, from one account.
+            //
+            // Keyed on the symbol, which is what makes the dedupe meaningful:
+            // the answer to `$DOGE` is the same sentence for everyone who asks
+            // inside the window.
+            let key = format!("${t}");
+            if let Admitted::No(why) = gate.admit(&mention.author, &key, ctx.now) {
+                return Answered::Refused(why);
+            }
+            return Answered::Ticker {
+                text: crate::ticker_reply(&t),
+                key,
+            };
+        }
         Asked::Nothing => return Answered::Nothing,
     };
 
@@ -180,6 +205,7 @@ pub fn answer(mention: &Mention, gate: &mut Gate, ctx: &Answering<'_>) -> Answer
             // Counted where the sheet was built, carried here so the week-close
             // job scores from the record and never re-reads the chain.
             signals: Some(sheet.signals),
+            pointed_at: None,
         }),
     }
 }
@@ -191,6 +217,9 @@ pub fn describe(why: &Refused) -> String {
         Refused::Unconfigured => "no limits configured, so nothing is answered".to_owned(),
         Refused::SummonerDaily { cap } => format!("this account has had its {cap} replies today"),
         Refused::GlobalDaily { cap } => format!("the daily cap of {cap} replies is spent"),
+        Refused::GlobalRate { per_hour } => {
+            format!("answering as fast as it is allowed to — {per_hour} an hour; try again shortly")
+        }
         Refused::AlreadyAnswered { reply_id } => {
             format!("already answered for this mint, see {reply_id}")
         }
@@ -254,7 +283,7 @@ mod tests {
             &ctx(&client),
         );
         match out {
-            Answered::Ticker(reply) => {
+            Answered::Ticker { text: reply, .. } => {
                 assert!(reply.contains("$ABC"), "{reply}");
                 assert!(reply.contains("contract address"), "{reply}");
             }
@@ -318,6 +347,7 @@ mod tests {
                 reply_id: "r1".to_owned(),
             },
             Refused::SelfOrIgnored,
+            Refused::GlobalRate { per_hour: 2 },
         ] {
             let text = describe(&why);
             // Each says something only it could say. Asserting "not empty and
@@ -330,6 +360,7 @@ mod tests {
                 Refused::GlobalDaily { .. } => "daily cap",
                 Refused::AlreadyAnswered { .. } => "already answered",
                 Refused::SelfOrIgnored => "itself",
+                Refused::GlobalRate { .. } => "an hour",
             };
             assert!(
                 text.contains(distinctive),

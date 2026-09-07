@@ -198,6 +198,7 @@ mod tests {
             reply: "Six token accounts.".to_owned(),
             fellback: None,
             signals: None,
+            pointed_at: None,
             reply_id: None,
         }
     }
