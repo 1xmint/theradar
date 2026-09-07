@@ -15,7 +15,7 @@
 
 use radar_risk::{Action, Address, Authorization, Autonomy, MicroUsd, Policy, Slot};
 use radar_signer::privy::{AuthorizationKey, NotAuthorised, PrivyRequest, authorise};
-use radar_signer::verify::Allowlist;
+use radar_signer::verify::{Allowlist, CallerBounds};
 use serde_json::{Value, json};
 
 const SYSTEM_PROGRAM: [u8; 32] = [0u8; 32];
@@ -23,6 +23,15 @@ const DEX: [u8; 32] = [0x11; 32];
 const MINT: [u8; 32] = [0x22; 32];
 const WALLET: [u8; 32] = [0x33; 32];
 const NOW: Slot = Slot(1_000);
+
+/// Bounds that assert nothing beyond the slot, so a refusal here is about the
+/// Privy path rather than about a size ceiling.
+const fn unbounded(now: Slot) -> CallerBounds {
+    CallerBounds {
+        now,
+        max_lamports: u64::MAX,
+    }
+}
 
 /// A policy wide enough not to be what any of these tests are about.
 ///
@@ -120,7 +129,7 @@ fn a_request_the_kernel_authorised_is_signed() {
         &Address::new(WALLET),
         &allowlist(),
         &policy(),
-        NOW,
+        unbounded(NOW),
     )
     .expect("an authorised request is signed");
 
@@ -145,7 +154,7 @@ fn a_transaction_for_another_token_is_refused_rather_than_signed() {
         &Address::new(WALLET),
         &allowlist(),
         &policy(),
-        NOW,
+        unbounded(NOW),
     )
     .expect_err("a substituted mint must not be signed");
 
@@ -180,7 +189,7 @@ fn the_bytes_checked_are_the_bytes_the_request_carries() {
         &Address::new(WALLET),
         &allowlist(),
         &policy(),
-        NOW,
+        unbounded(NOW),
     );
     let refused = authorise(
         &key(),
@@ -189,7 +198,7 @@ fn the_bytes_checked_are_the_bytes_the_request_carries() {
         &Address::new(WALLET),
         &allowlist(),
         &policy(),
-        NOW,
+        unbounded(NOW),
     );
     assert!(signed.is_ok(), "the honest body signs");
     assert!(refused.is_err(), "the substituted body does not");
@@ -206,7 +215,7 @@ fn an_expired_authorisation_signs_nothing() {
         &Address::new(WALLET),
         &allowlist(),
         &policy(),
-        Slot(9_999),
+        unbounded(Slot(9_999)),
     )
     .expect_err("an expired authorisation must not sign");
     assert!(matches!(refusal, NotAuthorised::Refused(_)));
@@ -234,7 +243,7 @@ fn a_request_with_no_transaction_in_it_is_refused_rather_than_passed() {
                     &Address::new(WALLET),
                     &allowlist(),
                     &policy(),
-                    NOW,
+                    unbounded(NOW),
                 ),
                 Err(NotAuthorised::NoTransaction)
             ),

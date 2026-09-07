@@ -45,6 +45,10 @@ pub struct Input {
 
 /// What would happen if you tried to sell.
 #[derive(Debug, Clone, Serialize, JsonSchema, PartialEq)]
+#[allow(
+    clippy::struct_excessive_bools,
+    reason = "a JSON contract, not a state machine: every field is an independent fact a caller reads by name, and folding four of them into two-variant enums would change a wire shape callers already parse without making any of them clearer"
+)]
 pub struct Output {
     /// The token asked about.
     pub mint: String,
@@ -58,6 +62,12 @@ pub struct Output {
     /// Decisive on its own: a good quote on an exit somebody else can cancel is
     /// a story about a good price, not a good price.
     pub can_be_stopped: bool,
+    /// Whether the issuer can still mint more of this token.
+    ///
+    /// Also decisive on its own, and for a different reason: unlimited supply at
+    /// the issuer's discretion makes the quote a fact about a token that need
+    /// not stay the same token.
+    pub can_be_diluted: bool,
     /// Extensions or authorities that could stop or tax an exit.
     pub structural_threats: Vec<String>,
     /// Lamports out at each size probed, ascending.
@@ -189,6 +199,7 @@ pub fn render(report: &ExitReport, structure_read: bool) -> Output {
         mint: report.mint.to_string(),
         exitable: report.is_exitable(),
         can_be_stopped: report.can_be_stopped,
+        can_be_diluted: report.can_be_diluted,
         structural_threats: report
             .structural_threats
             .iter()

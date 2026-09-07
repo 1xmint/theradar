@@ -40,7 +40,7 @@ use radar_customer::Meter;
 use radar_risk::Authorization;
 use serde_json::json;
 
-use crate::pipeline::Signing;
+use crate::pipeline::{Bounds, Signing};
 
 /// Why a customer signature could not be obtained.
 #[derive(Clone, PartialEq, Eq, Debug, thiserror::Error)]
@@ -94,6 +94,7 @@ pub trait Authorising: Send + Sync {
         authorization: &Authorization,
         request: &serde_json::Value,
         wallet: &str,
+        bounds: Bounds,
     ) -> Result<String, Vec<String>>;
 }
 
@@ -164,8 +165,9 @@ impl Signing for CustomerSigner<'_> {
         &self,
         authorization: &Authorization,
         transaction: &str,
+        bounds: Bounds,
     ) -> Result<String, Vec<String>> {
-        self.sign_through_privy(authorization, transaction)
+        self.sign_through_privy(authorization, transaction, bounds)
             .map_err(|why| vec![why.to_string()])
     }
 }
@@ -176,6 +178,7 @@ impl CustomerSigner<'_> {
         &self,
         authorization: &Authorization,
         transaction: &str,
+        bounds: Bounds,
     ) -> Result<String, NotSigned> {
         // Charged before the signature is asked for, not after.
         //
@@ -192,7 +195,7 @@ impl CustomerSigner<'_> {
         let request = self.request(transaction);
         let signature = self
             .signer
-            .authorise(authorization, &request, &self.wallet_address)
+            .authorise(authorization, &request, &self.wallet_address, bounds)
             .map_err(NotSigned::SignerRefused)?;
 
         // The exact bytes the signer canonicalised. Re-serialising the body here

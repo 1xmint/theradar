@@ -49,7 +49,7 @@
 //! same rule. This side is Radar's half, and it refuses first.
 
 use radar_risk::{Authorization, Policy};
-use radar_types::{Address, Slot};
+use radar_types::Address;
 
 use crate::verify::{Allowlist, Rejection};
 
@@ -158,8 +158,9 @@ pub struct Bounds<'a> {
     pub allowlist: &'a Allowlist,
     /// **The signer's own** policy, not the caller's (ADR 0008).
     pub policy: &'a Policy,
-    /// The caller's view of the chain head.
-    pub now: Slot,
+    /// The caller's view of the chain head, and the lamport ceiling the caller
+    /// asserts. Both narrow; neither widens. See [`verify::CallerBounds`].
+    pub caller: crate::verify::CallerBounds,
 }
 
 /// Produces the `X-Stamp` value for `body`, after checking the transaction it
@@ -196,7 +197,7 @@ pub fn stamp(
         bounds.signing_wallet,
         bounds.allowlist,
         bounds.policy,
-        bounds.now,
+        bounds.caller,
     )
     .map_err(|rejections| {
         NotStamped::Refused(rejections.iter().map(Rejection::to_string).collect())
@@ -262,7 +263,7 @@ mod tests {
     use super::*;
     use crate::verify::SYSTEM_PROGRAM;
     use radar_risk::{Action, Autonomy, MicroUsd};
-    use radar_types::SlotDelta;
+    use radar_types::{Slot, SlotDelta};
     use ring::signature::KeyPair as _;
 
     const DEX: [u8; 32] = [0x11; 32];
@@ -334,7 +335,10 @@ mod tests {
                 signing_wallet: &Address::new(WALLET),
                 allowlist: &allowlist(),
                 policy: &permissive(),
-                now: Slot(1_000),
+                caller: crate::verify::CallerBounds {
+                    now: Slot(1_000),
+                    max_lamports: u64::MAX,
+                },
             },
         )
         .expect("a stamp")
@@ -374,7 +378,10 @@ mod tests {
                 signing_wallet: &Address::new(WALLET),
                 allowlist: &allowlist(),
                 policy: &permissive(),
-                now: Slot(1_000),
+                caller: crate::verify::CallerBounds {
+                    now: Slot(1_000),
+                    max_lamports: u64::MAX,
+                },
             },
         )
         .expect("a stamp");
@@ -420,7 +427,10 @@ mod tests {
                 signing_wallet: &Address::new(WALLET),
                 allowlist: &allowlist(),
                 policy: &permissive(),
-                now: Slot(1_000),
+                caller: crate::verify::CallerBounds {
+                    now: Slot(1_000),
+                    max_lamports: u64::MAX,
+                },
             },
         );
         assert!(matches!(refused, Err(NotStamped::Refused(_))));
@@ -441,7 +451,10 @@ mod tests {
                 signing_wallet: &Address::new(WALLET),
                 allowlist: &allowlist(),
                 policy: &Policy::SHIPPED,
-                now: Slot(1_000),
+                caller: crate::verify::CallerBounds {
+                    now: Slot(1_000),
+                    max_lamports: u64::MAX,
+                },
             },
         );
         assert!(matches!(refused, Err(NotStamped::Refused(_))));
@@ -463,7 +476,10 @@ mod tests {
                 signing_wallet: &Address::new(WALLET),
                 allowlist: &allowlist(),
                 policy: &permissive(),
-                now: Slot(1_000),
+                caller: crate::verify::CallerBounds {
+                    now: Slot(1_000),
+                    max_lamports: u64::MAX,
+                },
             },
         );
         assert!(
@@ -483,7 +499,10 @@ mod tests {
                 signing_wallet: &Address::new(WALLET),
                 allowlist: &allowlist(),
                 policy: &permissive(),
-                now: Slot(1_000),
+                caller: crate::verify::CallerBounds {
+                    now: Slot(1_000),
+                    max_lamports: u64::MAX,
+                },
             },
         );
         assert!(matches!(refused, Err(NotStamped::NoTransaction)));

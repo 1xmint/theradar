@@ -59,6 +59,11 @@ pub struct PrivyAuthorization {
     pub wallet: String,
     /// The caller's view of the chain head.
     pub now_slot: u64,
+    /// The most lamports the caller intended this transaction to spend.
+    ///
+    /// Required, like `now_slot` and for the same reason: an optional bound with
+    /// a default is a missing value that passes.
+    pub max_lamports: u64,
 }
 
 /// A request to sign locally.
@@ -75,6 +80,19 @@ pub struct Request {
     /// unauthorised trade possible, because every bound is still checked
     /// against the bytes.
     pub now_slot: u64,
+    /// The most lamports the caller intended this transaction to spend.
+    ///
+    /// The authorization is in micro-USD and the transaction in lamports, and
+    /// this process has no price feed; the caller has one, so it converts and
+    /// says so here. It can only **narrow**: the authorization's own ceiling and
+    /// the signer's policy both still apply, so a caller that sets this to
+    /// `u64::MAX` gains nothing. See [`verify::CallerBounds`](crate::verify::CallerBounds).
+    ///
+    /// Required, with no `serde` default. An optional bound whose absence means
+    /// "no limit" is rule 8 broken in the one process that must not break it, so
+    /// a half-updated deployment fails to parse and stops signing rather than
+    /// signing without a size bound.
+    pub max_lamports: u64,
 }
 
 /// The answer.
@@ -127,10 +145,14 @@ impl Response {
     }
 }
 
-/// The slot a request reports.
+/// The bounds a request reports, in the shape [`check`](crate::verify::check)
+/// takes them.
 #[must_use]
-pub const fn slot_of(request: &Request) -> Slot {
-    Slot(request.now_slot)
+pub const fn bounds_of(request: &Request) -> crate::verify::CallerBounds {
+    crate::verify::CallerBounds {
+        now: Slot(request.now_slot),
+        max_lamports: request.max_lamports,
+    }
 }
 
 /// Places a signature into a transaction's signature array.

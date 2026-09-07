@@ -196,7 +196,12 @@ impl RecordingSigner {
 }
 
 impl Signing for RecordingSigner {
-    fn sign(&self, authorization: &Authorization, _: &str) -> Result<String, Vec<String>> {
+    fn sign(
+        &self,
+        authorization: &Authorization,
+        _: &str,
+        _: radar_exec::pipeline::Bounds,
+    ) -> Result<String, Vec<String>> {
         self.seen.borrow_mut().push(authorization.clone());
         self.answer.clone()
     }
@@ -261,6 +266,7 @@ fn attempt_from(authorization: &Authorization, notional: MicroUsd) -> Attempt {
         authorization: authorization.clone(),
         wallet: Address::new([3u8; 32]),
         size_lamports: 1_000_000_000,
+        now: NOW,
         expected_edge,
         known_costs,
         failure,

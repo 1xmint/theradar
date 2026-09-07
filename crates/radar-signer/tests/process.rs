@@ -204,6 +204,10 @@ fn request(transaction: &str, mint: &[u8; 32], now_slot: u64) -> serde_json::Val
         },
         "transaction": transaction,
         "now_slot": now_slot,
+        // Unbounded, so a refusal in these tests is about the property under
+        // test rather than about the caller's own ceiling. The ceiling has its
+        // own tests in `verify`.
+        "max_lamports": u64::MAX,
     })
 }
 
@@ -422,6 +426,7 @@ fn privy_request(transaction: &str) -> serde_json::Value {
         },
         "wallet": b58(&wallet()),
         "now_slot": 1_000u64,
+        "max_lamports": u64::MAX,
     })
 }
 

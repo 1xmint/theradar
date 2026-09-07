@@ -31,6 +31,15 @@ const WALLET: [u8; 32] = [0x33; 32];
 const APP: &str = "cmthhkznr0a3u0cl86prxlb7x";
 const TODAY: u64 = 20_331;
 
+/// Bounds wide enough that a refusal here is about the customer lane rather
+/// than about a size ceiling. The ceiling has its own tests in `radar-signer`.
+const fn test_bounds() -> radar_exec::pipeline::Bounds {
+    radar_exec::pipeline::Bounds {
+        now: radar_types::Slot(1_000),
+        max_lamports: u64::MAX,
+    }
+}
+
 fn wallet_address() -> String {
     Address::new(WALLET).to_string()
 }
@@ -107,6 +116,7 @@ impl Authorising for RealSigner {
         authorization: &Authorization,
         request: &serde_json::Value,
         wallet: &str,
+        bounds: radar_exec::pipeline::Bounds,
     ) -> Result<String, Vec<String>> {
         let request: PrivyRequest =
             serde_json::from_value(request.clone()).map_err(|e| vec![e.to_string()])?;
@@ -120,7 +130,14 @@ impl Authorising for RealSigner {
                 programs: vec![DEX, SYSTEM],
             },
             &self.policy,
-            Slot(1_000),
+            // The executor's bound, carried across the boundary rather than
+            // dropped. This composition is the one that documented C1 as
+            // passing; it now asserts the size the executor meant reaches the
+            // process that checks it.
+            radar_signer::verify::CallerBounds {
+                now: bounds.now,
+                max_lamports: bounds.max_lamports,
+            },
         )
         .map_err(|why| vec![why.to_string()])
     }
@@ -161,7 +178,7 @@ fn a_customer_trade_the_kernel_authorised_reaches_privy_signed() {
     let customer = CustomerSigner::new("sol-1", wallet_address(), APP, &signer, &privy, &meter);
 
     let returned = customer
-        .sign(&authorization(), &honest())
+        .sign(&authorization(), &honest(), test_bounds())
         .expect("an authorised trade signs");
     assert_eq!(returned, "c2lnbmVk");
 
@@ -189,7 +206,7 @@ fn a_trade_for_another_token_never_reaches_privy_at_all() {
     let customer = CustomerSigner::new("sol-1", wallet_address(), APP, &signer, &privy, &meter);
 
     let refusal = customer
-        .sign(&authorization(), &substituted_mint())
+        .sign(&authorization(), &substituted_mint(), test_bounds())
         .expect_err("a substituted mint must not be signed");
     assert!(
         refusal
@@ -216,7 +233,9 @@ fn a_closed_policy_stops_the_customer_lane_at_the_signer() {
     let customer = CustomerSigner::new("sol-1", wallet_address(), APP, &signer, &privy, &meter);
 
     assert!(
-        customer.sign(&authorization(), &honest()).is_err(),
+        customer
+            .sign(&authorization(), &honest(), test_bounds())
+            .is_err(),
         "a closed policy must not sign a customer's wallet"
     );
     assert!(
@@ -243,7 +262,9 @@ fn the_body_privy_receives_is_the_body_the_signer_authorised() {
     let meter = meter(10);
     let customer = CustomerSigner::new("sol-1", wallet_address(), APP, &signer, &privy, &meter);
 
-    customer.sign(&authorization(), &honest()).expect("signs");
+    customer
+        .sign(&authorization(), &honest(), test_bounds())
+        .expect("signs");
 
     let seen = privy.seen.lock().expect("not poisoned");
     assert!(
@@ -263,10 +284,20 @@ fn a_spent_allowance_refuses_before_anything_is_signed() {
     let meter = meter(2);
     let customer = CustomerSigner::new("sol-1", wallet_address(), APP, &signer, &privy, &meter);
 
-    assert!(customer.sign(&authorization(), &honest()).is_ok());
-    assert!(customer.sign(&authorization(), &honest()).is_ok());
     assert!(
-        customer.sign(&authorization(), &honest()).is_err(),
+        customer
+            .sign(&authorization(), &honest(), test_bounds())
+            .is_ok()
+    );
+    assert!(
+        customer
+            .sign(&authorization(), &honest(), test_bounds())
+            .is_ok()
+    );
+    assert!(
+        customer
+            .sign(&authorization(), &honest(), test_bounds())
+            .is_err(),
         "the third is past the allowance"
     );
     assert_eq!(
@@ -292,7 +323,7 @@ fn a_refused_signature_still_costs_its_allowance() {
 
     assert!(
         customer
-            .sign(&authorization(), &substituted_mint())
+            .sign(&authorization(), &substituted_mint(), test_bounds())
             .is_err()
     );
     assert_eq!(
@@ -320,7 +351,7 @@ fn privy_answering_without_a_signed_transaction_is_a_failure_not_a_pass() {
     let customer = CustomerSigner::new("sol-1", wallet_address(), APP, &signer, &unhelpful, &meter);
 
     let refusal = customer
-        .sign(&authorization(), &honest())
+        .sign(&authorization(), &honest(), test_bounds())
         .expect_err("an answer with no signature is not a signature");
     assert!(
         refusal.iter().any(|r| r.contains("wallet not found")),

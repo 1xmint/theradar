@@ -34,7 +34,7 @@ use radar_pumpfun::pda;
 use radar_pumpfun::transaction::{AccountMeta, Instruction, transaction};
 use radar_pumpfun::{Fees, Trade};
 use radar_risk::{Action, Authorization, Autonomy, MicroUsd, Policy};
-use radar_signer::verify::{Allowlist, Rejection, SYSTEM_PROGRAM, check};
+use radar_signer::verify::{Allowlist, CallerBounds, Rejection, SYSTEM_PROGRAM, check};
 use radar_types::{Address, Slot, SlotDelta};
 
 /// The mint from the captured buy.
@@ -95,9 +95,13 @@ fn buy_accounts(mint: &Address) -> Vec<AccountMeta> {
     ]
 }
 
-fn buy_instruction(mint: &Address) -> Instruction {
+/// The size the captured buy used, and the size every test here builds unless
+/// it says otherwise.
+const SPEND_LAMPORTS: u64 = 20_000_000;
+
+fn buy_instruction(mint: &Address, lamports: u64) -> Instruction {
     let data = Trade::BuyExactSolIn {
-        lamports: 20_000_000,
+        lamports,
         slippage_bps: 500,
         track_volume: false,
     }
@@ -111,15 +115,36 @@ fn buy_instruction(mint: &Address) -> Instruction {
 }
 
 fn bytes_for(mint: &Address) -> Vec<u8> {
-    transaction(&wallet(), &[buy_instruction(mint)], &[0xAA; 32]).expect("a legacy transaction")
+    bytes_spending(mint, SPEND_LAMPORTS)
 }
 
+fn bytes_spending(mint: &Address, lamports: u64) -> Vec<u8> {
+    transaction(&wallet(), &[buy_instruction(mint, lamports)], &[0xAA; 32])
+        .expect("a legacy transaction")
+}
+
+/// An authorisation whose ceiling covers `SPEND_LAMPORTS`.
+///
+/// # Why the number changed
+///
+/// This said `MicroUsd(5_000_000)` until 2026-09-07, against a buy of
+/// 20,000,000 lamports — and every test in this file passed, including the one
+/// that claims the signer would sign it. The signer summed **system-program
+/// transfers** to size a transaction, and a swap makes none, so the buy scored
+/// zero against every ceiling. The file documented the hole as working.
+///
+/// The ceiling the signer applies is the notional read as lamports (it has no
+/// price feed; see `radar_signer::verify::lamport_ceiling`), so the number here
+/// is a lamport bound wearing a micro-USD type, and that is a residual recorded
+/// in the signer rather than something this file can fix. What it can do is
+/// stop asserting that an over-ceiling buy is signable — see
+/// [`a_buy_larger_than_the_authorisation_is_refused`]. LEARNINGS 33.
 fn authorisation_for(mint: &Address) -> Authorization {
     Authorization {
         nonce: "pumpfun-buy".to_owned(),
         mint: *mint,
         action: Action::Buy,
-        max_notional: MicroUsd(5_000_000),
+        max_notional: MicroUsd(SPEND_LAMPORTS),
         expires_after: Slot(1_100),
         needs_operator_signature: false,
     }
@@ -136,6 +161,15 @@ fn permissive() -> Policy {
         max_canary: MicroUsd(1_000_000_000),
         max_input_staleness: SlotDelta(100_000),
         ..Policy::CLOSED
+    }
+}
+
+/// Bounds that assert nothing beyond the slot, so a refusal is about the
+/// transaction or the authorisation rather than about the caller's own ceiling.
+const fn unbounded(now: Slot) -> CallerBounds {
+    CallerBounds {
+        now,
+        max_lamports: u64::MAX,
     }
 }
 
@@ -162,7 +196,7 @@ fn the_signer_can_read_a_pump_fun_buy_this_crate_built() {
         &wallet(),
         &allowlist(),
         &permissive(),
-        Slot(1_000),
+        unbounded(Slot(1_000)),
     );
     assert!(
         checked.is_ok(),
@@ -184,7 +218,7 @@ fn an_authorisation_for_another_mint_is_refused() {
         &wallet(),
         &allowlist(),
         &permissive(),
-        Slot(1_000),
+        unbounded(Slot(1_000)),
     )
     .expect_err("an authorisation for a mint the transaction never names");
     assert!(
@@ -208,7 +242,7 @@ fn the_shipped_policy_refuses_it() {
         &wallet(),
         &allowlist(),
         &Policy::SHIPPED,
-        Slot(1_000),
+        unbounded(Slot(1_000)),
     )
     .expect_err("the shipped policy authorises nothing");
     assert!(
@@ -234,7 +268,7 @@ fn a_program_outside_the_allowlist_is_refused() {
             programs: vec![SYSTEM_PROGRAM],
         },
         &permissive(),
-        Slot(1_000),
+        unbounded(Slot(1_000)),
     )
     .expect_err("pump.fun is not on this allowlist");
     assert!(!rejections.is_empty());
@@ -295,4 +329,68 @@ fn the_size_is_priced_with_the_fee_the_chain_charges() {
     assert_eq!(fees.round_trip_bps(), 250);
     let spend = 20_000_000u64;
     assert_eq!(fees.charge(spend), 250_000);
+}
+
+#[test]
+fn a_buy_larger_than_the_authorisation_is_refused() {
+    // The assertion this file was missing, and the reason it existed at all.
+    //
+    // Rule 1: "the signer re-derives the transaction and checks it against the
+    // authorisation's bounds". Before 2026-09-07 it did that for the programs,
+    // the accounts, the mint and the fee payer, and **not for the size** — the
+    // one field a trade is about. A buy of 20,000,000 lamports under a ceiling
+    // of 5,000,000 was signed and this file called that a pass.
+    let mint = addr(MINT);
+    let over = bytes_spending(&mint, SPEND_LAMPORTS + 1);
+    let rejections = check(
+        &authorisation_for(&mint),
+        &over,
+        &wallet(),
+        &allowlist(),
+        &permissive(),
+        unbounded(Slot(1_000)),
+    )
+    .expect_err("a buy past the authorisation's ceiling must be refused");
+    assert!(
+        rejections.iter().any(|r| matches!(
+            r,
+            Rejection::OverSpend {
+                found,
+                allowed
+            } if *found == SPEND_LAMPORTS + 1 && *allowed == SPEND_LAMPORTS
+        )),
+        "expected the size check to fire on the swap, got {rejections:?}"
+    );
+}
+
+#[test]
+fn the_size_the_signer_reads_is_the_size_this_crate_wrote() {
+    // The composition the fix turns on: `radar-pumpfun` encodes the lamports and
+    // `radar-decode` reads them back inside the signer. If the two ever disagree
+    // about the field order, the ceiling would be applied to a token quantity —
+    // a six-orders-of-magnitude error that looks entirely plausible.
+    //
+    // Asserted by boundary rather than by reading the number out: one lamport
+    // under the ceiling is signed, one over is not, so the value the signer used
+    // is pinned to exactly what was written.
+    let mint = addr(MINT);
+    for (lamports, signable) in [
+        (SPEND_LAMPORTS - 1, true),
+        (SPEND_LAMPORTS, true),
+        (SPEND_LAMPORTS + 1, false),
+    ] {
+        let outcome = check(
+            &authorisation_for(&mint),
+            &bytes_spending(&mint, lamports),
+            &wallet(),
+            &allowlist(),
+            &permissive(),
+            unbounded(Slot(1_000)),
+        );
+        assert_eq!(
+            outcome.is_ok(),
+            signable,
+            "{lamports} lamports against a ceiling of {SPEND_LAMPORTS}: {outcome:?}"
+        );
+    }
 }

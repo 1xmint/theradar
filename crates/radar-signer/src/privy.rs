@@ -28,7 +28,7 @@
 //! bytes it signed*, and any method that signs what it is handed destroys it.
 
 use radar_risk::{Authorization, Policy};
-use radar_types::{Address, Slot};
+use radar_types::Address;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
@@ -189,7 +189,7 @@ pub fn authorise(
     signing_wallet: &Address,
     allowlist: &Allowlist,
     policy: &Policy,
-    now: Slot,
+    bounds: crate::verify::CallerBounds,
 ) -> Result<String, NotAuthorised> {
     // Read out of the body that will be sent. Not passed in alongside it: a
     // caller able to supply one transaction for checking and another for
@@ -205,7 +205,7 @@ pub fn authorise(
         signing_wallet,
         allowlist,
         policy,
-        now,
+        bounds,
     )
     .map_err(|rejections| {
         NotAuthorised::Refused(rejections.iter().map(Rejection::to_string).collect())

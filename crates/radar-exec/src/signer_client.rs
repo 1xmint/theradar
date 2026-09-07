@@ -28,7 +28,7 @@ use std::io::{BufRead as _, BufReader, Read, Write};
 
 use radar_risk::Authorization;
 
-use crate::pipeline::Signing;
+use crate::pipeline::{Bounds, Signing};
 
 /// A signer reached over a byte stream.
 ///
@@ -62,6 +62,7 @@ impl<S: Read + Write> Signing for StreamSigner<S> {
         &self,
         authorization: &Authorization,
         transaction: &str,
+        bounds: Bounds,
     ) -> Result<String, Vec<String>> {
         let request = serde_json::json!({
             // The signer serves two kinds of request now -- a local signature
@@ -72,13 +73,18 @@ impl<S: Read + Write> Signing for StreamSigner<S> {
             "sign": "local",
             "authorization": authorization,
             "transaction": transaction,
-            // The signer needs a slot to check expiry against and has no RPC of
-            // its own. Zero is always inside any expiry window, so this cannot
-            // be the check that saves us — the kernel's short lifetime is. Sent
-            // explicitly rather than omitted so the signer's own field is never
-            // optional, which is how a missing value becomes a default that
-            // passes.
-            "now_slot": 0u64,
+            // The signer needs a slot to check expiry against and has no RPC
+            // of its own, so the caller supplies one. This was `0` until
+            // 2026-09-07 and zero is inside every window, which made both the
+            // expiry check and ADR 0008's staleness check unreachable from
+            // production. Sent explicitly rather than omitted so the signer's
+            // own field is never optional, which is how a missing value becomes
+            // a default that passes.
+            "now_slot": bounds.now.get(),
+            // The authorization is in micro-USD and the transaction in
+            // lamports. The signer has no price feed, so the conversion is
+            // stated here and the signer holds us to it. It can only narrow.
+            "max_lamports": bounds.max_lamports,
         });
 
         let mut framed = self.stream.borrow_mut();
@@ -174,6 +180,40 @@ mod tests {
         }
     }
 
+    /// A shared buffer holding everything the client wrote.
+    type Written = std::rc::Rc<std::cell::RefCell<Vec<u8>>>;
+
+    /// A stream like [`Canned`], except the bytes written are kept where the
+    /// test can read them. `Canned` drops them, which is why the request itself
+    /// went unasserted for as long as it did.
+    struct Recording(Written, std::io::Cursor<Vec<u8>>);
+
+    impl Recording {
+        fn new(written: &Written, answer: &[u8]) -> Self {
+            Self(
+                std::rc::Rc::clone(written),
+                std::io::Cursor::new(answer.to_vec()),
+            )
+        }
+    }
+
+    impl Read for Recording {
+        fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+            self.1.read(buf)
+        }
+    }
+
+    impl Write for Recording {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.0.borrow_mut().extend_from_slice(buf);
+            Ok(buf.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
     fn authorization() -> Authorization {
         Authorization {
             nonce: "n".to_owned(),
@@ -189,18 +229,29 @@ mod tests {
         StreamSigner::new(Canned::new(answer), Canned::new(""))
     }
 
+    /// Bounds a test does not care about.
+    const fn bounds() -> Bounds {
+        Bounds {
+            now: Slot(1_100),
+            max_lamports: 20_000_000,
+        }
+    }
+
     #[test]
     fn a_signed_answer_yields_the_transaction() {
         let s =
             signer(r#"{"outcome":"signed","signature":"sig","wallet":"w","transaction":"dHg="}"#);
-        assert_eq!(s.sign(&authorization(), "unsigned"), Ok("dHg=".to_owned()));
+        assert_eq!(
+            s.sign(&authorization(), "unsigned", bounds()),
+            Ok("dHg=".to_owned())
+        );
     }
 
     #[test]
     fn a_refusal_carries_its_reasons_through() {
         let s = signer(r#"{"outcome":"refused","reasons":["mint absent","expired"]}"#);
         assert_eq!(
-            s.sign(&authorization(), "unsigned"),
+            s.sign(&authorization(), "unsigned", bounds()),
             Err(vec!["mint absent".to_owned(), "expired".to_owned()])
         );
     }
@@ -209,25 +260,60 @@ mod tests {
     fn a_silent_signer_is_a_refusal_not_a_pass() {
         // The failure mode worth being certain about: a signer that died must
         // never become a signer that agreed.
-        assert!(signer("").sign(&authorization(), "unsigned").is_err());
+        assert!(
+            signer("")
+                .sign(&authorization(), "unsigned", bounds())
+                .is_err()
+        );
     }
 
     #[test]
     fn an_unreadable_answer_is_a_refusal() {
-        assert!(signer("not json\n").sign(&authorization(), "x").is_err());
+        assert!(
+            signer("not json\n")
+                .sign(&authorization(), "x", bounds())
+                .is_err()
+        );
     }
 
     #[test]
     fn a_success_with_no_transaction_is_a_refusal() {
         // Nothing to submit is not a success, however the answer is labelled.
         let s = signer(r#"{"outcome":"signed","signature":"sig","wallet":"w"}"#);
-        assert!(s.sign(&authorization(), "unsigned").is_err());
+        assert!(s.sign(&authorization(), "unsigned", bounds()).is_err());
     }
 
     #[test]
     fn an_unlabelled_answer_is_a_refusal() {
         // Anything other than an explicit success is a refusal, so a signer
         // speaking a future protocol version fails closed.
-        assert!(signer("{}\n").sign(&authorization(), "x").is_err());
+        assert!(
+            signer("{}\n")
+                .sign(&authorization(), "x", bounds())
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn the_request_carries_the_slot_and_the_size_the_executor_meant() {
+        // The bug this replaces: `now_slot` was the literal `0`, which is inside
+        // every expiry window, so neither the signer's expiry check nor ADR
+        // 0008's staleness check could ever fire from production. A test that
+        // only asserted the answer came back would not have seen it, so this
+        // asserts what went *out*.
+        let written = Written::default();
+
+        let answer = r#"{"outcome":"signed","signature":"s","wallet":"w","transaction":"dHg="}"#;
+        let s = StreamSigner::new(
+            Recording::new(&written, answer.as_bytes()),
+            Recording::new(&written, b""),
+        );
+        s.sign(&authorization(), "unsigned", bounds())
+            .expect("the canned answer is a signature");
+
+        let sent = String::from_utf8(written.borrow().clone()).expect("utf-8");
+        let value: serde_json::Value = serde_json::from_str(sent.trim()).expect("one JSON line");
+        assert_eq!(value["now_slot"], 1_100, "the real head, not zero");
+        assert_eq!(value["max_lamports"], 20_000_000);
     }
 }

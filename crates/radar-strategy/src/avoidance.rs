@@ -29,6 +29,15 @@ pub enum PassReason {
     /// Decisive on its own. A good quote on an exit that a third party can
     /// cancel is not a good price, it is a story about one.
     ExitCanBeStopped,
+    /// The issuer can still mint more of this token.
+    ///
+    /// Also decisive, and for a different reason: nothing cancels the sale, but
+    /// the supply the position was sized against is a number somebody else can
+    /// change while the position is open. Its own reason rather than folded into
+    /// [`Self::ExitCanBeStopped`], because the research store wants to tell the
+    /// two apart — they are avoided for different causes and would be un-avoided
+    /// by different evidence.
+    ExitCanBeDiluted,
     /// No route at any size probed.
     NoRoute,
     /// An exit analysis was run and could not measure anything.
@@ -100,7 +109,10 @@ impl PassReason {
     pub const fn is_structural(self) -> bool {
         matches!(
             self,
-            Self::ExitCanBeStopped | Self::NoRoute | Self::ExitUnmeasurable
+            Self::ExitCanBeStopped
+                | Self::ExitCanBeDiluted
+                | Self::NoRoute
+                | Self::ExitUnmeasurable
         )
     }
 }
@@ -122,6 +134,9 @@ pub fn disqualify(candidate: &Candidate) -> Vec<PassReason> {
         Some(exit) => {
             if exit.can_be_stopped {
                 reasons.push(PassReason::ExitCanBeStopped);
+            }
+            if exit.can_be_diluted {
+                reasons.push(PassReason::ExitCanBeDiluted);
             }
             if exit.curve.is_empty() {
                 reasons.push(PassReason::NoRoute);
@@ -164,6 +179,7 @@ mod tests {
             no_route_at: Vec::new(),
             structural_threats: Vec::new(),
             can_be_stopped: false,
+            can_be_diluted: false,
             confidence: Confidence::Measured,
         }
     }

@@ -1290,6 +1290,7 @@ mod tests {
             no_route_at: Vec::new(),
             structural_threats: Vec::new(),
             can_be_stopped: false,
+            can_be_diluted: false,
             confidence: radar_sim::exit::Confidence::Measured,
         }
     }

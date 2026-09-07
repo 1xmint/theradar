@@ -1567,6 +1567,7 @@ name = "radar-signer"
 version = "0.0.1"
 dependencies = [
  "ed25519-dalek",
+ "radar-decode",
  "radar-risk",
  "radar-types",
  "ring",

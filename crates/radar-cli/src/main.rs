@@ -532,6 +532,7 @@ fn report_exit(report: &radar_sim::ExitReport, size: u64) {
         println!("  structural threats: {:?}", report.structural_threats);
     }
     println!("  can be stopped    : {}", report.can_be_stopped);
+    println!("  can be diluted    : {}", report.can_be_diluted);
     println!(
         "  EXITABLE          : {}",
         if report.is_exitable() { "yes" } else { "NO" }

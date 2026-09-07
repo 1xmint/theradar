@@ -126,6 +126,30 @@ pub enum Rejection {
     /// The transaction closes or reassigns an account it should not.
     #[error("contains an account-ownership change, which no trade needs")]
     OwnershipChange,
+    /// An instruction on a venue this signer knows carried data it could not
+    /// read.
+    ///
+    /// Rule 9. An instruction whose size the signer cannot establish is not an
+    /// instruction that spends nothing — it is one whose spend is unknown, and
+    /// unknown is not safe. pump.fun ships new instructions (the decoder's own
+    /// table went from fourteen discriminators to twenty-one), so this will fire
+    /// on a program upgrade before it fires on an attack. Refusing is still
+    /// right: the fix is a decoder update, and until it lands the alternative is
+    /// signing a payload nobody has read.
+    #[error("pump.fun instruction {0} could not be read, so its size is unknown")]
+    UnreadableVenueInstruction(String),
+    /// The message is a versioned (v0) transaction.
+    ///
+    /// [ADR 0003](https://github.com/hey-vera/radar/blob/main/docs/adr/0003-legacy-transactions-because-the-signer-must-be-able-to-read-them.md)
+    /// says the signer takes legacy transactions only. Until now that held only
+    /// as far as *lookup tables*: `decode` refuses a versioned message that
+    /// carries them, and accepted one that did not. The ADR's reason is broader
+    /// than its enforcement was — a versioned message is a format whose account
+    /// resolution this process does not fully own — so the refusal belongs here,
+    /// where the decision to sign is made, rather than in the decoder that other
+    /// tests read versioned bytes with.
+    #[error("versioned (v0) message; this signer signs legacy transactions only")]
+    Versioned,
 }
 
 /// A transaction that passed every check.
@@ -169,10 +193,32 @@ impl Checked {
 /// The system program's `Transfer` discriminator.
 const SYSTEM_TRANSFER: u32 = 2;
 
+/// The bounds the caller asserts about a transaction it built.
+///
+/// Both are the caller's word and neither is trusted as a *permission*: they can
+/// only narrow what the authorization and the signer's own policy already allow.
+/// A compromised caller setting `max_lamports` to `u64::MAX` gains nothing,
+/// because the authorization's own ceiling still applies.
+///
+/// `max_lamports` exists because the authorization is denominated in micro-USD
+/// and a transaction in lamports, and this process has no price feed — see
+/// [`lamport_ceiling`]. The executor has one, so it converts and states the
+/// result here. That makes the executor's *intent* checkable against the
+/// executor's *output*: a router that inflated the buy is caught by the process
+/// that holds the key rather than by the process that asked for it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CallerBounds {
+    /// The caller's view of the chain head.
+    pub now: Slot,
+    /// The most lamports the caller intended this transaction to spend.
+    pub max_lamports: u64,
+}
+
 /// Verifies transaction bytes against an authorization.
 ///
 /// `signing_wallet` is the public key this process holds the secret for;
-/// `now` is the caller's view of the chain head.
+/// `bounds` is what the caller asserts about the chain head and the size it
+/// intended, neither of which can widen anything.
 ///
 /// # Errors
 ///
@@ -184,8 +230,9 @@ pub fn check(
     signing_wallet: &Address,
     allowlist: &Allowlist,
     policy: &Policy,
-    now: Slot,
+    bounds: CallerBounds,
 ) -> Result<Checked, Vec<Rejection>> {
+    let now = bounds.now;
     let message = match decode(bytes) {
         Ok(m) => m,
         // Undecodable is terminal: there is nothing further to check against.
@@ -242,6 +289,9 @@ pub fn check(
     if message.instructions.is_empty() {
         rejections.push(Rejection::Empty);
     }
+    if message.versioned {
+        rejections.push(Rejection::Versioned);
+    }
 
     for program in message.programs_outside(&allowlist.programs) {
         rejections.push(Rejection::ProgramNotAllowed(
@@ -286,10 +336,38 @@ pub fn check(
     // guess, and a guess that is too small traps the position the old comment
     // was rightly worried about. This bound is finite, which is the property
     // that was missing.
-    let moved = lamports_transferred(&message);
-    // The tighter of the two. The authorisation may narrow the signer's policy;
-    // it may never widen it, and a caller that tried is already refused above.
-    let ceiling = lamport_ceiling(authorization).min(policy_ceiling.get());
+    //
+    // # The second hole that was here, and it is the one that mattered
+    //
+    // Until 2026-09-06 `lamports_transferred` was the *whole* of the size check,
+    // and it counts system-program transfers. **A swap makes none.** A pump.fun
+    // buy carries its lamports in the instruction's own data, which this process
+    // never decoded, so every buy scored zero against every ceiling.
+    //
+    // The composition test in `radar-pumpfun` documented it as passing:
+    // a 20,000,000-lamport buy was signed under an authorisation whose ceiling
+    // was 5,000,000. Rule 1 says the signer re-derives the transaction and checks
+    // it against the authorisation's bounds; for the only kind of transaction
+    // Radar would ever sign, it did not. LEARNINGS 33.
+    let bought = match lamports_bought(&message) {
+        Ok(v) => v,
+        Err(unreadable) => {
+            rejections.extend(unreadable);
+            // Not a value that can be compared, so the size check is skipped
+            // rather than run against a total that is missing an instruction.
+            // The rejection above already fails the transaction.
+            rejections.sort();
+            rejections.dedup();
+            return Err(rejections);
+        }
+    };
+    let moved = lamports_transferred(&message).saturating_add(bought);
+    // The tightest of the three. The authorisation may narrow the signer's
+    // policy and the caller may narrow the authorisation; neither may widen, and
+    // a caller that tried is already refused above.
+    let ceiling = lamport_ceiling(authorization)
+        .min(policy_ceiling.get())
+        .min(bounds.max_lamports);
     if moved > ceiling {
         rejections.push(Rejection::OverSpend {
             found: moved,
@@ -338,16 +416,98 @@ fn lamports_transferred(message: &Message) -> u64 {
         .fold(0u64, u64::saturating_add)
 }
 
+/// Lamports leaving the wallet through a swap on a venue this signer can read.
+///
+/// # Why buys and not sells
+///
+/// A buy sends lamports out and the amount is in the instruction: either the
+/// exact SOL in (`buy_exact_sol_in`, `buy_exact_quote_in_v2`) or the maximum SOL
+/// cost accepted (`buy`, `buy_v2`). Both are upper bounds on what leaves, which
+/// is exactly what a ceiling needs.
+///
+/// A **sell** sends tokens out and brings lamports in. Its lamport field is a
+/// *minimum acceptable output*, not a spend, and adding it to the total would
+/// refuse a large exit for being large — the trap the comment above
+/// [`lamports_transferred`]'s call site describes. So sells contribute nothing
+/// here. That leaves the size of a sale unbounded by this process, and it is
+/// deliberately unbounded: the bound a sale needs is on **tokens**, and the
+/// authorization carries no token quantity to check one against. Recorded as a
+/// known gap rather than closed with a number nobody has measured.
+///
+/// # Errors
+///
+/// Returns [`Rejection::UnreadableVenueInstruction`] for every pump.fun
+/// instruction whose discriminator is not in the decoder's table or whose
+/// arguments are truncated. Rule 9: an unreadable size is unknown, not zero.
+fn lamports_bought(message: &Message) -> Result<u64, Vec<Rejection>> {
+    let mut total = 0u64;
+    let mut unreadable = Vec::new();
+    for instruction in message
+        .instructions
+        .iter()
+        .filter(|i| i.program_id == *radar_decode::pumpfun::PROGRAM_ID.as_bytes())
+    {
+        let Some(known) = radar_decode::decode_pumpfun(&instruction.data)
+            .known()
+            .copied()
+        else {
+            unreadable.push(Rejection::UnreadableVenueInstruction(
+                radar_decode::Discriminator::from_data(&instruction.data)
+                    .map_or_else(|| "«under eight bytes»".to_owned(), |d| d.to_string()),
+            ));
+            continue;
+        };
+        if !known.is_buy() {
+            continue;
+        }
+        // A buy that decodes to a known variant but whose arguments are
+        // truncated is refused rather than skipped: the discriminator said this
+        // instruction spends, and the payload would not say how much.
+        let Some(Ok(trade)) = radar_decode::decode_pumpfun_trade(&instruction.data) else {
+            unreadable.push(Rejection::UnreadableVenueInstruction(
+                known.anchor_name().to_owned(),
+            ));
+            continue;
+        };
+        // Exactly one of the two fields is lamports, and which one depends on
+        // the variant — `radar_decode::args` carries the unit in the type so
+        // this cannot read a token amount as money. `u64::MAX` as a max cost
+        // means the trader accepted any price; saturating here turns that into a
+        // refusal, which is the right answer for an unbounded buy.
+        let lamports = trade
+            .exact
+            .lamports()
+            .or_else(|| trade.limit.lamports())
+            .unwrap_or(u64::MAX);
+        total = total.saturating_add(lamports);
+    }
+    if unreadable.is_empty() {
+        Ok(total)
+    } else {
+        Err(unreadable)
+    }
+}
+
 /// The lamport ceiling implied by an authorization's notional.
 ///
 /// The authorization is denominated in micro-USD and the transaction in
 /// lamports, and this process has no price feed — deliberately, since a signer
 /// with a price feed has one more input to be lied to by.
 ///
-/// So the conversion is left to the caller, who puts the ceiling on the
-/// authorization itself. Until that field exists this returns the notional read
-/// as lamports, which is a ceiling far tighter than any real trade at any real
-/// SOL price, so it fails closed rather than open.
+/// So the conversion is left to the caller, who states it in
+/// [`CallerBounds::max_lamports`], and this stays as the floor under it: the notional
+/// read as lamports, a ceiling far tighter than any real trade at any real SOL
+/// price, so it fails closed rather than open.
+///
+/// **The residual, stated plainly.** Because this is the tighter of the two in
+/// every realistic case, a genuine trade sized from a real price will be refused
+/// by it, and the caller's honest conversion cannot lift it. So today the pair
+/// bounds *safety* correctly and cannot yet size a real trade. The fix is a
+/// lamport-denominated `Policy` — the signer holding its own ceiling in the unit
+/// the chain uses — which is a decision about what the operator's limit *means*
+/// and belongs in an ADR rather than in a patch. Nothing trades
+/// (`Policy::CLOSED`), so the order is right: hold the bound, then argue the
+/// unit.
 const fn lamport_ceiling(authorization: &Authorization) -> u64 {
     authorization.max_notional.get()
 }
@@ -431,7 +591,10 @@ pub mod tests_support {
                 max_input_staleness: radar_types::SlotDelta(100_000),
                 ..Policy::CLOSED
             },
-            Slot(1_000),
+            super::CallerBounds {
+                now: Slot(1_000),
+                max_lamports: u64::MAX,
+            },
         )
         .expect("the fixture must verify")
     }
@@ -506,6 +669,48 @@ mod tests {
         out
     }
 
+    /// pump.fun's program id, as the message carries it.
+    const PUMP: [u8; 32] = *radar_decode::pumpfun::PROGRAM_ID.as_bytes();
+
+    /// An allowlist that also permits the venue, so a refusal in a size test is
+    /// about the size rather than about the program.
+    fn venue_allowlist() -> Allowlist {
+        Allowlist {
+            programs: vec![DEX, SYSTEM_PROGRAM, PUMP],
+        }
+    }
+
+    /// A pump.fun trade instruction's data: discriminator, then two `u64`s.
+    fn venue_trade(ix: radar_decode::pumpfun::Instruction, first: u64, second: u64) -> Vec<u8> {
+        let mut data = ix.discriminator().as_bytes().to_vec();
+        data.extend_from_slice(&first.to_le_bytes());
+        data.extend_from_slice(&second.to_le_bytes());
+        data
+    }
+
+    /// A transaction carrying one pump.fun instruction over the usual accounts.
+    fn venue_tx(data: Vec<u8>) -> Vec<u8> {
+        build(
+            &[WALLET, MINT, PUMP, SYSTEM_PROGRAM],
+            &[(2, vec![0, 1], data)],
+        )
+    }
+
+    /// `check` against the venue allowlist, with the caller's own ceiling given.
+    fn check_venue(bytes: &[u8], max_lamports: u64) -> Result<Checked, Vec<Rejection>> {
+        check(
+            &authorization(),
+            bytes,
+            &Address::new(WALLET),
+            &venue_allowlist(),
+            &policy(),
+            CallerBounds {
+                now: NOW,
+                max_lamports,
+            },
+        )
+    }
+
     /// A system transfer instruction's data.
     fn transfer(lamports: u64) -> Vec<u8> {
         let mut data = SYSTEM_TRANSFER.to_le_bytes().to_vec();
@@ -529,7 +734,7 @@ mod tests {
             &Address::new(WALLET),
             &allowlist(),
             &policy(),
-            NOW,
+            unbounded(NOW),
         )
         .expect("should verify");
         assert_eq!(checked.bytes(), honest());
@@ -549,7 +754,7 @@ mod tests {
             &Address::new(WALLET),
             &allowlist(),
             &policy(),
-            NOW,
+            unbounded(NOW),
         )
         .expect_err("must refuse");
         assert!(
@@ -571,7 +776,7 @@ mod tests {
             &Address::new(WALLET),
             &allowlist(),
             &policy(),
-            NOW,
+            unbounded(NOW),
         )
         .expect_err("must refuse");
         assert!(
@@ -596,7 +801,7 @@ mod tests {
             &Address::new(WALLET),
             &allowlist(),
             &policy(),
-            NOW,
+            unbounded(NOW),
         )
         .expect_err("must refuse");
         assert!(
@@ -623,7 +828,7 @@ mod tests {
             &Address::new(WALLET),
             &allowlist(),
             &policy(),
-            NOW,
+            unbounded(NOW),
         )
         .expect_err("must refuse");
         assert_eq!(
@@ -657,7 +862,7 @@ mod tests {
                 &Address::new(WALLET),
                 &allowlist(),
                 &policy(),
-                NOW
+                unbounded(NOW)
             )
             .is_ok()
         );
@@ -691,7 +896,7 @@ mod tests {
             &Address::new(WALLET),
             &allowlist(),
             &policy(),
-            NOW,
+            unbounded(NOW),
         );
         assert!(
             outcome.is_ok(),
@@ -726,7 +931,7 @@ mod tests {
             &Address::new(WALLET),
             &allowlist(),
             &policy(),
-            NOW,
+            unbounded(NOW),
         )
         .expect_err("draining the wallet must be refused");
         assert!(
@@ -763,7 +968,7 @@ mod tests {
                 &Address::new(WALLET),
                 &allowlist(),
                 &policy(),
-                NOW
+                unbounded(NOW)
             )
             .is_ok(),
             "exactly the ceiling is inside the limit"
@@ -780,7 +985,7 @@ mod tests {
                 &Address::new(WALLET),
                 &allowlist(),
                 &policy(),
-                NOW
+                unbounded(NOW)
             )
             .is_err(),
             "one lamport past it is not"
@@ -807,7 +1012,7 @@ mod tests {
                 &Address::new(WALLET),
                 &allowlist(),
                 &policy(),
-                NOW
+                unbounded(NOW)
             )
             .is_err(),
             "a reduce must be capped as well"
@@ -831,8 +1036,20 @@ mod tests {
             &Address::new(WALLET),
             &allowlist(),
             policy,
-            now,
+            unbounded(now),
         )
+    }
+
+    /// Bounds that assert nothing beyond the slot.
+    ///
+    /// `u64::MAX` so the caller's own ceiling never binds, leaving the
+    /// authorisation's as the one under test. Every test about the caller's
+    /// ceiling states it explicitly.
+    const fn unbounded(now: Slot) -> CallerBounds {
+        CallerBounds {
+            now,
+            max_lamports: u64::MAX,
+        }
     }
 
     #[test]
@@ -1028,7 +1245,7 @@ mod tests {
             &Address::new(WALLET),
             &allowlist(),
             &policy(),
-            Slot(2_000),
+            unbounded(Slot(2_000)),
         )
         .expect_err("must refuse");
         assert!(
@@ -1048,7 +1265,7 @@ mod tests {
             &Address::new(WALLET),
             &allowlist(),
             &policy(),
-            NOW,
+            unbounded(NOW),
         )
         .expect_err("must refuse");
         assert!(rejections.contains(&Rejection::NeedsOperator));
@@ -1064,7 +1281,7 @@ mod tests {
             &Address::new([0x77; 32]),
             &allowlist(),
             &policy(),
-            NOW,
+            unbounded(NOW),
         )
         .expect_err("must refuse");
         assert!(rejections.contains(&Rejection::ForeignFeePayer));
@@ -1086,7 +1303,7 @@ mod tests {
             &Address::new(WALLET),
             &allowlist(),
             &policy(),
-            NOW,
+            unbounded(NOW),
         )
         .expect_err("must refuse");
         assert!(rejections.contains(&Rejection::OwnershipChange));
@@ -1101,7 +1318,7 @@ mod tests {
             &Address::new(WALLET),
             &allowlist(),
             &policy(),
-            NOW,
+            unbounded(NOW),
         )
         .expect_err("must refuse");
         assert!(rejections.contains(&Rejection::Empty));
@@ -1123,7 +1340,7 @@ mod tests {
             &Address::new(WALLET),
             &allowlist(),
             &policy(),
-            Slot(9_999),
+            unbounded(Slot(9_999)),
         )
         .expect_err("must refuse");
         assert!(rejections.len() >= 5, "got {rejections:?}");
@@ -1139,7 +1356,7 @@ mod tests {
             &Address::new(WALLET),
             &allowlist(),
             &policy(),
-            NOW,
+            unbounded(NOW),
         )
         .expect_err("must refuse");
         assert_eq!(rejections.len(), 1);
@@ -1157,10 +1374,263 @@ mod tests {
             &Address::new(WALLET),
             &allowlist(),
             &policy(),
-            NOW,
+            unbounded(NOW),
         )
         .expect("verifies");
         assert_eq!(checked.bytes(), bytes.as_slice());
         assert_eq!(checked.message().instructions.len(), 1);
+    }
+
+    // --- the size of a swap ---------------------------------------------------
+    //
+    // Every test below fails against the code as it stood on 2026-09-06, when
+    // the only thing counted toward a ceiling was a system-program transfer and
+    // a swap makes none of those.
+
+    #[test]
+    fn a_buy_that_spends_more_than_the_authorisation_is_refused() {
+        // The hole. `authorization()` carries 50,000,000 micro-USD, read as
+        // lamports; this buy pins 60,000,000 lamports exactly. Before the fix
+        // the transaction scored zero against every ceiling and was signed.
+        use radar_decode::pumpfun::Instruction;
+        let rejections = check_venue(
+            &venue_tx(venue_trade(Instruction::BuyExactSolIn, 60_000_000, 0)),
+            u64::MAX,
+        )
+        .expect_err("a buy above the ceiling must be refused");
+        assert!(
+            rejections.iter().any(|r| matches!(
+                r,
+                Rejection::OverSpend {
+                    found: 60_000_000,
+                    allowed: 50_000_000
+                }
+            )),
+            "expected the size check to fire on the swap, got {rejections:?}"
+        );
+    }
+
+    #[test]
+    fn a_buy_inside_the_authorisation_is_signed() {
+        // The other half. A check that refused everything would pass the test
+        // above and be worthless.
+        use radar_decode::pumpfun::Instruction;
+        assert!(
+            check_venue(
+                &venue_tx(venue_trade(Instruction::BuyExactSolIn, 50_000_000, 0)),
+                u64::MAX,
+            )
+            .is_ok(),
+            "exactly the ceiling is inside it"
+        );
+        assert!(
+            check_venue(
+                &venue_tx(venue_trade(Instruction::BuyExactSolIn, 50_000_001, 0)),
+                u64::MAX,
+            )
+            .is_err(),
+            "one lamport past it is not"
+        );
+    }
+
+    #[test]
+    fn a_token_exact_buy_is_bounded_by_the_sol_it_accepts() {
+        // `buy` and `buy_v2` put the token amount first and the maximum SOL cost
+        // second, so the field that is money is the *second* one. Reading the
+        // first as lamports is the six-orders-of-magnitude error
+        // `radar_decode::args` exists to make impossible; this asserts the
+        // signer reads the right one.
+        use radar_decode::pumpfun::Instruction;
+        // A huge token amount with a small SOL bound: signable.
+        assert!(
+            check_venue(
+                &venue_tx(venue_trade(Instruction::Buy, 3_614_520_997_424, 1_000_000)),
+                u64::MAX,
+            )
+            .is_ok(),
+            "the token quantity is not a spend"
+        );
+        // A small token amount with a huge SOL bound: refused.
+        assert!(
+            check_venue(
+                &venue_tx(venue_trade(Instruction::Buy, 1_000, 60_000_000)),
+                u64::MAX,
+            )
+            .is_err(),
+            "the SOL bound is the spend"
+        );
+    }
+
+    #[test]
+    fn a_buy_that_accepted_any_price_is_refused() {
+        // `u64::MAX` as a maximum cost means the trader accepted any price. That
+        // is a real and common thing to see on chain, and it is not something
+        // this signer may agree to: an unbounded buy has no ceiling to check.
+        use radar_decode::pumpfun::Instruction;
+        assert!(
+            check_venue(
+                &venue_tx(venue_trade(Instruction::Buy, 1_000, u64::MAX)),
+                u64::MAX,
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn buys_split_across_instructions_are_summed() {
+        // The obvious way around a check that inspects one instruction: two buys
+        // of 30,000,000 under a ceiling of 50,000,000.
+        use radar_decode::pumpfun::Instruction;
+        let bytes = build(
+            &[WALLET, MINT, PUMP, SYSTEM_PROGRAM],
+            &[
+                (
+                    2,
+                    vec![0, 1],
+                    venue_trade(Instruction::BuyExactSolIn, 30_000_000, 0),
+                ),
+                (
+                    2,
+                    vec![0, 1],
+                    venue_trade(Instruction::BuyExactSolIn, 30_000_000, 0),
+                ),
+            ],
+        );
+        assert!(check_venue(&bytes, u64::MAX).is_err());
+    }
+
+    #[test]
+    fn a_swap_and_a_transfer_are_counted_together() {
+        // Neither alone is over; together they are. A check that took the larger
+        // rather than the sum would pass this.
+        use radar_decode::pumpfun::Instruction;
+        let bytes = build(
+            &[WALLET, MINT, PUMP, SYSTEM_PROGRAM],
+            &[
+                (
+                    2,
+                    vec![0, 1],
+                    venue_trade(Instruction::BuyExactSolIn, 30_000_000, 0),
+                ),
+                (3, vec![0, 1], transfer(30_000_000)),
+            ],
+        );
+        assert!(check_venue(&bytes, u64::MAX).is_err());
+    }
+
+    #[test]
+    fn a_large_sell_is_not_refused_for_being_large() {
+        // The trap the old exemption was right to worry about, kept shut. A sell
+        // sends tokens out and lamports *in*; its lamport field is a minimum
+        // acceptable output, not a spend. Counting it would refuse an exit for
+        // being profitable, which traps a position in exactly the situation the
+        // limits exist to prevent.
+        use radar_decode::pumpfun::Instruction;
+        assert!(
+            check_venue(
+                &venue_tx(venue_trade(Instruction::Sell, 500_000_000_000, 900_000_000)),
+                u64::MAX,
+            )
+            .is_ok(),
+            "a sell's minimum output is not a spend"
+        );
+    }
+
+    #[test]
+    fn an_unknown_instruction_on_the_venue_is_refused_rather_than_scored_zero() {
+        // Rule 9 in the process that holds the key. A discriminator the decoder
+        // does not have is an instruction whose size is *unknown*, and the
+        // convenient default -- treat it as spending nothing -- is the one that
+        // empties a wallet on the next program upgrade.
+        let mut data = vec![0xDE, 0xAD, 0xBE, 0xEF, 0x00, 0x11, 0x22, 0x33];
+        data.extend_from_slice(&u64::MAX.to_le_bytes());
+        let rejections =
+            check_venue(&venue_tx(data), u64::MAX).expect_err("an unreadable instruction");
+        assert!(
+            rejections
+                .iter()
+                .any(|r| matches!(r, Rejection::UnreadableVenueInstruction(_))),
+            "got {rejections:?}"
+        );
+    }
+
+    #[test]
+    fn a_truncated_buy_is_refused_rather_than_scored_zero() {
+        // The discriminator says this instruction spends; the payload does not
+        // say how much. Skipping it would score a spend of zero.
+        use radar_decode::pumpfun::Instruction;
+        let data = Instruction::BuyExactSolIn
+            .discriminator()
+            .as_bytes()
+            .to_vec();
+        let rejections =
+            check_venue(&venue_tx(data), u64::MAX).expect_err("a truncated buy is unreadable");
+        assert!(
+            rejections
+                .iter()
+                .any(|r| matches!(r, Rejection::UnreadableVenueInstruction(_))),
+            "got {rejections:?}"
+        );
+    }
+
+    #[test]
+    fn a_known_non_trade_on_the_venue_contributes_nothing() {
+        // Fee collection and accumulator bookkeeping are numerous and spend
+        // nothing. Refusing them would make the check fire on a change a
+        // reasonable person would make, which is worse than no check at all.
+        use radar_decode::pumpfun::Instruction;
+        let data = Instruction::CollectCreatorFee
+            .discriminator()
+            .as_bytes()
+            .to_vec();
+        assert!(check_venue(&venue_tx(data), u64::MAX).is_ok());
+    }
+
+    #[test]
+    fn the_callers_own_ceiling_narrows_but_cannot_widen() {
+        use radar_decode::pumpfun::Instruction;
+        let inside = venue_tx(venue_trade(Instruction::BuyExactSolIn, 40_000_000, 0));
+        // Inside the authorisation and inside the caller's own bound: signed.
+        assert!(check_venue(&inside, 40_000_000).is_ok());
+        // Inside the authorisation but past what the caller said it intended:
+        // refused. This is the executor's *output* checked against the
+        // executor's *intent*, which is what catches a router that inflated the
+        // size after the gate had judged it.
+        assert!(check_venue(&inside, 39_999_999).is_err());
+        // And a caller asserting no bound at all cannot lift the
+        // authorisation's: 60,000,000 is still refused.
+        let outside = venue_tx(venue_trade(Instruction::BuyExactSolIn, 60_000_000, 0));
+        assert!(check_venue(&outside, u64::MAX).is_err());
+    }
+
+    #[test]
+    fn a_versioned_message_is_refused_even_with_no_lookup_tables() {
+        // ADR 0003 says legacy only. Until now that held only as far as lookup
+        // tables: `tx::decode` refuses a versioned message carrying them and
+        // accepts one that does not. The ADR's reason is the format, not the
+        // tables, so the refusal belongs at the decision to sign.
+        let mut bytes = honest();
+        // A versioned message *inserts* a version byte before the header rather
+        // than setting a bit in it, so this is an insertion and not an OR. The
+        // message starts after the one-byte signature count and the signatures
+        // it declares, which `build` makes none of.
+        let signatures = usize::from(bytes[0]);
+        bytes.insert(1 + signatures * 64, 0x80);
+        // A versioned message carries a trailing lookup-table count, and the
+        // decoder rejects trailing bytes, so append the empty one.
+        bytes.push(0);
+        let rejections = check(
+            &authorization(),
+            &bytes,
+            &Address::new(WALLET),
+            &allowlist(),
+            &policy(),
+            unbounded(NOW),
+        )
+        .expect_err("a versioned message must be refused");
+        assert!(
+            rejections.iter().any(|r| matches!(r, Rejection::Versioned)),
+            "got {rejections:?}"
+        );
     }
 }
