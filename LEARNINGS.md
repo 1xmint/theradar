@@ -13,7 +13,7 @@ benefit of the doubt on everything else.
 
 ## Index
 
-**24 of these 33 name something mechanical that would catch a
+**25 of these 34 name something mechanical that would catch a
 recurrence. 9 name only a habit, and say so** — which is this file's opening
 standard rather than a gap in it. The habit-only rows are the ones worth reading
 twice; nothing will stop those repeating except somebody remembering.
@@ -58,6 +58,7 @@ quietly absent.
 | [31](#31-a-runbook-that-named-a-real-domain-belonging-to-somebody-else) | A runbook that named a real domain belonging to somebody else | `looks_unsubstituted` |
 | [32](#32-the-sandbox-made-the-contest-impossible-to-close-and-it-took-six-days-to-show) | The sandbox made the contest impossible to close, and it took six days to show | `contest_writable_notice`, `brief::contest` |
 | [33](#33-the-composition-test-documented-the-hole-and-every-assertion-passed) | The composition test documented the hole, and every assertion passed | `the_size_the_signer_reads_is_the_size_this_crate_wrote`,… |
+| [34](#34-the-monitor-resolved-its-paths-against-the-wrong-root-and-two-of-its-wrong-lines-said-ok) | The monitor resolved its paths against the wrong root, and two of its wrong lines said `[ok]` | `the_briefs_subjects_hang_off_the_one_path_it_is_given`,… |
 
 ---
 
@@ -1634,3 +1635,63 @@ order, buys split across instructions, a buy that accepted any price, and a larg
 sell that must **not** be refused — the false positive that would trap a position
 and the reason the old exemption existed. None of these pass against the code as
 it stood on 2026-09-06.
+## 34. The monitor resolved its paths against the wrong root, and two of its wrong lines said `[ok]`
+
+`radar brief` reads four things that are not the store: the analyst's reply log,
+the contest's week records, the creator index, and the binary manifest. Three of
+them were **relative literals** — `data/analyst`, `data/contest`,
+`docs/research/data/creator-index.json` — resolved against the process working
+directory. `deploy/radar-brief.service` set no `WorkingDirectory`, so systemd
+started the unit in `/`.
+
+Live output on 2026-09-07, every fifteen minutes, into the alert channel that had
+just been configured:
+
+```text
+[FAIL] contest    data/contest cannot be written
+[ok]   analyst    no reply log … it has never run
+[ok]   index      no creator index … timer is not installed
+```
+
+All three false. The contest directory had been written an hour earlier
+(`2957.json`), the reply log had two lines in it, and the creator-index timer had
+run that evening.
+
+**Why this is its own entry and not a duplicate of 32.** Entry 32 is a process
+that could not write a path it needed. This is a monitor that was looking at a
+different filesystem than the one it was reporting on — and the failure mode is
+inverted. Only *one* of the three lines alarmed. The other two came out
+**`[ok]`**, because `brief`'s absence rules are careful: a missing reply log on a
+host that has not claimed to run the analyst is a fact, not a fault. That
+carefulness is correct, and against a path that cannot exist it manufactures
+health. A monitor crying wolf gets ignored in a week; a monitor reporting `[ok]`
+about a directory that does not exist is believed.
+
+The alarming line made it worse rather than better. `[FAIL] contest — cannot be
+written` is a *plausible* message: it is exactly what entry 32's sandbox bug
+looks like, so the natural reading was "the ReadWritePaths fix did not take", and
+the natural next step was to go and look at a unit file that was correct.
+
+**The generalisation.** A check whose subject is named relatively is a check
+whose subject depends on who started it. Where a monitor is given one path it
+cannot be wrong about, derive the rest from that path rather than defaulting
+each one — a default is a second source of truth, and the run that disagrees
+with it is the run nobody is watching. Two other things fell out of running it
+the way systemd does: an *empty* environment override read as a path of `""`
+(the same wrong-path failure produced by a badly commented-out line), and the
+brief's own sandbox lacked the write grant its contest probe needs — a probe
+that answers a question about the wrong sandbox is the same class of error one
+level down.
+
+**What catches a recurrence:**
+`brief::tests::the_briefs_subjects_hang_off_the_one_path_it_is_given` pins the
+box's real layout against the store path from `deploy/alert.env.example`;
+`the_derived_layout_is_the_one_the_daemon_writes` asserts the derivation matches
+`radar_analyst::daemon::Paths::under` rather than matching a second literal that
+happens to agree; `a_relative_store_keeps_the_workstation_default` holds the
+other direction, which is what a fix like this breaks by accident; and
+`a_blank_override_is_unset_rather_than_a_path_of_nothing` covers the empty value.
+`WorkingDirectory=` and `ReadWritePaths=` in `deploy/radar-brief.service` are
+belt to that brace — neither is load-bearing now, and a unit whose working
+directory is unstated is a unit whose behaviour depends on where systemd starts
+it.

@@ -16,6 +16,19 @@ User=guardian
 Group=guardian
 ExecStart=/home/guardian/bin/radar-brief.sh
 
+# Belt, and the brace is in the code.
+#
+# Without this systemd starts the unit in `/`, and every relative path the
+# check resolved -- the analyst directory, the contest directory, the creator
+# index -- pointed at the root of the filesystem. On 2026-09-07 that produced
+# three wrong lines every fifteen minutes, two of them `[ok]`: a monitor
+# reporting health about directories that do not exist, into the alert channel
+# that had just been set up. `radar brief` now derives those paths from
+# `--store`, so this is no longer load-bearing; it stays because a unit whose
+# working directory is unstated is a unit whose behaviour depends on where
+# systemd happens to start it.
+WorkingDirectory=/home/guardian/radar
+
 # Set RADAR_ALERT_WEBHOOK here to deliver failures somewhere a person will see
 # them. Without it the check still writes to the journal at error priority, so
 # an unset channel is quieter but never silent.
@@ -25,6 +38,20 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=read-only
+
+# The contest check writes and removes a probe file, which is the whole point of
+# it: the directory was `0755` and owned by the right user and the kernel
+# refused the write anyway, because of a sandbox the process cannot see from its
+# own metadata (LEARNINGS 32).
+#
+# **This grant has to match `radar-analyst.service`'s for the same path**, and
+# that coupling is the reason it is written out rather than widened to
+# `.../data`. The probe runs in *this* unit's sandbox and is read as an answer
+# about the *analyst's*; where the two grants disagree, the probe answers a
+# question nobody asked. Without it the check reports "cannot be written" on a
+# perfectly healthy box -- the same false alarm this file's WorkingDirectory
+# note describes, arriving by a second route.
+ReadWritePaths=/home/guardian/radar/data/contest
 ProtectKernelTunables=true
 ProtectKernelModules=true
 ProtectControlGroups=true
