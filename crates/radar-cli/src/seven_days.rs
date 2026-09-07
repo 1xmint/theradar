@@ -103,14 +103,25 @@ pub fn build(
                     GraduationMode::Instant => Graduation::Instant,
                     GraduationMode::Organic => Graduation::Organic,
                 }),
-                // No transfer at or after the slot the reply was read at. Both
-                // sides must be known: a reply with no slot, or an outcome with
-                // no transfer slot, is "cannot say", not "quiet".
-                quiet_since_reply: match (
-                    e.read_at_slot,
-                    outcome.and_then(|o| o.last_transfer_slot),
-                ) {
-                    (Some(read), Some(last)) => Some(last.get() <= read),
+                // No transfer at or after the slot the reply was read at.
+                //
+                // **The outcome has to be newer than the reply**, and it usually
+                // is not. The store measures a token at one hour, six hours and
+                // a day after launch and then never again, so for any coin that
+                // was already older than a day when somebody asked about it —
+                // which is most coins people ask about — the latest outcome was
+                // recorded *before* the reply. Its `last_transfer_slot` is
+                // therefore from before the reply too, `last <= read` is true by
+                // arithmetic, and the post said the coin "had no transfer since
+                // we answered" about a coin trading on the AMM that afternoon.
+                //
+                // A public statement about a named coin, false for a structural
+                // reason, on the account's flagship post. `None` here is "cannot
+                // say", which is what the store actually knows.
+                quiet_since_reply: match (e.read_at_slot, outcome) {
+                    (Some(read), Some(o)) if o.measured_at.get() > read => {
+                        o.last_transfer_slot.map(|last| last.get() <= read)
+                    }
                     _ => None,
                 },
                 held_bps: outcome.and_then(|o| o.held_to_end_gain_bps()),
@@ -255,5 +266,52 @@ mod tests {
         assert_eq!(rows.rows[0].graduation, None);
         assert_eq!(rows.rows[0].quiet_since_reply, None);
         assert_eq!(rows.rows[0].held_bps, None);
+    }
+
+    #[test]
+    fn an_outcome_older_than_the_reply_cannot_say_the_coin_went_quiet() {
+        // The false statement this post was going to publish about named coins.
+        //
+        // The store measures at one hour, six hours and a day after launch and
+        // then never again. So for any coin already older than a day when
+        // somebody asked about it -- most coins people ask about -- the latest
+        // outcome predates the reply, `last_transfer_slot <= read_at_slot` is
+        // true by arithmetic, and the post said "had no transfer since we
+        // answered" about a coin trading on the AMM that afternoon.
+        let asked_at = 7 * DAY + 100;
+        let today = 14 * DAY + 100;
+        let log = [entry([1u8; 32], asked_at, Some("r1"), Some(500_000))];
+        let stale = [outcome([1u8; 32], 400_000, None, Some(390_000), None, None)];
+
+        let rows = build(&log, &stale, today, 600_000);
+        assert_eq!(rows.rows.len(), 1);
+        assert_eq!(
+            rows.rows[0].quiet_since_reply, None,
+            "an outcome measured before the reply says nothing about after it"
+        );
+    }
+
+    #[test]
+    fn an_outcome_newer_than_the_reply_can_say_it() {
+        // The other half. A filter that answered `None` for everything would
+        // pass the test above and make the clause unreachable -- and the post
+        // would quietly stop reporting the one thing it is for.
+        let asked_at = 7 * DAY + 100;
+        let today = 14 * DAY + 100;
+        let log = [entry([1u8; 32], asked_at, Some("r1"), Some(500_000))];
+
+        // Measured after the reply, last transfer before it: genuinely quiet.
+        let quiet = [outcome([1u8; 32], 700_000, None, Some(490_000), None, None)];
+        assert_eq!(
+            build(&log, &quiet, today, 800_000).rows[0].quiet_since_reply,
+            Some(true)
+        );
+
+        // Measured after the reply, and it moved since: not quiet.
+        let moved = [outcome([1u8; 32], 700_000, None, Some(510_000), None, None)];
+        assert_eq!(
+            build(&log, &moved, today, 800_000).rows[0].quiet_since_reply,
+            Some(false)
+        );
     }
 }

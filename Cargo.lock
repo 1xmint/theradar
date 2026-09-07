@@ -1308,6 +1308,7 @@ name = "radar-backfill"
 version = "0.0.1"
 dependencies = [
  "bs58",
+ "radar-analyst",
  "radar-asof",
  "radar-decode",
  "radar-graph",
