@@ -564,6 +564,28 @@ pub fn next_wait(found: usize, found_telegram: usize, previous: Duration) -> Dur
 /// mutants turned this `>` into `==` inside two functions nothing could call
 /// from a test, and a meter that settles the empty case and releases the
 /// real one is a meter that runs out on quiet weeks and never on busy ones.
+/// What to say when the budget covered only part of the thread, or `None`.
+///
+/// A function rather than an `if` inside [`announce_week`], for the reason
+/// [`unfunded_notice`] gives and one more: CI mutated this comparison into
+/// `==`, `>` and `<=` and nothing failed, because `announce_week` needs a
+/// platform to run at all. `>` in particular is the dangerous one -- it prints
+/// a shortfall on every ordinary week and says nothing on the one week that
+/// actually lost a post.
+///
+/// `None` when the whole thread is covered. Silence is the right output for
+/// the ordinary case: a line on every close is a line nobody reads by the
+/// third week.
+#[must_use]
+fn short_thread_notice(reserved: usize, wanted: usize) -> Option<String> {
+    (reserved < wanted).then(|| {
+        format!(
+            "radar-analyst: budget covers {reserved} of the week's {wanted} posts; \
+             the rest are not published"
+        )
+    })
+}
+
 /// Reserves a thread: one [`Cost::Post`] and a [`Cost::Reply`] for each post
 /// after it.
 ///
@@ -727,14 +749,15 @@ fn announce_week(
         eprintln!("radar-analyst: budget spent; the week's post is not published");
         return;
     }
-    if reservations.len() < posts.len() {
-        eprintln!(
-            "radar-analyst: budget covers {} of the week's {} posts; the rest are not published",
-            reservations.len(),
-            posts.len()
-        );
-        posts.truncate(reservations.len());
+    if let Some(notice) = short_thread_notice(reservations.len(), posts.len()) {
+        eprintln!("{notice}");
     }
+    // Unconditional, because `truncate` to a length at or past the end is a
+    // no-op. The comparison that decides whether to *say* something lives in
+    // `short_thread_notice`, where it can be tested -- CI mutated it here into
+    // `==`, `>` and `<=` and none of them failed, because nothing can call
+    // `announce_week` without a platform.
+    posts.truncate(reservations.len());
     match crate::weekly::publish(
         publisher,
         &paths.posts,
@@ -1149,14 +1172,39 @@ mod tests {
         let before = spend.spent_today();
         assert_eq!(one.len(), 1);
 
+        // A post, and a reply for each one after it. The exact total, not
+        // "more than one": CI turned the `n == 0` into `n != 0`, which prices
+        // the *first* post as a reply and every one after it as a post -- a
+        // different, larger number that still passes any "more than" check.
+        assert_eq!(before, MicroUsd(15_000), "one post is one Post");
+
         let mut spend = a_spend();
         let three = reserve_thread(&mut spend, 3, 1);
         assert_eq!(three.len(), 3);
-        assert!(
-            spend.spent_today() > before,
-            "three posts must reserve more than one: {:?} vs {before:?}",
-            spend.spent_today()
+        assert_eq!(
+            spend.spent_today(),
+            MicroUsd(15_000 + 10_000 + 10_000),
+            "a post and two replies"
         );
+    }
+
+    #[test]
+    fn a_thread_the_budget_only_half_covers_says_so_and_says_nothing_otherwise() {
+        // `>` is the dangerous mutation of this comparison: it prints a
+        // shortfall on every ordinary week and stays silent on the one week
+        // that actually lost a post -- an alarm that fires when nothing is
+        // wrong and not when something is.
+        assert_eq!(
+            short_thread_notice(3, 3),
+            None,
+            "the ordinary week is silent"
+        );
+        assert_eq!(short_thread_notice(1, 1), None);
+        let short = short_thread_notice(2, 3).expect("a shortfall is said");
+        assert!(short.contains("2 of the week's 3"), "{short}");
+        // A thread whose reservations somehow exceed its posts is not a
+        // shortfall, and must not be announced as one.
+        assert_eq!(short_thread_notice(4, 3), None);
     }
 
     #[test]
