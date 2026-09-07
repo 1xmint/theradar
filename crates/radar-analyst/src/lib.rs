@@ -46,6 +46,7 @@
 
 pub mod admission;
 pub mod answer;
+pub mod bio;
 pub mod contest;
 pub mod daemon;
 pub mod daily;

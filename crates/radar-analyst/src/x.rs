@@ -377,6 +377,57 @@ impl X {
         Self::body_of(response)
     }
 
+    /// Writes the account's bio.
+    ///
+    /// `POST /1.1/account/update_profile.json`, which is v1.1 and not v2 --
+    /// there is no v2 equivalent, established by probe on 2026-09-07 rather
+    /// than recalled.
+    ///
+    /// # This one signs the body, and the JSON path above does not
+    ///
+    /// OAuth 1.0a folds body parameters into the signature base string **only**
+    /// for `application/x-www-form-urlencoded`. `post` sends JSON and therefore
+    /// signs an empty parameter list; this sends a form and therefore must
+    /// include `description`. Getting it the other way round produces a
+    /// signature the platform rejects with a 401, which reads exactly like a
+    /// bad credential.
+    ///
+    /// # Only `description` is sent
+    ///
+    /// v1.1 updates only the parameters supplied, so `name`, `url` and
+    /// `location` are left alone. **Confirmed by probe, not assumed**: the
+    /// same call was made against the live account with the description it
+    /// already had, and all five profile fields came back identical.
+    ///
+    /// # Errors
+    ///
+    /// [`Unreachable`] with no credential, on transport failure, or when the
+    /// platform refuses. A refusal here has been seen as `403` with code 326
+    /// -- "this account is temporarily locked" -- on an account that was
+    /// posting normally at the time, so a failure on this endpoint says
+    /// nothing about whether the account can still post.
+    pub fn update_profile(&self, description: &str) -> Result<(), Unreachable> {
+        let Some(credentials) = &self.oauth else {
+            return Err(Unreachable::Transport(
+                "no OAuth credential, so the bio cannot be written".to_owned(),
+            ));
+        };
+        let url = format!("{}/1.1/account/update_profile.json", self.base);
+        let params = [("description".to_owned(), description.to_owned())];
+        let authorization = crate::oauth::authorization(
+            credentials,
+            "POST",
+            &url,
+            &params,
+            crate::daemon::now(),
+            &crate::oauth::nonce(),
+        );
+        let response = ureq::post(&url)
+            .header("Authorization", &authorization)
+            .send_form([("description", description)]);
+        Self::body_of(response).map(|_| ())
+    }
+
     /// Turns a ureq result into a body or a typed failure.
     fn body_of(
         response: Result<ureq::http::Response<ureq::Body>, ureq::Error>,
