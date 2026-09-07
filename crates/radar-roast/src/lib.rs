@@ -45,6 +45,7 @@ pub mod fidelity;
 pub mod forbidden;
 pub mod render;
 pub mod sheet;
+pub mod tags;
 pub mod verdict;
 pub mod voice;
 
