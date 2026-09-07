@@ -429,9 +429,33 @@ fn exit_analysis(args: &[String]) -> Result<(), String> {
         // scale pump.fun mints use.
         .unwrap_or(1_000_000_000);
 
+    // The same choice `consider` takes, and the reason this command has it: the
+    // two are different instruments, and LEARNINGS 18 is what happens when a
+    // difference between instruments is read as a change in the thing measured.
+    // `radar exit <mint> --quoter curve` beside `--quoter jupiter` is how the
+    // gap gets measured rather than assumed.
+    let pricing = match flag(args, "--quoter") {
+        Some(value) => consider::Pricing::parse(&value)?,
+        None => consider::Pricing::default(),
+    };
+
     println!("{mint}");
+    println!("  pricing           : {}", pricing.label());
     let structure = report_structure(&mint);
-    let report = radar_sim::probe(&JupiterQuoter::default(), &mint, structure, size);
+    let report = match pricing {
+        consider::Pricing::Jupiter => {
+            radar_sim::probe(&JupiterQuoter::default(), &mint, structure, size)
+        }
+        consider::Pricing::Curve => match RpcClient::default().depth(&mint) {
+            Ok(depth) => radar_sim::probe(&depth, &mint, structure, size),
+            Err(e) => {
+                // Rule 9 again, and said out loud: an unreadable curve is not a
+                // capacity of zero, and the empty report below is not exitable.
+                println!("  curve             : cannot be read ({e})");
+                radar_sim::ExitReport::build(mint, structure, Vec::new())
+            }
+        },
+    };
     report_exit(&report, size);
     Ok(())
 }
@@ -563,7 +587,14 @@ fn decision_lane(args: &[String]) -> Result<(), String> {
         .and_then(|v| v.parse().ok())
         .unwrap_or_else(consider::default_cap);
     let record_to = record_target(args);
-    consider::run(&reader, window, cap, record_to.as_deref())
+    // Defaulted to the curve. The hourly cron on the box runs this with no
+    // `--quoter`, and the whole point is that the default stops spending an
+    // aggregator's free tier on a lane that cannot trade.
+    let pricing = match flag(args, "--quoter") {
+        Some(value) => consider::Pricing::parse(&value)?,
+        None => consider::Pricing::default(),
+    };
+    consider::run(&reader, window, cap, record_to.as_deref(), pricing)
 }
 
 /// Where `consider` should record its decisions, if anywhere.
