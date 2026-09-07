@@ -14,7 +14,7 @@
 
 use radar_asof::AsOf;
 use radar_store::{
-    Envelope, Event, Launch, Origin, Outcome, Reader, SLOTS_PER_PARTITION, Table, Writer,
+    Envelope, Event, Launch, Origin, Outcome, Position, Reader, SLOTS_PER_PARTITION, Table, Writer,
 };
 use radar_types::{Address, Signature, Slot};
 
@@ -199,4 +199,104 @@ fn a_watermark_before_everything_returns_nothing_rather_than_everything() {
             .is_empty()
     );
     assert!(reader.read_outcomes(ancient).expect("read").is_empty());
+}
+
+#[test]
+fn a_close_from_after_the_watermark_does_not_shut_a_position_that_was_open() {
+    // The one leak that ran in the *permissive* direction, and the reason it is
+    // worth its own test rather than a row in the one above.
+    //
+    // A position row is written once and updated in place when the position
+    // closes, so a row read at an earlier watermark carries a `closed_at` from
+    // the future. `read_positions` filtered on `opened_at` alone, so that close
+    // was admitted and the position read as shut at a moment when it was open.
+    //
+    // Every other watermark violation shows a replay something it should not
+    // have seen, which produces an answer that is too good and is caught by
+    // being too good. This one shows a replay *less* than the live run had:
+    // a closed position counts against no exposure limit and an open one counts
+    // against every limit, so the kernel's deployment limits were judged against
+    // a portfolio smaller than the real one. A backtest that permits what
+    // production refused, and nothing about the number looks wrong.
+    let dir = tempfile::tempdir().expect("tempdir");
+    let opened = Slot(SLOTS_PER_PARTITION);
+    let watermark = Slot(opened.get() + 1_000);
+    let closed = Slot(opened.get() + 5_000);
+
+    let mut w = Writer::open(dir.path(), 10_000).expect("open");
+    w.append_position(Position {
+        mint: Address::new([3; 32]),
+        creator: Address::new([7; 32]),
+        opened_at: opened,
+        notional_micro_usd: 50_000_000,
+        entry_price: Some(1_000),
+        // Closed after the watermark. As of the watermark this position is open.
+        closed_at: Some(closed),
+        exit_price: Some(2_000),
+        realised_micro_usd: Some(25_000_000),
+    })
+    .expect("append");
+    w.flush().expect("flush");
+
+    let read = Reader::open(dir.path())
+        .read_positions(AsOf::at(watermark))
+        .expect("read");
+
+    assert_eq!(
+        read.len(),
+        1,
+        "the position was opened before the watermark"
+    );
+    let p = &read[0];
+    assert_eq!(
+        p.closed_at, None,
+        "a close at {closed} is not visible at {watermark}"
+    );
+    assert_eq!(
+        p.exit_price, None,
+        "the exit price belongs to the close and is equally from the future"
+    );
+    assert_eq!(
+        p.realised_micro_usd, None,
+        "and so does the realised figure -- reading it as recorded would let a \
+         realised-loss limit be judged against a trip that had not happened"
+    );
+    // The open half is untouched: this must not become a filter that drops the
+    // row, which would understate exposure in the same direction.
+    assert_eq!(p.opened_at, opened);
+    assert_eq!(p.notional_micro_usd, 50_000_000);
+    assert_eq!(p.entry_price, Some(1_000));
+}
+
+#[test]
+fn a_close_at_or_before_the_watermark_is_still_a_close() {
+    // The other half. A filter that dropped every close would pass the test
+    // above and make every position in every replay look permanently open.
+    let dir = tempfile::tempdir().expect("tempdir");
+    let opened = Slot(SLOTS_PER_PARTITION);
+    let closed = Slot(opened.get() + 1_000);
+
+    let mut w = Writer::open(dir.path(), 10_000).expect("open");
+    w.append_position(Position {
+        mint: Address::new([3; 32]),
+        creator: Address::new([7; 32]),
+        opened_at: opened,
+        notional_micro_usd: 50_000_000,
+        entry_price: Some(1_000),
+        closed_at: Some(closed),
+        exit_price: Some(2_000),
+        realised_micro_usd: Some(25_000_000),
+    })
+    .expect("append");
+    w.flush().expect("flush");
+
+    for watermark in [closed, Slot(closed.get() + 1)] {
+        let read = Reader::open(dir.path())
+            .read_positions(AsOf::at(watermark))
+            .expect("read");
+        let p = &read[0];
+        assert_eq!(p.closed_at, Some(closed), "at watermark {watermark}");
+        assert_eq!(p.exit_price, Some(2_000));
+        assert_eq!(p.realised_micro_usd, Some(25_000_000));
+    }
 }
