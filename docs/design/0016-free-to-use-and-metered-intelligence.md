@@ -2,13 +2,32 @@
 # Design 0016 — Free to use, metered intelligence
 
 **Date:** 2026-09-08
-**Status:** proposed. This is a recommendation on a question the owner asked, not
-a decision he has made. Nothing here is implemented and nothing here changes
+**Status:** proposed, and **written too early — see the correction below before
+reading the rest.** Nothing here is implemented and nothing here changes
 `Policy::CLOSED`.
-**Decides nothing on its own.** It exists because a business-model question
-arrived in chat and [`AGENTS.md`](../../AGENTS.md) §3 says a chat answer to a
-direction question is a draft.
 **Asks:** should Radar be free to use, with a paywall only on AI credits?
+
+## Correction, recorded the same day
+
+**This document was filed an hour after the idea was raised, before a single
+objection to it had been answered.** It is one side of a conversation that had
+not happened yet, and it was given the repository's authority anyway. The
+[`AGENTS.md`](../../AGENTS.md) §3 rule that produced it has been changed in the
+same commit: the conversation comes first, and the document records where it
+*ended*.
+
+One argument below is also wrong in a way worth naming, because it is a mistake
+this repository is otherwise careful about. The section headed "Why the name is
+wrong" reasons from a measured selection edge of 0 bps to a conclusion about
+**whether the product is worth building**. A measured zero does not support that.
+It is a fact about an instrument that has never been pointed at the thing being
+proposed — §1's "zero is a measurement about your instrument", used backwards.
+
+**What the 0 bps figure does constrain is narrow and still holds: what may be
+advertised.** Radar cannot market returns nobody has demonstrated. That is a
+claim about copy, not about the roadmap, and the two were run together below.
+Read every "so this is not a product" sentence as "so this is not yet a sentence
+we can put on a pricing page".
 
 ## The question, as the owner put it
 
@@ -40,7 +59,11 @@ paywall, for a reason that is specific to this product rather than a preference:
 - **Rule 8 already points the right way.** A meter with no budget refuses
   everything, so an unfunded account fails closed rather than free.
 
-## Why the name is wrong, and this is the part that matters
+## What can be advertised today, and what cannot
+
+*(Originally headed "Why the name is wrong, and this is the part that matters".
+It is not the part that matters, and the correction above says why. It is a
+constraint on public copy, and it is a real one.)*
 
 [`GOAL.md`](../../GOAL.md) states three measured facts:
 
@@ -53,9 +76,12 @@ paywall, for a reason that is specific to this product rather than a preference:
 
 `/health` on the production box returns `"policyClosed": true` today.
 
-So "advanced trading AI, worth buying" would sell the one capability this
-repository has measured and found **absent**. That is not a marketing nuance. It
-is the exact product GOAL.md says Radar exists not to be:
+So a page today reading "advanced trading AI" would advertise a capability the
+instrument has not yet found. **That is a marketing nuance and nothing more** —
+the first draft of this section said it was "not a marketing nuance", which was
+the error. Building toward that capability, and designing the measurement that
+would demonstrate it, is ordinary work and is wanted. What GOAL.md forbids is
+selling the feeling of it before the measurement exists:
 
 > A product that claimed an edge it could not show would be the ordinary thing to
 > build. […] **Radar's entire pitch is that it will tell you the truth about its
@@ -67,15 +93,18 @@ returns is closer to an advisory product than to a data product, and the operato
 is a Tennessee entity with worldwide reach. That is a question for counsel, and
 it is a much smaller question if the thing sold is analysis.
 
-**The owner's instinct is not wrong — the naming is.** What is being sold has
-real value and Radar can already show it: launch-block structure, creator
-history, the coordination bands from
-[research 0024](../research/0024-the-spike-became-a-hump-and-the-signal-moved.md), dated
-population comparisons, and a refusal log that says what was rejected and why.
-That is worth money to somebody about to buy a launch. It is not a trading AI.
+**What can be sold on day one**, because Radar can already show it: launch-block
+structure, creator history, the coordination bands from
+[research 0024](../research/0024-the-spike-became-a-hump-and-the-signal-moved.md),
+dated population comparisons, and a refusal log that says what was rejected and
+why. That is worth money to somebody about to buy a launch, and none of it needs
+an edge to exist first.
 
-**Recommended framing:** credits buy *research*. "Ask Radar about this launch,"
-not "let Radar trade it."
+**Recommended launch framing:** credits buy *research* — "ask Radar about this
+launch". **That is a starting position, not a ceiling.** If the assistant is
+built to the point where an edge is measurable and measured, the copy changes
+with the evidence. The rule is that the claim follows the measurement, not that
+the ambition is capped.
 
 ## Three things the sketch assumes that are not true today
 

@@ -945,7 +945,19 @@ mod tests {
         // If a genuine new rule needs the room, raise the number in the same
         // commit and say why. The number moving is the signal; a file quietly
         // growing is what this prevents.
-        const CEILING: usize = 400;
+        //
+        // 400 -> 410 on 2026-09-08, for two rules about how an agent answers the
+        // owner rather than how it writes code, and the file was at 399 when they
+        // were written -- so the ceiling, not the prose, is what had to move.
+        // §2's "an absent measurement is a fact about the instrument, never a
+        // verdict on an idea" and §3's step 2, "have the conversation first".
+        // Both come from the same afternoon: an agent answered a business-model
+        // proposal by quoting a measured 0 bps as though it settled whether the
+        // thing was worth building, then filed its own first reaction as
+        // `docs/design/0016` an hour later. LEARNINGS 35. Nine of the ten lines
+        // are those two rules; the tenth came back by collapsing a sentence
+        // AGENTS.md §7 had twice.
+        const CEILING: usize = 410;
 
         let text = std::fs::read_to_string(root().join("AGENTS.md")).expect("AGENTS.md");
         let lines = text.lines().count();
