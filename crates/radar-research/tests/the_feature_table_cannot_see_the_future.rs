@@ -170,8 +170,41 @@ fn decision(mint: u8, launch_slot: u64, decided_at: u64, recipients: u32) -> rad
     }
 }
 
+/// A `Complete` coverage record for the trades table over `[from, to]`.
+///
+/// Every fixture that means "the store holds trades for this window" has to say
+/// so now. Until 2026-09-07 a partition file said it implicitly, which is the
+/// bug: a file appears when its first row lands and says nothing about whether
+/// the rest of the range was ever queried.
+fn trades_covered(from: u64, to: u64) -> radar_store::Coverage {
+    radar_store::Coverage {
+        // Slot zero: a coverage record is read point-in-time, and every fixture
+        // here builds at the store's own watermark, so a record established at
+        // the bottom of the range is visible to all of them.
+        recorded_at: Slot(0),
+        table: radar_store::Table::Trades,
+        filter: None,
+        from_slot: Slot(from),
+        to_slot: Slot(to),
+        source: "test".to_owned(),
+        decoder_version: "test".to_owned(),
+        status: radar_store::Completion::Complete,
+    }
+}
+
 /// Builds a store from the fixtures and returns the table over all of it.
 fn table_over(events: Vec<Event>, outcomes: Vec<Outcome>) -> FeatureTable {
+    // The default fixture says the trades table was collected over everything,
+    // which is what these tests meant when they wrote a trade. The tests about
+    // coverage itself use `table_over_with_coverage` and say something else.
+    table_over_with_coverage(events, outcomes, vec![trades_covered(0, u64::MAX)])
+}
+
+fn table_over_with_coverage(
+    events: Vec<Event>,
+    outcomes: Vec<Outcome>,
+    coverage: Vec<radar_store::Coverage>,
+) -> FeatureTable {
     let dir = tempfile::tempdir().expect("tempdir");
     let mut writer = Writer::open(dir.path(), 1_000).expect("open");
     for event in events {
@@ -179,6 +212,9 @@ fn table_over(events: Vec<Event>, outcomes: Vec<Outcome>) -> FeatureTable {
     }
     for outcome in outcomes {
         writer.append_outcome(outcome).expect("append outcome");
+    }
+    for c in coverage {
+        writer.append_coverage(c).expect("append coverage");
     }
     writer.flush().expect("flush");
 
@@ -766,7 +802,10 @@ fn a_store_that_records_no_trades_reports_no_trade_features() {
     // one of them would have been a statement nobody measured.
     //
     // The dev buy is the exception and stays: it is read off the launch row.
-    let table = table_over(vec![launch(1, 100, 1_000)], vec![]);
+    //
+    // No coverage record at all, which is what a store that never ran a trade
+    // query looks like -- and, since 2026-09-07, the only thing that means it.
+    let table = table_over_with_coverage(vec![launch(1, 100, 1_000)], vec![], vec![]);
 
     for feature in [
         "launch_traders",
@@ -825,33 +864,114 @@ fn a_quiet_launch_in_a_store_that_does_record_trades_reads_zero() {
 
 #[test]
 fn a_window_the_trades_table_only_half_covers_is_not_covered() {
-    // The store partitions at 12,800 slots. A launch at 12,000 has its T at
-    // 18,000, so its window straddles two partitions -- and the trades table
-    // holds only the first. Counting the half it has would produce a number
-    // that is right about one part of the window and silent about the other,
-    // which is worse than absent because it looks like a measurement.
-    let straddling = 12_000u64;
-    assert_ne!(
-        straddling / 12_800,
-        (straddling + T) / 12_800,
-        "the fixture must actually straddle a partition boundary"
-    );
-
-    let table = table_over(
+    // A launch at 1,000 has its T at 7,000. The recorder collected up to 4,000
+    // and no further. Counting the half it has would produce a number that is
+    // right about one part of the window and silent about the other, which is
+    // worse than absent because it looks like a measurement.
+    let at = 1_000u64;
+    let table = table_over_with_coverage(
         vec![
-            launch(1, 100, straddling),
-            // A trade in the first partition only, for another mint, so the
-            // table exists and covers the launch slot but not T.
-            launch(2, 101, straddling + 1),
-            buy(2, 10, straddling + 1, 0, 1),
+            launch(1, 100, at),
+            launch(2, 101, at + 1),
+            buy(2, 10, at + 1, 0, 1),
         ],
         vec![],
+        vec![trades_covered(0, at + T / 2)],
     );
 
     assert_eq!(
         value(&table, 1, "launch_traders"),
         None,
         "half a window is not a measurement"
+    );
+}
+
+#[test]
+fn a_partition_file_is_not_a_claim_that_the_window_was_collected() {
+    // The bug this table exists to close. A partition file appears as soon as
+    // its first row lands, so a run that died a quarter of the way through a
+    // window produced one -- and coverage read from filenames took the whole
+    // window as collected. The rest of it then read as a quiet market.
+    //
+    // Here the store holds a real trade for mint 2 inside the window, so the
+    // partition file exists, and the only coverage record says the run did not
+    // finish. Re-apply by dropping the `Completion::Complete` filter in
+    // `trade_coverage`, or by going back to reading `files(Table::Trades)`.
+    let at = 1_000u64;
+    let mut partial = trades_covered(0, u64::MAX);
+    partial.status = radar_store::Completion::Partial;
+
+    let table = table_over_with_coverage(
+        vec![
+            launch(1, 100, at),
+            launch(2, 101, at + 1),
+            buy(2, 10, at + 1, 0, 1),
+        ],
+        vec![],
+        vec![partial],
+    );
+
+    assert_eq!(
+        value(&table, 1, "launch_traders"),
+        None,
+        "a run that did not finish covers nothing, whatever files it left"
+    );
+    assert_eq!(
+        value(&table, 2, "launch_traders"),
+        None,
+        "not even the mint whose trade is actually on disk"
+    );
+}
+
+#[test]
+fn a_completed_query_that_found_nothing_is_a_measured_zero() {
+    // The other half, and the one that makes the absence above mean something.
+    // A `Complete` record over a window with no trade rows in it is a query
+    // that ran and found nothing -- which is a fact about the market, not about
+    // the recorder. If both cases produced `None` this table would be useless.
+    let table = table_over_with_coverage(
+        vec![launch(1, 100, 1_000)],
+        vec![],
+        vec![trades_covered(0, u64::MAX)],
+    );
+
+    assert_eq!(value(&table, 1, "launch_traders"), Some(0.0));
+    assert_eq!(value(&table, 1, "trades_6000"), Some(0.0));
+}
+
+#[test]
+fn a_coverage_record_established_after_the_watermark_is_not_visible_to_it() {
+    // Rule 3, applied to the evidence about the evidence. A range collected
+    // today must not make a replay of last week better-informed than it was --
+    // which is the same argument the store already makes about rows, and the
+    // reason coverage is partitioned by `recorded_at` rather than by the range
+    // it describes.
+    let at = 1_000u64;
+    let mut late = trades_covered(0, u64::MAX);
+    late.recorded_at = Slot(9_000_000);
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    let mut writer = Writer::open(dir.path(), 1_000).expect("open");
+    writer.append(launch(1, 100, at)).expect("append");
+    writer.append(buy(1, 10, at, 0, 1)).expect("append");
+    writer.append_coverage(late).expect("append coverage");
+    writer.flush().expect("flush");
+
+    let reader = Reader::open(dir.path());
+    let early = features::build(&reader, AsOf::at(Slot(20_000)), Slot(0), Slot(u64::MAX))
+        .expect("built at the earlier watermark");
+    assert_eq!(
+        value(&early, 1, "launch_traders"),
+        None,
+        "the coverage record did not exist at this watermark"
+    );
+
+    let later = features::build(&reader, AsOf::at(Slot(9_000_000)), Slot(0), Slot(u64::MAX))
+        .expect("built at the later watermark");
+    assert_eq!(
+        value(&later, 1, "launch_traders"),
+        Some(1.0),
+        "and it does exist at this one, so the absence above is the watermark          and not a broken fixture"
     );
 }
 

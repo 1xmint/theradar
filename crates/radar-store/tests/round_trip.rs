@@ -3,8 +3,8 @@
 
 use radar_asof::{AsOf, PointInTime};
 use radar_store::{
-    Envelope, Event, Graduation, Launch, Origin, Outcome, Reader, SLOTS_PER_PARTITION, Side, Table,
-    Trade, Writer,
+    Completion, Coverage, Envelope, Event, Graduation, Launch, Origin, Outcome, Reader,
+    SLOTS_PER_PARTITION, Side, Table, Trade, Writer,
 };
 use radar_types::{Address, Signature, Slot};
 
@@ -1158,5 +1158,323 @@ fn a_file_whose_name_cannot_be_parsed_is_read_rather_than_skipped() {
         Reader::watermark(&reader).expect("watermark"),
         Some(Slot(600)),
         "the watermark falls back to every file when no name parses"
+    );
+}
+
+#[test]
+fn a_coverage_record_survives_a_round_trip_through_parquet() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let mut w = Writer::open(dir.path(), 1_000).expect("open");
+    w.append_coverage(Coverage {
+        recorded_at: Slot(500),
+        table: Table::Trades,
+        filter: None,
+        from_slot: Slot(10),
+        to_slot: Slot(400),
+        source: "cryptohouse".to_owned(),
+        decoder_version: "0.0.1".to_owned(),
+        status: Completion::Complete,
+    })
+    .expect("append");
+    w.append_coverage(Coverage {
+        recorded_at: Slot(600),
+        table: Table::Trades,
+        filter: Some("So11111111111111111111111111111111111111112".to_owned()),
+        from_slot: Slot(400),
+        to_slot: Slot(500),
+        source: "rpc".to_owned(),
+        decoder_version: "0.0.1".to_owned(),
+        status: Completion::Partial,
+    })
+    .expect("append");
+    w.flush().expect("flush");
+
+    let got = Reader::open(dir.path())
+        .read_coverage(AsOf::at(Slot(9_999)))
+        .expect("read");
+    assert_eq!(got.len(), 2);
+    assert_eq!(got[0].status, Completion::Complete);
+    assert_eq!(got[0].filter, None);
+    assert_eq!(got[0].source, "cryptohouse");
+    assert_eq!(got[0].from_slot, Slot(10));
+    assert_eq!(got[1].status, Completion::Partial);
+    assert_eq!(
+        got[1].filter.as_deref(),
+        Some("So11111111111111111111111111111111111111112"),
+        "a narrower capture keeps what it was narrowed to"
+    );
+}
+
+#[test]
+fn coverage_is_gated_on_when_the_range_was_established() {
+    // Rule 3 for the evidence about the evidence. The record describes slots 10
+    // to 400 and was written at 600; a reader at 500 must not see it, or a
+    // replay of slot 450 would be told the window had been collected before
+    // anybody had collected it.
+    let dir = tempfile::tempdir().expect("tempdir");
+    let mut w = Writer::open(dir.path(), 1_000).expect("open");
+    w.append_coverage(Coverage {
+        recorded_at: Slot(600),
+        table: Table::Trades,
+        filter: None,
+        from_slot: Slot(10),
+        to_slot: Slot(400),
+        source: "cryptohouse".to_owned(),
+        decoder_version: "0.0.1".to_owned(),
+        status: Completion::Complete,
+    })
+    .expect("append");
+    w.flush().expect("flush");
+
+    let reader = Reader::open(dir.path());
+    assert!(
+        reader
+            .read_coverage(AsOf::at(Slot(500)))
+            .expect("read")
+            .is_empty(),
+        "the range had not been established at slot 500"
+    );
+    assert_eq!(
+        reader
+            .read_coverage(AsOf::at(Slot(600)))
+            .expect("read")
+            .len(),
+        1,
+        "and it had at 600, so the emptiness above is the watermark"
+    );
+}
+
+#[test]
+fn a_bounded_read_does_not_open_partitions_outside_its_range() {
+    // The bound has to reach the disk. Reading the whole table and filtering
+    // afterwards returns the same rows and costs the whole table, which on the
+    // trades table is the difference between a pass that fits in memory and one
+    // that does not -- and it is invisible in the result, which is why this
+    // asserts on the files opened rather than on what came back.
+    let dir = tempfile::tempdir().expect("tempdir");
+    let mut w = Writer::open(dir.path(), 1_000).expect("open");
+    for partition in 0..4u64 {
+        w.append(trade(partition * SLOTS_PER_PARTITION + 5, 1, None))
+            .expect("append");
+    }
+    w.flush().expect("flush");
+
+    let reader = Reader::open(dir.path());
+    let files = reader.files(Table::Trades).expect("files");
+    assert_eq!(files.len(), 4, "one partition file each");
+
+    let as_of = AsOf::at(Slot(SLOTS_PER_PARTITION * 10));
+    let all = reader.read(Table::Trades, as_of).expect("read");
+    assert_eq!(all.len(), 4);
+
+    // One partition's worth, by slot range.
+    let bounded = reader
+        .read_range(
+            Table::Trades,
+            as_of,
+            Some(Slot(SLOTS_PER_PARTITION)),
+            Some(Slot(SLOTS_PER_PARTITION * 2 - 1)),
+        )
+        .expect("read_range");
+    assert_eq!(bounded.len(), 1);
+    assert_eq!(bounded[0].slot(), Slot(SLOTS_PER_PARTITION + 5));
+
+    // And the watermark still binds inside the range: a range that reaches past
+    // the watermark does not reach past it.
+    let narrow = reader
+        .read_range(
+            Table::Trades,
+            AsOf::at(Slot(SLOTS_PER_PARTITION + 5)),
+            None,
+            Some(Slot(SLOTS_PER_PARTITION * 3)),
+        )
+        .expect("read_range");
+    assert_eq!(
+        narrow.len(),
+        2,
+        "the range asks for three partitions; the watermark allows two rows"
+    );
+}
+
+#[test]
+fn a_bounded_read_includes_both_of_its_edges_and_nothing_outside_them() {
+    // The row filter's four comparisons, walked exactly. A range is inclusive
+    // at both ends, so `[200, 200]` is the single row at 200 -- widening either
+    // comparison drops it, and turning either into an equality keeps the two
+    // rows the range excludes and drops the one it asks for.
+    let dir = tempfile::tempdir().expect("tempdir");
+    let mut w = Writer::open(dir.path(), 1_000).expect("open");
+    for slot in [100u64, 200, 300] {
+        w.append(trade(slot, 1, Some(1))).expect("append");
+    }
+    w.flush().expect("flush");
+
+    let got = Reader::open(dir.path())
+        .read_range(
+            Table::Trades,
+            AsOf::at(Slot(9_999)),
+            Some(Slot(200)),
+            Some(Slot(200)),
+        )
+        .expect("read_range");
+    let slots: Vec<u64> = got.iter().map(|e| e.slot().get()).collect();
+    assert_eq!(
+        slots,
+        vec![200],
+        "both edges are inclusive and nothing outside them is admitted"
+    );
+}
+
+#[test]
+fn the_partition_guard_skips_files_without_opening_them() {
+    // The bound has to reach the disk, and "did not open" is invisible in the
+    // rows that came back -- so this makes it visible: a partition outside the
+    // range holds a file that is not Parquet at all. A read that opens it
+    // fails; a read that skips it by name cannot.
+    //
+    // Re-apply by turning the `||` in the partition guard into `&&`: nothing is
+    // ever skipped, the corrupt file is opened, and this returns an error while
+    // still being able to produce the right rows.
+    //
+    // The two real rows sit on a partition boundary -- one at the last slot of
+    // partition 0, one at the first slot of partition 1 -- and the range asks
+    // for exactly those two slots. That is the other half: a guard that skips a
+    // partition whose end *equals* `from`, or whose start *equals* `to`, drops
+    // a row the caller asked for.
+    let last_of_first = SLOTS_PER_PARTITION - 1;
+    let first_of_second = SLOTS_PER_PARTITION;
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    let mut w = Writer::open(dir.path(), 1_000).expect("open");
+    w.append(trade(last_of_first, 1, Some(1))).expect("append");
+    w.append(trade(first_of_second, 1, Some(1)))
+        .expect("append");
+    w.flush().expect("flush");
+
+    // A file in partition 3, named the way the writer names them so the reader
+    // can read its slot range off the name, and holding bytes no Parquet reader
+    // will accept.
+    let far = SLOTS_PER_PARTITION * 3;
+    std::fs::write(
+        dir.path()
+            .join(Table::Trades.dir())
+            .join(format!("slot_{far:012}_g0001.parquet")),
+        b"this is not a parquet file",
+    )
+    .expect("write the trap");
+
+    // High enough that the watermark does not skip the trap for us -- the
+    // range guard has to be what skips it, or this test proves nothing.
+    let as_of = AsOf::at(Slot(SLOTS_PER_PARTITION * 10));
+
+    let got = Reader::open(dir.path())
+        .read_range(
+            Table::Trades,
+            as_of,
+            Some(Slot(last_of_first)),
+            Some(Slot(first_of_second)),
+        )
+        .expect("a bounded read never opens a partition outside its range");
+    let slots: Vec<u64> = got.iter().map(|e| e.slot().get()).collect();
+    assert_eq!(slots, vec![last_of_first, first_of_second]);
+
+    // And the trap is real: an unbounded read over the same store does fail.
+    // Without this the assertion above would pass against a store with nothing
+    // to skip.
+    assert!(
+        Reader::open(dir.path()).read(Table::Trades, as_of).is_err(),
+        "the trap file is not readable, so skipping it is what made the read succeed"
+    );
+}
+
+#[test]
+fn coverage_skips_a_partition_that_starts_after_the_watermark() {
+    // The file-level half of the watermark rule, which the row-level filter
+    // hides: a record in a partition beginning after the watermark is not read
+    // at all. Walked at the exact boundary, because the mutations that survive
+    // otherwise are the ones that differ only when the partition starts exactly
+    // at the watermark.
+    let far = SLOTS_PER_PARTITION * 3;
+    let dir = tempfile::tempdir().expect("tempdir");
+    let mut w = Writer::open(dir.path(), 1_000).expect("open");
+    for at in [100u64, far] {
+        w.append_coverage(Coverage {
+            recorded_at: Slot(at),
+            table: Table::Trades,
+            filter: None,
+            from_slot: Slot(0),
+            to_slot: Slot(10),
+            source: "test".to_owned(),
+            decoder_version: "test".to_owned(),
+            status: Completion::Complete,
+        })
+        .expect("append");
+    }
+    w.flush().expect("flush");
+
+    let reader = Reader::open(dir.path());
+    assert_eq!(
+        reader
+            .read_coverage(AsOf::at(Slot(far)))
+            .expect("read")
+            .len(),
+        2,
+        "a partition starting exactly at the watermark is inside it"
+    );
+    assert_eq!(
+        reader
+            .read_coverage(AsOf::at(Slot(far - 1)))
+            .expect("read")
+            .len(),
+        1,
+        "and one starting after it is not read"
+    );
+}
+
+#[test]
+fn coverage_reaches_disk_on_the_buffer_it_was_given() {
+    // The writer's own counters, which nothing reached: `radar-backfill` prints
+    // them at the end of a run, and a run that reports zero rows written after
+    // writing some is an operator going to look in the wrong place.
+    //
+    // Re-apply by replacing either `+= 1` with `*= 1`, or by widening the
+    // `>=` to `<`: the first never flushes and the second flushes on every
+    // append.
+    let record = |at: u64| Coverage {
+        recorded_at: Slot(at),
+        table: Table::Trades,
+        filter: None,
+        from_slot: Slot(0),
+        to_slot: Slot(10),
+        source: "test".to_owned(),
+        decoder_version: "test".to_owned(),
+        status: Completion::Complete,
+    };
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    let mut w = Writer::open(dir.path(), 2).expect("open");
+
+    w.append_coverage(record(1)).expect("append");
+    assert_eq!(
+        w.written_rows(),
+        0,
+        "one append does not reach a flush threshold of two"
+    );
+
+    w.append_coverage(record(2)).expect("append");
+    assert_eq!(
+        w.written_rows(),
+        2,
+        "the second append reaches it, and both rows are written"
+    );
+    assert_eq!(w.written_files(), 1, "both rows are in one partition file");
+
+    // And they are actually on disk rather than merely counted.
+    assert_eq!(
+        Reader::open(dir.path())
+            .read_coverage(AsOf::at(Slot(9_999)))
+            .expect("read")
+            .len(),
+        2
     );
 }

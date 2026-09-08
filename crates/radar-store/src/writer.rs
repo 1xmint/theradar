@@ -59,6 +59,12 @@ pub struct Writer {
     /// and no transaction position, because nothing happened on chain.
     pending_decisions: BTreeMap<u64, Vec<Decision>>,
     pending_positions: BTreeMap<u64, Vec<crate::Position>>,
+    /// Buffered coverage records, by partition.
+    ///
+    /// Separate for the same reason the three above are: a coverage row is a
+    /// statement about a *range* of the chain rather than a thing that happened
+    /// at a point in it.
+    pending_coverage: BTreeMap<u64, Vec<crate::Coverage>>,
     buffered: usize,
     flush_at: usize,
     written_rows: u64,
@@ -83,6 +89,7 @@ impl Writer {
             pending_outcomes: BTreeMap::new(),
             pending_decisions: BTreeMap::new(),
             pending_positions: BTreeMap::new(),
+            pending_coverage: BTreeMap::new(),
             buffered: 0,
             flush_at: flush_at.max(1),
             written_rows: 0,
@@ -176,6 +183,30 @@ impl Writer {
         Ok(())
     }
 
+    /// Records one ingestion range, as the recorder actually ran it.
+    ///
+    /// Partitioned by `recorded_at` -- the collection watermark -- and not by
+    /// the range it describes, so that reading coverage at a watermark returns
+    /// what was known **then**. A record written today about last week's slots
+    /// belongs to today.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StoreError`] if a flush fails.
+    pub fn append_coverage(&mut self, coverage: crate::Coverage) -> Result<(), StoreError> {
+        let slot = coverage.recorded_at;
+        self.highest_slot = Some(self.highest_slot.map_or(slot, |h| h.max(slot)));
+        self.pending_coverage
+            .entry(partition_of(slot))
+            .or_default()
+            .push(coverage);
+        self.buffered += 1;
+        if self.buffered >= self.flush_at {
+            self.flush()?;
+        }
+        Ok(())
+    }
+
     /// Events buffered but not yet on disk.
     #[must_use]
     pub const fn buffered(&self) -> usize {
@@ -238,6 +269,18 @@ impl Writer {
             let rows = positions.len() as u64;
             let batch = build_position_batch(&positions)?;
             let path = self.next_path(Table::Positions, partition);
+            write_parquet(&path, &batch)?;
+            self.written_rows += rows;
+            self.written_files += 1;
+        }
+
+        for (partition, coverage) in std::mem::take(&mut self.pending_coverage) {
+            if coverage.is_empty() {
+                continue;
+            }
+            let rows = coverage.len() as u64;
+            let batch = build_coverage_batch(&coverage)?;
+            let path = self.next_path(Table::Coverage, partition);
             write_parquet(&path, &batch)?;
             self.written_rows += rows;
             self.written_files += 1;
@@ -309,6 +352,42 @@ fn reason_item() -> Arc<arrow::datatypes::Field> {
 }
 
 /// Builds the Parquet batch for a run of decisions.
+fn build_coverage_batch(coverage: &[crate::Coverage]) -> Result<RecordBatch, StoreError> {
+    let mut recorded_at = UInt64Builder::new();
+    let mut table = StringBuilder::new();
+    let mut filter = StringBuilder::new();
+    let (mut from_slot, mut to_slot) = (UInt64Builder::new(), UInt64Builder::new());
+    let mut source = StringBuilder::new();
+    let mut decoder_version = StringBuilder::new();
+    let mut status = StringBuilder::new();
+
+    for c in coverage {
+        recorded_at.append_value(c.recorded_at.get());
+        table.append_value(c.table.dir());
+        filter.append_option(c.filter.as_deref());
+        from_slot.append_value(c.from_slot.get());
+        to_slot.append_value(c.to_slot.get());
+        source.append_value(&c.source);
+        decoder_version.append_value(&c.decoder_version);
+        status.append_value(c.status.as_str());
+    }
+
+    RecordBatch::try_new(
+        schema_for(Table::Coverage),
+        vec![
+            Arc::new(recorded_at.finish()),
+            Arc::new(table.finish()),
+            Arc::new(filter.finish()),
+            Arc::new(from_slot.finish()),
+            Arc::new(to_slot.finish()),
+            Arc::new(source.finish()),
+            Arc::new(decoder_version.finish()),
+            Arc::new(status.finish()),
+        ],
+    )
+    .map_err(StoreError::from)
+}
+
 fn build_position_batch(positions: &[crate::Position]) -> Result<RecordBatch, StoreError> {
     let (mut mint, mut creator) = (StringBuilder::new(), StringBuilder::new());
     let mut opened_at = UInt64Builder::new();
@@ -623,7 +702,7 @@ fn build_batch(table: Table, events: &[Event]) -> Result<RecordBatch, StoreError
             }
             cols.push(Arc::new(mint.finish()));
         }
-        Table::Outcomes | Table::Decisions | Table::Positions => {
+        Table::Outcomes | Table::Decisions | Table::Positions | Table::Coverage => {
             unreachable!(
                 "not events; see build_outcome_batch / build_decision_batch /                  build_position_batch"
             )

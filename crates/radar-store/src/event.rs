@@ -349,7 +349,8 @@ impl Event {
 /// Separate rather than a single wide table with nullable columns: the schemas
 /// have little in common, and a launch row carrying eight null trade columns
 /// compresses worse and reads worse than two narrow tables.
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, PartialOrd, Ord)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum Table {
     /// Token creations.
     Launches,
@@ -372,6 +373,15 @@ pub enum Table {
     /// is answerable at any watermark. A mutable row would answer it with
     /// today's state.
     Positions,
+    /// What the recorder actually collected, and over what.
+    ///
+    /// Not a chain event and not a measurement of the chain — a record of which
+    /// ingestion ranges were run and which of them finished. Coverage was
+    /// inferred from partition filenames until 2026-09-07, and a file exists as
+    /// soon as its first row lands: a run that died a quarter of the way
+    /// through a window produced one, and the rest of the window read as a
+    /// quiet market. See [`crate::coverage`].
+    Coverage,
 }
 
 impl Table {
@@ -384,6 +394,7 @@ impl Table {
         Self::Outcomes,
         Self::Decisions,
         Self::Positions,
+        Self::Coverage,
     ];
 
     /// The tables that hold chain events, which is what
@@ -425,6 +436,10 @@ impl Table {
             Self::Outcomes => "measured_at",
             Self::Decisions => "decided_at",
             Self::Positions => "opened_at",
+            // The collection watermark: the moment the range was established
+            // complete. A coverage record written today must not make a
+            // decision taken last week look better-informed than it was.
+            Self::Coverage => "recorded_at",
         }
     }
 
@@ -438,7 +453,18 @@ impl Table {
             Self::Outcomes => "outcomes",
             Self::Decisions => "decisions",
             Self::Positions => "positions",
+            Self::Coverage => "coverage",
         }
+    }
+
+    /// The table a directory name belongs to.
+    ///
+    /// The inverse of [`dir`](Self::dir), for the stored `table` column on a
+    /// coverage row. Exhaustive over the same match, so a new table stops
+    /// compiling here rather than reading back as `None`.
+    #[must_use]
+    pub fn from_dir(dir: &str) -> Option<Self> {
+        Self::ALL.iter().copied().find(|t| t.dir() == dir)
     }
 }
 
@@ -602,6 +628,19 @@ mod tests {
         assert_eq!(ok.tx_index, Some(117));
         assert!(ok.succeeded());
         assert!(!ok.outcome_unknown());
+    }
+
+    #[test]
+    fn a_directory_name_maps_back_to_its_own_table_and_nothing_else() {
+        // The inverse of `dir`, and the coverage table's `table` column depends
+        // on it. Re-apply by turning the `==` into `!=`: every name resolves to
+        // whichever table is not it, which for a stored coverage row means a
+        // range about trades reads back as a range about launches.
+        for t in Table::ALL {
+            assert_eq!(Table::from_dir(t.dir()), Some(*t), "{t:?}");
+        }
+        assert_eq!(Table::from_dir("not_a_table"), None);
+        assert_eq!(Table::from_dir(""), None);
     }
 
     #[test]

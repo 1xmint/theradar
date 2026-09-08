@@ -137,6 +137,20 @@ metadata, the dev buy, and what the decision lane recorded. Getting the recorder
 to write trades is the highest-value repair available to this work and it is not
 part of it.
 
+**And a partition file no longer counts as evidence that a window was
+collected.** Changed 2026-09-07, plan 0010 item 2. Coverage was the set of
+partition indices the trades directory held; a partition file appears as soon as
+its first row lands, so a run that died a quarter of the way through a window
+produced one and the rest of the window read as a quiet market. Coverage is now
+a recorded table — ranges the recorder wrote down as having been *run*, with the
+status of the run, read at the watermark so a range collected today cannot
+inform a replay of last week. **Nothing in production writes one yet**: the
+backfill queries by timestamp and the store is keyed by slot, and attesting a
+slot range from a completed time window that returned no rows is a design
+question with its own change. Until it lands every trade-derived feature is
+absent, which on the production store changes nothing — they were already absent
+under the rule this replaces.
+
 **And when it does write one, the row will now say what it does not know.**
 Changed 2026-09-07, plan 0010 item 2. Three fields the recorder does not always
 resolve were stored as sentinels — an unresolved success as `true`, an
