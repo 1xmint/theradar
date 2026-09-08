@@ -66,8 +66,17 @@ Fill in the commit, named checks, observed outcomes, and deployment state for ea
       the publish. **Still to do in item 4:** the persistent outbox keyed by
       operation, the `Uncertain` path for an accepted effect with a lost response
       (the `Publisher` trait cannot express it today and that is named in the
-      code), the four `radar audit` subcommands, retention with loud expiry, and
-      the off-host checkpoint.
+      code), retention with loud expiry, and the off-host checkpoint.
+      **Three of the four `radar audit` subcommands landed** on
+      `feat/radar-audit`: `explain` takes whichever id an operator is holding —
+      mention, mint, week, claim, signature or the event's own — `verify` exits
+      non-zero on a broken chain and **zero on a torn one**, because a monitor
+      that pages for every restart is a monitor somebody mutes, and `export`
+      bundles a week as JSON while saying in the bundle that a filtered copy
+      cannot vouch for the chain it came from. `replay` is deliberately absent
+      and says so where somebody types it: it needs the recorded *inputs* to a
+      decision, and a replay built on what exists would re-derive the verdict
+      from today's world and call the difference a divergence.
 - [ ] 5. Implement admitted launch evidence and permanent receipts.
 - [ ] 6. Replace mixed scoring with explicit whole-week fallback modes.
 - [ ] 7. Implement autonomous evidence relay, selection, and claim integration.
