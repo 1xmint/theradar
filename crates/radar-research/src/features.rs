@@ -50,7 +50,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use radar_asof::{AsOf, LookAhead, Observed};
-use radar_store::{Event, GraduationMode, Outcome, Reader, Side, StoreError, Table, Trade};
+use radar_store::{
+    Completion, Event, GraduationMode, Outcome, Reader, Side, StoreError, Table, Trade,
+};
 use radar_types::{Address, Slot, SlotDelta};
 
 /// Slots between a launch and T, the moment every feature is observed at.
@@ -257,7 +259,7 @@ pub fn build(
         .collect();
 
     let trades = trades_to_t(reader, as_of, &by_mint, &considered)?;
-    let coverage = trade_coverage(reader)?;
+    let coverage = trade_coverage(reader, as_of)?;
 
     // Outcomes per mint, ascending by measurement. The row builder walks this
     // twice — once bounded by T for the creator's record, once unbounded for
@@ -343,7 +345,7 @@ pub fn build(
     })
 }
 
-/// The partitions the trades table actually holds, by partition index.
+/// The slot ranges the trades table was actually collected over.
 ///
 /// # Why a trade feature is not a measurement everywhere
 ///
@@ -355,27 +357,63 @@ pub fn build(
 /// launches, which is rule 9's exact failure and the one this module exists to
 /// refuse.
 ///
-/// So coverage is read from the table's own partition files. A launch whose
-/// window is not wholly inside the partitions the store holds gets **absent**
-/// trade features, and a stratum naming one drops the row rather than reading
-/// the absence as a quiet market.
-fn trade_coverage(reader: &Reader) -> Result<BTreeSet<u64>, StoreError> {
-    Ok(reader
-        .files(Table::Trades)?
-        .iter()
-        .filter_map(|path| Reader::partition_range(path))
-        .map(|(start, _)| radar_store::partition_of(start))
-        .collect())
+/// # Why a partition file is not the evidence
+///
+/// It was, until 2026-09-07: coverage was the set of partition indices the
+/// trades directory held. **A partition file appears as soon as its first row
+/// lands**, so a run that died a quarter of the way through a window produced
+/// one, and the remaining three quarters of that window read as a quiet market
+/// — the same failure the paragraph above describes, arriving by a route the
+/// paragraph above does not close.
+///
+/// So coverage is now read from [`Coverage`] records: ranges the recorder wrote
+/// down as having been *run*, with the status of the run. A `Partial` record
+/// covers nothing. A record about a narrower filter covers nothing here either,
+/// because a cohort capture is not a statement about the venue.
+///
+/// The records are read at the watermark, so a range collected today cannot
+/// make a replay of last week better-informed than it was.
+fn trade_coverage(reader: &Reader, as_of: AsOf) -> Result<Vec<(Slot, Slot)>, StoreError> {
+    let mut ranges: Vec<(Slot, Slot)> = reader
+        .read_coverage(as_of)?
+        .into_iter()
+        .filter(|c| {
+            c.table == Table::Trades && c.status == Completion::Complete && c.filter.is_none()
+        })
+        .map(|c| (c.from_slot, c.to_slot))
+        .collect();
+    ranges.sort_unstable();
+    Ok(ranges)
 }
 
-/// Whether the trades table covers every partition from `from` to `to`.
+/// Whether the recorded ranges cover every slot from `from` to `to`.
 ///
 /// The whole window or none of it. A window half-covered would produce a count
 /// that is right about one half and silent about the other, which is worse than
 /// absent because it looks like a number.
-fn covered(coverage: &BTreeSet<u64>, from: Slot, to: Slot) -> bool {
-    (radar_store::partition_of(from)..=radar_store::partition_of(to))
-        .all(|partition| coverage.contains(&partition))
+///
+/// Adjacent and overlapping ranges join: two runs that between them covered a
+/// window did cover it, and requiring one record to span it would refuse a
+/// window the store genuinely holds.
+fn covered(ranges: &[(Slot, Slot)], from: Slot, to: Slot) -> bool {
+    let mut reached = from;
+    for (start, end) in ranges {
+        if *start > reached {
+            // A gap. `ranges` is sorted, so nothing later can fill it.
+            return false;
+        }
+        if *end >= reached {
+            if *end >= to {
+                return true;
+            }
+            // `end + 1`, because a range ending exactly at `reached` has
+            // covered `reached` and the next slot needing cover is the one
+            // after it. Advancing to `end` instead loops on a single-slot
+            // range for ever.
+            reached = Slot(end.get() + 1);
+        }
+    }
+    false
 }
 
 /// The trades of every considered mint, from its launch to its T, in order.
@@ -395,14 +433,37 @@ fn covered(coverage: &BTreeSet<u64>, from: Slot, to: Slot) -> bool {
 /// holding a mint's whole history when only the first 6,000 slots are ever
 /// looked at is the difference between a pass that fits and one that does not.
 /// A trade before the launch slot is a recording artefact, not history.
+///
+/// **The bound now reaches the disk.** This read the whole trades table and
+/// filtered afterwards until 2026-09-07, so `--from`/`--to` bounded what was
+/// kept and not what was opened — the memory paragraph above was a claim the
+/// code did not implement. The range handed to [`Reader::read_range`] is the
+/// considered launches' own span, widened by T, so no partition outside it is
+/// opened at all.
 fn trades_to_t(
     reader: &Reader,
     as_of: AsOf,
     by_mint: &BTreeMap<Address, radar_store::Launch>,
     considered: &BTreeSet<Address>,
 ) -> Result<BTreeMap<Address, Vec<Trade>>, StoreError> {
+    // The union of every considered mint's window. `None` when nothing is
+    // considered, and then nothing is read.
+    let window = considered
+        .iter()
+        .filter_map(|m| by_mint.get(m))
+        .map(|l| {
+            (
+                l.envelope.slot,
+                l.envelope.slot + SlotDelta(ENTRY_OFFSET_SLOTS),
+            )
+        })
+        .reduce(|(lo, hi), (a, b)| (lo.min(a), hi.max(b)));
+    let Some((from, to)) = window else {
+        return Ok(BTreeMap::new());
+    };
+
     let mut trades: BTreeMap<Address, Vec<Trade>> = BTreeMap::new();
-    for event in reader.read(Table::Trades, as_of)? {
+    for event in reader.read_range(Table::Trades, as_of, Some(from), Some(to))? {
         let Event::Trade(trade) = event else {
             continue;
         };
@@ -1504,5 +1565,39 @@ mod tests {
         assert_eq!(prevalence_ordinal("infrastructure"), Some(2.0));
         assert_eq!(prevalence_ordinal("something new"), None);
         assert_eq!(prevalence_ordinal(""), None);
+    }
+
+    #[test]
+    fn coverage_joins_adjacent_runs_and_refuses_a_gap() {
+        let r = |a: u64, b: u64| (Slot(a), Slot(b));
+
+        // One record spanning the window.
+        assert!(covered(&[r(0, 100)], Slot(10), Slot(20)));
+
+        // Two runs that between them covered it. Requiring one record to span
+        // the window would refuse a window the store genuinely holds.
+        assert!(covered(&[r(0, 10), r(11, 100)], Slot(5), Slot(50)));
+
+        // Overlapping runs are the same answer.
+        assert!(covered(&[r(0, 60), r(40, 100)], Slot(5), Slot(90)));
+
+        // A one-slot hole between them is a hole. This is the case the `end + 1`
+        // in `covered` decides: advancing to `end` instead would treat slot 11
+        // as covered by a range that stops at 10.
+        assert!(!covered(&[r(0, 10), r(12, 100)], Slot(5), Slot(50)));
+
+        // The window starting before anything was collected.
+        assert!(!covered(&[r(10, 100)], Slot(5), Slot(50)));
+
+        // And running off the end of what was collected.
+        assert!(!covered(&[r(0, 40)], Slot(5), Slot(50)));
+
+        // No records at all covers nothing, including a single slot.
+        assert!(!covered(&[], Slot(5), Slot(5)));
+
+        // A single-slot range covers its own slot. Written because the loop
+        // advances by `end + 1`, and a version that advanced by `end` would sit
+        // on this input for ever rather than returning false.
+        assert!(covered(&[r(5, 5)], Slot(5), Slot(5)));
     }
 }

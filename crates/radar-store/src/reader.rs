@@ -9,6 +9,7 @@ use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 use radar_asof::{AsOf, PointInTime};
 use radar_types::{Address, Signature, Slot};
 
+use crate::coverage::{Completion, Coverage};
 use crate::decision::{Conclusion, Decision, KernelOutcome};
 use crate::error::StoreError;
 use crate::event::{Envelope, Event, Graduation, Launch, Origin, Side, Table, Trade};
@@ -105,6 +106,35 @@ impl Reader {
     ///
     /// Returns [`StoreError`] if a file cannot be read or a row is malformed.
     pub fn read(&self, table: Table, as_of: AsOf) -> Result<Vec<Event>, StoreError> {
+        self.read_range(table, as_of, None, None)
+    }
+
+    /// Reads events in `[from, to]`, at or before `as_of`.
+    ///
+    /// **The bound restricts the disk read, not the result.** A caller reading
+    /// one fold used to read the whole table and filter afterwards, which on
+    /// the trades table is the difference between a pass that fits in memory
+    /// and one that does not — and the filtering was invisible in a profile,
+    /// because the cost is in the files that were opened rather than in the
+    /// rows that were kept.
+    ///
+    /// A partition is skipped when its slot range, read from its name alone,
+    /// cannot intersect `[from, to]`. `AsOf` filtering still applies inside
+    /// every partition that is opened: the range is a narrower question, never
+    /// a way around the watermark.
+    ///
+    /// `None` on either end means unbounded there.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StoreError`] if a file cannot be read or a row is malformed.
+    pub fn read_range(
+        &self,
+        table: Table,
+        as_of: AsOf,
+        from: Option<Slot>,
+        to: Option<Slot>,
+    ) -> Result<Vec<Event>, StoreError> {
         // Fail with the reason rather than with "no `slot` column", which is
         // what the caller actually sees otherwise and which says nothing about
         // what to do instead.
@@ -113,15 +143,24 @@ impl Reader {
         }
         let mut out = Vec::new();
         for path in self.files(table)? {
-            // Files are slot-ranged, so whole files past the watermark are
-            // skipped without being opened.
+            // Files are slot-ranged, so whole files past the watermark -- or
+            // outside the requested range -- are skipped without being opened.
             if start_slot_of(&path).is_some_and(|start| start > as_of.slot().get()) {
                 continue;
             }
+            if let Some((start, end)) = Self::partition_range(&path)
+                && (from.is_some_and(|f| end < f) || to.is_some_and(|t| start > t))
+            {
+                continue;
+            }
             for event in read_file(&path, table)? {
-                if as_of.admits(event.slot()) {
-                    out.push(event);
+                if !as_of.admits(event.slot()) {
+                    continue;
                 }
+                if from.is_some_and(|f| event.slot() < f) || to.is_some_and(|t| event.slot() > t) {
+                    continue;
+                }
+                out.push(event);
             }
         }
         out.sort_by_key(|e| {
@@ -171,6 +210,65 @@ impl Reader {
             }
         }
         Ok(total)
+    }
+
+    /// Reads coverage records established at or before `as_of`.
+    ///
+    /// The watermark applies to `recorded_at` — the moment the range was
+    /// established complete — and not to the range itself. That is the
+    /// load-bearing part: a record written today about last week's slots must
+    /// not make a decision taken last week look better-informed than it was.
+    /// AGENTS.md rule 3, applied to the evidence about the evidence.
+    ///
+    /// A row naming a table this build does not know is **skipped**, not an
+    /// error: a store written by a later build is still readable, and coverage
+    /// of a table that does not exist here cannot cover anything here either.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StoreError`] if a file cannot be read or a row is malformed.
+    pub fn read_coverage(&self, as_of: AsOf) -> Result<Vec<Coverage>, StoreError> {
+        let mut out = Vec::new();
+        for path in self.files(Table::Coverage)? {
+            if start_slot_of(&path).is_some_and(|start| start > as_of.slot().get()) {
+                continue;
+            }
+            let file = fs::File::open(&path)?;
+            let reader = ParquetRecordBatchReaderBuilder::try_new(file)?.build()?;
+            for batch in reader {
+                let batch = batch?;
+                let recorded_at = u64_col(&batch, "recorded_at")?;
+                let table = str_col(&batch, "table")?;
+                let filter = str_col(&batch, "filter")?;
+                let from_slot = u64_col(&batch, "from_slot")?;
+                let to_slot = u64_col(&batch, "to_slot")?;
+                let source = str_col(&batch, "source")?;
+                let decoder_version = str_col(&batch, "decoder_version")?;
+                let status = str_col(&batch, "status")?;
+
+                for i in 0..batch.num_rows() {
+                    let at = Slot(recorded_at.value(i));
+                    if !as_of.admits(at) {
+                        continue;
+                    }
+                    let Some(named) = Table::from_dir(table.value(i)) else {
+                        continue;
+                    };
+                    out.push(Coverage {
+                        recorded_at: at,
+                        table: named,
+                        filter: filter.is_valid(i).then(|| filter.value(i).to_owned()),
+                        from_slot: Slot(from_slot.value(i)),
+                        to_slot: Slot(to_slot.value(i)),
+                        source: source.value(i).to_owned(),
+                        decoder_version: decoder_version.value(i).to_owned(),
+                        status: Completion::from_str_or_partial(status.value(i)),
+                    });
+                }
+            }
+        }
+        out.sort_by_key(|c| (c.recorded_at.get(), c.from_slot.get(), c.to_slot.get()));
+        Ok(out)
     }
 
     /// Reads outcome measurements taken at or before `as_of`.
@@ -662,7 +760,7 @@ fn read_file(path: &Path, table: Table) -> Result<Vec<Event>, StoreError> {
                     origin,
                     mint,
                 })),
-                Table::Outcomes | Table::Decisions | Table::Positions => {
+                Table::Outcomes | Table::Decisions | Table::Positions | Table::Coverage => {
                     unreachable!(
                         "not events; read by read_outcomes / read_decisions / read_positions"
                     )

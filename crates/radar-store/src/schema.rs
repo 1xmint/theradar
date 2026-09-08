@@ -85,7 +85,7 @@ fn event_schema(table: Table) -> Arc<Schema> {
             Field::new("accepted_any_price", DataType::Boolean, false),
         ]),
         Table::Graduations => fields.push(Field::new("mint", DataType::Utf8, false)),
-        Table::Outcomes | Table::Decisions | Table::Positions => {
+        Table::Outcomes | Table::Decisions | Table::Positions | Table::Coverage => {
             unreachable!("not chain events; handled by recorded_schema")
         }
     }
@@ -138,6 +138,25 @@ fn recorded_schema(table: Table) -> Arc<Schema> {
         // Append-only: opening writes a row and closing writes another with the
         // same `(mint, opened_at)`. Reading folds them, so the history is
         // answerable at any watermark rather than only as of now.
+        Table::Coverage => Arc::new(Schema::new(vec![
+            // The collection watermark, and the slot column this table is read
+            // point-in-time by.
+            Field::new("recorded_at", DataType::UInt64, false),
+            // Which table the range is about, by directory name.
+            Field::new("table", DataType::Utf8, false),
+            // Null is the whole table over the interval. A value is a narrower
+            // capture and covers nothing else in it -- a cohort capture is not
+            // a statement about the venue.
+            Field::new("filter", DataType::Utf8, true),
+            Field::new("from_slot", DataType::UInt64, false),
+            Field::new("to_slot", DataType::UInt64, false),
+            Field::new("source", DataType::Utf8, false),
+            Field::new("decoder_version", DataType::Utf8, false),
+            // "complete" or "partial". A status this build does not recognise
+            // reads as partial: an unknown promise is not one to rely on, and
+            // the safe direction for coverage is to claim less of it.
+            Field::new("status", DataType::Utf8, false),
+        ])),
         Table::Positions => Arc::new(Schema::new(vec![
             Field::new("mint", DataType::Utf8, false),
             Field::new("creator", DataType::Utf8, false),
@@ -261,9 +280,23 @@ mod tests {
     }
 
     #[test]
-    fn every_table_carries_a_mint() {
+    fn every_table_about_a_token_carries_a_mint() {
         // An event with no token is not useful to anything downstream.
+        //
+        // Coverage is the one exception and it is stated rather than skipped: a
+        // coverage row is about a *range of the chain*, not about a token, and
+        // giving it a `mint` column would invite a reader to join it as though
+        // it were a per-mint fact. Where a capture really was narrower than the
+        // whole table, that goes in `filter`, whose whole job is to say the
+        // record covers nothing else.
         for t in Table::ALL {
+            if *t == Table::Coverage {
+                assert!(
+                    schema_for(*t).field_with_name("filter").is_ok(),
+                    "coverage says what it was narrowed to, if anything"
+                );
+                continue;
+            }
             assert!(schema_for(*t).field_with_name("mint").is_ok(), "{t:?}");
         }
     }

@@ -28,8 +28,14 @@ Fill in the commit, named checks, observed outcomes, and deployment state for ea
       (`the_feature_table_cannot_see_the_future.rs`). Each was verified by
       re-applying the bug — the redundant filter in `trades_to_t` survived its
       own re-application and was removed rather than tested. `cargo test
-      --workspace --all-targets`: 77 suites, 0 failures. **Part two — coverage
-      manifests and bounded `--from`/`--to` reads — is not started.**
+      --workspace --all-targets`: 77 suites, 0 failures. **Part two done** on
+      `fix/research-coverage-and-bounded-reads`: a `coverage` table records
+      which ingestion ranges were run and which finished, read at the watermark;
+      `trade_coverage` reads those records instead of inferring coverage from
+      partition filenames; `Reader::read_range` bounds the disk read and the
+      feature pass uses it. **One piece is deliberately left out and named:**
+      nothing in production writes a coverage record yet, because the backfill
+      queries by timestamp and the store is keyed by slot. That is item 2c.
 - [ ] 3. Repair cohort/label protocol and provenance.
 - [ ] 4. Implement durable audit, offline replay, and effect recovery.
 - [ ] 5. Implement admitted launch evidence and permanent receipts.
