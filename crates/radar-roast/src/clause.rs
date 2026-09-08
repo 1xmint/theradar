@@ -609,6 +609,54 @@ mod tests {
     }
 
     #[test]
+    fn what_is_not_known_reaches_the_model_and_an_empty_section_never_does() {
+        // Rule 9 in the one place the model can act on it. An unknown is
+        // something the reply is expected to *say* -- via a clause, when one is
+        // written -- and the model can only choose to lead on an absence if it
+        // is shown the absence.
+        //
+        // The other half is that the section is absent rather than empty when
+        // nothing is unknown. A heading with nothing under it reads to a model
+        // as a list it failed to receive.
+        let mut sheet = sheet_of(vec![selectable(Kind::LaunchRecipients, "a", "A.")]);
+        assert!(
+            !render_for_selection(&sheet).contains("NOT KNOWN"),
+            "an empty section was added"
+        );
+
+        sheet
+            .unknown
+            .push("the bonding curve could not be read".to_owned());
+        let rendered = render_for_selection(&sheet);
+        assert!(rendered.contains("NOT KNOWN"), "{rendered}");
+        assert!(rendered.contains("the bonding curve could not be read"));
+    }
+
+    #[test]
+    fn a_refusal_says_what_the_model_actually_did() {
+        // The line an operator reads in `radar roast`'s output, and the only
+        // thing that tells "wrote a sentence" apart from "asked for a register
+        // nobody authored". Those want different fixes -- the prompt, and the
+        // clause list -- so an empty or uniform message costs a diagnosis.
+        assert!(
+            NotSelected::Unparsed("it is a rug".to_owned())
+                .to_string()
+                .contains("it is a rug"),
+            "the offending line is quoted back"
+        );
+        for (why, wanted) in [
+            (NotSelected::NoSuchFact(9), "F9"),
+            (NotSelected::Repeated(2), "F2"),
+            (NotSelected::NoSuchVoice("savage".to_owned()), "savage"),
+            (NotSelected::TooMany(4), "4"),
+            (NotSelected::Empty, "nothing"),
+        ] {
+            let said = why.to_string();
+            assert!(said.contains(wanted), "{why:?} said {said:?}");
+        }
+    }
+
+    #[test]
     fn a_register_nobody_wrote_for_that_fact_is_refused() {
         // Different from an unknown register, and the parser says which: one is
         // the model inventing a word, the other is it asking for a sentence that
