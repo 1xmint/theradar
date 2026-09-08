@@ -55,7 +55,19 @@ Fill in the commit, named checks, observed outcomes, and deployment state for ea
       time-block resampling with a creator-grouped sensitivity analysis. Item 4
       (train-only thresholds) was already held by `grammar`, which takes its
       deciles from the fitting rows.
-- [ ] 4. Implement durable audit, offline replay, and effect recovery.
+- [~] 4. Implement durable audit, offline replay, and effect recovery. **The
+      journal itself is done** on `feat/replayable-audit`: `radar-journal` is an
+      append-only, hash-chained record whose `record` fills the sequence, the
+      previous hash and the event id so a caller cannot choose them, and whose
+      `verify` keeps three answers apart — nothing was ever written, the last
+      write was interrupted, and something wrote to this file that was not the
+      journal. Wired into `radar-analyst`'s publish path as a real caller: a
+      journal that cannot be opened stops the tick, and a write that fails blocks
+      the publish. **Still to do in item 4:** the persistent outbox keyed by
+      operation, the `Uncertain` path for an accepted effect with a lost response
+      (the `Publisher` trait cannot express it today and that is named in the
+      code), the four `radar audit` subcommands, retention with loud expiry, and
+      the off-host checkpoint.
 - [ ] 5. Implement admitted launch evidence and permanent receipts.
 - [ ] 6. Replace mixed scoring with explicit whole-week fallback modes.
 - [ ] 7. Implement autonomous evidence relay, selection, and claim integration.

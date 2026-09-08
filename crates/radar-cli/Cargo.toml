@@ -30,6 +30,7 @@ radar-onchain.workspace = true
 radar-roast.workspace = true
 # The mention parser, the admission gate and the reply log. Cannot post.
 radar-analyst.workspace = true
+radar-journal.workspace = true
 radar-contest.workspace = true
 radar-payout.workspace = true
 radar-pumpfun.workspace = true

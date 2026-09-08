@@ -215,9 +215,15 @@ fn answer(
     let was_template = entry.fellback.is_some();
 
     // The log is written before anything is said, and a failure to write stops
-    // the reply.
-    let written = radar_analyst::publish::publish(&radar_analyst::DryRun, log_path, entry)
-        .map_err(|e| format!("could not write the reply log at {log_path}: {e}"))?;
+    // the reply. So is the journal: this is a dry run and says nothing, but it
+    // exercises the same path the daemon does, and a dry run that skipped the
+    // journal would be rehearsing a different loop from the one that ships.
+    let journal_path = format!("{log_path}.journal.jsonl");
+    let mut journal = radar_journal::Journal::open(&journal_path)
+        .map_err(|e| format!("could not open the journal at {journal_path}: {e}"))?;
+    let written =
+        radar_analyst::publish::publish(&radar_analyst::DryRun, log_path, &mut journal, entry)
+            .map_err(|e| format!("could not write the reply log at {log_path}: {e}"))?;
 
     print!("--> {}", written.reply);
     if needs_newline(&written.reply) {

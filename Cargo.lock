@@ -1281,6 +1281,7 @@ dependencies = [
  "base64",
  "hmac",
  "radar-contest",
+ "radar-journal",
  "radar-model",
  "radar-onchain",
  "radar-provider",
@@ -1332,6 +1333,7 @@ dependencies = [
  "radar-exec",
  "radar-graph",
  "radar-instruments",
+ "radar-journal",
  "radar-model",
  "radar-onchain",
  "radar-payout",
@@ -1417,6 +1419,18 @@ dependencies = [
  "radar-store",
  "radar-types",
  "schemars",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror",
+]
+
+[[package]]
+name = "radar-journal"
+version = "0.0.1"
+dependencies = [
+ "blake3",
+ "radar-types",
  "serde",
  "serde_json",
  "tempfile",

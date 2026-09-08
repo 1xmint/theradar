@@ -41,6 +41,8 @@
 //! The rest of the loop — parsing, admission, the log, the reply itself — does
 //! not depend on either answer, which is why it is finished and this is not.
 
+use radar_journal::{Correlation, Journal, Outcome, Stage};
+
 use crate::log::Entry;
 
 /// Somewhere a reply can go.
@@ -148,11 +150,30 @@ impl Publisher for DryRun {
 pub fn publish(
     publisher: &dyn Publisher,
     log_path: &str,
+    journal: &mut Journal,
     mut entry: Entry,
 ) -> std::io::Result<Entry> {
     // Said nothing yet. This is the record that makes the reply defensible even
     // if everything after it fails.
     crate::log::append(log_path, &entry)?;
+
+    // And the durable intent, which is a different claim from the reply log's.
+    // The log says the reply was entitled to be made; this says it was decided
+    // before it was attempted. **A journal write that fails blocks the
+    // publish** -- ADR 0017's one rule -- so the `?` here is the whole point and
+    // not error hygiene.
+    let intent = journal
+        .record(
+            Stage::Publication,
+            Outcome::Ok,
+            entry.at,
+            correlation_of(&entry),
+            radar_types::build_sha().map(ToOwned::to_owned),
+            Vec::new(),
+            None,
+            None,
+        )
+        .map_err(|e| std::io::Error::other(e.to_string()))?;
 
     match publisher.reply(&entry.mention_id, &entry.reply) {
         Ok(id) => entry.reply_id = Some(id),
@@ -168,7 +189,41 @@ pub fn publish(
         }
     }
     crate::log::append(log_path, &entry)?;
+
+    // The settlement, chained to the intent by naming its id. A publisher that
+    // returned an error is `Failed`; one that returned an id is `Ok`. There is
+    // deliberately no path to `Uncertain` here yet -- this `Publisher` trait
+    // returns a `Result` and cannot express "accepted, response lost", which is
+    // a limit of the trait rather than a state that cannot happen. Recording a
+    // lost response as `Failed` is what makes a retry publish twice, so the
+    // trait is where that has to change, and it is named in ADR 0017 as part of
+    // the outbox rather than smuggled in here.
+    journal
+        .record(
+            Stage::Publication,
+            if entry.reply_id.is_some() {
+                Outcome::Ok
+            } else {
+                Outcome::Failed
+            },
+            entry.at,
+            correlation_of(&entry),
+            radar_types::build_sha().map(ToOwned::to_owned),
+            Vec::new(),
+            entry.fellback.clone(),
+            Some(format!("intent {}", intent.id())),
+        )
+        .map_err(|e| std::io::Error::other(e.to_string()))?;
     Ok(entry)
+}
+
+/// What a reply's journal events are about.
+fn correlation_of(entry: &Entry) -> Correlation {
+    Correlation {
+        mention: Some(entry.mention_id.clone()),
+        mint: entry.mint.clone(),
+        ..Correlation::default()
+    }
 }
 
 #[cfg(test)]
@@ -224,7 +279,8 @@ mod tests {
     fn a_dry_run_is_logged_with_no_reply_id() {
         // "We decided this" is recorded; "we published this" is not claimed.
         let path = temp("dry.jsonl");
-        let out = publish(&DryRun, &path, entry()).expect("logged");
+        let mut journal = Journal::open(temp("dry-journal.jsonl")).expect("journal");
+        let out = publish(&DryRun, &path, &mut journal, entry()).expect("logged");
         assert!(out.reply_id.is_none());
         assert!(out.fellback.expect("a reason").contains("not published"));
 
@@ -277,7 +333,8 @@ mod tests {
             path: path.clone(),
             seen: std::sync::Mutex::new(usize::MAX),
         };
-        publish(&publisher, &path, entry()).expect("logged");
+        let mut journal = Journal::open(temp("fail-journal.jsonl")).expect("journal");
+        publish(&publisher, &path, &mut journal, entry()).expect("logged");
 
         let at_post_time = *publisher.seen.lock().expect("not poisoned");
         assert_eq!(
@@ -304,7 +361,8 @@ mod tests {
     #[test]
     fn a_published_reply_is_logged_with_its_id() {
         let path = temp("live.jsonl");
-        let out = publish(&Posts, &path, entry()).expect("logged");
+        let mut journal = Journal::open(temp("posts-journal.jsonl")).expect("journal");
+        let out = publish(&Posts, &path, &mut journal, entry()).expect("logged");
         assert_eq!(out.reply_id.as_deref(), Some("reply-1"));
         assert!(out.fellback.is_none());
         assert_eq!(
@@ -325,7 +383,8 @@ mod tests {
         // the failure and posting anyway -- is the exact situation the log
         // exists to prevent.
         let bad = "/this/path/does/not/exist/and/cannot/be/created/log.jsonl";
-        assert!(publish(&Posts, bad, entry()).is_err());
+        let mut journal = Journal::open(temp("bad-journal.jsonl")).expect("journal");
+        assert!(publish(&Posts, bad, &mut journal, entry()).is_err());
     }
 
     #[test]
@@ -336,7 +395,8 @@ mod tests {
         let path = temp("both.jsonl");
         let mut e = entry();
         e.fellback = Some("Fabricated".to_owned());
-        let out = publish(&DryRun, &path, e).expect("logged");
+        let mut journal = Journal::open(temp("fellback-journal.jsonl")).expect("journal");
+        let out = publish(&DryRun, &path, &mut journal, e).expect("logged");
         let reason = out.fellback.expect("a reason");
         assert!(reason.contains("Fabricated"), "{reason}");
         assert!(reason.contains("not published"), "{reason}");
