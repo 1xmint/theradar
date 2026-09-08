@@ -118,6 +118,76 @@ pub fn feature_index(name: &str) -> Option<usize> {
     FEATURES.iter().position(|f| *f == name)
 }
 
+/// Why a row carries no label for a horizon.
+///
+/// Every one of these is a different fact about the evidence, and collapsing
+/// them into `None` was costing the report the only thing it could say about
+/// its own denominator. Design 0015 §3.2 items 2 and 5: a missing label is a
+/// gap, and a reader needs to know which kind before deciding whether the
+/// launches that do carry one are a fair sample of the launches that do not.
+///
+/// The order is the order the checks run in, so the first reason that applies
+/// is the one recorded.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Missing {
+    /// Nothing was measured at or after T, so there is no entry to price from.
+    NoEntry,
+    /// Nothing was measured at or before the horizon after the entry.
+    NoExit,
+    /// The latest measurement before the horizon **is** the entry.
+    ///
+    /// One reading divided by itself, which is a return of exactly zero and an
+    /// identity rather than a measurement. This was 357,077 rows on the first
+    /// live run and it made every median in every stratum 0.0 bps.
+    OneObservationTwice,
+    /// The entry's window held no fills, so its price is one nobody quoted.
+    ///
+    /// A quote that could not have been bought at is not an entry, however live
+    /// the exit is.
+    StaleEntry,
+    /// The exit's window held no fills, so its price is one nobody could have
+    /// sold at.
+    StaleExit,
+    /// A checkpoint carried no price at all.
+    ///
+    /// Distinct from the two above: those are prices that exist and are stale,
+    /// this is a measurement that never had one.
+    NoPrice,
+}
+
+impl Missing {
+    /// The spelling in the file, and in the report.
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::NoEntry => "no_entry",
+            Self::NoExit => "no_exit",
+            Self::OneObservationTwice => "one_observation_twice",
+            Self::StaleEntry => "stale_entry",
+            Self::StaleExit => "stale_exit",
+            Self::NoPrice => "no_price",
+        }
+    }
+
+    /// The inverse, refusing anything else rather than guessing.
+    ///
+    /// A spelling this build does not know is a schema change. Reading it as
+    /// one of these would put a row in a bucket nobody measured.
+    #[must_use]
+    pub fn from_label(label: &str) -> Option<Self> {
+        [
+            Self::NoEntry,
+            Self::NoExit,
+            Self::OneObservationTwice,
+            Self::StaleEntry,
+            Self::StaleExit,
+            Self::NoPrice,
+        ]
+        .into_iter()
+        .find(|m| m.label() == label)
+    }
+}
+
 /// One launch, observed at T, with what happened next.
 #[derive(Clone, PartialEq, Debug)]
 pub struct Row {
@@ -134,11 +204,22 @@ pub struct Row {
     /// never zero.
     pub values: Vec<Option<f64>>,
     /// Gross return from the entry checkpoint to the six-hour checkpoint, in
-    /// basis points. `None` when either checkpoint is missing a price.
+    /// basis points. `None` when there is no label, and
+    /// [`missing_6h`](Self::missing_6h) says why.
     pub gross_6h_bps: Option<f64>,
+    /// Why there is no six-hour label, when there is none.
+    ///
+    /// Exactly one of this and [`gross_6h_bps`](Self::gross_6h_bps) is `Some`
+    /// on a row this build wrote. Both `None` is a row read back from a file
+    /// written before 2026-09-08, when the reason was not recorded: an absence
+    /// whose reason is itself absent, which is the honest reading of an older
+    /// file and not a seventh reason.
+    pub missing_6h: Option<Missing>,
     /// Gross return from the entry checkpoint to the twenty-four-hour
     /// checkpoint, in basis points.
     pub gross_24h_bps: Option<f64>,
+    /// Why there is no twenty-four-hour label, when there is none.
+    pub missing_24h: Option<Missing>,
     /// How the token graduated, as measured by the latest outcome at the
     /// watermark. A label: it is read from the future and is not a feature.
     pub mode: Option<GraduationMode>,
@@ -615,15 +696,17 @@ fn build_row(inputs: &Inputs<'_>) -> Result<Row, BuildError> {
     factory_features(&mut builder, inputs)?;
     decision_features(&mut builder, inputs)?;
 
-    let (gross_6h_bps, gross_24h_bps, mode) = labels(inputs);
+    let (six, day, mode) = labels(inputs);
     Ok(Row {
         mint: inputs.launch.mint,
         creator: inputs.launch.creator,
         launch_slot: inputs.launch_slot(),
         t: inputs.t(),
         values: builder.values,
-        gross_6h_bps,
-        gross_24h_bps,
+        gross_6h_bps: six.ok(),
+        missing_6h: six.err(),
+        gross_24h_bps: day.ok(),
+        missing_24h: day.err(),
         mode,
     })
 }
@@ -964,7 +1047,13 @@ fn decision_features(builder: &mut RowBuilder, inputs: &Inputs<'_>) -> Result<()
 /// The entry is the first checkpoint at or after T; the exit is the last
 /// checkpoint at or before the horizon, and it has to be a later measurement
 /// than the entry or the "return" is one reading divided by itself.
-fn labels(inputs: &Inputs<'_>) -> (Option<f64>, Option<f64>, Option<GraduationMode>) {
+fn labels(
+    inputs: &Inputs<'_>,
+) -> (
+    Result<f64, Missing>,
+    Result<f64, Missing>,
+    Option<GraduationMode>,
+) {
     let series = inputs
         .per_mint
         .get(&inputs.launch.mint)
@@ -972,10 +1061,13 @@ fn labels(inputs: &Inputs<'_>) -> (Option<f64>, Option<f64>, Option<GraduationMo
         .unwrap_or_default();
     let t = inputs.t();
     let entry = first_from(&series, t);
-    let gross = |hours: u64| -> Option<f64> {
-        let entry = entry?;
+    // A `Result` rather than an `Option`, so every path out of here names its
+    // reason. The reasons are the report's account of its own denominator
+    // (design 0015 §3.2 items 2 and 5), and an `Option` cannot carry one.
+    let gross = |hours: u64| -> Result<f64, Missing> {
+        let entry = entry.ok_or(Missing::NoEntry)?;
         let horizon = inputs.launch_slot() + SlotDelta(hours * SLOTS_PER_HOUR);
-        let exit = latest_by(&series, horizon)?;
+        let exit = latest_by(&series, horizon).ok_or(Missing::NoExit)?;
         // Strictly later than the entry, not merely at or after T. The first
         // live run made this exact mistake: most mints in the production store
         // are measured once after T, so the latest measurement before the
@@ -984,7 +1076,7 @@ fn labels(inputs: &Inputs<'_>) -> (Option<f64>, Option<f64>, Option<GraduationMo
         // 357,077 rows, and every median in every stratum was 0.0 bps -- a null
         // that looked like a measurement and was an identity.
         if exit.measured_at <= entry.measured_at {
-            return None;
+            return Err(Missing::OneObservationTwice);
         }
         // And both prices have to be **fresh**, which is the same mistake two
         // levels down. `last_price` is the price of the last observed fill, so
@@ -1007,10 +1099,17 @@ fn labels(inputs: &Inputs<'_>) -> (Option<f64>, Option<f64>, Option<GraduationMo
         //
         // It is absent on every row written before 2026-08-31, when the column
         // was added, so labels before then are refused rather than guessed.
-        if entry.window_peak_price.is_none() || exit.window_peak_price.is_none() {
-            return None;
+        if entry.window_peak_price.is_none() {
+            return Err(Missing::StaleEntry);
         }
-        bps_between(entry.last_price?, exit.last_price?)
+        if exit.window_peak_price.is_none() {
+            return Err(Missing::StaleExit);
+        }
+        bps_between(
+            entry.last_price.ok_or(Missing::NoPrice)?,
+            exit.last_price.ok_or(Missing::NoPrice)?,
+        )
+        .ok_or(Missing::NoPrice)
     };
     (
         gross(6),
@@ -1161,7 +1260,13 @@ fn schema() -> arrow::datatypes::Schema {
         fields.push(Field::new(*name, DataType::Float64, true));
     }
     fields.push(Field::new("gross_6h_bps", DataType::Float64, true));
+    // Why there is no label, when there is none. Added 2026-09-08 and absent
+    // from every file written before, which the reader takes with the optional
+    // accessor -- an absence whose reason is itself absent is the honest
+    // reading of an older file.
+    fields.push(Field::new("missing_6h", DataType::Utf8, true));
     fields.push(Field::new("gross_24h_bps", DataType::Float64, true));
+    fields.push(Field::new("missing_24h", DataType::Utf8, true));
     fields.push(Field::new("graduation_mode", DataType::Utf8, true));
     arrow::datatypes::Schema::new(fields)
 }
@@ -1186,23 +1291,17 @@ fn mode_from(label: &str) -> Option<GraduationMode> {
     }
 }
 
-/// Writes the table.
+/// The file's columns, in the order [`schema`] declares them.
 ///
-/// Deterministic: the same table written twice produces the same bytes, which
-/// `radar features` run twice depends on and
-/// `the_same_table_writes_the_same_bytes` holds.
-///
-/// # Errors
-///
-/// [`FileError`] when the path cannot be created or arrow refuses the batch.
-pub fn write(table: &FeatureTable, path: &std::path::Path) -> Result<(), FileError> {
+/// Split out of [`write`] so that adding a column is one edit in a function
+/// whose whole job is the column list, rather than one more block in a function
+/// that also creates directories and sets compression. The two orders have to
+/// agree, and nothing but reading them together enforces that — which is the
+/// argument for keeping this one short and next to the schema.
+fn columns_of(table: &FeatureTable) -> Vec<arrow::array::ArrayRef> {
     use arrow::array::{ArrayRef, Float64Array, StringArray, UInt64Array};
-    use parquet::arrow::ArrowWriter;
-    use parquet::basic::{Compression, ZstdLevel};
-    use parquet::file::properties::WriterProperties;
     use std::sync::Arc;
 
-    let schema = Arc::new(schema());
     let mut columns: Vec<ArrayRef> = vec![
         Arc::new(
             table
@@ -1253,8 +1352,22 @@ pub fn write(table: &FeatureTable, path: &std::path::Path) -> Result<(), FileErr
         table
             .rows
             .iter()
+            .map(|r| r.missing_6h.map(Missing::label))
+            .collect::<StringArray>(),
+    ));
+    columns.push(Arc::new(
+        table
+            .rows
+            .iter()
             .map(|r| r.gross_24h_bps)
             .collect::<Float64Array>(),
+    ));
+    columns.push(Arc::new(
+        table
+            .rows
+            .iter()
+            .map(|r| r.missing_24h.map(Missing::label))
+            .collect::<StringArray>(),
     ));
     columns.push(Arc::new(
         table
@@ -1263,8 +1376,26 @@ pub fn write(table: &FeatureTable, path: &std::path::Path) -> Result<(), FileErr
             .map(|r| r.mode.map(mode_label))
             .collect::<StringArray>(),
     ));
+    columns
+}
 
-    let batch = arrow::record_batch::RecordBatch::try_new(Arc::clone(&schema), columns)?;
+/// Writes the table.
+///
+/// Deterministic: the same table written twice produces the same bytes, which
+/// `radar features` run twice depends on and
+/// `the_same_table_writes_the_same_bytes` holds.
+///
+/// # Errors
+///
+/// [`FileError`] when the path cannot be created or arrow refuses the batch.
+pub fn write(table: &FeatureTable, path: &std::path::Path) -> Result<(), FileError> {
+    use parquet::arrow::ArrowWriter;
+    use parquet::basic::{Compression, ZstdLevel};
+    use parquet::file::properties::WriterProperties;
+    use std::sync::Arc;
+
+    let schema = Arc::new(schema());
+    let batch = arrow::record_batch::RecordBatch::try_new(Arc::clone(&schema), columns_of(table))?;
     let props = WriterProperties::builder()
         .set_compression(Compression::ZSTD(ZstdLevel::try_new(3).unwrap_or_default()))
         .set_dictionary_enabled(true)
@@ -1406,6 +1537,23 @@ fn rows_from(batch: &arrow::record_batch::RecordBatch, path: &str) -> Result<Vec
         .collect::<Result<_, _>>()?;
     let six = real("gross_6h_bps")?;
     let day = real("gross_24h_bps")?;
+    // Optional, because a file written before 2026-09-08 has no such column.
+    // Erroring on it would make every table already on disk unreadable in the
+    // change that started recording the reason -- `older_files_still_read.rs`
+    // is a whole test file about that mistake.
+    let why_six = batch
+        .column_by_name("missing_6h")
+        .and_then(|c| c.as_any().downcast_ref::<StringArray>());
+    let why_day = batch
+        .column_by_name("missing_24h")
+        .and_then(|c| c.as_any().downcast_ref::<StringArray>());
+    let reason = |column: Option<&StringArray>, i: usize| -> Option<Missing> {
+        let column = column?;
+        column
+            .is_valid(i)
+            .then(|| Missing::from_label(column.value(i)))
+            .flatten()
+    };
     let mode = text("graduation_mode")?;
 
     let parse = |value: &str, what: &str| -> Result<Address, FileError> {
@@ -1427,7 +1575,9 @@ fn rows_from(batch: &arrow::record_batch::RecordBatch, path: &str) -> Result<Vec
                 .map(|c| c.is_valid(i).then(|| c.value(i)))
                 .collect(),
             gross_6h_bps: six.is_valid(i).then(|| six.value(i)),
+            missing_6h: reason(why_six, i),
             gross_24h_bps: day.is_valid(i).then(|| day.value(i)),
+            missing_24h: reason(why_day, i),
             // An unknown label reads as absent rather than as a mode. A new
             // spelling is a schema change, and guessing one would put tokens in
             // a cohort nobody measured.

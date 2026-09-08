@@ -17,7 +17,7 @@
 //! `creator_edge` look prophetic in a backtest and ordinary in production.
 
 use radar_asof::AsOf;
-use radar_research::features::{self, FeatureTable};
+use radar_research::features::{self, FeatureTable, Missing};
 use radar_store::{Envelope, Event, Launch, Origin, Outcome, Reader, Trade, Writer};
 use radar_types::{Address, Signature, Slot};
 
@@ -1173,4 +1173,147 @@ fn a_failed_swap_is_not_a_trade_a_buyer_or_curve_progress() {
         None,
         "ten SOL of reverted buying moved the curve nowhere"
     );
+}
+
+#[test]
+fn every_absent_label_says_which_of_the_six_things_went_wrong() {
+    // The reasons are not interchangeable. A population missing labels because
+    // nothing was ever measured after T is a different sample from one missing
+    // them because every exit price was stale, and a report that says only
+    // "absent" cannot tell a reader which sample they are looking at.
+    //
+    // Re-apply by collapsing any arm of `labels` back to a bare `None`: the
+    // case it covers loses its reason and lands in the wrong bucket.
+    let at = 1_000u64;
+    let six = 6 * 9_000u64;
+
+    // Nothing measured at or after T.
+    let no_entry = table_over(
+        vec![launch(1, 100, at)],
+        vec![outcome(1, at + 10, at, None, Some(100))],
+    );
+    assert_eq!(no_entry.rows[0].missing_6h, Some(Missing::NoEntry));
+
+    // An entry after T, but nothing later inside the horizon: the latest
+    // measurement before the horizon is the entry itself.
+    let one_reading = table_over(
+        vec![launch(1, 100, at)],
+        vec![outcome(1, at + T, at, None, Some(100))],
+    );
+    assert_eq!(
+        one_reading.rows[0].missing_6h,
+        Some(Missing::OneObservationTwice),
+        "one reading divided by itself is an identity, not a return"
+    );
+
+    // An entry whose own window held no fills: a quote nobody could have
+    // bought at.
+    let mut stale_entry_first = outcome(1, at + T, at, None, Some(100));
+    stale_entry_first.window_peak_price = None;
+    stale_entry_first.window_trough_price = None;
+    let stale_entry = table_over(
+        vec![launch(1, 100, at)],
+        vec![
+            stale_entry_first,
+            outcome(1, at + T + 5_000, at, None, Some(150)),
+        ],
+    );
+    assert_eq!(stale_entry.rows[0].missing_6h, Some(Missing::StaleEntry));
+
+    // And the same at the exit, which is the other end of the same mistake.
+    let mut stale_exit_last = outcome(1, at + T + 5_000, at, None, Some(150));
+    stale_exit_last.window_peak_price = None;
+    stale_exit_last.window_trough_price = None;
+    let stale_exit = table_over(
+        vec![launch(1, 100, at)],
+        vec![outcome(1, at + T, at, None, Some(100)), stale_exit_last],
+    );
+    assert_eq!(stale_exit.rows[0].missing_6h, Some(Missing::StaleExit));
+
+    // A checkpoint that carried no price at all -- distinct from the two
+    // above, which are prices that exist and are stale.
+    let mut no_price_entry = outcome(1, at + T, at, None, Some(100));
+    no_price_entry.last_price = None;
+    let no_price = table_over(
+        vec![launch(1, 100, at)],
+        vec![
+            no_price_entry,
+            outcome(1, at + T + 5_000, at, None, Some(150)),
+        ],
+    );
+    assert_eq!(no_price.rows[0].missing_6h, Some(Missing::NoPrice));
+
+    // Nothing at or before the horizon *after* an entry that is itself past
+    // it. The six-hour horizon is closed and the day-long one is not, so the
+    // same launch fails the two horizons differently -- which is why the
+    // reason is recorded per horizon rather than per row.
+    let late = table_over(
+        vec![launch(1, 100, at)],
+        vec![
+            outcome(1, at + six + 1, at, None, Some(100)),
+            outcome(1, at + six + 9_000, at, None, Some(150)),
+        ],
+    );
+    assert_eq!(late.rows[0].missing_6h, Some(Missing::NoExit));
+    assert_eq!(
+        late.rows[0].gross_24h_bps,
+        Some(5_000.0),
+        "the day-long horizon is still open and does carry a label"
+    );
+    assert_eq!(late.rows[0].missing_24h, None);
+}
+
+#[test]
+fn a_labelled_row_carries_no_reason_and_an_unlabelled_one_carries_nothing_else() {
+    // Exactly one of the two is set on a row this build wrote. Both would be a
+    // row that is somehow labelled and excluded; neither would be an absence
+    // whose reason nobody recorded, which is what an older file reads back as
+    // and is not something this build should produce.
+    let at = 1_000u64;
+    let table = table_over(
+        vec![launch(1, 100, at), launch(2, 100, at + 1)],
+        vec![
+            outcome(1, at + T, at, None, Some(100)),
+            outcome(1, at + T + 5_000, at, None, Some(150)),
+        ],
+    );
+
+    for row in &table.rows {
+        assert_eq!(
+            row.gross_6h_bps.is_some(),
+            row.missing_6h.is_none(),
+            "{} has both or neither at six hours",
+            row.mint
+        );
+        assert_eq!(
+            row.gross_24h_bps.is_some(),
+            row.missing_24h.is_none(),
+            "{} has both or neither at a day",
+            row.mint
+        );
+    }
+}
+
+#[test]
+fn the_reason_survives_the_file_and_an_older_file_reads_back_as_unrecorded() {
+    // The reason is only useful if it reaches the report, and the report is
+    // built from the file rather than from the table in memory.
+    let at = 1_000u64;
+    let table = table_over(
+        vec![launch(1, 100, at)],
+        vec![outcome(1, at + T, at, None, Some(100))],
+    );
+    assert_eq!(
+        table.rows[0].missing_6h,
+        Some(Missing::OneObservationTwice),
+        "the fixture is the case being carried"
+    );
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join(features::file_name(table.watermark));
+    features::write(&table, &path).expect("written");
+    let back = features::read(&path).expect("read");
+
+    assert_eq!(back.rows[0].missing_6h, Some(Missing::OneObservationTwice));
+    assert_eq!(back.rows[0].missing_24h, Some(Missing::OneObservationTwice));
 }
