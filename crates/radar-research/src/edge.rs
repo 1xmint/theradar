@@ -808,7 +808,6 @@ fn split(population: &[Slot]) -> Result<Vec<(Slot, Slot)>, EdgeError> {
         // A `position` over a fixed slice cannot loop forever whatever a mutant
         // does to it. That is AGENTS.md §5's ladder applied to a check rather
         // than a behaviour: the hang was made impossible instead of tested for.
-        // `tags::substitute` carries the same note for the same reason.
         let at = population[nominal];
         let end = population[nominal..]
             .iter()

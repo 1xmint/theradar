@@ -21,7 +21,7 @@ use radar_model::{Answer, Provider, Request, Unreachable};
 use radar_onchain::budget::Count;
 use radar_onchain::dossier::{CurveFacts, Dossier};
 use radar_onchain::launch::{LaunchBlock, Metadata};
-use radar_roast::sheet::{Fact, FactSheet};
+use radar_roast::sheet::FactSheet;
 use radar_roast::{BaseRates, fidelity, forbidden, voice};
 use radar_types::{Address, MicroUsd, Slot};
 
@@ -326,12 +326,12 @@ fn a_clean_measured_reply_still_survives_every_check() {
         None,
         None,
     );
-    // Written the way the prompt asks for: prose with slots, and not one digit
-    // the model chose. `[F1]` is the first fact on whatever sheet this dossier
-    // produces, so this stays true if the sheet grows a fact.
-    let good = Says(
-        "[F1] in the launch block, and nothing measured here says what happens next.".to_owned(),
-    );
+    // Written the way the prompt asks for: a selection, and not one word the
+    // model chose. `F1` is the first *selectable* fact on whatever sheet this
+    // dossier produces, so this stays true if the sheet grows a fact — and it
+    // fails loudly if the first fact ever loses its clauses, which is the case
+    // worth knowing about.
+    let good = Says("F1.plain".to_owned());
     let reply = voice::write(&sheet, Some(&good));
     assert!(!reply.is_template(), "{:?}", reply.fellback);
 }
@@ -369,8 +369,6 @@ fn the_slot_is_authorised_so_a_citable_reply_is_not_refused() {
         None,
         None,
     );
-    let cited = Fact::exact("unused", 0.0, "");
-    let _ = cited;
     assert!(fidelity::check("Read at slot 444007820.", &sheet.authorised()).is_empty());
 }
 
@@ -561,4 +559,49 @@ fn a_creator_whose_launches_are_all_unmeasured_says_so() {
     );
     // The launch count is still published: it is known.
     assert!(sheet.render().contains("12"), "{}", sheet.render());
+}
+
+#[test]
+fn every_clause_is_a_sentence_that_can_start_a_reply() {
+    // A clause is a complete sentence and any one of them may be chosen first,
+    // so every one has to *begin* like a sentence. This is not a style rule: the
+    // launch-block counts are a `Count`, which renders as "at least 12" when the
+    // call budget truncated it, and three clauses were written to interpolate
+    // one at the start. On an ordinary launch they read "6 token accounts at
+    // birth"; on a truncated one they read "at least 6 token accounts at birth",
+    // which opens a public reply in lower case and looks like a broken bot.
+    //
+    // Checked here rather than remembered, because the failure only appears on
+    // the sheets nobody builds a fixture for. `AtLeast` is the case that caught
+    // it, so `AtLeast` is what this walks.
+    let mut dossier = dossier_named("Ordinary Token", "OK");
+    let launch = dossier.launch.as_mut().expect("the fixture has one");
+    launch.recipients = Count::AtLeast(6);
+    launch.transactions = Count::AtLeast(4);
+    let sheet = FactSheet::build(&dossier, Some(&rates()), None, None);
+
+    let mut checked = 0;
+    for fact in &sheet.facts {
+        for clause in &fact.clauses {
+            let first = clause.text.chars().next().expect("a clause is never empty");
+            assert!(
+                first.is_uppercase() || first.is_ascii_digit() || first == '$',
+                "{:?} opens mid-sentence: {:?}",
+                fact.label,
+                clause.text
+            );
+            // And it ends like one, so two of them joined by a space do not run
+            // together into a third sentence nobody wrote.
+            assert!(
+                clause.text.ends_with('.'),
+                "{:?} does not end: {:?}",
+                fact.label,
+                clause.text
+            );
+            checked += 1;
+        }
+    }
+    // A guard on the guard: a build that produced no clauses would pass every
+    // assertion above and prove nothing.
+    assert!(checked > 20, "only {checked} clauses were checked");
 }

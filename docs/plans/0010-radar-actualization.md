@@ -77,7 +77,28 @@ Fill in the commit, named checks, observed outcomes, and deployment state for ea
       and says so where somebody types it: it needs the recorded *inputs* to a
       decision, and a replay built on what exists would re-derive the verdict
       from today's world and call the difference a divergence.
-- [ ] 5. Implement admitted launch evidence and permanent receipts.
+- [~] 5. Implement admitted launch evidence and permanent receipts. **Part one
+      done** on `feat/launch-evidence-clauses`: [ADR
+      0016](../adr/0016-the-model-selects-whole-clauses-never-a-number-in-its-own-sentence.md)'s
+      commitments 1 (in its `kind` and clause half), 2 and 4. The model's output
+      grammar is a list of clause selections — `F1.plain`, one per line, and
+      nothing else — so it chooses which facts land, in what order and in what
+      register, and writes no subject, number, unit, window, negation,
+      comparison or verdict. The `tags` module is deleted, because a model that emits
+      only a selection has no prose position for a tag to sit in; its argument
+      is answered in `clause.rs`'s header, and `forbidden`/`fidelity` now read
+      Radar's own clauses, which is a real and different job. A fact with an
+      empty clause list is shown as context and given no number, so a
+      measurement cannot be published before its wording is reviewed. Three
+      regressions, each verified by re-applying the bug — a tolerant parser, an
+      unfiltered offer, and a clause opening in lower case because a truncated
+      `Count` renders as "at least 12". `cargo test --workspace --all-targets`:
+      2140 passed, 0 failed; `cargo mutants -f crates/radar-roast/src/clause.rs`:
+      26 caught, 0 missed. **Still to do in item 5:** the receipt — ADR 0016's
+      commitment 1 *metadata* half (typed scope, measurement time, watermark,
+      source references, completeness, schema version), its persistence, the
+      validated receipt-ID route and the site view (5b); and design 0015 §3.3's
+      two evidence families with their admission fixtures (5c).
 - [ ] 6. Replace mixed scoring with explicit whole-week fallback modes.
 - [ ] 7. Implement autonomous evidence relay, selection, and claim integration.
 - [ ] 8. Build and visually verify the evidence-newsroom site, including public winner payout addresses, copy/explorer links, and verified transaction evidence in History.

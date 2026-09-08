@@ -40,16 +40,17 @@
 #![forbid(unsafe_code)]
 
 pub mod baserates;
+pub mod clause;
 pub mod creator;
 pub mod fidelity;
 pub mod forbidden;
 pub mod render;
 pub mod sheet;
-pub mod tags;
 pub mod verdict;
 pub mod voice;
 
 pub use baserates::BaseRates;
+pub use clause::{Clause, Kind, Selection, Voice};
 pub use creator::{CreatorIndex, Population};
 pub use sheet::{About, Fact, FactSheet};
 pub use verdict::{Verdict, template};
