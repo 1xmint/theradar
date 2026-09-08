@@ -17,7 +17,17 @@
 //!
 //! **Failed transactions are events.** A buy that reverted is real information
 //! about a token — often the first sign that it cannot be traded — so it is
-//! recorded with `succeeded: false` rather than dropped.
+//! recorded with `success: Some(false)` rather than dropped.
+//!
+//! **And unresolved is a third state, not the first two.** Success, the
+//! transaction's position in its block, and the account that traded are all
+//! `Option` because the recorder does not always resolve them. Each of the
+//! three was a sentinel until 2026-09-07 — `true`, `u32::MAX` and the system
+//! program — and each sentinel reads as a measurement downstream: an outage
+//! became successful activity, an unresolved position joined a contiguity run,
+//! and one placeholder address made every backfilled launch look like it had
+//! exactly one trader. [`Envelope::from_stored`] translates the two envelope
+//! sentinels on read, so files written before the change say what they meant.
 
 use radar_types::{Address, Signature, Slot};
 use serde::{Deserialize, Serialize};
@@ -50,21 +60,123 @@ pub struct Envelope {
     pub slot: Slot,
     /// The transaction this came from.
     pub signature: Signature,
-    /// Position of the transaction within its block.
+    /// Position of the transaction within its block, when it is known.
     ///
     /// The input to same-slot clustering: coordination analysis needs to know
     /// which transactions landed together and in what order, and that ordering
     /// exists nowhere else once the block is discarded.
-    pub tx_index: u32,
+    ///
+    /// `None` means the recorder never resolved a position. **It was `u32::MAX`
+    /// until 2026-09-07**, which is a sentinel a reader has to know about to
+    /// avoid treating it as a position four billion transactions into a block —
+    /// and `longest_run` over a set containing it produced exactly that. Files
+    /// written before the change still hold the sentinel and
+    /// [`Envelope::from_stored`] translates it.
+    pub tx_index: Option<u32>,
     /// Position of the instruction within its transaction.
     pub instruction_index: u32,
     /// The enclosing instruction, if this one was a cross-program invocation.
     pub parent_index: Option<u32>,
-    /// Whether the transaction succeeded.
+    /// Whether the transaction succeeded, when that is known.
     ///
-    /// A failed buy is information about a token, not the absence of one.
-    pub succeeded: bool,
+    /// Three states, and each is a different sentence:
+    ///
+    /// - `Some(true)` — the chain accepted it.
+    /// - `Some(false)` — the chain rejected it. A failed buy is information
+    ///   about a token, not the absence of one, so it is recorded rather than
+    ///   dropped.
+    /// - `None` — **nobody looked**. The backfill's success comes from a join
+    ///   against the transactions table, and when that join finds nothing there
+    ///   is no `err` column to read. This was `true` until 2026-09-07: absent
+    ///   was recorded as succeeded, which is rule 9 with the sign flipped and
+    ///   the direction that invents activity.
+    ///
+    /// Read it through [`succeeded`](Self::succeeded) and
+    /// [`failed`](Self::failed) rather than matching here, so that "unknown is
+    /// not success" is one decision in one place.
+    pub success: Option<bool>,
 }
+
+impl Envelope {
+    /// Whether the transaction is **known** to have succeeded.
+    ///
+    /// Unknown is not success. Every population that means "what actually
+    /// happened" — succeeded launches, distinct buyers, graduations, curve
+    /// progress — filters on this, and an unresolved row is excluded rather
+    /// than assumed. AGENTS.md rule 9.
+    #[must_use]
+    pub const fn succeeded(&self) -> bool {
+        matches!(self.success, Some(true))
+    }
+
+    /// Whether the transaction is **known** to have failed.
+    ///
+    /// Deliberately not `!succeeded()`: a count of failures that silently
+    /// includes every unresolved row reports an outage as a chain event.
+    #[must_use]
+    pub const fn failed(&self) -> bool {
+        matches!(self.success, Some(false))
+    }
+
+    /// Whether nobody established either way.
+    #[must_use]
+    pub const fn outcome_unknown(&self) -> bool {
+        self.success.is_none()
+    }
+
+    /// A total order over positions within a slot that puts unknown **last**.
+    ///
+    /// `Option`'s own ordering puts `None` first, which would sort every
+    /// unresolved trade ahead of the launch it belongs to and make a
+    /// "first trade after the launch" read the least-known row in the block.
+    /// The direction is arbitrary; having it written down once is not.
+    #[must_use]
+    pub const fn position_key(&self) -> (bool, u32, u32) {
+        match self.tx_index {
+            Some(tx) => (false, tx, self.instruction_index),
+            None => (true, 0, self.instruction_index),
+        }
+    }
+
+    /// The stored form of a row, with the pre-2026-09-07 sentinels translated.
+    ///
+    /// One function rather than a rule in the reader, because the two sentinels
+    /// are **coupled**: `tx_index` and `success` both come from the backfill's
+    /// join against the transactions table, so a row missing the position is a
+    /// row whose `err` column was never read either. A reader that translated
+    /// only the position would keep reporting those rows as successful, which
+    /// is the half of the bug that mattered.
+    ///
+    /// `u32::MAX` is safe to read as a sentinel: no block reaches four billion
+    /// transactions, and the writer that produced it said so in the comment
+    /// beside it.
+    #[must_use]
+    pub fn from_stored(
+        slot: Slot,
+        signature: Signature,
+        tx_index: Option<u32>,
+        instruction_index: u32,
+        parent_index: Option<u32>,
+        success: Option<bool>,
+    ) -> Self {
+        let unresolved = tx_index.is_none_or(|tx| tx == LEGACY_UNKNOWN_TX_INDEX);
+        Self {
+            slot,
+            signature,
+            tx_index: if unresolved { None } else { tx_index },
+            instruction_index,
+            parent_index,
+            success: if unresolved { None } else { success },
+        }
+    }
+}
+
+/// What the recorder wrote for an unresolved transaction position before
+/// 2026-09-07.
+///
+/// Public because the backfill's own tests assert that it is no longer written,
+/// and a magic number asserted in two crates is a magic number in two crates.
+pub const LEGACY_UNKNOWN_TX_INDEX: u32 = u32::MAX;
 
 /// Which program and instruction produced an event.
 ///
@@ -140,8 +252,16 @@ pub struct Trade {
     pub origin: Origin,
     /// The mint traded.
     pub mint: Address,
-    /// The account that traded.
-    pub trader: Address,
+    /// The account that traded, when it is known.
+    ///
+    /// `None` means the recorder never resolved one. The backfill's query does
+    /// not fetch account keys, and until 2026-09-07 it wrote
+    /// [`Address::SYSTEM_PROGRAM`] as a placeholder — so every trade in the
+    /// store names the same "trader", and every count of distinct traders over
+    /// backfilled data is 1. A placeholder is not an actor, and a feature that
+    /// counts one is worse than a feature that is absent, because it looks like
+    /// a measurement.
+    pub trader: Option<Address>,
     /// Direction.
     pub side: Side,
     /// Lamports that actually moved, from balance deltas. `None` when not
@@ -330,10 +450,10 @@ mod tests {
         Envelope {
             slot: Slot(slot),
             signature: Signature::new([1u8; 64]),
-            tx_index: 7,
+            tx_index: Some(7),
             instruction_index: 2,
             parent_index: None,
-            succeeded: true,
+            success: Some(true),
         }
     }
 
@@ -342,7 +462,7 @@ mod tests {
             envelope: envelope(slot),
             origin: Origin::known(Address::SYSTEM_PROGRAM, "buy"),
             mint: Address::new([9u8; 32]),
-            trader: Address::new([8u8; 32]),
+            trader: Some(Address::new([8u8; 32])),
             side: Side::Buy,
             realised_lamports: None,
             realised_tokens: None,
@@ -425,10 +545,75 @@ mod tests {
     #[test]
     fn a_failed_transaction_is_still_an_event() {
         let mut e = envelope(5);
-        e.succeeded = false;
+        e.success = Some(false);
         // Nothing about the type refuses it. A failed buy is often the first
         // sign a token cannot be traded.
-        assert!(!e.succeeded);
+        assert!(e.failed());
+        assert!(!e.succeeded());
+        // A rejection is an answer. Without this the mutant that makes
+        // `outcome_unknown` always true survives, and every caller that gates
+        // on it -- the whole feature pass -- goes silent on data it can read.
+        assert!(!e.outcome_unknown());
+    }
+
+    #[test]
+    fn unknown_is_neither_succeeded_nor_failed() {
+        // The two questions are asked separately because the answers differ.
+        // `!succeeded()` would call an unresolved row a failure, and a count of
+        // on-chain failures that rises during an outage is a number about the
+        // recorder wearing the label of a number about the chain.
+        let mut e = envelope(5);
+        e.success = None;
+        assert!(!e.succeeded());
+        assert!(!e.failed());
+        assert!(e.outcome_unknown());
+    }
+
+    #[test]
+    fn the_legacy_sentinels_read_back_as_unknown_together() {
+        // Re-apply the bug by passing `Some(true)` beside the sentinel, which
+        // is exactly the pair every row written before 2026-09-07 holds: the
+        // backfill's join supplied both columns or neither, and the old writer
+        // turned "neither" into a position and a success.
+        let e = Envelope::from_stored(
+            Slot(5),
+            Signature::new([1u8; 64]),
+            Some(LEGACY_UNKNOWN_TX_INDEX),
+            2,
+            None,
+            Some(true),
+        );
+        assert_eq!(e.tx_index, None);
+        assert!(
+            e.outcome_unknown(),
+            "a row with no resolved position had no `err` column read either"
+        );
+
+        // And a resolved row is untouched, so the translation cannot quietly
+        // erase real history.
+        let ok = Envelope::from_stored(
+            Slot(5),
+            Signature::new([1u8; 64]),
+            Some(117),
+            2,
+            None,
+            Some(true),
+        );
+        assert_eq!(ok.tx_index, Some(117));
+        assert!(ok.succeeded());
+        assert!(!ok.outcome_unknown());
+    }
+
+    #[test]
+    fn an_unknown_position_sorts_last_within_its_slot() {
+        // `Option`'s own ordering puts `None` first, which would sort every
+        // unresolved trade ahead of the launch it belongs to. Re-apply by
+        // returning `(self.tx_index.is_some(), ..)`.
+        let mut known = envelope(5);
+        known.tx_index = Some(9);
+        let mut unknown = envelope(5);
+        unknown.tx_index = None;
+        assert!(known.position_key() < unknown.position_key());
     }
 
     #[test]

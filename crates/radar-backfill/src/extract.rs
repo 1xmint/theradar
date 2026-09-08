@@ -218,19 +218,25 @@ fn envelope(row: &Row) -> Result<Envelope, Skipped> {
             .sig
             .parse::<Signature>()
             .map_err(|_| Skipped::BadField)?,
-        // Absent when the transactions join found nothing. Zero is a real block
-        // position, so it must not stand in for "unknown" -- but the store needs
-        // a value, and u32::MAX is not a position any block reaches.
-        tx_index: row.tx_index.as_deref().map_or(Ok(u32::MAX), |v| {
-            v.parse::<u32>().map_err(|_| Skipped::BadField)
-        })?,
+        // Absent when the transactions join found nothing. The store now
+        // carries that absence rather than a sentinel: this was `u32::MAX`
+        // until 2026-09-07, and `longest_run` over a set containing it counted
+        // it as a block position.
+        tx_index: row
+            .tx_index
+            .as_deref()
+            .map(|v| v.parse::<u32>().map_err(|_| Skipped::BadField))
+            .transpose()?,
         instruction_index: u32::try_from(parse_u64(&row.ix_index)?)
             .map_err(|_| Skipped::BadField)?,
         parent_index: (parent >= 0).then(|| u32::try_from(parent).unwrap_or(u32::MAX)),
-        // Absent means unknown; treating unknown as failed would discard real
-        // activity, and treating it as succeeded would invent it. The join
-        // supplies this for every row it resolves.
-        succeeded: row.ok.as_deref() != Some("0"),
+        // Absent means unknown, and it is now recorded as unknown. Treating it
+        // as failed would discard real activity; treating it as succeeded --
+        // which `row.ok.as_deref() != Some("0")` did until 2026-09-07 --
+        // invents it, and that is the direction that puts an outage into a
+        // feature as measured activity. The join supplies this for every row it
+        // resolves.
+        success: row.ok.as_deref().map(|v| v != "0"),
     })
 }
 
@@ -302,9 +308,10 @@ pub fn event_from_row(row: &Row) -> Result<Event, Skipped> {
             origin,
             mint,
             // The trader is an account key, which this query does not fetch.
-            // Left as the mint's zero placeholder would be a lie, so the trade
-            // records the program until the account join is added.
-            trader: Address::SYSTEM_PROGRAM,
+            // Recorded as unknown until the account join is added: the system
+            // program stood in for it until 2026-09-07, which made every
+            // distinct-trader count over backfilled data equal to one.
+            trader: None,
             side: match side {
                 radar_decode::Side::Buy => Side::Buy,
                 radar_decode::Side::Sell => Side::Sell,
@@ -603,7 +610,7 @@ mod tests {
         assert_eq!(l.creator, Address::new([7u8; 32]));
         assert_eq!(l.mint.to_string(), PUMP);
         assert_eq!(l.envelope.slot, Slot(440_624_677));
-        assert_eq!(l.envelope.tx_index, 117);
+        assert_eq!(l.envelope.tx_index, Some(117));
         // Top-level instruction: parent_index of -1 must become None, not 4294967295.
         assert_eq!(l.envelope.parent_index, None);
         // Not measured by this query, and not faked as zero.
@@ -637,18 +644,48 @@ mod tests {
         let mut r = row(&trade_data(), &[PUMP]);
         r.ok = Some("0".into());
         let e = event_from_row(&r).expect("converts");
-        assert!(!e.envelope().succeeded);
+        assert!(e.envelope().failed());
     }
 
     #[test]
     fn an_unresolvable_transaction_position_is_not_reported_as_the_first_in_its_block() {
         // Zero is a real block position. Using it for "unknown" would make every
         // unresolved transaction look like it led its slot, which is exactly the
-        // signal coordination analysis reads.
+        // signal coordination analysis reads. It was `u32::MAX` until
+        // 2026-09-07, which reads as a position rather than as an absence to
+        // anything that does arithmetic on it -- `longest_run` did.
         let mut r = row(&trade_data(), &[PUMP]);
         r.tx_index = None;
         let e = event_from_row(&r).expect("converts");
-        assert_eq!(e.envelope().tx_index, u32::MAX);
+        assert_eq!(e.envelope().tx_index, None);
+    }
+
+    #[test]
+    fn an_unresolved_transaction_is_not_recorded_as_a_successful_one() {
+        // Re-apply by restoring `row.ok.as_deref() != Some("0")`: with no `ok`
+        // column that expression is `true`, so an outage in the transactions
+        // join became successful on-chain activity in every feature built from
+        // these rows.
+        let mut r = row(&trade_data(), &[PUMP]);
+        r.ok = None;
+        r.tx_index = None;
+        let e = event_from_row(&r).expect("converts");
+        assert!(e.envelope().outcome_unknown());
+        assert!(!e.envelope().succeeded());
+        assert!(!e.envelope().failed());
+    }
+
+    #[test]
+    fn a_backfilled_trade_has_no_trader_rather_than_a_placeholder_one() {
+        // The query does not fetch account keys. Writing the system program
+        // there made every distinct-trader count over backfilled data equal to
+        // one, which is a measurement-shaped answer to a question nothing
+        // asked.
+        let e = event_from_row(&row(&trade_data(), &[PUMP])).expect("converts");
+        let Event::Trade(t) = e else {
+            panic!("a trade row is a trade")
+        };
+        assert_eq!(t.trader, None);
     }
 
     #[test]

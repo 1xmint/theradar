@@ -23,10 +23,10 @@ fn launch_at(slot: u64) -> Event {
         envelope: Envelope {
             slot: Slot(slot),
             signature: Signature::new([u8::try_from(slot % 251).unwrap_or(1); 64]),
-            tx_index: 1,
+            tx_index: Some(1),
             instruction_index: 0,
             parent_index: None,
-            succeeded: true,
+            success: Some(true),
         },
         origin: Origin::known(Address::new([9; 32]), "create_v2"),
         mint: Address::new([u8::try_from(slot % 251).unwrap_or(1); 32]),

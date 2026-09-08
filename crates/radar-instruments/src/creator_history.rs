@@ -122,7 +122,7 @@ impl Instrument for CreatorHistory {
             if !metadata_seen.insert((l.name.clone(), l.symbol.clone(), l.uri.clone())) {
                 duplicates += 1;
             }
-            if !l.envelope.succeeded {
+            if !l.envelope.succeeded() {
                 failed += 1;
             }
             evidence.push((slot, l.envelope.signature.to_string()));

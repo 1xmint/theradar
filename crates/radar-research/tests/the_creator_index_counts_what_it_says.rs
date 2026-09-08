@@ -34,10 +34,10 @@ fn launch(mint: u8, creator: u8, slot: u64, succeeded: bool) -> Event {
         envelope: Envelope {
             slot: Slot(slot),
             signature: Signature::new([(slot % 251) as u8; 64]),
-            tx_index: 0,
+            tx_index: Some(0),
             instruction_index: 1,
             parent_index: None,
-            succeeded,
+            success: Some(succeeded),
         },
         origin: Origin::known(pumpfun(), "create_v2"),
         mint: address(mint),

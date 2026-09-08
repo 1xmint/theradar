@@ -118,7 +118,7 @@ fn distinct_graduations(
     launches: &BTreeMap<Address, (Address, Slot)>,
 ) -> Vec<Graduated> {
     let mut by_mint: BTreeMap<Address, Graduated> = BTreeMap::new();
-    for event in events.iter().filter(|e| e.envelope().succeeded) {
+    for event in events.iter().filter(|e| e.envelope().succeeded()) {
         let mint = event.mint();
         let known = launches.get(&mint);
         let this = Graduated {
@@ -301,10 +301,10 @@ mod tests {
             envelope: radar_store::Envelope {
                 slot: Slot(slot),
                 signature: radar_types::Signature::new([mint; 64]),
-                tx_index: 3,
+                tx_index: Some(3),
                 instruction_index: 2,
                 parent_index: None,
-                succeeded,
+                success: Some(succeeded),
             },
             origin: radar_store::Origin::known(Address::new([5u8; 32]), "migrate_v2"),
             mint: Address::new([mint; 32]),

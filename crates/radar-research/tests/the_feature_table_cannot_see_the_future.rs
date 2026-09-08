@@ -43,10 +43,10 @@ fn launch_named(mint: u8, creator: u8, slot: u64, name: &str, symbol: &str) -> E
         envelope: Envelope {
             slot: Slot(slot),
             signature: Signature::new([(slot % 251) as u8; 64]),
-            tx_index: 0,
+            tx_index: Some(0),
             instruction_index: 1,
             parent_index: None,
-            succeeded: true,
+            success: Some(true),
         },
         origin: Origin::known(pumpfun(), "create_v2"),
         mint: address(mint),
@@ -62,7 +62,7 @@ fn failed_launch(mint: u8, creator: u8, slot: u64) -> Event {
     let Event::Launch(mut l) = launch(mint, creator, slot) else {
         unreachable!("launch builds a launch")
     };
-    l.envelope.succeeded = false;
+    l.envelope.success = Some(false);
     Event::Launch(l)
 }
 
@@ -72,14 +72,14 @@ fn buy(mint: u8, trader: u8, slot: u64, tx: u32, sol: u64) -> Event {
         envelope: Envelope {
             slot: Slot(slot),
             signature: Signature::new([(slot % 251) as u8; 64]),
-            tx_index: tx,
+            tx_index: Some(tx),
             instruction_index: 0,
             parent_index: None,
-            succeeded: true,
+            success: Some(true),
         },
         origin: Origin::known(pumpfun(), "buy"),
         mint: address(mint),
-        trader: address(trader),
+        trader: Some(address(trader)),
         side: radar_store::Side::Buy,
         realised_lamports: Some(sol * 1_000_000_000),
         realised_tokens: Some(1),
@@ -944,4 +944,107 @@ fn a_price_that_traded_back_to_where_it_started_is_a_return_of_zero() {
     );
 
     assert_eq!(table.rows[0].gross_6h_bps, Some(0.0));
+}
+
+/// A buy whose trader and block position the recorder never resolved.
+///
+/// This is what every trade in the production store looks like: the backfill's
+/// query fetches no account keys, and its join against the transactions table
+/// supplies the block position and the success flag or neither.
+fn unresolved_buy(mint: u8, slot: u64, sol: u64) -> Event {
+    let Event::Trade(mut t) = buy(mint, 10, slot, 0, sol) else {
+        unreachable!("buy builds a trade")
+    };
+    t.envelope.tx_index = None;
+    t.envelope.success = None;
+    t.trader = None;
+    Event::Trade(t)
+}
+
+#[test]
+fn a_block_of_unresolved_trades_has_no_trader_count_rather_than_one() {
+    // The arithmetic this is about: before 2026-09-07 every backfilled trade
+    // named the system program as its trader, so `launch_traders` was 1 for
+    // every launch in the store with any trade at all -- a confident number
+    // about a question nobody had answered. `launch_transactions` and
+    // `launch_contiguity` were worse: `u32::MAX` entered the position set and
+    // `longest_run` counted it as a block position.
+    //
+    // Re-apply by dropping the `filter_map` in `launch_block_features` and the
+    // emptiness guards around `set`.
+    let at = 1_000;
+    let table = table_over(
+        vec![
+            launch(1, 100, at),
+            unresolved_buy(1, at, 1),
+            unresolved_buy(1, at, 1),
+            unresolved_buy(1, at, 1),
+            // A second mint traded readably in the same partition, so the
+            // trades table covers the window. Without it the row would be
+            // absent for the older and different reason that the store holds
+            // no trades at all, and this test would pass for free.
+            launch(2, 101, at + 1),
+            buy(2, 20, at + 1, 0, 1),
+        ],
+        vec![],
+    );
+
+    assert_eq!(
+        value(&table, 1, "launch_traders"),
+        None,
+        "three unknown actors are not one trader, and they are not three either"
+    );
+    assert_eq!(value(&table, 1, "launch_transactions"), None);
+    assert_eq!(value(&table, 1, "launch_contiguity"), None);
+    assert_eq!(
+        value(&table, 1, "traders_25"),
+        None,
+        "the same absence at the activity widths"
+    );
+    assert_eq!(
+        value(&table, 1, "trades_25"),
+        None,
+        "a count of successful trades over a window holding unresolved rows is          a count over a smaller window than the one asked about"
+    );
+
+    // The other half, in the same test so it cannot drift apart from it: the
+    // readable mint in the same store gets its numbers. Without this the fix
+    // would be satisfied by a function that returns absent for everything.
+    assert_eq!(value(&table, 2, "launch_traders"), Some(1.0));
+    assert_eq!(value(&table, 2, "trades_25"), Some(1.0));
+}
+
+#[test]
+fn a_failed_swap_is_not_a_trade_a_buyer_or_curve_progress() {
+    // A reverted buy is real evidence about a token and it stays in the store.
+    // It is not activity, and every feature here means activity. Re-apply by
+    // removing the `succeeded()` filter in `trades_to_t`: the failed buy joins
+    // the trader count and moves the curve to ten SOL, which is the number the
+    // liquidity-velocity features exist to report.
+    let at = 1_000;
+    let Event::Trade(mut failed) = buy(1, 11, at, 4, 10) else {
+        unreachable!("buy builds a trade")
+    };
+    failed.envelope.success = Some(false);
+
+    let table = table_over(
+        vec![
+            launch(1, 100, at),
+            buy(1, 10, at, 3, 1),
+            Event::Trade(failed),
+        ],
+        vec![],
+    );
+
+    assert_eq!(
+        value(&table, 1, "launch_traders"),
+        Some(1.0),
+        "the reverted buy's account never acquired anything"
+    );
+    assert_eq!(value(&table, 1, "launch_transactions"), Some(1.0));
+    assert_eq!(
+        value(&table, 1, "trades_to_10_sol"),
+        None,
+        "ten SOL of reverted buying moved the curve nowhere"
+    );
 }

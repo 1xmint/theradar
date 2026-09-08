@@ -19,7 +19,17 @@ Fill in the commit, named checks, observed outcomes, and deployment state for ea
       0007 §6.2 carry supersession notes rather than edits. `cargo test -p
       repo-conformance`: 33 passed, 0 failed. **No behaviour changed** — every
       ADR states it is not yet implemented.
-- [ ] 2. Repair observable research inputs and coverage.
+- [~] 2. Repair observable research inputs and coverage. **Part one done** on
+      `fix/observable-event-fields`: `Envelope.success`, `Envelope.tx_index` and
+      `Trade.trader` are `Option`, the pre-2026-09-07 sentinels translate on
+      read, and every count of successful activity is absent when the window
+      holds an unresolved row. Regressions: an old-shape trades file reads back
+      as unknown (`older_files_still_read.rs`), and three feature cases
+      (`the_feature_table_cannot_see_the_future.rs`). Each was verified by
+      re-applying the bug — the redundant filter in `trades_to_t` survived its
+      own re-application and was removed rather than tested. `cargo test
+      --workspace --all-targets`: 77 suites, 0 failures. **Part two — coverage
+      manifests and bounded `--from`/`--to` reads — is not started.**
 - [ ] 3. Repair cohort/label protocol and provenance.
 - [ ] 4. Implement durable audit, offline replay, and effect recovery.
 - [ ] 5. Implement admitted launch evidence and permanent receipts.

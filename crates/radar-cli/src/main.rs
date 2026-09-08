@@ -206,6 +206,7 @@ fn inspect(args: &[String]) -> Result<(), String> {
     let mut by_instruction: BTreeMap<String, usize> = BTreeMap::new();
     let mut unknown = 0usize;
     let mut failed = 0usize;
+    let mut unresolved = 0usize;
     for e in &events {
         *by_table
             .entry(match e {
@@ -225,8 +226,13 @@ fn inspect(args: &[String]) -> Result<(), String> {
         if !origin.known {
             unknown += 1;
         }
-        if !e.envelope().succeeded {
+        // Counted apart, because `!succeeded` folded them together: a rise in
+        // unresolved rows is a fault in the recorder, not an event on chain.
+        if e.envelope().failed() {
             failed += 1;
+        }
+        if e.envelope().outcome_unknown() {
+            unresolved += 1;
         }
     }
 
@@ -239,6 +245,10 @@ fn inspect(args: &[String]) -> Result<(), String> {
         println!("  {i:<26} {n}");
     }
     println!("\nfailed transactions: {failed}");
+    // Not a chain fact. These are rows whose transaction the backfill's join
+    // never resolved, so nothing is known either way — reported as success
+    // until 2026-09-07.
+    println!("unresolved outcomes:  {unresolved}");
     // The program-upgrade alarm. A decoder that has stopped understanding a
     // program looks exactly like a program that has gone quiet, so this number
     // climbing is the signal to go and look.

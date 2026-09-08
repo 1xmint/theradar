@@ -18,12 +18,14 @@
 
 use std::sync::Arc;
 
-use arrow::array::{ArrayRef, ListBuilder, StringBuilder, UInt64Builder};
+use arrow::array::{
+    ArrayRef, BooleanBuilder, ListBuilder, StringBuilder, UInt32Builder, UInt64Builder,
+};
 use arrow::datatypes::{DataType, Field, Schema};
 use arrow::record_batch::RecordBatch;
 use parquet::arrow::ArrowWriter;
 use radar_asof::AsOf;
-use radar_store::{Reader, Table};
+use radar_store::{Event, Reader, Table};
 use radar_types::Slot;
 
 /// The decisions schema as it stood *before* `authority_prevalence`.
@@ -330,4 +332,163 @@ fn files_written_by_an_older_parquet_are_still_readable() {
         !graduations.is_empty(),
         "the graduations fixture decoded to zero rows"
     );
+}
+
+/// The trades schema as it stood *before* the three fields became nullable.
+///
+/// Copied deliberately rather than derived, for the reason the two halves above
+/// give: the point is to pin a shape that no longer exists.
+fn trades_schema_before_unknown_was_expressible() -> Arc<Schema> {
+    Arc::new(Schema::new(vec![
+        Field::new("slot", DataType::UInt64, false),
+        Field::new("signature", DataType::Utf8, false),
+        // Not nullable, and that is the whole point: there was nowhere to put
+        // "unresolved", so the writer put `u32::MAX` here and `true` there.
+        Field::new("tx_index", DataType::UInt32, false),
+        Field::new("instruction_index", DataType::UInt32, false),
+        Field::new("parent_index", DataType::UInt32, true),
+        Field::new("succeeded", DataType::Boolean, false),
+        Field::new("program", DataType::Utf8, false),
+        Field::new("instruction", DataType::Utf8, false),
+        Field::new("known", DataType::Boolean, false),
+        Field::new("mint", DataType::Utf8, false),
+        Field::new("trader", DataType::Utf8, false),
+        Field::new("side", DataType::Utf8, false),
+        Field::new("realised_lamports", DataType::UInt64, true),
+        Field::new("realised_tokens", DataType::UInt64, true),
+        Field::new("requested_amount", DataType::UInt64, false),
+        Field::new("requested_is_lamports", DataType::Boolean, false),
+        Field::new("limit_amount", DataType::UInt64, false),
+        Field::new("accepted_any_price", DataType::Boolean, false),
+    ]))
+}
+
+/// Two trade rows in that shape: one the join resolved, one it did not.
+fn write_old_trade_file(dir: &std::path::Path) {
+    let mut slot = UInt64Builder::new();
+    let mut signature = StringBuilder::new();
+    let mut tx_index = UInt32Builder::new();
+    let mut ix_index = UInt32Builder::new();
+    let mut parent = UInt32Builder::new();
+    let mut succeeded = BooleanBuilder::new();
+    let mut program = StringBuilder::new();
+    let mut instruction = StringBuilder::new();
+    let mut known = BooleanBuilder::new();
+    let mut mint = StringBuilder::new();
+    let mut trader = StringBuilder::new();
+    let mut side = StringBuilder::new();
+    let mut realised_lamports = UInt64Builder::new();
+    let mut realised_tokens = UInt64Builder::new();
+    let mut requested = UInt64Builder::new();
+    let mut requested_is_lamports = BooleanBuilder::new();
+    let mut limit = UInt64Builder::new();
+    let mut any_price = BooleanBuilder::new();
+
+    // Row 0: the join resolved. Row 1: it did not, and the old writer had to
+    // put *something* in three non-nullable columns.
+    for (tx, ok) in [(117u32, true), (u32::MAX, true)] {
+        slot.append_value(9_000);
+        signature.append_value(
+            "4vJ9JU1bJJE96FbKtjmpqUEsHdSHgWLmXknzYqTBhtnLGWNMhLZmvHhZmc4mNMhCLzGxWDpqoBFeLbNvEZs3nvvW",
+        );
+        tx_index.append_value(tx);
+        ix_index.append_value(0);
+        parent.append_option(None);
+        succeeded.append_value(ok);
+        program.append_value("6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P");
+        instruction.append_value("buy");
+        known.append_value(true);
+        mint.append_value("So11111111111111111111111111111111111111112");
+        // The placeholder. Every backfilled trade in production carries it.
+        trader.append_value("11111111111111111111111111111111");
+        side.append_value("buy");
+        realised_lamports.append_option(None);
+        realised_tokens.append_option(None);
+        requested.append_value(1_000);
+        requested_is_lamports.append_value(true);
+        limit.append_value(0);
+        any_price.append_value(true);
+    }
+
+    let columns: Vec<ArrayRef> = vec![
+        Arc::new(slot.finish()),
+        Arc::new(signature.finish()),
+        Arc::new(tx_index.finish()),
+        Arc::new(ix_index.finish()),
+        Arc::new(parent.finish()),
+        Arc::new(succeeded.finish()),
+        Arc::new(program.finish()),
+        Arc::new(instruction.finish()),
+        Arc::new(known.finish()),
+        Arc::new(mint.finish()),
+        Arc::new(trader.finish()),
+        Arc::new(side.finish()),
+        Arc::new(realised_lamports.finish()),
+        Arc::new(realised_tokens.finish()),
+        Arc::new(requested.finish()),
+        Arc::new(requested_is_lamports.finish()),
+        Arc::new(limit.finish()),
+        Arc::new(any_price.finish()),
+    ];
+    let batch = RecordBatch::try_new(trades_schema_before_unknown_was_expressible(), columns)
+        .expect("the old shape is valid");
+
+    let table = dir.join(Table::Trades.dir());
+    std::fs::create_dir_all(&table).expect("mkdir");
+    let file =
+        std::fs::File::create(table.join("slot_000000009000_g0001.parquet")).expect("create");
+    let mut writer = ArrowWriter::try_new(file, batch.schema(), None).expect("writer");
+    writer.write(&batch).expect("write");
+    writer.close().expect("close");
+}
+
+#[test]
+fn a_trade_file_written_with_the_old_sentinels_reads_back_as_unknown() {
+    // The file is real production shape: `u32::MAX` for an unresolved position,
+    // `true` for a success nobody read, and the system program standing in for
+    // a trader the query never fetched.
+    //
+    // Re-apply the bug by taking the columns field by field instead of through
+    // `Envelope::from_stored`, or by dropping the system-program branch in the
+    // reader: the second row then reports a successful trade at block position
+    // 4,294,967,295 by the system program, and every feature built from it --
+    // distinct traders, contiguity, successful buyers -- takes those as
+    // measurements.
+    let dir = tempfile::tempdir().expect("tempdir");
+    write_old_trade_file(dir.path());
+
+    let trades = Reader::open(dir.path())
+        .read(Table::Trades, AsOf::at(Slot(20_000)))
+        .expect("a file written before the columns were nullable is still valid");
+    assert_eq!(trades.len(), 2);
+
+    let Event::Trade(resolved) = &trades[0] else {
+        panic!("a trade row is a trade")
+    };
+    let Event::Trade(unresolved) = &trades[1] else {
+        panic!("a trade row is a trade")
+    };
+
+    // The resolved row survives untouched. Without this half the translation
+    // could erase real history and still pass.
+    assert_eq!(resolved.envelope.tx_index, Some(117));
+    assert!(resolved.envelope.succeeded());
+
+    // The unresolved row says it does not know -- about the position *and*
+    // about the outcome, because the backfill's join supplied both columns or
+    // neither.
+    assert_eq!(unresolved.envelope.tx_index, None);
+    assert!(
+        unresolved.envelope.outcome_unknown(),
+        "a row with no resolved position had no `err` column read either"
+    );
+    assert!(!unresolved.envelope.succeeded());
+
+    // And neither row names an actor, because the placeholder is not one.
+    assert_eq!(resolved.trader, None);
+    assert_eq!(unresolved.trader, None);
+
+    // Unknown sorts last within the slot, so a "first trade in the block" read
+    // cannot land on the least-known row.
+    assert!(trades[0].envelope().position_key() < trades[1].envelope().position_key());
 }

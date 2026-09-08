@@ -25,10 +25,10 @@ fn launch(mint_id: u8, creator_id: u8, slot: u64) -> Event {
         envelope: Envelope {
             slot: Slot(slot),
             signature: Signature::new([mint_id; 64]),
-            tx_index: 1,
+            tx_index: Some(1),
             instruction_index: 0,
             parent_index: None,
-            succeeded: true,
+            success: Some(true),
         },
         origin: Origin::known(Address::new([9; 32]), "create_v2"),
         mint: mint(mint_id),

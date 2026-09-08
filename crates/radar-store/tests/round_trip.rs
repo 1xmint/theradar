@@ -12,10 +12,10 @@ fn envelope(slot: u64, tx_index: u32) -> Envelope {
     Envelope {
         slot: Slot(slot),
         signature: Signature::new([(slot % 251) as u8; 64]),
-        tx_index,
+        tx_index: Some(tx_index),
         instruction_index: 1,
         parent_index: None,
-        succeeded: true,
+        success: Some(true),
     }
 }
 
@@ -34,7 +34,7 @@ fn trade(slot: u64, tx_index: u32, realised: Option<u64>) -> Event {
         envelope: envelope(slot, tx_index),
         origin: Origin::known(pumpfun(), "buy"),
         mint: mint(9),
-        trader: mint(8),
+        trader: Some(mint(8)),
         side: Side::Buy,
         realised_lamports: realised,
         realised_tokens: Some(1_234_567),
@@ -164,11 +164,14 @@ fn events_read_back_in_chain_order() {
     let events = Reader::open(dir.path())
         .read(Table::Trades, AsOf::at(Slot(99)))
         .expect("read");
-    let order: Vec<(u64, u32)> = events
+    let order: Vec<(u64, Option<u32>)> = events
         .iter()
         .map(|e| (e.slot().get(), e.envelope().tx_index))
         .collect();
-    assert_eq!(order, vec![(10, 2), (10, 9), (20, 1), (20, 3)]);
+    assert_eq!(
+        order,
+        vec![(10, Some(2)), (10, Some(9)), (20, Some(1)), (20, Some(3))]
+    );
 }
 
 #[test]

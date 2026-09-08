@@ -457,10 +457,12 @@ impl EnvelopeCols {
         let env = e.envelope();
         self.slot.append_value(env.slot.get());
         self.signature.append_value(env.signature.to_string());
-        self.tx_index.append_value(env.tx_index);
+        // `append_option`, not `append_value` with a fallback: the whole point
+        // of this change is that an unresolved field reaches disk as null.
+        self.tx_index.append_option(env.tx_index);
         self.instruction_index.append_value(env.instruction_index);
         self.parent_index.append_option(env.parent_index);
-        self.succeeded.append_value(env.succeeded);
+        self.succeeded.append_option(env.success);
         let origin = match e {
             Event::Launch(l) => &l.origin,
             Event::Trade(t) => &t.origin,
@@ -592,7 +594,7 @@ fn build_batch(table: Table, events: &[Event]) -> Result<RecordBatch, StoreError
             for e in events {
                 let Event::Trade(t) = e else { continue };
                 mint.append_value(t.mint.to_string());
-                trader.append_value(t.trader.to_string());
+                trader.append_option(t.trader.map(|a| a.to_string()));
                 side.append_value(t.side.as_str());
                 rl.append_option(t.realised_lamports);
                 rt.append_option(t.realised_tokens);

@@ -497,7 +497,7 @@ fn universe(reader: &Reader, as_of: AsOf) -> Result<Universe, String> {
         // that was attempted and reverted is real information — but it is not a
         // graduation, and counting it as one inflated the rarest and most
         // load-bearing label in the store by about a third.
-        if !event.envelope().succeeded {
+        if !event.envelope().succeeded() {
             continue;
         }
         let slot = event.envelope().slot;

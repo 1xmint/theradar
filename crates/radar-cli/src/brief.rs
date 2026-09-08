@@ -706,16 +706,24 @@ fn tables(reader: &Reader) -> Vec<Check> {
         match reader.read(*table, as_of) {
             Ok(events) if events.is_empty() => {}
             Ok(events) => {
-                let failed = events.iter().filter(|e| !e.envelope().succeeded).count();
-                let detail = if failed == 0 {
-                    format!("{} recorded", events.len())
-                } else {
-                    format!(
-                        "{} recorded, {failed} of them failed on chain",
-                        events.len()
-                    )
-                };
-                out.push(Check::new(Status::Ok, table.dir(), detail));
+                // Three counts, not two. `!succeeded` used to fold "the chain
+                // rejected it" together with "the recorder never resolved it",
+                // so an outage in the transactions join reported itself as a
+                // rise in on-chain failures -- a number about Radar wearing the
+                // label of a number about the chain.
+                let failed = events.iter().filter(|e| e.envelope().failed()).count();
+                let unresolved = events
+                    .iter()
+                    .filter(|e| e.envelope().outcome_unknown())
+                    .count();
+                let mut parts = vec![format!("{} recorded", events.len())];
+                if failed > 0 {
+                    parts.push(format!("{failed} of them failed on chain"));
+                }
+                if unresolved > 0 {
+                    parts.push(format!("{unresolved} whose outcome was never resolved"));
+                }
+                out.push(Check::new(Status::Ok, table.dir(), parts.join(", ")));
             }
             Err(e) => out.push(Check::new(Status::Unknown, table.dir(), format!("{e}"))),
         }
@@ -2407,10 +2415,10 @@ mod tests {
                     envelope: Envelope {
                         slot: radar_types::Slot(slot),
                         signature: radar_types::Signature::new([(slot % 251) as u8; 64]),
-                        tx_index: 0,
+                        tx_index: Some(0),
                         instruction_index: 1,
                         parent_index: None,
-                        succeeded: i < ok,
+                        success: Some(i < ok),
                     },
                     origin: Origin::known(
                         "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P"

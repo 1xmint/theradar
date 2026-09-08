@@ -126,7 +126,7 @@ impl Reader {
         }
         out.sort_by_key(|e| {
             let env = e.envelope();
-            (env.slot.get(), env.tx_index, env.instruction_index)
+            (env.slot.get(), env.position_key())
         });
         Ok(out)
     }
@@ -582,14 +582,19 @@ fn read_file(path: &Path, table: Table) -> Result<Vec<Event>, StoreError> {
         let mint = str_col(&batch, "mint")?;
 
         for i in 0..batch.num_rows() {
-            let envelope = Envelope {
-                slot: Slot(slot.value(i)),
-                signature: parse(signature.value(i), "signature")?,
-                tx_index: tx_index.value(i),
-                instruction_index: ix_index.value(i),
-                parent_index: parent.is_valid(i).then(|| parent.value(i)),
-                succeeded: succeeded.value(i),
-            };
+            // Through `from_stored` rather than field by field, because the
+            // two pre-2026-09-07 sentinels are coupled: a row with no resolved
+            // position also has no resolved success, and translating one
+            // without the other keeps reporting an unresolved row as a
+            // successful one.
+            let envelope = Envelope::from_stored(
+                Slot(slot.value(i)),
+                parse(signature.value(i), "signature")?,
+                tx_index.is_valid(i).then(|| tx_index.value(i)),
+                ix_index.value(i),
+                parent.is_valid(i).then(|| parent.value(i)),
+                succeeded.is_valid(i).then(|| succeeded.value(i)),
+            );
             let origin = Origin {
                 program: parse(program.value(i), "program")?,
                 instruction: instruction.value(i).to_owned(),
@@ -619,7 +624,21 @@ fn read_file(path: &Path, table: Table) -> Result<Vec<Event>, StoreError> {
                         envelope,
                         origin,
                         mint,
-                        trader: parse(str_col(&batch, "trader")?.value(i), "trader")?,
+                        trader: {
+                            let t = str_col(&batch, "trader")?;
+                            // A stored system-program "trader" is the
+                            // placeholder the backfill wrote before
+                            // 2026-09-07, not an account that traded: the
+                            // system program cannot sign a pump.fun swap.
+                            match t
+                                .is_valid(i)
+                                .then(|| parse(t.value(i), "trader"))
+                                .transpose()?
+                            {
+                                Some(a) if a == Address::SYSTEM_PROGRAM => None,
+                                other => other,
+                            }
+                        },
                         side: match side {
                             "buy" => Side::Buy,
                             "sell" => Side::Sell,
