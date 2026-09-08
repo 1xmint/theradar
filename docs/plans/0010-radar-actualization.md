@@ -47,10 +47,42 @@ Fill in the commit, named checks, observed outcomes, and deployment state for ea
 
 ## Handback
 
-**Stopped at:** item 1 recorded on branch `docs/radar-next-phase` against `4d14032f493d01ef76d27744769efda786956fc7`. The four documents are committed and three ADRs are written. No Radar implementation code, production settings, posts, token, or payment was changed.
+**Stopped at:** 2026-09-08, after item 2. `main` is at the squash of #212.
+PR [#211](https://github.com/hey-vera/radar/pull/211) (item 1) and
+[#212](https://github.com/hey-vera/radar/pull/212) (item 2 part one) are merged;
+[#213](https://github.com/hey-vera/radar/pull/213) (item 2 part two) is open
+with auto-merge armed. No production settings, posts, token, or payment was
+changed, and nothing was run against a production store.
+
+**Two traps this stretch paid for, both worth knowing before the next PR:**
+
+- CI's mutation shard runs `--in-diff`, so it mutates *changed lines* — including
+  a line whose only change was `succeeded` becoming `succeeded()`. Two of the
+  three survivors on #212 were pre-existing untested decisions that the diff
+  merely touched. The fix that works is to lift the decision out of the function
+  that reads a store and prints, so a test can reach it at all.
+- A branch stacked on an unmerged PR cannot be rebased onto `main` after that PR
+  squash-merges: the replayed commits conflict with their own squashed content.
+  `git rebase --onto origin/main <last-already-merged-commit> <branch>` replays
+  only the new work and produces the diff the PR should show.
 
 **Owner decisions:** fully autonomous selection, no human judge, farmed participation accepted, one winner whenever valid entries exist, deterministic and disclosed engagement-data fallbacks, complete developer logs and replay, evidence-newsroom art direction, Tennessee operator with worldwide reach. X written approval is settled by the owner and must not be reopened.
 
-**Next action:** item 2, `fix/observable-research-inputs` — known/unknown event fields, legacy sentinel handling on read, coverage manifests, and bounded partition reads, with the regressions design 0015 §3.1 names. Follow its PR ordering and `AGENTS.md` verification requirements. No production research result exists from this handoff; do not invent one.
+**Next action:** item 3, `fix/research-cohorts-and-labels` (design 0015 §3.2) —
+frozen cohorts before label filtering, label provenance and censoring, train-only
+threshold selection, reproducible reports. It is unblocked and needs no
+credential.
+
+**Carried, and named so it is not lost:** *item 2c*, the coverage **producer**.
+Nothing in production writes a coverage record, so every trade-derived feature is
+absent. That changes nothing today — the production trades directory has never
+been written to — but it is a prerequisite for any trade-derived measurement.
+The obstacle is real: the backfill queries by `block_timestamp` and the store is
+keyed by `block_slot`, and a completed time window that returned no rows attests
+no slot range. The workable shape is per-run rather than per-window, bounding the
+attested span by the events the run actually saw and under-claiming at the edges.
+`crates/radar-store/src/coverage.rs` carries this note too.
+
+No production research result exists from this handoff; do not invent one.
 
 **Completion condition:** implemented behavior and rendered site pass the stated acceptance cases, the result and residual limits are documented, and each outstanding operational/legal prerequisite has a precise owner and deliverable. A missing engagement measurement cannot become a hidden no-winner veto, and a selected winner cannot bypass the existing payment authorization checks.
