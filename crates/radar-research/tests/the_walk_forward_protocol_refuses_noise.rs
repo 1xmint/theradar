@@ -239,8 +239,65 @@ fn too_few_rows_is_refused_rather_than_reported() {
 
     assert!(matches!(
         edge::run(&table, &rates, &Options::default()),
-        Err(edge::EdgeError::TooFewRows { rows: 40 })
+        Err(edge::EdgeError::TooFewLaunches { launches: 40 })
     ));
+}
+
+#[test]
+fn the_population_floor_is_the_folds_times_the_row_floor_and_not_some_other_arithmetic() {
+    // The threshold walked from both sides. One row short is refused; exactly
+    // the floor is not refused *for this reason*.
+    //
+    // Re-apply by replacing the `*` with `+` or `/`: the population guard stops
+    // firing, and the run falls through to the labelled guard -- which reports
+    // the same count under a different name. That masking is why the two
+    // refusals are named apart, and it is what made the mutation invisible
+    // while they shared one.
+    let rates = rates();
+    let floor = edge::FOLDS * edge::MIN_ROWS;
+
+    let mut short = table_of(|_, planted| planted[0] * 40.0 - 2_000.0);
+    short.rows.truncate(floor - 1);
+    assert!(
+        matches!(
+            edge::run(&short, &rates, &Options::default()),
+            Err(edge::EdgeError::TooFewLaunches { launches }) if launches == floor - 1
+        ),
+        "one launch short of the floor is refused as a population"
+    );
+
+    let mut exact = table_of(|_, planted| planted[0] * 40.0 - 2_000.0);
+    exact.rows.truncate(floor);
+    assert!(
+        !matches!(
+            edge::run(&exact, &rates, &Options::default()),
+            Err(edge::EdgeError::TooFewLaunches { .. })
+        ),
+        "exactly the floor is enough launches"
+    );
+}
+
+#[test]
+fn a_population_that_is_labelled_too_thinly_is_a_different_refusal() {
+    // The two floors are the same number and different questions, and the
+    // report has to say which one it hit: "there is nothing to split" and
+    // "there is nothing to read" send an operator to different places.
+    let rates = rates();
+    let mut table = table_of(|_, planted| planted[0] * 40.0 - 2_000.0);
+    table.rows.truncate(edge::FOLDS * edge::MIN_ROWS + 10);
+    // Plenty of launches, almost no labels.
+    for row in table.rows.iter_mut().skip(5) {
+        row.gross_6h_bps = None;
+        row.gross_24h_bps = None;
+    }
+
+    assert!(
+        matches!(
+            edge::run(&table, &rates, &Options::default()),
+            Err(edge::EdgeError::TooFewRows { rows: 5 })
+        ),
+        "enough launches to split, too few labels to read"
+    );
 }
 
 #[test]
@@ -253,11 +310,11 @@ fn removing_labels_cannot_move_a_fold_boundary() {
     //
     // Re-apply by passing the labelled points to `split` again: the second
     // report's windows shift and this fails on the first fold.
-    let full = table_of(|index, _| (pseudo(index, 99) - 0.5) * 4_000.0);
+    let full = table_of(|_, planted| planted[0] * 40.0 - 2_000.0);
 
     // The same table with a quarter of its labels gone. Nothing else changes:
     // same launches, same slots, same features, same order.
-    let mut sparse = table_of(|index, _| (pseudo(index, 99) - 0.5) * 4_000.0);
+    let mut sparse = table_of(|_, planted| planted[0] * 40.0 - 2_000.0);
     for (index, row) in sparse.rows.iter_mut().enumerate() {
         if index % 4 == 0 {
             row.gross_6h_bps = None;
@@ -307,7 +364,7 @@ fn the_cohort_counts_are_the_denominators_and_they_nest() {
     // The two differences are different facts -- missing evidence, and the
     // purge and embargo -- and a report that collapsed them would hide the
     // first behind the second.
-    let table = table_of(|index, _| (pseudo(index, 99) - 0.5) * 4_000.0);
+    let table = table_of(|_, planted| planted[0] * 40.0 - 2_000.0);
     let report = edge::run(&table, &rates(), &Options::default()).expect("ran");
 
     assert_eq!(

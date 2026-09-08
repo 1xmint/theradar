@@ -275,4 +275,30 @@ mod tests {
         );
         assert!(lines.last().expect("a verdict").contains("did not clear"));
     }
+
+    #[test]
+    fn the_labelled_fraction_is_a_real_percentage_and_zero_only_when_there_is_no_whole() {
+        // Small arithmetic, but it is arithmetic a reader acts on: this number
+        // is how they tell "a verdict about launches" from "a verdict about the
+        // launches whose outcome could be observed". Every mutation of it makes
+        // the report say something false rather than something imprecise.
+        assert!((percent(1, 4) - 25.0).abs() < f64::EPSILON);
+        assert!((percent(4, 4) - 100.0).abs() < f64::EPSILON);
+
+        // The case the function exists for. In integer arithmetic
+        // `3 * 100 / 4_000` is zero, and a report printing 0% for three real
+        // rows is claiming there is no evidence when there is a little.
+        assert!(
+            percent(3, 4_000) > 0.0,
+            "a small fraction is small, not absent: {}",
+            percent(3, 4_000)
+        );
+        assert!((percent(3, 4_000) - 0.075).abs() < 1e-12);
+
+        // And the guard, which is the only reason to return zero at all: there
+        // is no whole to be a fraction of. Re-apply by inverting it and every
+        // real fraction above becomes zero.
+        assert!((percent(0, 0) - 0.0).abs() < f64::EPSILON);
+        assert!((percent(7, 0) - 0.0).abs() < f64::EPSILON);
+    }
 }

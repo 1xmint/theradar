@@ -227,6 +227,21 @@ pub enum EdgeError {
         /// Labelled rows found.
         rows: usize,
     },
+    /// Fewer eligible launches than the folds and the row floor need.
+    ///
+    /// Distinct from [`TooFewRows`](Self::TooFewRows), which is about labels.
+    /// This one is about the **population**, and it is checked first because
+    /// the fold boundaries are placed before any label is looked at. The two
+    /// were one message until 2026-09-08, which made them the same check
+    /// written twice: a mutation of either threshold was masked by the other,
+    /// and the mutation gate said so.
+    #[error(
+        "{launches} eligible launches is too few for {FOLDS} folds of at least {MIN_ROWS}; there is nothing to split"
+    )]
+    TooFewLaunches {
+        /// Eligible launches found.
+        launches: usize,
+    },
     /// One slot holds so many launches that a fold boundary cannot be placed
     /// without either splitting that slot or emptying a later window.
     ///
@@ -543,8 +558,8 @@ pub fn run(
     // 1). `table.rows` is already ascending by launch slot.
     let population: Vec<Slot> = table.rows.iter().map(|r| r.launch_slot).collect();
     if population.len() < FOLDS * MIN_ROWS {
-        return Err(EdgeError::TooFewRows {
-            rows: population.len(),
+        return Err(EdgeError::TooFewLaunches {
+            launches: population.len(),
         });
     }
     let windows = split(&population)?;
@@ -718,12 +733,28 @@ fn split(population: &[Slot]) -> Result<Vec<(Slot, Slot)>, EdgeError> {
             windows.push((population[start], population[population.len() - 1]));
             break;
         }
-        let mut end = (start + per).saturating_sub(1);
-        // Advance to the end of this slot's run, so the two sides of the cut
-        // are never the same instant.
-        while end + 1 < population.len() && population[end + 1] == population[end] {
-            end += 1;
-        }
+        let nominal = (start + per).saturating_sub(1);
+        // The end of this slot's run, so the two sides of the cut are never the
+        // same instant.
+        //
+        // # Why this is a `position` and not a cursor
+        //
+        // It was `while ... { end += 1 }`, and the mutation gate reported a
+        // **timeout** on the shard holding it. `end *= 1` stops the cursor
+        // advancing and the loop never terminates, and `cargo mutants` cannot
+        // tell an infinite loop from a slow test — the justfile's own note says
+        // a timeout is `inconclusive`, never a pass, so the shard failed with
+        // no survivor named.
+        //
+        // A `position` over a fixed slice cannot loop forever whatever a mutant
+        // does to it. That is AGENTS.md §5's ladder applied to a check rather
+        // than a behaviour: the hang was made impossible instead of tested for.
+        // `tags::substitute` carries the same note for the same reason.
+        let at = population[nominal];
+        let end = population[nominal..]
+            .iter()
+            .position(|slot| *slot != at)
+            .map_or(population.len() - 1, |offset| nominal + offset - 1);
         if end + 1 >= population.len() {
             return Err(EdgeError::SlotSpansAFold {
                 slot: population[end],
@@ -2014,11 +2045,15 @@ mod tests {
         });
         assert!(run(&table, &rates, &Options::default()).is_ok());
 
+        // One launch short is a refusal about the **population** -- there is
+        // nothing to split into five windows. `TooFewRows` is the other
+        // refusal, about labels, and the two are named apart because they send
+        // an operator to different places.
         let mut short = table;
         short.rows.pop();
         assert!(matches!(
             run(&short, &rates, &Options::default()),
-            Err(EdgeError::TooFewRows { .. })
+            Err(EdgeError::TooFewLaunches { .. })
         ));
     }
 
