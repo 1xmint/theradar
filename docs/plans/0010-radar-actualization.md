@@ -45,11 +45,16 @@ Fill in the commit, named checks, observed outcomes, and deployment state for ea
       window says so. Regressions: `removing_labels_cannot_move_a_fold_boundary`
       — verified by re-applying the bug, which shifts all five boundaries —
       plus the two `split` cases and the nesting of the cohort counts. §3.2's
-      **items 2, 5 and 6 are not done**: label provenance and censoring (quote
-      source, endpoint freshness, the same old fill in overlapping lookbacks),
-      descriptive-versus-economic reporting, and time-block resampling with a
-      creator-grouped sensitivity analysis. Item 4 (train-only thresholds) was
-      already held by `grammar`, which takes its deciles from the fitting rows.
+      **item 2 followed** on `fix/label-provenance`: every absent label carries
+      a typed reason — no entry, no exit, one observation counted twice, a stale
+      entry price, a stale exit price, or no price at all — recorded per horizon,
+      carried through the file, and reported by `radar edge` as a breakdown of
+      the population it could not see. A file written before the column reads
+      back as `unrecorded` rather than being assigned a reason. **Items 5 and 6
+      are still not done**: descriptive-versus-economic reporting, and
+      time-block resampling with a creator-grouped sensitivity analysis. Item 4
+      (train-only thresholds) was already held by `grammar`, which takes its
+      deciles from the fitting rows.
 - [ ] 4. Implement durable audit, offline replay, and effect recovery.
 - [ ] 5. Implement admitted launch evidence and permanent receipts.
 - [ ] 6. Replace mixed scoring with explicit whole-week fallback modes.

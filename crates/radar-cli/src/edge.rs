@@ -88,6 +88,19 @@ fn present(report: &Report) {
         report.labelled_rows,
         percent(report.labelled_rows, report.eligible_rows)
     );
+    // The account of the denominator. A population missing labels because
+    // nothing was measured after T is a different sample from one missing them
+    // because every exit price was stale, and a reader deciding how far to
+    // trust the verdict needs to know which.
+    if !report.missingness.is_empty() {
+        println!("  of the rest:");
+        for (reason, n) in &report.missingness {
+            println!(
+                "    {reason:<22} {n:>7}  ({:.0}% of the population)",
+                percent(*n, report.eligible_rows)
+            );
+        }
+    }
     println!(
         "charged      : {:.0} bps round trip -- {} (snapshot of {})",
         report.round_trip_bps, report.cost_source, report.rates_measured_on

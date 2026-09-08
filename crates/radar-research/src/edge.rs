@@ -41,10 +41,12 @@
 //! [`Options::noise_seed`] plants exactly that: a feature that is uniform noise
 //! by construction, which the protocol must never report as `Found`.
 
+use std::collections::BTreeMap;
+
 use radar_roast::BaseRates;
 use radar_types::Slot;
 
-use crate::features::{FEATURES, FeatureTable, Row};
+use crate::features::{FEATURES, FeatureTable, Missing, Row};
 use crate::wilson_bounds;
 
 /// Windows the rows are split into.
@@ -200,6 +202,20 @@ impl Horizon {
         match self {
             Self::SixHours => row.gross_6h_bps,
             Self::TwentyFourHours => row.gross_24h_bps,
+        }
+    }
+
+    /// Why this row has no return at this horizon, when the reason was
+    /// recorded.
+    ///
+    /// The two horizons fail for different reasons on the same launch -- a
+    /// six-hour exit can be stale where a twenty-four-hour one is fresh -- so
+    /// the reason is per horizon, like the label itself.
+    #[must_use]
+    pub const fn missing_of(self, row: &Row) -> Option<Missing> {
+        match self {
+            Self::SixHours => row.missing_6h,
+            Self::TwentyFourHours => row.missing_24h,
         }
     }
 }
@@ -461,6 +477,18 @@ pub struct Report {
     pub rates_measured_on: String,
     /// Labelled rows the protocol ran over.
     pub labelled_rows: usize,
+    /// Why the unlabelled rows are unlabelled, most common first.
+    ///
+    /// The account of the denominator. `eligible_rows` minus `labelled_rows` is
+    /// how many launches this verdict could not see; these are the reasons, and
+    /// they are not interchangeable — a population missing labels because
+    /// nothing was ever measured after T is a different sample from one missing
+    /// them because every exit price was stale. Design 0015 §3.2 item 5.
+    ///
+    /// A row read back from a file written before 2026-09-08 has no recorded
+    /// reason, and is counted under [`UNRECORDED_REASON`] rather than assigned
+    /// one.
+    pub missingness: Vec<(String, usize)>,
     /// Eligible launches in the frozen population, labelled or not.
     ///
     /// The denominator. `labelled_rows` over this is the fraction of the
@@ -654,6 +682,7 @@ pub fn run(
         rates_measured_on: rates.measured_on.clone(),
         labelled_rows: points.len(),
         eligible_rows: population.len(),
+        missingness: missingness(table, options.horizon),
         folds,
         strata_tried: tried,
         enumeration,
@@ -661,6 +690,36 @@ pub fn run(
         fixed,
         found,
     })
+}
+
+/// What a row read from a file older than the reason column counts as.
+///
+/// Not a seventh [`Missing`] variant: the row's reason is absent, and inventing
+/// one would put it in a bucket nobody measured. Named here rather than spelled
+/// twice, because the report prints it and a test asserts on it.
+pub const UNRECORDED_REASON: &str = "unrecorded";
+
+/// Why the unlabelled rows are unlabelled, most common first.
+///
+/// Ties break on the reason's name, so two runs over the same table print the
+/// same order.
+fn missingness(table: &FeatureTable, horizon: Horizon) -> Vec<(String, usize)> {
+    let mut counts: BTreeMap<&str, usize> = BTreeMap::new();
+    for row in &table.rows {
+        if horizon.gross_of(row).is_some() {
+            continue;
+        }
+        let reason = horizon
+            .missing_of(row)
+            .map_or(UNRECORDED_REASON, Missing::label);
+        *counts.entry(reason).or_default() += 1;
+    }
+    let mut out: Vec<(String, usize)> = counts
+        .into_iter()
+        .map(|(reason, n)| (reason.to_owned(), n))
+        .collect();
+    out.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+    out
 }
 
 /// The labelled rows, in launch order, with the planted noise if one is asked
@@ -1285,6 +1344,8 @@ mod tests {
                     values,
                     gross_6h_bps: Some(gross(index)),
                     gross_24h_bps: Some(gross(index)),
+                    missing_6h: None,
+                    missing_24h: None,
                     mode: None,
                 }
             })
@@ -1312,6 +1373,8 @@ mod tests {
             values,
             gross_6h_bps: None,
             gross_24h_bps: None,
+            missing_6h: None,
+            missing_24h: None,
             mode: None,
         };
         let real = Stratum::named(
@@ -1703,6 +1766,8 @@ mod tests {
             values,
             gross_6h_bps: None,
             gross_24h_bps: None,
+            missing_6h: None,
+            missing_24h: None,
             mode: None,
         };
         let planted = Stratum::named(
@@ -2097,6 +2162,8 @@ mod tests {
             values,
             gross_6h_bps: Some(gross),
             gross_24h_bps: Some(gross),
+            missing_6h: None,
+            missing_24h: None,
             mode: None,
         }
     }

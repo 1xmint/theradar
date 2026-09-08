@@ -176,6 +176,15 @@ how many survived the purge and the embargo — so a verdict taken over a small
 fraction of a window says so. A slot holding more launches than a fold can hold
 is refused rather than split across a boundary.
 
+**And an absent label now says why it is absent.** Added 2026-09-08. Six
+reasons, recorded per horizon and carried through the feature file: nothing
+measured at or after T, nothing at or before the horizon, the latest measurement
+before the horizon being the entry itself, a stale entry price, a stale exit
+price, or no price at all. `radar edge` prints them as a breakdown of the
+population it could not see, because a sample missing labels for want of any
+measurement is a different sample from one missing them because every exit price
+was stale.
+
 **No result exists.** Neither command has been run against the production
 store — that needs a Linux binary on the box, and this workstation has no store
 to run them against. So the honest state of the number is unchanged: research

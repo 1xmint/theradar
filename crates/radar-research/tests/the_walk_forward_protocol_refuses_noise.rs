@@ -87,6 +87,8 @@ fn table_of(label: impl Fn(usize, [f64; 3]) -> f64) -> FeatureTable {
                 values,
                 gross_6h_bps: Some(gross),
                 gross_24h_bps: Some(gross),
+                missing_6h: None,
+                missing_24h: None,
                 mode: None,
             }
         })
