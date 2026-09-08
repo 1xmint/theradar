@@ -5,6 +5,11 @@
 **Status:** accepted. **This is Josh's decision, recorded**, and it reverses
 [GOAL.md](../../GOAL.md)'s "Radar will not launch one, ever" — written
 2026-09-03 and edited in the same commit as this file.
+**Constraint 4's entry mechanism is superseded by
+[ADR 0015](0015-the-prize-is-an-evidence-relay-and-a-winner-is-always-selected.md)**
+(2026-09-07): entry is an explicit quote nomination of a published receipt, not
+every mention. Constraint 4's substance — entry is free and never requires
+holding the token — is unchanged, and so is constraint 3.
 **Decides:** whether a token is launched at all, what the operator may hold,
 where the money goes, and what the analyst may say about it.
 

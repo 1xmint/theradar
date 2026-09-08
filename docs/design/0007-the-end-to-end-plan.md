@@ -318,6 +318,16 @@ the thing the bot exists to expose.
 
 ### 6.2 The mechanism
 
+**Superseded 2026-09-07 by
+[ADR 0015](../adr/0015-the-prize-is-an-evidence-relay-and-a-winner-is-always-selected.md).**
+The entry rule, the weighted score, the account-age exclusion and the tie rule
+below are all replaced: an entry becomes an explicit quote nomination of a
+published receipt, the score becomes distinct sharing accounts under one
+whole-week scoring mode, and a winner is selected whenever a valid entry exists.
+The diagram is kept as written because it is what the shipped code still does
+and what the closed weeks were scored under. The claim and payout half of it —
+everything from the winner reply down — is unchanged.
+
 ```
  week opens ──▶ every summoned roast is an entry (summoner = entrant)
                         │
