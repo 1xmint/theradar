@@ -244,18 +244,21 @@ impl Journal {
 
 /// Whether the file has content that does not end in a newline.
 ///
-/// Which is to say: whether the last write was interrupted. An empty file and a
-/// file that does not exist are both `false` -- there is no torn line to
-/// terminate.
+/// Which is to say: whether the last write was interrupted. An empty file is
+/// `false` — there is no torn line to terminate.
+///
+/// Its only caller has already opened the file with `create(true)`, so a
+/// missing file is not a case here. It was special-cased anyway in the first
+/// version, and the mutation gate reported the branch as a survivor — correctly,
+/// because nothing can reach it. A read that fails now is an error, which is
+/// what it should be: if the file we just created cannot be read, the next thing
+/// this function's caller would do is append to it.
 fn ends_mid_line(path: &Path) -> Result<bool, JournalError> {
-    match fs::read(path) {
-        Ok(bytes) => Ok(bytes.last().is_some_and(|b| *b != NEWLINE)),
-        Err(source) if source.kind() == std::io::ErrorKind::NotFound => Ok(false),
-        Err(source) => Err(JournalError::Io {
-            path: path.display().to_string(),
-            source,
-        }),
-    }
+    let bytes = fs::read(path).map_err(|source| JournalError::Io {
+        path: path.display().to_string(),
+        source,
+    })?;
+    Ok(bytes.last().is_some_and(|b| *b != NEWLINE))
 }
 
 /// Reads the complete events out of a journal file.

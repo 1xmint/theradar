@@ -401,4 +401,58 @@ mod tests {
         assert!(reason.contains("Fabricated"), "{reason}");
         assert!(reason.contains("not published"), "{reason}");
     }
+
+    #[test]
+    fn the_journal_records_the_intent_and_then_the_settlement_and_says_what_they_are_about() {
+        // Two events for one reply, in that order: the intent before anything
+        // was said, then how it came out. The settlement names the intent's id,
+        // so the pair can be joined by a reader who has one of them.
+        //
+        // Both carry the mention **and the mint**. Re-apply by deleting the
+        // `mint` from `correlation_of`, which the mutation gate did: the events
+        // stay findable from a mention id and become unfindable from the coin --
+        // and "what did this account say about this token" is the question
+        // somebody holding a screenshot asks.
+        let path = temp("journal-correlation.jsonl");
+        let journal_path = temp("journal-correlation-journal.jsonl");
+        let mut journal = Journal::open(&journal_path).expect("journal");
+
+        publish(&DryRun, &path, &mut journal, entry()).expect("logged");
+
+        let events = Journal::open(&journal_path)
+            .expect("journal")
+            .events()
+            .expect("events");
+        assert_eq!(events.len(), 2, "the intent and the settlement");
+
+        for event in &events {
+            assert_eq!(event.stage, Stage::Publication);
+            assert_eq!(event.correlation.mention.as_deref(), Some("m1"));
+            assert_eq!(
+                event.correlation.mint.as_deref(),
+                Some("MintOne"),
+                "findable from the coin, not only from the mention"
+            );
+        }
+
+        assert_eq!(
+            events[0].outcome,
+            Outcome::Ok,
+            "the intent, before anything"
+        );
+        assert_eq!(
+            events[1].outcome,
+            Outcome::Failed,
+            "the dry run publishes nothing, and that is a settled failure rather \
+             than an unknown"
+        );
+        assert!(
+            events[1]
+                .redacted
+                .as_deref()
+                .is_some_and(|d| d.contains(&events[0].id)),
+            "the settlement names the intent it settles: {:?}",
+            events[1].redacted
+        );
+    }
 }

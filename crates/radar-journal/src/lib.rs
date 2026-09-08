@@ -47,5 +47,5 @@
 mod event;
 mod file;
 
-pub use event::{Correlation, Event, Outcome, Recorded, SCHEMA_VERSION, Stage};
+pub use event::{Correlation, Event, MAX_REDACTED, Outcome, Recorded, SCHEMA_VERSION, Stage};
 pub use file::{Journal, JournalError, Verified};

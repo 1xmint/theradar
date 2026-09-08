@@ -335,3 +335,86 @@ fn the_same_history_gives_an_event_the_same_id_twice() {
     let two = std::fs::read_to_string(journal_of(b.path(), 4)).expect("read");
     assert_eq!(one, two);
 }
+
+#[test]
+fn the_diagnostic_bound_is_walked_from_both_sides() {
+    // Exactly the bound is a reason; one byte more is a response body. The
+    // difference matters because the rule is what keeps a provider's error --
+    // headers included -- out of a permanent record, and a bound nobody walked
+    // is a bound that drifts.
+    //
+    // Re-apply by widening the `>` to `>=`: a diagnostic of exactly the bound is
+    // refused, and the first caller to hit it works around the journal rather
+    // than through it.
+    let dir = tempfile::tempdir().expect("tempdir");
+    let mut journal = Journal::open(dir.path().join("bound.jsonl")).expect("open");
+
+    let at_the_bound = journal.record(
+        Stage::Publication,
+        Outcome::Failed,
+        1,
+        about("mint"),
+        None,
+        Vec::new(),
+        None,
+        Some("x".repeat(radar_journal::MAX_REDACTED)),
+    );
+    assert!(
+        at_the_bound.is_ok(),
+        "exactly the bound is a reason: {at_the_bound:?}"
+    );
+
+    let one_over = journal.record(
+        Stage::Publication,
+        Outcome::Failed,
+        2,
+        about("mint"),
+        None,
+        Vec::new(),
+        None,
+        Some("x".repeat(radar_journal::MAX_REDACTED + 1)),
+    );
+    assert!(matches!(
+        one_over,
+        Err(radar_journal::JournalError::RedactedTooLong { .. })
+    ));
+}
+
+#[test]
+fn the_receipt_names_the_event_that_was_written() {
+    // The receipt is what a later event about the same effect refers to, and
+    // what a caller writes into the settlement it records afterwards. An id
+    // that does not name the event on disk makes a chain of two events that
+    // cannot be joined -- which reads as evidence and is not.
+    //
+    // Re-apply by returning anything else from `Recorded::id`.
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("receipt.jsonl");
+    let mut journal = Journal::open(&path).expect("open");
+
+    let receipt = journal
+        .record(
+            Stage::Publication,
+            Outcome::Ok,
+            1_000,
+            about("mint"),
+            None,
+            Vec::new(),
+            None,
+            None,
+        )
+        .expect("record");
+
+    let written = Journal::open(&path)
+        .expect("open")
+        .events()
+        .expect("events");
+    assert_eq!(written.len(), 1);
+    assert_eq!(
+        receipt.id(),
+        written[0].id,
+        "the receipt names the event on disk"
+    );
+    assert!(!receipt.id().is_empty(), "and it is not empty");
+    assert_eq!(receipt.event(), &written[0]);
+}
