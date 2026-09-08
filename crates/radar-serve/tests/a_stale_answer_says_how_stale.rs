@@ -24,10 +24,10 @@ fn launch(slot: u64) -> radar_store::Event {
         envelope: radar_store::Envelope {
             slot: Slot(slot),
             signature: Signature::new([(slot % 251) as u8; 64]),
-            tx_index: 0,
+            tx_index: Some(0),
             instruction_index: 0,
             parent_index: None,
-            succeeded: true,
+            success: Some(true),
         },
         origin: radar_store::Origin::known(Address::new([3u8; 32]), "create_v2"),
         mint: Address::new([1u8; 32]),

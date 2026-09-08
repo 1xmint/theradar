@@ -118,7 +118,7 @@ carrying the date it was measured.
 ## The learning loop has an instrument, and it has not been run yet
 
 **Built 2026-09-05, plan 0007 items 1 and 2.** `radar features` writes one row
-per succeeded launch with twenty-three features, every value observed at or
+per succeeded launch with twenty-four features, every value observed at or
 before T = launch + 6,000 slots and accepted through `AsOf::accept`, so a
 feature computed from something that had not happened yet is a build error
 rather than a column. `radar edge` runs the walk-forward protocol over that
@@ -136,6 +136,20 @@ with no code change. Nine features remain: the creator's record, the launch
 metadata, the dev buy, and what the decision lane recorded. Getting the recorder
 to write trades is the highest-value repair available to this work and it is not
 part of it.
+
+**And when it does write one, the row will now say what it does not know.**
+Changed 2026-09-07, plan 0010 item 2. Three fields the recorder does not always
+resolve were stored as sentinels — an unresolved success as `true`, an
+unresolved block position as `u32::MAX`, an unresolved trader as the system
+program — and each read downstream as a measurement. All three are `Option` now,
+the two envelope sentinels are translated on read so files written before the
+change say what they meant, and a count of successful activity over a window
+holding an unresolved row is **absent** rather than a count of the readable
+part. The consequence to hold on to: had the trades backfill run against the
+old shape, every launch with any trade would have carried `launch_traders = 1`
+and a contiguity run containing four billion. This is a repair to the
+instrument, not a measurement — nothing has been run against a store that holds
+trades, because there is not one.
 
 **No result exists.** Neither command has been run against the production
 store — that needs a Linux binary on the box, and this workstation has no store

@@ -59,7 +59,7 @@ pub fn build(reader: &Reader, as_of: AsOf, built_at: u64) -> Result<CreatorIndex
         // a spam burst is real information about the market, but a creator
         // credited with a thousand launches that never happened is a
         // creator ranked on somebody else's failed transactions.
-        if !launch.envelope.succeeded {
+        if !launch.envelope.succeeded() {
             continue;
         }
         if creator_of.insert(launch.mint, launch.creator).is_none() {

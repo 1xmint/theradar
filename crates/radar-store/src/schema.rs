@@ -10,7 +10,12 @@
 //! suggests.
 //!
 //! Nullability is meaningful throughout: a null realised amount means "not
-//! recoverable", never zero.
+//! recoverable", never zero, and a null `succeeded`, `tx_index` or `trader`
+//! means the recorder never resolved it rather than that it resolved to the
+//! convenient value. The column names are unchanged so that every DuckDB query
+//! written against this store still runs; what changed is that they may now be
+//! null, and a query that treats null as false is asking a different question
+//! from the one it asks of a non-null column.
 
 use std::sync::Arc;
 
@@ -23,11 +28,17 @@ fn envelope_fields() -> Vec<Field> {
     vec![
         Field::new("slot", DataType::UInt64, false),
         Field::new("signature", DataType::Utf8, false),
-        Field::new("tx_index", DataType::UInt32, false),
+        // Null means the recorder never resolved a position. Nullable since
+        // 2026-09-07; before that an unresolved position was written as
+        // `u32::MAX`, and `Envelope::from_stored` reads that back as null.
+        Field::new("tx_index", DataType::UInt32, true),
         Field::new("instruction_index", DataType::UInt32, false),
         // Null means top-level rather than a cross-program invocation.
         Field::new("parent_index", DataType::UInt32, true),
-        Field::new("succeeded", DataType::Boolean, false),
+        // Null means nobody established whether the transaction succeeded --
+        // the backfill's join found no `err` column to read. Nullable since
+        // 2026-09-07; before that absent was written as `true`.
+        Field::new("succeeded", DataType::Boolean, true),
         Field::new("program", DataType::Utf8, false),
         Field::new("instruction", DataType::Utf8, false),
         Field::new("known", DataType::Boolean, false),
@@ -62,7 +73,9 @@ fn event_schema(table: Table) -> Arc<Schema> {
         ]),
         Table::Trades => fields.extend([
             Field::new("mint", DataType::Utf8, false),
-            Field::new("trader", DataType::Utf8, false),
+            // Null means the recorder never resolved the account. Nullable
+            // since 2026-09-07; before that the system program stood in for it.
+            Field::new("trader", DataType::Utf8, true),
             Field::new("side", DataType::Utf8, false),
             Field::new("realised_lamports", DataType::UInt64, true),
             Field::new("realised_tokens", DataType::UInt64, true),

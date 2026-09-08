@@ -241,7 +241,7 @@ pub fn build(
         let Event::Launch(launch) = event else {
             continue;
         };
-        if !launch.envelope.succeeded {
+        if !launch.envelope.succeeded() {
             continue;
         }
         by_mint.entry(launch.mint).or_insert(*launch);
@@ -380,6 +380,17 @@ fn covered(coverage: &BTreeSet<u64>, from: Slot, to: Slot) -> bool {
 
 /// The trades of every considered mint, from its launch to its T, in order.
 ///
+/// **Every row in the window, whatever its outcome.** A reverted swap moved
+/// nothing and an unresolved one might have; neither is countable activity, and
+/// it would be tempting to drop both here. They are kept because the two
+/// absences have to stay apart downstream: a window whose rows are all
+/// unreadable is not a quiet window, and a filter applied here would make them
+/// identical. [`Inputs::successful`] is the one place a feature narrows to what
+/// the chain accepted, and [`Inputs::outcomes_resolved`] is the one place it
+/// asks whether narrowing is even honest. A second filter here would be a
+/// second enforcement point for one property -- and it was written that way
+/// first, survived its own mutation, and was removed for exactly that reason.
+///
 /// The window is the memory bound: the trades table is the large read, and
 /// holding a mint's whole history when only the first 6,000 slots are ever
 /// looked at is the difference between a pass that fits and one that does not.
@@ -491,6 +502,26 @@ impl Inputs<'_> {
         self.launch.envelope.slot
     }
 
+    /// Whether every trade in this window has a **known** outcome.
+    ///
+    /// The window holds successes and unresolved rows;
+    /// [`trades_to_t`] has already dropped the failures. A count of successful
+    /// activity over a window containing an unresolved row is a count over a
+    /// smaller window than the one asked about, so every such feature is absent
+    /// when this is false.
+    ///
+    /// Distinct from [`trades_recorded`](Self::trades_recorded), which asks
+    /// whether the store holds the window at all. Coverage says the rows should
+    /// be there; this says the rows that are there can be read.
+    fn outcomes_resolved(&self) -> bool {
+        self.trades.iter().all(|t| !t.envelope.outcome_unknown())
+    }
+
+    /// The trades in this window the chain accepted.
+    fn successful(&self) -> impl Iterator<Item = &Trade> {
+        self.trades.iter().filter(|t| t.envelope.succeeded())
+    }
+
     /// T — the moment every feature is observed at or before.
     fn t(&self) -> Slot {
         self.launch_slot() + SlotDelta(ENTRY_OFFSET_SLOTS)
@@ -553,32 +584,51 @@ fn launch_block_features(builder: &mut RowBuilder, inputs: &Inputs<'_>) -> Resul
         }
         return Ok(());
     }
+    // Every count below is a count of **distinct successful actors or
+    // positions**, and each is knowable only when three things hold: the store
+    // covers the window (`trades_recorded`, checked above), every row in it has
+    // a resolved outcome, and every successful row carries the field being
+    // counted. Otherwise the feature is absent.
+    //
+    // This is not defensive coding, it is the arithmetic of what is in the
+    // store today. Every trade the backfill wrote names the system program as
+    // its trader and has no resolved block position, so before 2026-09-07 this
+    // function reported `launch_traders = 1` for every backfilled launch with
+    // any trade, and `longest_run` counted `u32::MAX` as a block position. One
+    // placeholder is not one trader, and rule 9 says the row must say so.
+    let resolved = inputs.outcomes_resolved();
     let in_block: Vec<&Trade> = inputs
-        .trades
-        .iter()
+        .successful()
         .filter(|t| t.envelope.slot == at)
         .collect();
-    let accounts: BTreeSet<Address> = in_block.iter().map(|t| t.trader).collect();
-    let positions: BTreeSet<u32> = in_block.iter().map(|t| t.envelope.tx_index).collect();
+    let accounts: BTreeSet<Address> = in_block.iter().filter_map(|t| t.trader).collect();
+    let positions: BTreeSet<u32> = in_block
+        .iter()
+        .filter_map(|t| t.envelope.tx_index)
+        .collect();
 
-    set(
-        builder,
-        mint,
-        "launch_traders",
-        Observed::new(count(accounts.len()), at),
-    )?;
-    set(
-        builder,
-        mint,
-        "launch_transactions",
-        Observed::new(count(positions.len()), at),
-    )?;
-    set(
-        builder,
-        mint,
-        "launch_contiguity",
-        Observed::new(count(longest_run(&positions)), at),
-    )?;
+    if resolved && in_block.iter().all(|t| t.trader.is_some()) {
+        set(
+            builder,
+            mint,
+            "launch_traders",
+            Observed::new(count(accounts.len()), at),
+        )?;
+    }
+    if resolved && in_block.iter().all(|t| t.envelope.tx_index.is_some()) {
+        set(
+            builder,
+            mint,
+            "launch_transactions",
+            Observed::new(count(positions.len()), at),
+        )?;
+        set(
+            builder,
+            mint,
+            "launch_contiguity",
+            Observed::new(count(longest_run(&positions)), at),
+        )?;
+    }
     if let Some(lamports) = inputs.launch.dev_buy_lamports {
         set(
             builder,
@@ -674,6 +724,13 @@ fn activity_features(builder: &mut RowBuilder, inputs: &Inputs<'_>) -> Result<()
         return Ok(());
     }
     let mint = inputs.launch.mint;
+    // Both counts here are counts of *successful* activity, so both are absent
+    // when the window holds a row nobody resolved -- counting the resolved ones
+    // would answer about a smaller window than the one asked about.
+    let resolved = inputs.outcomes_resolved();
+    if !resolved {
+        return Ok(());
+    }
     for (width, trades_name, traders_name) in [
         (25u64, "trades_25", "traders_25"),
         (300, "trades_300", "traders_300"),
@@ -681,27 +738,31 @@ fn activity_features(builder: &mut RowBuilder, inputs: &Inputs<'_>) -> Result<()
     ] {
         let edge = inputs.launch_slot() + SlotDelta(width);
         let seen: Vec<&Trade> = inputs
-            .trades
-            .iter()
+            .successful()
             .filter(|t| t.envelope.slot <= edge)
             .collect();
-        let distinct: BTreeSet<Address> = seen.iter().map(|t| t.trader).collect();
+        let distinct: BTreeSet<Address> = seen.iter().filter_map(|t| t.trader).collect();
         // Observed at the window's edge rather than at the last trade inside it:
         // "nothing traded by slot X" is a statement about X, and it is only true
         // once X has passed. Bounded by T, which it already is by construction.
         let at = edge.min(inputs.t());
+        // The trade count survives an unknown *actor* -- it counts rows, and the
+        // rows are real successes. The distinct-trader count does not: with any
+        // trader unresolved it counts a subset and reports it as the whole.
         set(
             builder,
             mint,
             trades_name,
             Observed::new(count(seen.len()), at),
         )?;
-        set(
-            builder,
-            mint,
-            traders_name,
-            Observed::new(count(distinct.len()), at),
-        )?;
+        if seen.iter().all(|t| t.trader.is_some()) {
+            set(
+                builder,
+                mint,
+                traders_name,
+                Observed::new(count(distinct.len()), at),
+            )?;
+        }
     }
     Ok(())
 }
@@ -714,6 +775,12 @@ fn velocity_features(builder: &mut RowBuilder, inputs: &Inputs<'_>) -> Result<()
     if !inputs.trades_recorded {
         return Ok(());
     }
+    // Curve progress, so the same rule as the counts: an unresolved row might
+    // have moved the curve, and a depth reached without it is a depth reached
+    // in a different market.
+    if !inputs.outcomes_resolved() {
+        return Ok(());
+    }
     let mint = inputs.launch.mint;
     let mut cumulative = 0u128;
     let mut taken = 0u64;
@@ -723,7 +790,7 @@ fn velocity_features(builder: &mut RowBuilder, inputs: &Inputs<'_>) -> Result<()
         (30, "trades_to_30_sol", None),
     ];
 
-    for trade in inputs.trades {
+    for trade in inputs.successful() {
         let Some(lamports) = trade.realised_lamports else {
             continue;
         };
