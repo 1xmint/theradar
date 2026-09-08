@@ -152,33 +152,62 @@ fn verify(path: &str, (from, to): (Option<u64>, Option<u64>)) -> Result<(), Stri
     let events = journal.events().map_err(|e| e.to_string())?;
     let shown = events
         .iter()
-        .filter(|e| from.is_none_or(|f| e.sequence >= f) && to.is_none_or(|t| e.sequence <= t))
+        .filter(|e| in_range(e.sequence, from, to))
         .count();
 
+    for line in verify_lines(&verdict, shown, from, to) {
+        println!("{line}");
+    }
     match verdict {
-        Verified::Intact { events: n } => {
-            println!("intact: {n} events, chained from the first.");
-            if from.is_some() || to.is_some() {
-                println!("  {shown} of them in the range asked for.");
-            }
-            Ok(())
-        }
-        Verified::Torn { events: n } => {
-            // Not a fault, and it must not exit non-zero: a deploy that
-            // restarted the daemon mid-write leaves exactly this, and a monitor
-            // that pages for it is a monitor that gets muted.
-            println!("torn: {n} complete events, and a final write that did not finish.");
-            println!("  That is the ordinary shape of a crash or a restart. The");
-            println!("  events before it are untouched, and the next one continues");
-            println!("  from the last complete event.");
-            Ok(())
-        }
+        // A torn journal exits **zero**. A deploy that restarted the daemon
+        // mid-write leaves exactly this, and a monitor that pages for it is a
+        // monitor that gets muted -- and then it is silent for the one below.
+        Verified::Intact { .. } | Verified::Torn { .. } => Ok(()),
         Verified::Broken { at, why } => Err(format!(
             "broken at sequence {at}: {why}\n  \
              This is not a crash. Something wrote to this file that was not the\n  \
              journal, or something removed a line. The events before {at} still\n  \
              stand; nothing after it can be trusted without knowing what happened."
         )),
+    }
+}
+
+/// What `verify` says, as lines.
+///
+/// A `Vec<String>` rather than a block of `println!`, which is this crate's
+/// idiom for the same reason three times over now: a printer is reachable by no
+/// test, and the mutation gate reports every decision inside one as a survivor.
+/// `candidate_lines` and `missingness_lines` are the other two.
+///
+/// The `Broken` case says nothing here — its words are the error, because an
+/// error is what an operator's shell shows them.
+fn verify_lines(
+    verdict: &Verified,
+    shown: usize,
+    from: Option<u64>,
+    to: Option<u64>,
+) -> Vec<String> {
+    // The bounds rather than a `ranged` flag, so the decision that a range was
+    // asked for lives inside the function a test can call. It was a flag, and
+    // the mutation gate then reported the `||` at the *call site* -- outside
+    // everything the test could reach. A split that leaves the decision on the
+    // other side of the seam has not split anything.
+    let ranged = from.is_some() || to.is_some();
+    match verdict {
+        Verified::Intact { events } => {
+            let mut lines = vec![format!("intact: {events} events, chained from the first.")];
+            if ranged {
+                lines.push(format!("  {shown} of them in the range asked for."));
+            }
+            lines
+        }
+        Verified::Torn { events } => vec![
+            format!("torn: {events} complete events, and a final write that did not finish."),
+            "  That is the ordinary shape of a crash or a restart. The".to_owned(),
+            "  events before it are untouched, and the next one continues".to_owned(),
+            "  from the last complete event.".to_owned(),
+        ],
+        Verified::Broken { .. } => Vec::new(),
     }
 }
 
@@ -189,10 +218,7 @@ fn verify(path: &str, (from, to): (Option<u64>, Option<u64>)) -> Result<(), Stri
 /// journal never holds a credential, so exporting it cannot leak one.
 fn export(path: &str, week: &str) -> Result<(), String> {
     let events = open(path)?.events().map_err(|e| e.to_string())?;
-    let matched: Vec<&Event> = events
-        .iter()
-        .filter(|e| e.correlation.week.as_deref() == Some(week))
-        .collect();
+    let matched = events_of_week(&events, week);
 
     let bundle = serde_json::json!({
         "week": week,
@@ -212,6 +238,37 @@ fn export(path: &str, week: &str) -> Result<(), String> {
         serde_json::to_string_pretty(&bundle).map_err(|e| e.to_string())?
     );
     Ok(())
+}
+
+/// Whether a sequence is inside the reported range.
+///
+/// Both bounds inclusive, and an absent bound is unbounded on that side. Split
+/// out of [`verify`] so a test can reach it: it was inline, and the mutation
+/// gate reported every comparison in it as a survivor -- the range is exercised
+/// by nothing that runs the command, because the command prints and a printer
+/// is reachable by no test.
+const fn in_range(sequence: u64, from: Option<u64>, to: Option<u64>) -> bool {
+    let after_start = match from {
+        Some(f) => sequence >= f,
+        None => true,
+    };
+    let before_end = match to {
+        Some(t) => sequence <= t,
+        None => true,
+    };
+    after_start && before_end
+}
+
+/// The events about one week.
+///
+/// Split out of [`export`] for the reason [`in_range`] is, and because the test
+/// for it had re-implemented this filter rather than calling it -- which tests
+/// the test.
+fn events_of_week<'a>(events: &'a [Event], week: &str) -> Vec<&'a Event> {
+    events
+        .iter()
+        .filter(|e| e.correlation.week.as_deref() == Some(week))
+        .collect()
 }
 
 /// Whether an event names `id` anywhere a reader would look.
@@ -390,17 +447,6 @@ mod tests {
         journal_with_two_weeks(&path);
 
         assert!(export(&path, "2026-W37").is_ok());
-
-        // The filter itself, checked without the printing.
-        let events = Journal::open(&path)
-            .expect("open")
-            .events()
-            .expect("events");
-        let week: Vec<_> = events
-            .iter()
-            .filter(|e| e.correlation.week.as_deref() == Some("2026-W37"))
-            .collect();
-        assert_eq!(week.len(), 2, "two of the three events are that week's");
     }
 
     #[test]
@@ -428,5 +474,123 @@ mod tests {
         for known in ["explain", "verify", "export"] {
             assert!(why.contains(known), "{why}");
         }
+    }
+
+    #[test]
+    fn the_reported_range_includes_both_bounds_and_is_open_on_an_absent_one() {
+        // Walked exactly, because every comparison in it survived the mutation
+        // gate: the range is exercised by nothing that runs the command, since
+        // the command prints and a printer is reachable by no test.
+        //
+        // Both bounds inclusive: `--from 2 --to 4` is 2, 3 and 4. An operator
+        // who asks for a sequence and is not shown it reads the journal as
+        // missing an event.
+        assert!(in_range(2, Some(2), Some(4)), "the lower bound is inside");
+        assert!(in_range(3, Some(2), Some(4)));
+        assert!(in_range(4, Some(2), Some(4)), "the upper bound is inside");
+        assert!(!in_range(1, Some(2), Some(4)));
+        assert!(!in_range(5, Some(2), Some(4)));
+
+        // An absent bound is unbounded on that side, not zero and not the end.
+        assert!(in_range(1, None, Some(4)));
+        assert!(in_range(9, Some(2), None));
+        assert!(in_range(0, None, None));
+
+        // The `&&`, which as an `||` admits everything either bound admits --
+        // so a window becomes a union and the count reported is larger than the
+        // range asked for.
+        assert!(
+            !in_range(9, Some(2), Some(4)),
+            "past the end is outside, even though it is after the start"
+        );
+        assert!(
+            !in_range(1, Some(2), Some(4)),
+            "before the start is outside, even though it is before the end"
+        );
+    }
+
+    #[test]
+    fn the_range_count_is_reported_only_when_a_range_was_asked_for() {
+        // Cosmetic, and not equivalent: as an `&&` the count disappears unless
+        // *both* bounds are given, so `--from 2` alone silently stops reporting
+        // what it narrowed to. The mutation gate found it, and the answer is
+        // the `_lines` split rather than an entry claiming a real behaviour
+        // change is equivalent.
+        let intact = Verified::Intact { events: 9 };
+
+        let plain = verify_lines(&intact, 9, None, None);
+        assert_eq!(
+            plain.len(),
+            1,
+            "no range asked for, no range line: {plain:?}"
+        );
+
+        let ranged = verify_lines(&intact, 4, Some(2), Some(5));
+        assert_eq!(ranged.len(), 2, "{ranged:?}");
+        assert!(
+            ranged[1].contains('4') && ranged[1].contains("range"),
+            "{ranged:?}"
+        );
+
+        // One bound is a range. As an `&&` the count disappears unless both are
+        // given, so `--from 2` alone silently stops reporting what it narrowed
+        // to -- and that is the mutant, which lived at the call site until the
+        // bounds moved in here.
+        assert_eq!(verify_lines(&intact, 7, Some(2), None).len(), 2);
+        assert_eq!(verify_lines(&intact, 7, None, Some(5)).len(), 2);
+
+        // Torn says the same thing whether or not a range was asked for: the
+        // count is about a chain that is sound, and a torn one is not the
+        // question.
+        let torn = Verified::Torn { events: 3 };
+        assert_eq!(
+            verify_lines(&torn, 1, Some(2), Some(5)),
+            verify_lines(&torn, 9, None, None)
+        );
+        assert!(verify_lines(&torn, 0, None, None)[0].contains("torn"));
+
+        // Broken says nothing here. Its words are the error, which is what an
+        // operator's shell shows them -- printing them twice would read as two
+        // faults.
+        assert!(
+            verify_lines(
+                &Verified::Broken {
+                    at: 2,
+                    why: "a gap".to_owned()
+                },
+                0,
+                None,
+                None
+            )
+            .is_empty()
+        );
+    }
+
+    #[test]
+    fn a_week_export_carries_that_week_and_no_other() {
+        // This test used to re-implement the filter it was checking, which
+        // tests the test. It calls the function now, and the mutation gate is
+        // what said so: `== Some(week)` mutated to `!=` and nothing failed.
+        let path = temp("week-filter.jsonl");
+        journal_with_two_weeks(&path);
+        let events = Journal::open(&path)
+            .expect("open")
+            .events()
+            .expect("events");
+
+        let week = events_of_week(&events, "2026-W37");
+        assert_eq!(week.len(), 2);
+        assert!(
+            week.iter()
+                .all(|e| e.correlation.week.as_deref() == Some("2026-W37")),
+            "and every one of them is that week's"
+        );
+
+        let other = events_of_week(&events, "2026-W38");
+        assert_eq!(other.len(), 1);
+
+        // A week the journal holds nothing about is empty rather than
+        // everything, which is what the inverted comparison would give.
+        assert!(events_of_week(&events, "2026-W99").is_empty());
     }
 }
