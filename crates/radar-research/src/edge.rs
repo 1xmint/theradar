@@ -227,6 +227,19 @@ pub enum EdgeError {
         /// Labelled rows found.
         rows: usize,
     },
+    /// One slot holds so many launches that a fold boundary cannot be placed
+    /// without either splitting that slot or emptying a later window.
+    ///
+    /// A refusal rather than a report, for the reason [`split`] gives: the two
+    /// ways out are putting the same instant on both sides of a boundary, and
+    /// announcing five folds while deciding on four.
+    #[error(
+        "slot {slot} holds enough launches to span a whole fold; the {FOLDS}-fold split cannot be placed without splitting that slot"
+    )]
+    SlotSpansAFold {
+        /// The slot that is too wide.
+        slot: Slot,
+    },
 }
 
 /// One term of a stratum: a feature against a threshold, in one direction.
@@ -385,8 +398,24 @@ pub struct Fold {
     pub from: Slot,
     /// The last launch slot in the window.
     pub to: Slot,
-    /// Rows in it after the purge and the embargo.
+    /// Rows in it after the purge and the embargo. The denominator every
+    /// reading in this fold is taken over.
     pub rows: usize,
+    /// Eligible launches in the window, labelled or not.
+    ///
+    /// The window's own denominator, and the number that says how much of the
+    /// population a fold's reading actually saw. `rows` divided by this is the
+    /// fraction of the fold the protocol could score; a fold where that is
+    /// small is a fold whose verdict is about a subset, and the report has to
+    /// let a reader see that rather than only the subset's size.
+    pub population: usize,
+    /// Eligible launches in the window that carried a label at all.
+    ///
+    /// Between `population` and `rows`: the difference from `population` is
+    /// missing labels, and the difference from `rows` is the purge and the
+    /// embargo. Two different reasons a launch is not scored, kept apart
+    /// because only the first is a gap in the evidence.
+    pub labelled: usize,
 }
 
 /// Whether the search covered the whole grammar.
@@ -417,6 +446,13 @@ pub struct Report {
     pub rates_measured_on: String,
     /// Labelled rows the protocol ran over.
     pub labelled_rows: usize,
+    /// Eligible launches in the frozen population, labelled or not.
+    ///
+    /// The denominator. `labelled_rows` over this is the fraction of the
+    /// population any verdict below is a statement about, and a verdict from a
+    /// small fraction is a statement about the launches whose outcome could be
+    /// observed rather than about launches.
+    pub eligible_rows: usize,
     /// The windows.
     pub folds: Vec<Fold>,
     /// How many strata were tried.
@@ -500,12 +536,24 @@ pub fn run(
 ) -> Result<Report, EdgeError> {
     let (round_trip, cost_source) = options.cost.resolve(rates)?;
 
+    // The population is frozen first, and the boundaries come from it. Every
+    // eligible launch is in it, including the ones no label will ever be found
+    // for -- they are the denominator, and dropping them here is how label
+    // availability used to decide where the folds fell (design 0015 §3.2 item
+    // 1). `table.rows` is already ascending by launch slot.
+    let population: Vec<Slot> = table.rows.iter().map(|r| r.launch_slot).collect();
+    if population.len() < FOLDS * MIN_ROWS {
+        return Err(EdgeError::TooFewRows {
+            rows: population.len(),
+        });
+    }
+    let windows = split(&population)?;
+
+    // Only now are labels looked at.
     let points = points_of(table, options, round_trip);
     if points.len() < FOLDS * MIN_ROWS {
         return Err(EdgeError::TooFewRows { rows: points.len() });
     }
-
-    let windows = split(&points);
     let (fit_rows, test_rows) = admissible(&points, &windows, options.horizon);
 
     // Each window reports its own admissible rows. The fitting period is three
@@ -525,6 +573,11 @@ pub fn run(
             } else {
                 test_rows[index - FIT_FOLDS].len()
             },
+            population: population.iter().filter(|s| *s >= from && *s <= to).count(),
+            labelled: points
+                .iter()
+                .filter(|p| p.launch_slot >= *from && p.launch_slot <= *to)
+                .count(),
         })
         .collect();
 
@@ -585,6 +638,7 @@ pub fn run(
         band_bar_bps: rates.round_trip_bar,
         rates_measured_on: rates.measured_on.clone(),
         labelled_rows: points.len(),
+        eligible_rows: population.len(),
         folds,
         strata_tried: tried,
         enumeration,
@@ -621,24 +675,64 @@ fn points_of(table: &FeatureTable, options: &Options, round_trip: f64) -> Vec<Po
     points
 }
 
-/// Splits the points into [`FOLDS`] contiguous windows, equal in rows.
+/// Splits the **frozen population** into [`FOLDS`] contiguous windows, equal in
+/// rows.
 ///
 /// By position rather than by slot range: a window of equal slot width holds
 /// wildly unequal numbers of launches, and a fold of forty rows cannot be
 /// compared with one of forty thousand.
-fn split(points: &[Point]) -> Vec<(Slot, Slot)> {
-    let per = points.len() / FOLDS;
-    (0..FOLDS)
-        .map(|index| {
-            let start = index * per;
-            let end = if index == FOLDS - 1 {
-                points.len() - 1
-            } else {
-                (start + per).saturating_sub(1)
-            };
-            (points[start].launch_slot, points[end].launch_slot)
-        })
-        .collect()
+///
+/// # Why the population and not the labelled rows
+///
+/// This took the labelled points until 2026-09-08, and the labelled points are
+/// the rows that survived `points_of`'s `filter_map`. So **label availability
+/// decided where the fold boundaries fell**: a horizon whose exit price is
+/// missing for a run of launches moved every later boundary, and two runs of
+/// the same protocol over the same history at two horizons were split
+/// differently. The boundaries are a property of the population, and the
+/// population is every eligible launch — design 0015 §3.2, item 1.
+///
+/// # Why a slot group is never split
+///
+/// Two launches in the same slot are the same instant. Putting one either side
+/// of a boundary makes that instant simultaneously fitting data and test data.
+/// The embargo happens to exclude such a row from the test fold today, so this
+/// was not reachable — but that is the embargo holding a property the split
+/// should hold itself, and an embargo of zero would expose it. Each cut is
+/// therefore advanced to the end of its slot's run.
+///
+/// # Errors
+///
+/// [`EdgeError::SlotSpansAFold`] when one slot holds so many launches that
+/// advancing a cut past it would swallow a whole later window. Refused rather
+/// than reported: silently splitting the group would put the same instant on
+/// both sides of a boundary, and silently emptying a fold would report a
+/// verdict from four windows while saying five.
+fn split(population: &[Slot]) -> Result<Vec<(Slot, Slot)>, EdgeError> {
+    let per = population.len() / FOLDS;
+    let mut windows = Vec::with_capacity(FOLDS);
+    let mut start = 0usize;
+
+    for index in 0..FOLDS {
+        if index == FOLDS - 1 {
+            windows.push((population[start], population[population.len() - 1]));
+            break;
+        }
+        let mut end = (start + per).saturating_sub(1);
+        // Advance to the end of this slot's run, so the two sides of the cut
+        // are never the same instant.
+        while end + 1 < population.len() && population[end + 1] == population[end] {
+            end += 1;
+        }
+        if end + 1 >= population.len() {
+            return Err(EdgeError::SlotSpansAFold {
+                slot: population[end],
+            });
+        }
+        windows.push((population[start], population[end]));
+        start = end + 1;
+    }
+    Ok(windows)
 }
 
 /// Applies the purge and the embargo.
@@ -1209,10 +1303,8 @@ mod tests {
         // the last window has to carry them. Computing its end the way the
         // others are computed would drop the final three rows from the protocol
         // entirely, silently.
-        let points: Vec<Point> = (0..503u64)
-            .map(|i| point(i * 10, Vec::new(), 0.0, 0.0))
-            .collect();
-        let windows = split(&points);
+        let population: Vec<Slot> = (0..503u64).map(|i| Slot(i * 10)).collect();
+        let windows = split(&population).expect("distinct slots split cleanly");
 
         assert_eq!(
             windows.last().copied(),
@@ -1600,13 +1692,58 @@ mod tests {
     }
 
     #[test]
+    fn a_cut_never_lands_inside_a_group_of_launches_sharing_a_slot() {
+        // Two launches in the same slot are the same instant. Putting one
+        // either side of a boundary makes that instant simultaneously fitting
+        // data and test data. Re-apply by deleting the `while` that advances
+        // the cut: the first window then ends at slot 990 with three more rows
+        // at 990 sitting in the second.
+        let mut population: Vec<Slot> = (0..500u64).map(|i| Slot(i * 10)).collect();
+        // Four launches share slot 990, which is exactly where the first cut
+        // would otherwise fall.
+        for _ in 0..3 {
+            population.push(Slot(990));
+        }
+        population.sort_unstable();
+
+        let windows = split(&population).expect("one shared slot does not span a fold");
+        for pair in windows.windows(2) {
+            assert!(
+                pair[0].1 < pair[1].0,
+                "a slot on both sides of a cut: {pair:?}"
+            );
+        }
+        assert_eq!(
+            windows[0].1,
+            Slot(990),
+            "the cut lands on the shared slot and takes all of it"
+        );
+        assert!(
+            windows[1].0 > Slot(990),
+            "and the next window starts after it, not on it"
+        );
+    }
+
+    #[test]
+    fn a_slot_wide_enough_to_swallow_a_fold_is_refused_rather_than_split() {
+        // The degenerate input, refused. The two ways out are putting the same
+        // instant on both sides of a boundary and announcing five folds while
+        // deciding on four, and neither is a thing to do quietly.
+        let mut population: Vec<Slot> = (0..100u64).map(Slot).collect();
+        population.extend(std::iter::repeat_n(Slot(100), 400));
+
+        assert!(matches!(
+            split(&population),
+            Err(EdgeError::SlotSpansAFold { slot: Slot(100) })
+        ));
+    }
+
+    #[test]
     fn the_windows_are_contiguous_equal_slices_in_launch_order() {
         // Off by one in either edge shifts every fold boundary, which shifts
         // the purge and the embargo with it.
-        let points: Vec<Point> = (0..500u64)
-            .map(|i| point(i * 10, Vec::new(), 0.0, 0.0))
-            .collect();
-        let windows = split(&points);
+        let population: Vec<Slot> = (0..500u64).map(|i| Slot(i * 10)).collect();
+        let windows = split(&population).expect("distinct slots split cleanly");
 
         assert_eq!(
             windows,
@@ -2147,15 +2284,8 @@ mod tests {
 
     #[test]
     fn the_windows_are_equal_in_rows_and_in_launch_order() {
-        let points: Vec<Point> = (0..500u64)
-            .map(|i| Point {
-                launch_slot: Slot(i * 10),
-                gross: 0.0,
-                net: 0.0,
-                values: Vec::new(),
-            })
-            .collect();
-        let windows = split(&points);
+        let population: Vec<Slot> = (0..500u64).map(|i| Slot(i * 10)).collect();
+        let windows = split(&population).expect("distinct slots split cleanly");
 
         assert_eq!(windows.len(), FOLDS);
         assert_eq!(windows[0].0, Slot(0));
@@ -2203,7 +2333,8 @@ mod tests {
                 values: Vec::new(),
             })
             .collect();
-        let windows = split(&points);
+        let population: Vec<Slot> = points.iter().map(|p| p.launch_slot).collect();
+        let windows = split(&population).expect("distinct slots split cleanly");
         let (fit, tests) = admissible(&points, &windows, Horizon::TwentyFourHours);
 
         let boundary = windows[FIT_FOLDS - 1].1;
@@ -2230,7 +2361,8 @@ mod tests {
                 values: Vec::new(),
             })
             .collect();
-        let windows = split(&points);
+        let population: Vec<Slot> = points.iter().map(|p| p.launch_slot).collect();
+        let windows = split(&population).expect("distinct slots split cleanly");
         let (_, tests) = admissible(&points, &windows, Horizon::SixHours);
 
         for (offset, rows) in tests.iter().enumerate() {

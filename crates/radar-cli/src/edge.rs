@@ -58,11 +58,36 @@ pub fn run(args: &[String]) -> Result<(), String> {
     Ok(())
 }
 
+/// `part` as a percentage of `whole`, and zero when there is no whole.
+///
+/// Not `part * 100 / whole` in integer arithmetic: 3 of 4,000 rounds to zero
+/// there, and a report that prints 0% for a real fraction is saying something
+/// false about the evidence rather than something imprecise.
+#[expect(
+    clippy::cast_precision_loss,
+    reason = "row counts, far below f64's exact-integer range"
+)]
+fn percent(part: usize, whole: usize) -> f64 {
+    if whole == 0 {
+        return 0.0;
+    }
+    part as f64 * 100.0 / whole as f64
+}
+
 /// Prints the report.
 fn present(report: &Report) {
     println!("watermark    : slot {}", report.watermark);
     println!("horizon      : {}", report.horizon.label());
-    println!("labelled rows: {}", report.labelled_rows);
+    // The denominator first, then what was scored out of it. A verdict from a
+    // small fraction of the population is a statement about the launches whose
+    // outcome could be observed, and a reader who is shown only the numerator
+    // cannot tell one from a statement about launches.
+    println!("population   : {} eligible launches", report.eligible_rows);
+    println!(
+        "labelled rows: {} ({:.0}% of the population carried a label)",
+        report.labelled_rows,
+        percent(report.labelled_rows, report.eligible_rows)
+    );
     println!(
         "charged      : {:.0} bps round trip -- {} (snapshot of {})",
         report.round_trip_bps, report.cost_source, report.rates_measured_on
@@ -78,10 +103,12 @@ fn present(report: &Report) {
     println!("\nfolds (the first {} are fitted as one):", edge::FIT_FOLDS);
     for (index, fold) in report.folds.iter().enumerate() {
         println!(
-            "  {index}  slots {:>12} to {:>12}  {:>7} rows",
+            "  {index}  slots {:>12} to {:>12}  {:>7} rows  ({} labelled of {})",
             fold.from.get(),
             fold.to.get(),
-            fold.rows
+            fold.rows,
+            fold.labelled,
+            fold.population
         );
     }
 
