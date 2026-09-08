@@ -36,7 +36,20 @@ Fill in the commit, named checks, observed outcomes, and deployment state for ea
       feature pass uses it. **One piece is deliberately left out and named:**
       nothing in production writes a coverage record yet, because the backfill
       queries by timestamp and the store is keyed by slot. That is item 2c.
-- [ ] 3. Repair cohort/label protocol and provenance.
+- [~] 3. Repair cohort/label protocol and provenance. **Design 0015 §3.2 items 1
+      and 3 done** on `fix/research-cohorts-and-labels`: the frozen population
+      supplies the fold boundaries before any label is examined, a cut never
+      lands inside a group of launches sharing a slot (and a slot wide enough to
+      swallow a fold is refused rather than split), and every fold reports
+      population / labelled / scored so a verdict over a small fraction of a
+      window says so. Regressions: `removing_labels_cannot_move_a_fold_boundary`
+      — verified by re-applying the bug, which shifts all five boundaries —
+      plus the two `split` cases and the nesting of the cohort counts. §3.2's
+      **items 2, 5 and 6 are not done**: label provenance and censoring (quote
+      source, endpoint freshness, the same old fill in overlapping lookbacks),
+      descriptive-versus-economic reporting, and time-block resampling with a
+      creator-grouped sensitivity analysis. Item 4 (train-only thresholds) was
+      already held by `grammar`, which takes its deciles from the fitting rows.
 - [ ] 4. Implement durable audit, offline replay, and effect recovery.
 - [ ] 5. Implement admitted launch evidence and permanent receipts.
 - [ ] 6. Replace mixed scoring with explicit whole-week fallback modes.

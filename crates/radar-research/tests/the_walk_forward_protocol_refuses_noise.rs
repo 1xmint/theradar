@@ -239,6 +239,152 @@ fn too_few_rows_is_refused_rather_than_reported() {
 
     assert!(matches!(
         edge::run(&table, &rates, &Options::default()),
-        Err(edge::EdgeError::TooFewRows { rows: 40 })
+        Err(edge::EdgeError::TooFewLaunches { launches: 40 })
     ));
+}
+
+#[test]
+fn the_population_floor_is_the_folds_times_the_row_floor_and_not_some_other_arithmetic() {
+    // The threshold walked from both sides. One row short is refused; exactly
+    // the floor is not refused *for this reason*.
+    //
+    // Re-apply by replacing the `*` with `+` or `/`: the population guard stops
+    // firing, and the run falls through to the labelled guard -- which reports
+    // the same count under a different name. That masking is why the two
+    // refusals are named apart, and it is what made the mutation invisible
+    // while they shared one.
+    let rates = rates();
+    let floor = edge::FOLDS * edge::MIN_ROWS;
+
+    let mut short = table_of(|_, planted| planted[0] * 40.0 - 2_000.0);
+    short.rows.truncate(floor - 1);
+    assert!(
+        matches!(
+            edge::run(&short, &rates, &Options::default()),
+            Err(edge::EdgeError::TooFewLaunches { launches }) if launches == floor - 1
+        ),
+        "one launch short of the floor is refused as a population"
+    );
+
+    let mut exact = table_of(|_, planted| planted[0] * 40.0 - 2_000.0);
+    exact.rows.truncate(floor);
+    assert!(
+        !matches!(
+            edge::run(&exact, &rates, &Options::default()),
+            Err(edge::EdgeError::TooFewLaunches { .. })
+        ),
+        "exactly the floor is enough launches"
+    );
+}
+
+#[test]
+fn a_population_that_is_labelled_too_thinly_is_a_different_refusal() {
+    // The two floors are the same number and different questions, and the
+    // report has to say which one it hit: "there is nothing to split" and
+    // "there is nothing to read" send an operator to different places.
+    let rates = rates();
+    let mut table = table_of(|_, planted| planted[0] * 40.0 - 2_000.0);
+    table.rows.truncate(edge::FOLDS * edge::MIN_ROWS + 10);
+    // Plenty of launches, almost no labels.
+    for row in table.rows.iter_mut().skip(5) {
+        row.gross_6h_bps = None;
+        row.gross_24h_bps = None;
+    }
+
+    assert!(
+        matches!(
+            edge::run(&table, &rates, &Options::default()),
+            Err(edge::EdgeError::TooFewRows { rows: 5 })
+        ),
+        "enough launches to split, too few labels to read"
+    );
+}
+
+#[test]
+fn removing_labels_cannot_move_a_fold_boundary() {
+    // The defect, stated as a property. Fold boundaries came from the
+    // **labelled** rows, so a horizon whose exit price is missing for a run of
+    // launches moved every later boundary -- and the same history at two
+    // horizons was split two different ways. Boundaries are a property of the
+    // population, and the population is every eligible launch.
+    //
+    // Re-apply by passing the labelled points to `split` again: the second
+    // report's windows shift and this fails on the first fold.
+    let full = table_of(|_, planted| planted[0] * 40.0 - 2_000.0);
+
+    // The same table with a quarter of its labels gone. Nothing else changes:
+    // same launches, same slots, same features, same order.
+    let mut sparse = table_of(|_, planted| planted[0] * 40.0 - 2_000.0);
+    for (index, row) in sparse.rows.iter_mut().enumerate() {
+        if index % 4 == 0 {
+            row.gross_6h_bps = None;
+            row.gross_24h_bps = None;
+        }
+    }
+
+    let options = Options::default();
+    let a = edge::run(&full, &rates(), &options).expect("ran over the full table");
+    let b = edge::run(&sparse, &rates(), &options).expect("ran over the sparse table");
+
+    let bounds = |r: &edge::Report| -> Vec<(u64, u64)> {
+        r.folds.iter().map(|f| (f.from.get(), f.to.get())).collect()
+    };
+    assert_eq!(
+        bounds(&a),
+        bounds(&b),
+        "the population is identical, so the windows must be"
+    );
+
+    // And the counts say what changed, rather than the boundaries saying it.
+    assert_eq!(
+        a.eligible_rows, b.eligible_rows,
+        "the same launches are eligible either way"
+    );
+    assert!(
+        b.labelled_rows < a.labelled_rows,
+        "a quarter of the labels are gone: {} vs {}",
+        b.labelled_rows,
+        a.labelled_rows
+    );
+    for (index, fold) in b.folds.iter().enumerate() {
+        assert!(
+            fold.labelled < fold.population,
+            "fold {index} should show missing labels as a gap between its own \
+             counts, not as a moved edge: {} labelled of {}",
+            fold.labelled,
+            fold.population
+        );
+    }
+}
+
+#[test]
+fn the_cohort_counts_are_the_denominators_and_they_nest() {
+    // `rows` is what a reading is taken over, `labelled` is what carried a
+    // label at all, and `population` is every eligible launch in the window.
+    // The two differences are different facts -- missing evidence, and the
+    // purge and embargo -- and a report that collapsed them would hide the
+    // first behind the second.
+    let table = table_of(|_, planted| planted[0] * 40.0 - 2_000.0);
+    let report = edge::run(&table, &rates(), &Options::default()).expect("ran");
+
+    assert_eq!(
+        report.eligible_rows,
+        table.rows.len(),
+        "every row in the table is an eligible launch"
+    );
+    assert_eq!(
+        report.folds.iter().map(|f| f.population).sum::<usize>(),
+        report.eligible_rows,
+        "the windows partition the population, so their counts sum to it"
+    );
+    for (index, fold) in report.folds.iter().enumerate() {
+        assert!(
+            fold.rows <= fold.labelled,
+            "fold {index}: scored rows cannot exceed labelled ones"
+        );
+        assert!(
+            fold.labelled <= fold.population,
+            "fold {index}: labelled rows cannot exceed the population"
+        );
+    }
 }

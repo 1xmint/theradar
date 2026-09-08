@@ -588,6 +588,12 @@ fn the_table_a_store_produces_feeds_the_protocol() {
         &radar_research::edge::Options::default(),
     ) {
         Ok(report) => assert_eq!(report.labelled_rows, read_back.rows.len()),
+        // Either floor is the right refusal for a fixture this small, and both
+        // count the same rows here because every row carries a label. They are
+        // separate variants because a real store can hit one without the other.
+        Err(radar_research::edge::EdgeError::TooFewLaunches { launches }) => {
+            assert_eq!(launches, read_back.rows.len());
+        }
         Err(radar_research::edge::EdgeError::TooFewRows { rows }) => {
             assert_eq!(rows, read_back.rows.len());
         }

@@ -58,11 +58,36 @@ pub fn run(args: &[String]) -> Result<(), String> {
     Ok(())
 }
 
+/// `part` as a percentage of `whole`, and zero when there is no whole.
+///
+/// Not `part * 100 / whole` in integer arithmetic: 3 of 4,000 rounds to zero
+/// there, and a report that prints 0% for a real fraction is saying something
+/// false about the evidence rather than something imprecise.
+#[expect(
+    clippy::cast_precision_loss,
+    reason = "row counts, far below f64's exact-integer range"
+)]
+fn percent(part: usize, whole: usize) -> f64 {
+    if whole == 0 {
+        return 0.0;
+    }
+    part as f64 * 100.0 / whole as f64
+}
+
 /// Prints the report.
 fn present(report: &Report) {
     println!("watermark    : slot {}", report.watermark);
     println!("horizon      : {}", report.horizon.label());
-    println!("labelled rows: {}", report.labelled_rows);
+    // The denominator first, then what was scored out of it. A verdict from a
+    // small fraction of the population is a statement about the launches whose
+    // outcome could be observed, and a reader who is shown only the numerator
+    // cannot tell one from a statement about launches.
+    println!("population   : {} eligible launches", report.eligible_rows);
+    println!(
+        "labelled rows: {} ({:.0}% of the population carried a label)",
+        report.labelled_rows,
+        percent(report.labelled_rows, report.eligible_rows)
+    );
     println!(
         "charged      : {:.0} bps round trip -- {} (snapshot of {})",
         report.round_trip_bps, report.cost_source, report.rates_measured_on
@@ -78,10 +103,12 @@ fn present(report: &Report) {
     println!("\nfolds (the first {} are fitted as one):", edge::FIT_FOLDS);
     for (index, fold) in report.folds.iter().enumerate() {
         println!(
-            "  {index}  slots {:>12} to {:>12}  {:>7} rows",
+            "  {index}  slots {:>12} to {:>12}  {:>7} rows  ({} labelled of {})",
             fold.from.get(),
             fold.to.get(),
-            fold.rows
+            fold.rows,
+            fold.labelled,
+            fold.population
         );
     }
 
@@ -247,5 +274,31 @@ mod tests {
             "a fold with too few rows says so rather than showing a figure: {lines:?}"
         );
         assert!(lines.last().expect("a verdict").contains("did not clear"));
+    }
+
+    #[test]
+    fn the_labelled_fraction_is_a_real_percentage_and_zero_only_when_there_is_no_whole() {
+        // Small arithmetic, but it is arithmetic a reader acts on: this number
+        // is how they tell "a verdict about launches" from "a verdict about the
+        // launches whose outcome could be observed". Every mutation of it makes
+        // the report say something false rather than something imprecise.
+        assert!((percent(1, 4) - 25.0).abs() < f64::EPSILON);
+        assert!((percent(4, 4) - 100.0).abs() < f64::EPSILON);
+
+        // The case the function exists for. In integer arithmetic
+        // `3 * 100 / 4_000` is zero, and a report printing 0% for three real
+        // rows is claiming there is no evidence when there is a little.
+        assert!(
+            percent(3, 4_000) > 0.0,
+            "a small fraction is small, not absent: {}",
+            percent(3, 4_000)
+        );
+        assert!((percent(3, 4_000) - 0.075).abs() < 1e-12);
+
+        // And the guard, which is the only reason to return zero at all: there
+        // is no whole to be a fraction of. Re-apply by inverting it and every
+        // real fraction above becomes zero.
+        assert!((percent(0, 0) - 0.0).abs() < f64::EPSILON);
+        assert!((percent(7, 0) - 0.0).abs() < f64::EPSILON);
     }
 }

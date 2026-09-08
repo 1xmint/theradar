@@ -165,6 +165,17 @@ and a contiguity run containing four billion. This is a repair to the
 instrument, not a measurement — nothing has been run against a store that holds
 trades, because there is not one.
 
+**The folds are the population's, not the labels'.** Changed 2026-09-08, plan
+0010 item 3. `edge`'s five fold boundaries were computed from the **labelled**
+rows, so label availability decided where they fell: a horizon whose exit price
+is missing for a run of launches moved every later boundary, and the same
+history at two horizons was split two different ways. The boundaries now come
+from every eligible launch, frozen before a label is looked at, and each fold
+reports three counts — its population, how many of those carried a label, and
+how many survived the purge and the embargo — so a verdict taken over a small
+fraction of a window says so. A slot holding more launches than a fold can hold
+is refused rather than split across a boundary.
+
 **No result exists.** Neither command has been run against the production
 store — that needs a Linux binary on the box, and this workstation has no store
 to run them against. So the honest state of the number is unchanged: research
