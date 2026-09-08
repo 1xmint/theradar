@@ -606,6 +606,33 @@ pub fn audience_of(path: &str) -> Audience {
         || path == "/v1/public/pool"
         || path == "/v1/public/weeks"
         || path == "/v1/public/hunters"
+        // --- the application shell ---
+        //
+        // The HTML and the bundle, and every client route that serves the same
+        // HTML. Public since 2026-09-08, and the reason is a product decision
+        // rather than a security one: a visitor who is gated at the front door
+        // never reaches the sign-in control the interface already has, so the
+        // only login they are ever offered is the operator's identity provider.
+        // That is what `radar.heyvera.org` was showing.
+        //
+        // **This publishes the shell, not the data.** Every read the pages make
+        // stays classified below: the funnel, the decisions, the evidence, the
+        // token pages, the wallet and the assistant are all `Customer`, and a
+        // signed-out visitor gets a panel with nothing in it and a button that
+        // fills it. That is the ordinary shape of a product, and it is the shape
+        // this interface was already built for -- `Wallet` renders a signed-out
+        // state, and has since ADR 0011's amendment.
+        //
+        // `/instance` and `/analyst` are deliberately **not** here. They are the
+        // operator's screens; a direct navigation to one still meets the
+        // operator check, which is the fallback doing its job.
+        || path == "/"
+        || path.starts_with("/assets/")
+        || path == "/decisions"
+        || path == "/evidence"
+        || path == "/wallet"
+        || path == "/ask"
+        || path.starts_with("/token/")
     {
         return Audience::Public;
     }
@@ -614,36 +641,14 @@ pub fn audience_of(path: &str) -> Audience {
     // makes. Listed rather than inferred, because a rule like "anything under
     // /v1 is a customer route" is exactly how `/v1/store` ends up in front of
     // somebody who should not see the operator's store counts.
-    let customer = path == "/"
-        || path.starts_with("/assets/")
-        || path == "/v1/funnel"
+    let customer = path == "/v1/funnel"
         || path == "/v1/scoreboard"
         || path == "/v1/decisions"
         || path.starts_with("/v1/evidence/")
         || path.starts_with("/v1/tokens/")
         || path == "/v1/customer/wallet"
         || path == "/v1/customer/events"
-        || path == "/v1/chat"
-        // The interface's own routes, which are not `/` and are not assets.
-        //
-        // The SPA is registered as the router's fallback, so it is *served* on
-        // any path -- but the guard runs first and classifies by path, and an
-        // unclassified path falls to `Operator`. Without these, a customer
-        // opening a deep link, or simply refreshing the page they are on, is
-        // refused for a page the server would have rendered happily.
-        //
-        // Listed rather than matched by prefix, for the same reason `/v1` is:
-        // "anything that is not an API route belongs to the customer" hands
-        // over `/ops` the day somebody adds a page next to it.
-        //
-        // `/instance` is deliberately absent. It is the operator's screen, and
-        // it falls through to the strictest audience -- which is the fallback
-        // doing its job rather than an omission.
-        || path == "/decisions"
-        || path == "/evidence"
-        || path == "/wallet"
-        || path == "/ask"
-        || path.starts_with("/token/");
+        || path == "/v1/chat";
     if customer {
         return Audience::Customer;
     }
@@ -1052,7 +1057,7 @@ mod tests {
     }
 
     #[test]
-    fn the_public_surface_is_the_monitor_the_paid_lane_and_the_sites_three_documents() {
+    fn the_public_surface_is_the_monitor_the_paid_lane_the_documents_and_the_shell() {
         assert!(is_public("/health"));
         assert!(is_public("/x402/v1/instruments"));
         assert!(is_public("/v1/public/stats"));
@@ -1061,15 +1066,30 @@ mod tests {
         assert!(is_public("/v1/public/weeks"));
         assert!(is_public("/v1/public/hunters"));
 
+        // The shell: the HTML, the bundle, and the client routes that serve the
+        // same HTML. A visitor reaches the interface and its sign-in control;
+        // what the pages *read* is gated below.
+        assert!(is_public("/"));
+        assert!(is_public("/assets/index-abc123.js"));
+        assert!(is_public("/decisions"));
+        assert!(is_public("/evidence"));
+        assert!(is_public("/wallet"));
+        assert!(is_public("/ask"));
+        assert!(is_public(
+            "/token/So11111111111111111111111111111111111111112"
+        ));
+
         for private in [
-            "/",
+            // The operator's screens are not shell. A direct navigation to one
+            // still meets the operator check.
+            "/instance",
+            "/analyst",
             "/ops",
             "/v1/funnel",
             "/v1/tokens/abc",
             "/v1/events",
             "/v1/chat",
             "/mcp",
-            "/assets/index-abc123.js",
             // The trailing slash in the prefix is what stops these.
             "/x402",
             "/x402-internal/secrets",
@@ -1105,9 +1125,11 @@ mod tests {
             ("/v1/public/pool", Audience::Public),
             ("/v1/public/weeks", Audience::Public),
             ("/v1/public/hunters", Audience::Public),
-            // The product.
-            ("/", Audience::Customer),
-            ("/assets/index-abc123.js", Audience::Customer),
+            // The shell. Public, so a visitor reaches the interface and the
+            // sign-in control it already carries.
+            ("/", Audience::Public),
+            ("/assets/index-abc123.js", Audience::Public),
+            // The product's reads, which is where the gate actually is.
             ("/v1/funnel", Audience::Customer),
             ("/v1/scoreboard", Audience::Customer),
             ("/v1/decisions", Audience::Customer),
@@ -1125,15 +1147,18 @@ mod tests {
                 Audience::Customer,
             ),
             ("/v1/chat", Audience::Customer),
-            // The interface's own routes. A customer must be able to open one
-            // directly and to refresh on it.
-            ("/decisions", Audience::Customer),
-            ("/evidence", Audience::Customer),
-            ("/wallet", Audience::Customer),
-            ("/ask", Audience::Customer),
+            // The interface's own routes. **Public**, because they serve the
+            // shell -- the same HTML `/` serves -- and a visitor who cannot
+            // load the shell never sees the sign-in control it carries. What
+            // the pages read is the `/v1/...` rows above, and those are still
+            // `Customer`.
+            ("/decisions", Audience::Public),
+            ("/evidence", Audience::Public),
+            ("/wallet", Audience::Public),
+            ("/ask", Audience::Public),
             (
                 "/token/So11111111111111111111111111111111111111112",
-                Audience::Customer,
+                Audience::Public,
             ),
             // The operator's surface. `/v1/store` and `/v1/events` are here on
             // purpose: store counts and a raw event stream are debugging tools,
@@ -1194,7 +1219,18 @@ mod tests {
         assert!(!Audience::Operator.is_open());
         assert!(Audience::Public.is_open());
 
-        for customer in ["/", "/v1/funnel", "/v1/tokens/abc", "/assets/app.js"] {
+        // The reads, which are the product. The **shell** is public since
+        // 2026-09-08 and is deliberately not in this list: a page that renders
+        // nothing until a session exists is not the thing being protected, and
+        // gating it only meant nobody ever reached the sign-in control.
+        for customer in [
+            "/v1/funnel",
+            "/v1/tokens/abc",
+            "/v1/decisions",
+            "/v1/evidence/returns",
+            "/v1/customer/wallet",
+            "/v1/chat",
+        ] {
             assert!(
                 !audience_of(customer).is_open(),
                 "{customer} must not be served without a check"
@@ -1220,7 +1256,7 @@ mod tests {
             );
         }
 
-        for path in ["/", "/v1/funnel", "/v1/tokens/abc", "/v1/customer/wallet"] {
+        for path in ["/v1/funnel", "/v1/tokens/abc", "/v1/customer/wallet"] {
             let audience = audience_of(path);
             assert!(audience.accepts_customer(), "{path} is product");
             assert!(

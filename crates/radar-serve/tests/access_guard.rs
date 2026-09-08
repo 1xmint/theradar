@@ -68,25 +68,65 @@ async fn status(router: axum::Router, path: &str) -> StatusCode {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn every_private_path_is_refused_without_an_assertion() {
-    // The list is deliberately long and includes the asset path. An interface
-    // whose HTML is behind a login and whose JavaScript bundle is not still
-    // leaks the shape of the product, and the bundle is where the API paths are
-    // written down.
+    // This list used to open with `/` and the asset path, and the comment gave
+    // the reason: an interface whose HTML is behind a login and whose bundle is
+    // not still leaks the shape of the product, and the bundle is where the API
+    // paths are written down.
+    //
+    // That argument is about a **private** product, and it was right about one.
+    // The shell is public since 2026-09-08 by the owner's decision: a visitor
+    // gated at the front door never reaches the sign-in control the interface
+    // carries, so the only login on offer was the operator's identity provider.
+    // Once the panel is something strangers are meant to open, the shape of the
+    // product is not the secret -- the data is, and every path below is data.
+    //
+    // The shell's own assertion is `the_shell_is_served_so_a_visitor_can_reach
+    // _the_sign_in`, and the two together are the whole statement: the page is
+    // public, everything it reads is not.
     for path in [
-        "/",
         "/ops",
+        "/instance",
+        "/analyst",
         "/v1/funnel",
         "/v1/store",
         "/v1/tokens/So11111111111111111111111111111111111111112",
         "/v1/instruments",
         "/v1/events",
-        "/assets/index-abc123.js",
+        "/v1/decisions",
+        "/v1/chat",
         "/there-is-no-such-path",
     ] {
         assert_eq!(
             status(enforcing(), path).await,
             StatusCode::FORBIDDEN,
             "{path} was served without an identity"
+        );
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_shell_is_served_so_a_visitor_can_reach_the_sign_in() {
+    // The other half, and the reason the list above is shorter than it was.
+    // With Access enforcing -- which is how the instance actually runs -- a
+    // stranger gets the page and the bundle, and the page carries a connect
+    // control. Anything it then reads is refused until they sign in.
+    //
+    // Re-apply by moving `/` back to the customer block: the request 403s, the
+    // visitor sees Cloudflare's login, and no amount of client work can put a
+    // sign-in in front of them.
+    for path in [
+        "/",
+        "/assets/index-abc123.js",
+        "/decisions",
+        "/evidence",
+        "/wallet",
+        "/ask",
+        "/token/So11111111111111111111111111111111111111112",
+    ] {
+        assert_ne!(
+            status(enforcing(), path).await,
+            StatusCode::FORBIDDEN,
+            "{path} is the shell; a visitor who cannot load it cannot sign in"
         );
     }
 }
