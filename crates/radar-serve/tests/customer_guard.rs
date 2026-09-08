@@ -228,3 +228,141 @@ async fn the_wallet_route_refuses_a_request_carrying_no_customer_identity() {
         "a request with no verified customer must not receive a wallet"
     );
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_wallet_session_opens_the_product_on_an_instance_with_no_privy() {
+    // The lane ADR 0011's amendment says ships, on the deployment that actually
+    // ships it: no `RADAR_PRIVY_APP_ID`, no vendor, nothing to buy. A customer
+    // connects a wallet they already own and is admitted.
+    //
+    // It did not work. The guard read
+    //
+    //     if audience.accepts_customer()
+    //         && let Some(config) = state.customer.config()
+    //         && let Some(token) = ...
+    //
+    // and `config` is `None` without Privy -- so the whole block was skipped,
+    // **including the wallet branch, which does not use Privy for anything**.
+    // The only sign-in the product had was dead unless a vendor nobody needed
+    // was configured, and every request fell through to the operator check.
+    //
+    // Nothing caught it: every test in this file configures `Mode::Enforce`,
+    // because they were written about Privy. Re-apply by putting the `config`
+    // back in the outer condition.
+    let salt = vec![7u8; 32];
+    let address = radar_types::Address::new([3u8; 32]);
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("a clock after 1970")
+        .as_secs();
+    let session = radar_customer::session::issue(&address, &salt, now).expect("a session");
+
+    let mut registry = Registry::new();
+    registry.register(CreatorHistory);
+    let router = app(Arc::new(AppState {
+        // The allowlist, holding exactly this wallet -- which is the shape an
+        // operator uses to admit themselves and nobody else while the
+        // subscription lane does not exist.
+        admission: radar_serve::admission::Admission::Allowlist(
+            [address.to_string()].into_iter().collect(),
+        ),
+        shares: radar_serve::share::Shares::new(radar_serve::share::Allowance::per_day(100)),
+        customer_salt: salt,
+        registry,
+        store: Reader::open(std::env::temp_dir().join("radar-wallet-no-privy-test")),
+        x402: None,
+        chat: None,
+        // Access enforcing, as it is in production. The customer must get
+        // through on their wallet rather than by the operator's identity.
+        access: radar_serve::access::Mode::Enforce(radar_serve::access::Config {
+            team_domain: "radar-test.invalid".to_owned(),
+            aud: "radar-aud-tag".to_owned(),
+        }),
+        keys: radar_serve::access::KeyCache::new(),
+        // The part that matters: **no customer lane configured**.
+        customer: Mode::Off,
+        customer_keys: KeyCache::preloaded(Keys(Vec::new())),
+        linker: radar_serve::link::Linker::new(),
+        scoreboard: radar_serve::cache::Cache::new(),
+        token: radar_serve::cache::Cache::new(),
+        challenges: None,
+        privy: None,
+    }));
+
+    assert_ne!(
+        status_with(router.clone(), "/v1/funnel", &session).await,
+        StatusCode::FORBIDDEN,
+        "a wallet session must open the product without Privy configured"
+    );
+
+    // And the boundary still holds: a wallet session is a customer, and a
+    // customer never reaches the operator's surface however valid their token.
+    assert_eq!(
+        status_with(router.clone(), "/v1/store", &session).await,
+        StatusCode::FORBIDDEN,
+        "a wallet session must not reach the operator's store counts"
+    );
+    assert_eq!(
+        status_with(router, "/mcp", &session).await,
+        StatusCode::FORBIDDEN,
+        "nor the debugging surface"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_allowlist_admits_the_wallet_it_names_and_no_other() {
+    // What an operator uses to give themselves persistent access while the
+    // subscription lane does not exist: one address, and everybody else meets
+    // the same refusal a stranger does.
+    let salt = vec![9u8; 32];
+    let mine = radar_types::Address::new([3u8; 32]);
+    let theirs = radar_types::Address::new([4u8; 32]);
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("a clock after 1970")
+        .as_secs();
+
+    let build = || {
+        app(Arc::new(AppState {
+            admission: radar_serve::admission::Admission::Allowlist(
+                [mine.to_string()].into_iter().collect(),
+            ),
+            shares: radar_serve::share::Shares::new(radar_serve::share::Allowance::per_day(100)),
+            customer_salt: salt.clone(),
+            registry: {
+                let mut r = Registry::new();
+                r.register(CreatorHistory);
+                r
+            },
+            store: Reader::open(std::env::temp_dir().join("radar-allowlist-test")),
+            x402: None,
+            chat: None,
+            access: radar_serve::access::Mode::Enforce(radar_serve::access::Config {
+                team_domain: "radar-test.invalid".to_owned(),
+                aud: "radar-aud-tag".to_owned(),
+            }),
+            keys: radar_serve::access::KeyCache::new(),
+            customer: Mode::Off,
+            customer_keys: KeyCache::preloaded(Keys(Vec::new())),
+            linker: radar_serve::link::Linker::new(),
+            scoreboard: radar_serve::cache::Cache::new(),
+            token: radar_serve::cache::Cache::new(),
+            challenges: None,
+            privy: None,
+        }))
+    };
+
+    let admitted = radar_customer::session::issue(&mine, &salt, now).expect("a session");
+    let stranger = radar_customer::session::issue(&theirs, &salt, now).expect("a session");
+
+    assert_ne!(
+        status_with(build(), "/v1/funnel", &admitted).await,
+        StatusCode::FORBIDDEN,
+        "the allowlisted wallet is admitted"
+    );
+    assert_eq!(
+        status_with(build(), "/v1/funnel", &stranger).await,
+        StatusCode::FORBIDDEN,
+        "a wallet that signed perfectly well and is not on the list is refused"
+    );
+}

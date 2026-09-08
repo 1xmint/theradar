@@ -320,8 +320,15 @@ async fn guard(
     // A customer token is tried first, and only where the route is product.
     // `accepts_customer` is false for every operator route, so a valid customer
     // token cannot reach `/v1/store` or `/mcp` however well formed it is.
+    //
+    // **The Privy configuration is not a precondition of this block**, and it was
+    // until 2026-09-08: the `let Some(config)` sat here, so an instance with no
+    // `RADAR_PRIVY_APP_ID` skipped the whole thing -- including the wallet
+    // session, which does not use Privy for anything. The lane ADR 0011's
+    // amendment says ships was dead unless a vendor nobody needed was
+    // configured. `config` is a precondition of the *Privy* branch, and it is
+    // asked for there.
     if audience.accepts_customer()
-        && let Some(config) = state.customer.config()
         && let Some(token) = customer::token_from(request.headers())
     {
         // A wallet session first. Under ADR 0011's amendment this is the lane
@@ -350,11 +357,16 @@ async fn guard(
             not_admitted = Some(customer.did);
         }
 
-        let verified = tokio::task::block_in_place(|| {
-            let keys = state.customer_keys.get(config)?;
-            customer::verify(&token, &keys, config, now_unix())
+        // And now Privy, which is the branch that actually needs the
+        // configuration. An instance without it has a wallet lane and no email
+        // lane, which is a coherent deployment and the one that ships today.
+        let verified = state.customer.config().and_then(|config| {
+            tokio::task::block_in_place(|| {
+                let keys = state.customer_keys.get(config).ok()?;
+                customer::verify(&token, &keys, config, now_unix()).ok()
+            })
         });
-        if let Ok(customer) = verified {
+        if let Some(customer) = verified {
             // Genuine, and now: is this one of ours? `verify` proves Privy
             // issued the token for this application, which is authentication.
             // Anyone can sign up to a Privy application, so a verified stranger
