@@ -631,6 +631,19 @@ mod tests {
     }
 
     #[test]
+    fn a_directory_name_maps_back_to_its_own_table_and_nothing_else() {
+        // The inverse of `dir`, and the coverage table's `table` column depends
+        // on it. Re-apply by turning the `==` into `!=`: every name resolves to
+        // whichever table is not it, which for a stored coverage row means a
+        // range about trades reads back as a range about launches.
+        for t in Table::ALL {
+            assert_eq!(Table::from_dir(t.dir()), Some(*t), "{t:?}");
+        }
+        assert_eq!(Table::from_dir("not_a_table"), None);
+        assert_eq!(Table::from_dir(""), None);
+    }
+
+    #[test]
     fn an_unknown_position_sorts_last_within_its_slot() {
         // `Option`'s own ordering puts `None` first, which would sort every
         // unresolved trade ahead of the launch it belongs to. Re-apply by
