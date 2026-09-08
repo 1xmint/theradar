@@ -12,6 +12,7 @@ use std::process::ExitCode;
 use radar_asof::AsOf;
 use radar_instruments::{Context, CreatorHistory, CreatorTrackRecord, Registry, SimulateExit};
 mod analyst;
+mod audit;
 mod basis;
 mod brief;
 mod consider;
@@ -35,8 +36,13 @@ use radar_sim::{JupiterQuoter, RpcClient};
 use radar_store::{Event, Reader, Table};
 use radar_types::Slot;
 
-fn usage() -> &'static str {
-    "radar-cli <command>
+/// The command list.
+///
+/// At module scope rather than inside [`usage`], because the length lint counts
+/// lines in a function and this is a string that grows every time a command is
+/// added. A function whose whole body is one literal is not the thing that lint
+/// is for.
+const USAGE: &str = "radar-cli <command>
 
 commands:
   brief --store <dir>            is the system healthy right now; exits
@@ -129,7 +135,22 @@ commands:
   exits --store <dir> [--cost-bps N]
                                  would a stop or a take-profit have beaten
                                  holding; reports both tie-break bounds
-"
+  audit explain --id <id> [--journal <file>]
+                                 everything the journal holds about one mention,
+                                 mint, week, claim or signature, in order. Takes
+                                 whichever id you are holding
+  audit verify [--journal <file>] [--from N] [--to N]
+                                 walk the chain. Intact, torn -- the ordinary
+                                 shape of a crash, and not a fault -- or broken,
+                                 which exits non-zero because something wrote to
+                                 the file that was not the journal
+  audit export --week <week> [--journal <file>]
+                                 that week's events as JSON, for an incident
+                                 bundle
+";
+
+fn usage() -> &'static str {
+    USAGE
 }
 
 /// Reads every event the store holds.
@@ -825,6 +846,7 @@ fn main() -> ExitCode {
         "dossier" => dossier::run(&args),
         "roast" => roast::run(&args),
         "analyst" => analyst::run(&args),
+        "audit" => audit::run(&args),
         "model-prices" => model_prices::run(&args),
         "selection" => selection_report(&args),
         "basis" => basis_report(&args),
