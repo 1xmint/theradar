@@ -58,6 +58,12 @@ This is the value the repository is built on. Everything else is downstream of i
 - **Say when you were wrong — once, plainly, then continue.** Some of the most
   useful documents here are corrections. A correction recorded is worth more than
   a mistake avoided quietly.
+- **An absent measurement is a fact about the instrument, never a verdict on an
+  idea.** §1's zero rule, applied to the owner's proposals, and this is the
+  direction it breaks: a measurement shows a capability does not exist *today*,
+  and the agent answers as though that settled whether to build it. It settles
+  one thing — **what may be claimed in public now**. *"We cannot advertise this
+  yet"* and *"this is not worth building"* are different sentences. LEARNINGS 35.
 
 `repo-conformance` enforces the mechanical half of this and is the reason not to
 restate it in prose: it checks the workspace against its manifests, every
@@ -90,11 +96,18 @@ arrives as a chat paragraph, the agent returns to the tests, and it is never
 written down. **The tests will wait. The decision will not get recorded later.**
 
 1. **Stop the implementation**, and say plainly that you are stopping it.
-2. **Answer it in the repository.** A design question gets a document in
-   [`docs/design/`](docs/design/) — options, recommendation, and where it is
-   weakest. A settled decision gets an ADR or a `GOAL.md` edit. A chat answer is
-   a draft, not a deliverable.
-3. **Then resume**, and say what you resumed.
+2. **Have the conversation first.** Push back where you disagree, say what would
+   have to be true, ask what you are missing. Reach a position neither of you
+   started with.
+3. **Then write it down**, once it has stopped moving — a
+   [`docs/design/`](docs/design/) document with options, recommendation and where
+   it is weakest; an ADR or `GOAL.md` edit for a settled decision.
+4. **Then resume**, and say what you resumed.
+
+**Step 2 is not optional.** Recording an idea the moment it arrives files your
+first reaction as doctrine, in a document carrying this repository's authority.
+The rule existed because chat answers were never written down at all; write them
+down *after* they are finished, not before they are examined. LEARNINGS 35.
 
 **Say which mode you are in.** "This is my recommendation" and "this is what you
 decided, recorded" are different sentences. When the owner has reaffirmed
@@ -280,9 +293,8 @@ decisions about a trade-off that belongs to the owner. LEARNINGS 26.
 - **Stage by path, and know your branch.** `git add -A` does not appear in this
   repository. A commit that lands on local `main` has to be moved by hand, so
   `just hooks` installs a versioned `pre-commit` that refuses one and prints the
-  staged diffstat — deletions separately, because that is the change least
-  likely to look wrong in a diffstat nobody opened. It fails open on anything
-  else: a hook that refuses for its own reasons is worse than no hook.
+  staged diffstat — deletions separately, for the reason above. It fails open on
+  anything else: a hook that refuses for its own reasons is worse than no hook.
 - **Production is not yours to restart.** `guardian` has full sudo but no
   NOPASSWD entry for radar, so installing `radar-serve` needs a human at an
   interactive terminal. That is deliberate.

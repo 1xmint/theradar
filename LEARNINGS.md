@@ -13,8 +13,8 @@ benefit of the doubt on everything else.
 
 ## Index
 
-**25 of these 34 name something mechanical that would catch a
-recurrence. 9 name only a habit, and say so** — which is this file's opening
+**25 of these 35 name something mechanical that would catch a
+recurrence. 10 name only a habit, and say so** — which is this file's opening
 standard rather than a gap in it. The habit-only rows are the ones worth reading
 twice; nothing will stop those repeating except somebody remembering.
 
@@ -59,6 +59,7 @@ quietly absent.
 | [32](#32-the-sandbox-made-the-contest-impossible-to-close-and-it-took-six-days-to-show) | The sandbox made the contest impossible to close, and it took six days to show | `contest_writable_notice`, `brief::contest` |
 | [33](#33-the-composition-test-documented-the-hole-and-every-assertion-passed) | The composition test documented the hole, and every assertion passed | `the_size_the_signer_reads_is_the_size_this_crate_wrote`,… |
 | [34](#34-the-monitor-resolved-its-paths-against-the-wrong-root-and-two-of-its-wrong-lines-said-ok) | The monitor resolved its paths against the wrong root, and two of its wrong lines said `[ok]` | `the_briefs_subjects_hang_off_the_one_path_it_is_given`,… |
+| [35](#35-a-measured-zero-was-read-as-a-verdict-and-a-first-reaction-was-filed-as-doctrine) | A measured zero was read as a verdict, and a first reaction was filed as doctrine | habit only, and it says so |
 
 ---
 
@@ -1695,3 +1696,44 @@ other direction, which is what a fix like this breaks by accident; and
 belt to that brace — neither is load-bearing now, and a unit whose working
 directory is unstated is a unit whose behaviour depends on where systemd starts
 it.
+
+## 35. A measured zero was read as a verdict, and a first reaction was filed as doctrine
+
+The owner proposed a pricing model — Radar free, with a paywall only on metered
+AI credits, funding an "advanced trading AI". Two things went wrong in the answer
+and they compound.
+
+**The measurement was used as a verdict.** `GOAL.md` records a measured selection
+edge of 0 bps against a ~456 bps bar, and the reply reasoned from that to *this
+is the one capability measured and found absent, so it is not the product*. That
+does not follow. The 0 bps figure describes an instrument that has never been
+pointed at the thing being proposed, which is [`AGENTS.md`](AGENTS.md) §1's "zero
+is a measurement about your instrument" used backwards — and used against the
+owner's idea rather than against a disappointing result, which is the direction
+nobody was watching. What the figure genuinely constrains is one sentence on a
+pricing page. It says nothing about what is worth building, and the two were run
+together.
+
+The owner named the pattern as recurring: *"Josh says a good idea and then Opus 5
+says oh that's not measured so therefore not possible."* That is the shape.
+
+**And it was written down too early.** `docs/design/0016` was filed about an hour
+after the idea arrived, before a single objection had been answered — so the
+repository gained a document that recorded one participant's opening position and
+carried the repository's authority while doing it. The §3 rule being followed
+("a chat answer is a draft, not a deliverable") was written to fix the opposite
+failure, chat answers never being written down at all, and it had no step saying
+*first, actually have the argument*.
+
+**What changed:** §3's numbered steps gained step 2, "have the conversation
+first", and §2 gained "an absent measurement is a fact about the instrument,
+never a verdict on an idea". Design 0016 carries a correction at the top rather
+than being deleted, because the reasoning error is more useful visible than gone.
+The AGENTS.md line ceiling moved 400 -> 410 in the same commit, which is the
+mechanism `the_context_file_stays_within_its_budget` exists to force: the file
+was at 399, so the two rules could not be added quietly.
+
+**What catches a recurrence:** nothing mechanical, and that is stated rather than
+papered over. No check can read "this is not worth building" and know it was
+inferred from an absent measurement. The guard is the pair of rules and the fact
+that the owner will say so again.
