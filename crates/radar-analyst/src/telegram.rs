@@ -454,6 +454,18 @@ pub fn tick(
     };
     let at = crate::daemon::now();
     let today = crate::daemon::day_of(at);
+    // Opened once per tick, and a journal that cannot be opened stops the tick.
+    // The X loop's own comment gives the reason at length; it is the same one.
+    let mut journal = match radar_journal::Journal::open(&paths.journal) {
+        Ok(journal) => journal,
+        Err(e) => {
+            eprintln!(
+                "radar-analyst: cannot open the journal at {}: {e}; not publishing this tick",
+                paths.journal
+            );
+            return 0;
+        }
+    };
     let cursor = crate::poll::read_cursor(&paths.telegram_cursor);
     let page = match bot.updates(cursor.as_deref()) {
         Ok(page) => page,
@@ -504,7 +516,8 @@ pub fn tick(
         match outcome {
             Answered::Reply { entry, .. } => {
                 let mint = entry.mint.clone().unwrap_or_default();
-                match crate::publish::publish(publisher, &paths.telegram_log, *entry) {
+                match crate::publish::publish(publisher, &paths.telegram_log, &mut journal, *entry)
+                {
                     Ok(written) => {
                         if let Some(id) = &written.reply_id {
                             gate.record(&mention.author, &mint, id, at);

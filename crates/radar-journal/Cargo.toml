@@ -1,0 +1,26 @@
+[package]
+name = "radar-journal"
+description = "The append-only, hash-chained record of what the autonomous surface decided and did, written before the effect it describes."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+
+[dependencies]
+# The chain. Already in the tree for the noise mixer and the share tokens, so it
+# adds nothing to the dependency surface -- which matters here, because this
+# crate will eventually be linked into the process that holds a payout key.
+blake3.workspace = true
+radar-types.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+tempfile = "3"
+
+[lints]
+workspace = true

@@ -55,6 +55,14 @@ pub struct Paths {
     /// The daily "seven days later" rows, written by `radar seven-days-later`
     /// on a timer and posted from here.
     pub daily_dir: String,
+    /// The hash-chained journal: what was decided, written before it was done.
+    ///
+    /// Beside the reply log rather than instead of it. The reply log is the
+    /// evidence a public statement was entitled to be made — the fact sheet, the
+    /// slot, the text. The journal is the record that the *intent* reached disk
+    /// before the effect left the process, which is the property that stops an
+    /// unattended restart publishing twice. ADR 0017.
+    pub journal: String,
 }
 
 impl Paths {
@@ -79,6 +87,7 @@ impl Paths {
             posts: format!("{dir}/posts.jsonl"),
             contest_dir,
             daily_dir: format!("{dir}/daily"),
+            journal: format!("{dir}/journal.jsonl"),
         }
     }
 }
@@ -1326,6 +1335,25 @@ pub fn tick(
     let at = now();
     let today = day_of(at);
 
+    // Opened once per tick rather than per reply: `open` reads the file to find
+    // the end of the chain, and doing that for every reply would make the cost
+    // of publishing grow with everything ever published.
+    //
+    // **A journal that cannot be opened stops the tick.** Rule 8 and ADR 0017:
+    // the durable intent exists before the effect, so a process that cannot
+    // write intents must not produce effects. Refusing costs a poll cycle;
+    // publishing without a record costs the ability to explain what was said.
+    let mut journal = match radar_journal::Journal::open(&paths.journal) {
+        Ok(journal) => journal,
+        Err(e) => {
+            eprintln!(
+                "radar-analyst: cannot open the journal at {}: {e}; not publishing this tick",
+                paths.journal
+            );
+            return 0;
+        }
+    };
+
     // The read is billable before it happens.
     let Ok(read) = spend.authorize(Cost::MentionRead, today) else {
         eprintln!("radar-analyst: budget spent; not polling");
@@ -1473,7 +1501,7 @@ pub fn tick(
                     }
                     break;
                 };
-                match crate::publish::publish(publisher, &paths.log, *entry) {
+                match crate::publish::publish(publisher, &paths.log, &mut journal, *entry) {
                     Ok(written) => {
                         handled.push(&mention.id);
                         if let Some(id) = &written.reply_id {
@@ -1535,7 +1563,7 @@ pub fn tick(
                     signals: Some(Vec::new()),
                     pointed_at: None,
                 };
-                match crate::publish::publish(publisher, &paths.log, entry) {
+                match crate::publish::publish(publisher, &paths.log, &mut journal, entry) {
                     Ok(written) => {
                         handled.push(&mention.id);
                         if let Some(id) = &written.reply_id {
@@ -1604,7 +1632,7 @@ pub fn tick(
                         signals: Some(Vec::new()),
                         pointed_at: Some(reply_id.clone()),
                     };
-                    match crate::publish::publish(publisher, &paths.log, entry) {
+                    match crate::publish::publish(publisher, &paths.log, &mut journal, entry) {
                         Ok(written) => {
                             if written.reply_id.is_some() {
                                 let charged = reply_cost.reserved();
