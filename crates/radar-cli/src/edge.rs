@@ -74,6 +74,30 @@ fn percent(part: usize, whole: usize) -> f64 {
     part as f64 * 100.0 / whole as f64
 }
 
+/// The account of the denominator, as lines.
+///
+/// A population missing labels because nothing was measured after T is a
+/// different sample from one missing them because every exit price was stale,
+/// and a reader deciding how far to trust the verdict needs to know which.
+///
+/// A `Vec<String>` rather than a block of `println!` for the reason
+/// [`candidate_lines`] is one: a printer is reachable by no test, and the
+/// mutation gate said so — deleting the emptiness guard silenced the whole
+/// breakdown and nothing noticed.
+fn missingness_lines(report: &Report) -> Vec<String> {
+    if report.missingness.is_empty() {
+        return Vec::new();
+    }
+    let mut lines = vec!["  of the rest:".to_owned()];
+    for (reason, n) in &report.missingness {
+        lines.push(format!(
+            "    {reason:<22} {n:>7}  ({:.0}% of the population)",
+            percent(*n, report.eligible_rows)
+        ));
+    }
+    lines
+}
+
 /// Prints the report.
 fn present(report: &Report) {
     println!("watermark    : slot {}", report.watermark);
@@ -88,18 +112,8 @@ fn present(report: &Report) {
         report.labelled_rows,
         percent(report.labelled_rows, report.eligible_rows)
     );
-    // The account of the denominator. A population missing labels because
-    // nothing was measured after T is a different sample from one missing them
-    // because every exit price was stale, and a reader deciding how far to
-    // trust the verdict needs to know which.
-    if !report.missingness.is_empty() {
-        println!("  of the rest:");
-        for (reason, n) in &report.missingness {
-            println!(
-                "    {reason:<22} {n:>7}  ({:.0}% of the population)",
-                percent(*n, report.eligible_rows)
-            );
-        }
+    for line in missingness_lines(report) {
+        println!("{line}");
     }
     println!(
         "charged      : {:.0} bps round trip -- {} (snapshot of {})",
@@ -313,5 +327,57 @@ mod tests {
         // real fraction above becomes zero.
         assert!((percent(0, 0) - 0.0).abs() < f64::EPSILON);
         assert!((percent(7, 0) - 0.0).abs() < f64::EPSILON);
+    }
+
+    /// A report carrying nothing but the fields `missingness_lines` reads.
+    fn report_with(missingness: Vec<(String, usize)>, eligible: usize) -> Report {
+        Report {
+            watermark: radar_types::Slot(1),
+            horizon: Horizon::TwentyFourHours,
+            cost_source: "fixture".to_owned(),
+            round_trip_bps: 850.0,
+            band_bar_bps: 456.0,
+            rates_measured_on: "2026-09-08".to_owned(),
+            labelled_rows: eligible.saturating_sub(missingness.iter().map(|(_, n)| n).sum()),
+            eligible_rows: eligible,
+            missingness,
+            folds: Vec::new(),
+            strata_tried: 0,
+            enumeration: Enumeration::Exhaustive,
+            fitted: None,
+            fixed: Vec::new(),
+            found: false,
+        }
+    }
+
+    #[test]
+    fn the_reasons_are_printed_when_there_are_any_and_nothing_is_printed_when_there_are_none() {
+        // Re-apply by deleting the `!`... which is exactly what the mutation
+        // gate did: the guard inverted, the whole breakdown went silent, and no
+        // test noticed. A report that shows a denominator and then says nothing
+        // about the gap is the state this block exists to prevent.
+        let lines = missingness_lines(&report_with(
+            vec![
+                ("one_observation_twice".to_owned(), 141),
+                ("stale_exit".to_owned(), 52),
+            ],
+            812,
+        ));
+
+        assert_eq!(lines.len(), 3, "a heading and a line per reason: {lines:?}");
+        assert!(lines[0].contains("of the rest"));
+        assert!(
+            lines[1].contains("one_observation_twice") && lines[1].contains("141"),
+            "{lines:?}"
+        );
+        assert!(
+            lines[1].contains("17%"),
+            "the share of the population, not of the gap: {lines:?}"
+        );
+        assert!(lines[2].contains("stale_exit"), "{lines:?}");
+
+        // And the other side: nothing missing prints no heading, rather than a
+        // heading over an empty list.
+        assert!(missingness_lines(&report_with(Vec::new(), 812)).is_empty());
     }
 }

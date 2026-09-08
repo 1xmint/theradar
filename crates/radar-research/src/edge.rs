@@ -2566,4 +2566,70 @@ mod tests {
         assert_eq!(stratum.describe(), "launch_traders >= 3.0000");
         assert_eq!(Stratum::named("y", Vec::new()).describe(), "every row");
     }
+
+    #[test]
+    fn the_missingness_counts_each_reason_and_orders_the_common_ones_first() {
+        // The account of the denominator, counted. Re-apply by replacing the
+        // `+= 1` with `*= 1`: every reason reports zero, which reads as "the
+        // gap has no explanation" rather than as a broken counter.
+        //
+        // A labelled row contributes nothing, an unlabelled one contributes to
+        // its own reason, and a row from a file older than the reason column
+        // contributes to `unrecorded` rather than being assigned one.
+        let reasons = [
+            Some(Missing::StaleExit),
+            Some(Missing::StaleExit),
+            Some(Missing::StaleExit),
+            Some(Missing::NoEntry),
+            Some(Missing::NoEntry),
+            Some(Missing::OneObservationTwice),
+            None,
+        ];
+        let mut rows: Vec<Row> = reasons
+            .iter()
+            .enumerate()
+            .map(|(i, why)| {
+                let mut row = row(1, i as u64 * 10, 0, 1.0, 100.0);
+                row.gross_24h_bps = None;
+                row.missing_24h = *why;
+                // Unlabelled at six hours too, and with no reason recorded --
+                // which is what a row read back from a file older than the
+                // column looks like.
+                row.gross_6h_bps = None;
+                row
+            })
+            .collect();
+        // Two labelled rows, which must not appear in the account at all.
+        for i in 0..2 {
+            let mut row = row(2, 1_000 + i * 10, 0, 1.0, 100.0);
+            row.gross_24h_bps = Some(100.0);
+            row.missing_24h = None;
+            rows.push(row);
+        }
+
+        let table = FeatureTable {
+            watermark: Slot(10_000),
+            entry_offset: crate::features::ENTRY_OFFSET_SLOTS,
+            rows,
+        };
+
+        let counts = missingness(&table, Horizon::TwentyFourHours);
+        assert_eq!(
+            counts,
+            vec![
+                ("stale_exit".to_owned(), 3),
+                ("no_entry".to_owned(), 2),
+                ("one_observation_twice".to_owned(), 1),
+                (UNRECORDED_REASON.to_owned(), 1),
+            ],
+            "most common first, and the two labelled rows are not in it"
+        );
+
+        // The same table at six hours: those seven rows are unlabelled there
+        // with no reason recorded, and the two labelled ones still are. So the
+        // account is seven unrecorded -- the day-long horizon's reasons are not
+        // borrowed, which is the point of recording them per horizon.
+        let six = missingness(&table, Horizon::SixHours);
+        assert_eq!(six, vec![(UNRECORDED_REASON.to_owned(), 7)]);
+    }
 }
