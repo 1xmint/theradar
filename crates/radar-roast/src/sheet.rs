@@ -27,6 +27,7 @@ use radar_onchain::{Dossier, LaunchBlock};
 use radar_types::Slot;
 
 use crate::baserates::BaseRates;
+use crate::clause::{Kind, Voice};
 use std::fmt::Write as _;
 
 /// Lamports in one SOL.
@@ -62,6 +63,13 @@ pub enum About {
 pub struct Fact {
     /// What kind of claim this is. Decides whether the self-mint rule drops it.
     pub about: About,
+    /// A stable name for the measurement, which survives the sheet.
+    ///
+    /// The position of a fact in [`FactSheet::facts`] does not: the list is
+    /// built conditionally, so the third fact is a different measurement on two
+    /// sheets. Anything that has to refer to this fact later — a selection, a
+    /// log line, a receipt — refers to this.
+    pub kind: crate::clause::Kind,
     /// What it is, in the fact sheet the model reads.
     pub label: String,
     /// How it renders.
@@ -72,6 +80,13 @@ pub struct Fact {
     /// renderings: 0.251, 25.1 and 25 are the same fact said three ways, and a
     /// model that picks a different one has not invented anything.
     pub values: Vec<f64>,
+    /// The complete sentences this fact may be published as, one per register.
+    ///
+    /// **Empty means the fact is true and unpublishable.** It is shown to the
+    /// model as context it may reason from and given no number it could select,
+    /// so a measurement cannot reach a timeline before somebody has written the
+    /// sentence that states it. See [`crate::clause`].
+    pub clauses: Vec<crate::clause::Clause>,
 }
 
 impl Fact {
@@ -80,14 +95,35 @@ impl Fact {
     /// A **measurement**, never a price: a price or market-cap fact is built as
     /// a literal with [`About::Price`], so that the choice is written down where
     /// the self-mint rule can read it.
+    ///
+    /// Built with no clauses. Add them with [`Fact::saying`]; a fact that never
+    /// gets one is context and not copy.
     #[must_use]
-    pub fn exact(label: impl Into<String>, value: f64, rendered: impl Into<String>) -> Self {
+    pub fn exact(
+        kind: crate::clause::Kind,
+        label: impl Into<String>,
+        value: f64,
+        rendered: impl Into<String>,
+    ) -> Self {
         Self {
             about: About::Measurement,
+            kind,
             label: label.into(),
             rendered: rendered.into(),
             values: vec![value],
+            clauses: Vec::new(),
         }
+    }
+
+    /// Adds one vetted clause.
+    ///
+    /// The whole sentence, written here, by the code that read the measurement:
+    /// subject, verb, number, unit, window and limitation. Nothing downstream
+    /// completes it.
+    #[must_use]
+    pub fn saying(mut self, voice: crate::clause::Voice, text: impl Into<String>) -> Self {
+        self.clauses.push(crate::clause::Clause::new(voice, text));
+        self
     }
 
     /// A share, authorised as a ratio, a percentage, and the percentage rounded.
@@ -97,7 +133,7 @@ impl Fact {
     /// exists to stop fabrication, and a tolerance narrow enough to forbid
     /// ordinary rounding would push every reply to the deterministic template.
     #[must_use]
-    pub fn share(label: impl Into<String>, ratio: f64) -> Self {
+    pub fn share(kind: crate::clause::Kind, label: impl Into<String>, ratio: f64) -> Self {
         let pct = ratio * 100.0;
         // Precision follows the magnitude, and this is not cosmetic. The
         // strongest finding in 0024 is that launches with one to three
@@ -113,6 +149,7 @@ impl Fact {
         };
         Self {
             about: About::Measurement,
+            kind,
             label: label.into(),
             rendered,
             values: vec![
@@ -122,6 +159,7 @@ impl Fact {
                 (pct * 10.0).round() / 10.0,
                 (pct * 100.0).round() / 100.0,
             ],
+            clauses: Vec::new(),
         }
     }
 }
@@ -270,11 +308,23 @@ impl FactSheet {
         }
 
         if let Some(count) = dossier.creator_transactions {
-            facts.push(Fact::exact(
-                "transactions by this creator's address (transactions, not launches)",
-                f64::from(count.lower_bound()),
-                format!("{count}"),
-            ));
+            let rendered = format!("{count}");
+            facts.push(
+                Fact::exact(
+                    Kind::CreatorTransactions,
+                    "transactions by this creator's address (transactions, not launches)",
+                    f64::from(count.lower_bound()),
+                    rendered.clone(),
+                )
+                .saying(
+                    Voice::Plain,
+                    format!("Radar has seen {rendered} transactions from this creator's address -- transactions, not launches."),
+                )
+                .saying(
+                    Voice::Blunt,
+                    format!("That address has {rendered} transactions on it. Transactions, not launches."),
+                ),
+            );
         }
 
         // Not inside the launch-block arm above, and deliberately: this is a
@@ -415,12 +465,18 @@ fn withhold_price(facts: &mut Vec<Fact>) {
     facts.retain(|f| f.about != About::Price);
     facts.push(Fact {
         about: About::Measurement,
+        kind: Kind::SelfMintWithheld,
         label: "this token".to_owned(),
         rendered: "the analyst's own. Its price and market capitalisation are never stated, \
                    whoever asks and whatever they are. Say so if it comes up; say nothing \
                    about what it is worth."
             .to_owned(),
         values: Vec::new(),
+        // No clause, and this is the strongest case for the empty list being a
+        // real mechanism rather than an omission: the note tells the model why
+        // a figure is missing, and there is no arrangement of selections that
+        // publishes a sentence about the analyst's own price.
+        clauses: Vec::new(),
     });
 }
 
@@ -441,32 +497,86 @@ fn phrase_for(fact: &str) -> String {
 }
 
 fn push_launch(facts: &mut Vec<Fact>, untrusted: &mut Vec<(String, String)>, launch: &LaunchBlock) {
-    facts.push(Fact::exact(
-        "distinct token accounts receiving the token in its own launch block \
-         (token accounts, NOT owners, NOT people)",
-        f64::from(launch.recipients.lower_bound()),
-        format!("{}", launch.recipients),
-    ));
-    facts.push(Fact::exact(
-        "transactions in the launch block",
-        f64::from(launch.transactions.lower_bound()),
-        format!("{}", launch.transactions),
-    ));
+    let recipients = format!("{}", launch.recipients);
+    facts.push(
+        Fact::exact(
+            Kind::LaunchRecipients,
+            "distinct token accounts receiving the token in its own launch block \
+             (token accounts, NOT owners, NOT people)",
+            f64::from(launch.recipients.lower_bound()),
+            recipients.clone(),
+        )
+        // Rule 3 of the old prompt, now unbreakable: the model asked for this
+        // clause gets "token accounts" whether or not it remembered the rule,
+        // because the noun is not its to choose.
+        .saying(
+            Voice::Plain,
+            format!(
+                "The launch block put it into {recipients} token accounts -- accounts, not people."
+            ),
+        )
+        .saying(
+            Voice::Blunt,
+            format!("It reached {recipients} token accounts at birth. Accounts, not owners."),
+        ),
+    );
+    let transactions = format!("{}", launch.transactions);
+    facts.push(
+        Fact::exact(
+            Kind::LaunchTransactions,
+            "transactions in the launch block",
+            f64::from(launch.transactions.lower_bound()),
+            transactions.clone(),
+        )
+        .saying(
+            Voice::Plain,
+            format!("The launch block carried {transactions} transactions."),
+        )
+        .saying(
+            Voice::Blunt,
+            format!("One block, {transactions} transactions."),
+        ),
+    );
     match launch.dev_buy_lamports {
-        Some(l) => facts.push(Fact::exact(
-            "SOL the creator spent buying their own token in the launch block",
-            lamports_as_sol(l),
-            format!("{} SOL", render_sol(l)),
-        )),
+        Some(l) => {
+            let sol = format!("{} SOL", render_sol(l));
+            facts.push(
+                Fact::exact(
+                    Kind::DevBuy,
+                    "SOL the creator spent buying their own token in the launch block",
+                    lamports_as_sol(l),
+                    sol.clone(),
+                )
+                .saying(
+                    Voice::Plain,
+                    format!("The creator bought {sol} of their own token in the launch block."),
+                )
+                .saying(Voice::Blunt, format!("The creator's own bid: {sol}.")),
+            );
+        }
         // Rule 9, and this one is a statement about a person: "did not buy" and
-        // "we could not see a buy" are different accusations.
-        None => facts.push(Fact {
-            about: About::Measurement,
-            label: "creator's own buy in the launch block".to_owned(),
-            rendered: "not found -- absent, NOT zero. Do not say the creator bought nothing."
-                .to_owned(),
-            values: Vec::new(),
-        }),
+        // "we could not see a buy" are different accusations. The clause says
+        // the second, and the model cannot reach for the first, because the only
+        // sentence on offer is this one.
+        None => facts.push(
+            Fact {
+                about: About::Measurement,
+                kind: Kind::DevBuyUnseen,
+                label: "creator's own buy in the launch block".to_owned(),
+                rendered: "not found -- absent, NOT zero. Do not say the creator bought nothing."
+                    .to_owned(),
+                values: Vec::new(),
+                clauses: Vec::new(),
+            }
+            .saying(
+                Voice::Plain,
+                "No buy by the creator was found in the launch block, which is not the same as none.",
+            )
+            .saying(
+                Voice::Blunt,
+                "Radar found no creator buy. Found, not happened.",
+            ),
+        ),
     }
     untrusted.push(("token name".to_owned(), launch.metadata.name.clone()));
     untrusted.push(("token symbol".to_owned(), launch.metadata.symbol.clone()));
@@ -515,11 +625,26 @@ fn push_creator(
         return;
     };
 
-    facts.push(Fact::exact(
-        "tokens this creator has launched, in Radar's record",
-        f64::from(record.launches),
-        record.launches.to_string(),
-    ));
+    let launches = record.launches.to_string();
+    facts.push(
+        Fact::exact(
+            Kind::CreatorLaunches,
+            "tokens this creator has launched, in Radar's record",
+            f64::from(record.launches),
+            launches.clone(),
+        )
+        // "in Radar's record" is in the sentence and not in the model's memory.
+        // The window is the part a reader needs to weigh the count, and it is
+        // the part a free-writing model drops first.
+        .saying(
+            Voice::Plain,
+            format!("This creator has launched {launches} tokens in Radar's record."),
+        )
+        .saying(
+            Voice::Blunt,
+            format!("{launches} launches on this creator, in Radar's record."),
+        ),
+    );
 
     // The denominator, always beside the numerator. A gap between launches and
     // measured means the outcome pass has not caught up -- not that those
@@ -529,26 +654,79 @@ fn push_creator(
         unknown.push("how those launches turned out: none has been measured yet".to_owned());
         return;
     }
-    facts.push(Fact::exact(
-        "of those, how many have been measured",
-        f64::from(record.measured),
-        record.measured.to_string(),
-    ));
-    facts.push(Fact::exact(
-        "of the measured, how many reached an AMM by filling over time",
-        f64::from(record.organic),
-        record.organic.to_string(),
-    ));
-    facts.push(Fact::exact(
-        "of the measured, how many filled their curve within three slots (capital committed before the token existed, not demand)",
-        f64::from(record.instant),
-        record.instant.to_string(),
-    ));
-    facts.push(Fact::exact(
-        "of the measured, how many showed almost no activity at all",
-        f64::from(record.stillborn),
-        record.stillborn.to_string(),
-    ));
+    // Every clause below carries its denominator, because that is the number
+    // that decides whether the numerator means anything -- and the denominator
+    // is what a sentence written for effect leaves out.
+    let measured = record.measured.to_string();
+    facts.push(
+        Fact::exact(
+            Kind::CreatorMeasured,
+            "of those, how many have been measured",
+            f64::from(record.measured),
+            measured.clone(),
+        )
+        .saying(
+            Voice::Plain,
+            format!("Of those, {measured} have had an outcome measured."),
+        )
+        .saying(
+            Voice::Blunt,
+            format!("{measured} of them have been measured."),
+        ),
+    );
+    let organic = record.organic.to_string();
+    facts.push(
+        Fact::exact(
+            Kind::CreatorOrganic,
+            "of the measured, how many reached an AMM by filling over time",
+            f64::from(record.organic),
+            organic.clone(),
+        )
+        .saying(
+            Voice::Plain,
+            format!("{organic} of those {measured} filled a curve over time."),
+        )
+        .saying(
+            Voice::Blunt,
+            format!("{organic} of {measured} filled a curve the slow way."),
+        ),
+    );
+    let instant = record.instant.to_string();
+    facts.push(
+        Fact::exact(
+            Kind::CreatorInstant,
+            "of the measured, how many filled their curve within three slots (capital committed before the token existed, not demand)",
+            f64::from(record.instant),
+            instant.clone(),
+        )
+        .saying(
+            Voice::Plain,
+            format!(
+                "{instant} of those {measured} filled inside three slots, which is capital arranged before the token existed."
+            ),
+        )
+        .saying(
+            Voice::Blunt,
+            format!("{instant} of {measured} filled inside three slots. That is arrangement, not demand."),
+        ),
+    );
+    let stillborn = record.stillborn.to_string();
+    facts.push(
+        Fact::exact(
+            Kind::CreatorStillborn,
+            "of the measured, how many showed almost no activity at all",
+            f64::from(record.stillborn),
+            stillborn.clone(),
+        )
+        .saying(
+            Voice::Plain,
+            format!("{stillborn} of those {measured} showed almost no activity at all."),
+        )
+        .saying(
+            Voice::Blunt,
+            format!("{stillborn} of {measured} never moved."),
+        ),
+    );
 }
 
 /// The population as **Radar itself measured it**, from the store.
@@ -581,13 +759,20 @@ fn push_measured_population(facts: &mut Vec<Fact>, population: &crate::creator::
     let Some(graduated) = population.graduated_share() else {
         facts.push(Fact {
             about: About::Measurement,
+            kind: Kind::VenueUnmeasured,
             label: "how the venue as a whole turns out".to_owned(),
             rendered: "NOT AVAILABLE -- no outcome has been measured yet".to_owned(),
             values: Vec::new(),
+            // No clause: an absence is context for choosing what to say, and
+            // there is nothing here to publish. A sentence about it would be a
+            // sentence about Radar's backlog.
+            clauses: Vec::new(),
         });
         return;
     };
+    let measured = population.measured.to_string();
     facts.push(Fact::exact(
+        Kind::VenueMeasured,
         "launches Radar has recorded and measured, which every share below is out of",
         // Lossless below 2^53; these are counts of launches.
         #[expect(
@@ -597,29 +782,79 @@ fn push_measured_population(facts: &mut Vec<Fact>, population: &crate::creator::
         {
             population.measured as f64
         },
-        population.measured.to_string(),
+        measured.clone(),
     ));
-    facts.push(Fact::share(
+    // The denominator travels inside every share's sentence rather than beside
+    // it, so a clause published alone still says what it is a share of.
+    let share = Fact::share(
+        Kind::VenueGraduated,
         "of every measured launch, how many graduated at all",
         graduated,
-    ));
+    );
+    let rendered = share.rendered.clone();
+    facts.push(
+        share
+            .saying(
+                Voice::Plain,
+                format!("Across the {measured} launches Radar has measured, {rendered} graduated at all."),
+            )
+            .saying(
+                Voice::Blunt,
+                format!("{rendered} of {measured} measured launches ever graduated."),
+            ),
+    );
     if let Some(organic) = population.organic_share() {
-        facts.push(Fact::share(
+        let f = Fact::share(
+            Kind::VenueOrganic,
             "of every measured launch, how many filled their curve over time",
             organic,
-        ));
+        );
+        let r = f.rendered.clone();
+        facts.push(
+            f.saying(
+                Voice::Plain,
+                format!("Of those {measured} measured launches, {r} filled a curve over time."),
+            )
+            .saying(
+                Voice::Blunt,
+                format!("{r} of {measured} filled a curve over time."),
+            ),
+        );
     }
     if let Some(instant) = population.instant_share() {
-        facts.push(Fact::share(
+        let f = Fact::share(
+            Kind::VenueInstant,
             "of every measured launch, how many filled inside their own launch block",
             instant,
-        ));
+        );
+        let r = f.rendered.clone();
+        facts.push(
+            f.saying(
+                Voice::Plain,
+                format!("Of those {measured} measured launches, {r} filled inside their own launch block."),
+            )
+            .saying(
+                Voice::Blunt,
+                format!("{r} of {measured} filled inside their own launch block."),
+            ),
+        );
     }
     if let Some(stillborn) = population.stillborn_share() {
-        facts.push(Fact::share(
+        let f = Fact::share(
+            Kind::VenueStillborn,
             "of every measured launch, how many showed almost no activity at all",
             stillborn,
-        ));
+        );
+        let r = f.rendered.clone();
+        facts.push(
+            f.saying(
+                Voice::Plain,
+                format!(
+                    "Of those {measured} measured launches, {r} showed almost no activity at all."
+                ),
+            )
+            .saying(Voice::Blunt, format!("{r} of {measured} never moved.")),
+        );
     }
 }
 
@@ -629,61 +864,180 @@ fn push_population(facts: &mut Vec<Fact>, recipients: Count, rates: &BaseRates) 
     let Some(exact) = recipients.exact() else {
         facts.push(Fact {
             about: About::Measurement,
+            kind: Kind::BandUnavailable,
             label: "population context for the recipient count".to_owned(),
             rendered: "NOT AVAILABLE -- the count was cut short, so it cannot be \
                        placed in a distribution"
                 .to_owned(),
             values: Vec::new(),
+            clauses: Vec::new(),
         });
         return;
     };
     let Some(band) = rates.band_for(exact) else {
         return;
     };
-    facts.push(Fact::share(
+    push_band(facts, exact, band);
+    push_base_rates(facts, rates);
+}
+
+/// This launch's own band, as a distribution it sits inside.
+fn push_band(facts: &mut Vec<Fact>, exact: u32, band: &crate::baserates::Band) {
+    // `band.name` is Radar's own label for a range and it contains digits --
+    // "10-13 recipients". Those digits are on the sheet because the band's own
+    // facts authorise them, and they are inside the clause for the same reason
+    // the denominator is: a share of an unnamed population is not a
+    // measurement, it is a mood.
+    let name = &band.name;
+    let f = Fact::share(
+        Kind::BandNeverGraduated,
         format!(
-            "share of launches that NEVER graduated whose block had {} recipients ({})",
-            exact, band.name
+            "share of launches that NEVER graduated whose block had {exact} recipients ({name})"
         ),
         band.never_graduated,
-    ));
-    facts.push(Fact::share(
-        format!("share of ORGANIC graduations in that band ({})", band.name),
-        band.organic,
-    ));
-    facts.push(Fact::share(
-        format!("share of INSTANT graduations in that band ({})", band.name),
-        band.instant,
-    ));
-    facts.push(Fact::share(
-        format!(
-            "probability a launch in that band ({}) graduates instantly",
-            band.name
+    );
+    let r = f.rendered.clone();
+    facts.push(
+        f.saying(
+            Voice::Plain,
+            format!("Among launches in the {name} band, {r} never graduated at all."),
+        )
+        .saying(
+            Voice::Blunt,
+            format!("{r} of the {name} band never graduated."),
         ),
+    );
+    let f = Fact::share(
+        Kind::BandOrganic,
+        format!("share of ORGANIC graduations in that band ({name})"),
+        band.organic,
+    );
+    let r = f.rendered.clone();
+    facts.push(
+        f.saying(
+            Voice::Plain,
+            format!("Among launches in the {name} band, {r} filled a curve over time."),
+        )
+        .saying(
+            Voice::Blunt,
+            format!("{r} of the {name} band filled a curve over time."),
+        ),
+    );
+    let f = Fact::share(
+        Kind::BandInstant,
+        format!("share of INSTANT graduations in that band ({name})"),
+        band.instant,
+    );
+    let r = f.rendered.clone();
+    facts.push(
+        f.saying(
+            Voice::Plain,
+            format!("Among launches in the {name} band, {r} graduated instantly."),
+        )
+        .saying(
+            Voice::Blunt,
+            format!("{r} of the {name} band graduated instantly."),
+        ),
+    );
+    let f = Fact::share(
+        Kind::BandInstantProbability,
+        format!("probability a launch in that band ({name}) graduates instantly"),
         band.p_instant,
-    ));
-    facts.push(Fact::exact(
-        format!("how many times the base rate that is ({} band)", band.name),
-        band.x_base_instant,
-        format!("{:.1}x", band.x_base_instant),
-    ));
-    facts.push(Fact::share(
+    );
+    let r = f.rendered.clone();
+    facts.push(
+        f.saying(
+            Voice::Plain,
+            format!("A launch in the {name} band graduates instantly {r} of the time."),
+        )
+        .saying(
+            Voice::Blunt,
+            format!("Instant graduation in the {name} band: {r}."),
+        ),
+    );
+    // Research 0024 is the record of this multiple moving off six recipients. A
+    // clause states it as a dated comparison against the population rate rather
+    // than as a property of the band, because it is the ratio of two measured
+    // shares and the denominator is the one that moves.
+    let times = format!("{:.1}x", band.x_base_instant);
+    facts.push(
+        Fact::exact(
+            Kind::BandTimesBaseRate,
+            format!("how many times the base rate that is ({name} band)"),
+            band.x_base_instant,
+            times.clone(),
+        )
+        .saying(
+            Voice::Plain,
+            format!("That is {times} the rate across every launch Radar has measured."),
+        )
+        .saying(Voice::Blunt, format!("{times} the rate of the field.")),
+    );
+}
+
+/// The whole field, which is what makes a band figure mean anything.
+fn push_base_rates(facts: &mut Vec<Fact>, rates: &BaseRates) {
+    let f = Fact::share(
+        Kind::BaseInstant,
         "population rate: share of all launches that graduate instantly",
         rates.base_rate_instant,
-    ));
-    facts.push(Fact::share(
+    );
+    let r = f.rendered.clone();
+    facts.push(
+        f.saying(
+            Voice::Plain,
+            format!("Across every launch in the snapshot, {r} graduated instantly."),
+        )
+        .saying(
+            Voice::Blunt,
+            format!("The whole field graduates instantly {r} of the time."),
+        ),
+    );
+    let f = Fact::share(
+        Kind::BaseGraduates,
         "population rate: share of all launches that graduate at all",
         rates.base_rate_graduates,
-    ));
+    );
+    let r = f.rendered.clone();
+    facts.push(
+        f.saying(
+            Voice::Plain,
+            format!("Across every launch in the snapshot, {r} graduated at all."),
+        )
+        .saying(
+            Voice::Blunt,
+            format!("{r} of the whole field ever graduates."),
+        ),
+    );
 }
 
 fn push_curve(facts: &mut Vec<Fact>, curve: &radar_onchain::CurveFacts) {
-    facts.push(Fact {
-        about: About::Measurement,
-        label: "has the token graduated off the bonding curve".to_owned(),
-        rendered: if curve.complete { "yes" } else { "no" }.to_owned(),
-        values: Vec::new(),
-    });
+    facts.push(
+        Fact {
+            about: About::Measurement,
+            kind: Kind::Graduated,
+            label: "has the token graduated off the bonding curve".to_owned(),
+            rendered: if curve.complete { "yes" } else { "no" }.to_owned(),
+            values: Vec::new(),
+            clauses: Vec::new(),
+        }
+        .saying(
+            Voice::Plain,
+            if curve.complete {
+                "It has left the bonding curve and trades on an AMM."
+            } else {
+                "It is still on its bonding curve."
+            },
+        )
+        .saying(
+            Voice::Blunt,
+            if curve.complete {
+                "Off the curve, on an AMM."
+            } else {
+                "Still on the curve."
+            },
+        ),
+    );
     // A graduated coin has an empty curve *because it left*, and the two
     // remaining curve facts are both false about it: the capacity is not zero,
     // it is elsewhere, and the curve's fee schedule is not the fee the coin
@@ -692,66 +1046,161 @@ fn push_curve(facts: &mut Vec<Fact>, curve: &radar_onchain::CurveFacts) {
     // line the sheet could carry, because a graduated coin is exactly the kind
     // of coin people ask the bot about.
     if curve.complete {
-        facts.push(Fact {
-            about: About::Measurement,
-            label: "exit capacity".to_owned(),
-            rendered: "graduated off the curve; it trades on the AMM, which Radar does not price. \
-                       NOT zero, and NOT 'cannot size into this'."
-                .to_owned(),
-            values: Vec::new(),
-        });
+        facts.push(
+            Fact {
+                about: About::Measurement,
+                kind: Kind::CapacityAfterGraduation,
+                label: "exit capacity".to_owned(),
+                rendered:
+                    "graduated off the curve; it trades on the AMM, which Radar does not price. \
+                     NOT zero, and NOT 'cannot size into this'."
+                        .to_owned(),
+                values: Vec::new(),
+                clauses: Vec::new(),
+            }
+            .saying(
+                Voice::Plain,
+                "Radar does not price the AMM it moved to, so it has no exit size for this one.",
+            )
+            .saying(Voice::Blunt, "Radar cannot size the AMM it moved to."),
+        );
         return;
     }
     match curve.capacity_lamports {
-        Some(l) => facts.push(Fact::exact(
-            "SOL that can be bought before price moves 1% -- this is RADAR'S OWN \
-             impact budget, NOT a ceiling the venue imposes (research 0022)",
-            lamports_as_sol(l),
-            format!("{} SOL", render_sol(l)),
-        )),
-        None => facts.push(Fact {
-            about: About::Measurement,
-            label: "exit capacity".to_owned(),
-            rendered: "none -- cannot size into this at all. NOT 'no limit found'.".to_owned(),
-            values: Vec::new(),
-        }),
+        Some(l) => {
+            let sol = format!("{} SOL", render_sol(l));
+            facts.push(
+                Fact::exact(
+                    Kind::Capacity,
+                    "SOL that can be bought before price moves 1% -- this is RADAR'S OWN \
+                     impact budget, NOT a ceiling the venue imposes (research 0022)",
+                    lamports_as_sol(l),
+                    sol.clone(),
+                )
+                // Research 0022 reversed the capacity claim: this is Radar's own
+                // impact budget, not a ceiling the venue imposes. The clause
+                // says whose budget it is, in the sentence, because the earlier
+                // wording was read as the venue's limit and that reading was
+                // wrong for a year.
+                .saying(
+                    Voice::Plain,
+                    format!("{sol} can be bought before the price moves one percent, on Radar's own impact budget."),
+                )
+                .saying(
+                    Voice::Blunt,
+                    format!("{sol} before the price moves one percent, by Radar's budget."),
+                ),
+            );
+        }
+        None => facts.push(
+            Fact {
+                about: About::Measurement,
+                kind: Kind::CapacityNone,
+                label: "exit capacity".to_owned(),
+                rendered: "none -- cannot size into this at all. NOT 'no limit found'.".to_owned(),
+                values: Vec::new(),
+                clauses: Vec::new(),
+            }
+            .saying(
+                Voice::Plain,
+                "No size at all clears Radar's impact budget here.",
+            )
+            .saying(
+                Voice::Blunt,
+                "Nothing fits inside Radar's impact budget here.",
+            ),
+        ),
     }
+    push_fee(facts, curve);
+}
+
+/// The venue's own fee, which is not the cost of trading and says so.
+fn push_fee(facts: &mut Vec<Fact>, curve: &radar_onchain::CurveFacts) {
     if let Some(fees) = &curve.fees {
         #[expect(
             clippy::cast_precision_loss,
             reason = "a basis-point figure is a small integer; this is a comparison value"
         )]
         let rt = fees.round_trip_bps() as f64;
-        facts.push(Fact {
-            about: About::Measurement,
-            label: "venue fee, round trip, read from the on-chain schedule".to_owned(),
-            rendered: format!(
-                "{rt} bps -- THE VENUE FEE ONLY. The measured all-in round trip is 850 bps. \
-                 Never present the fee as the cost of trading."
+        facts.push(
+            Fact {
+                about: About::Measurement,
+                kind: Kind::VenueFee,
+                label: "venue fee, round trip, read from the on-chain schedule".to_owned(),
+                rendered: format!(
+                    "{rt} bps -- THE VENUE FEE ONLY. The measured all-in round trip is 850 bps. \
+                     Never present the fee as the cost of trading."
+                ),
+                values: vec![rt, rt / 100.0],
+                clauses: Vec::new(),
+            }
+            // "the venue's fee" and "the cost of trading" are different claims
+            // and the gap between them is most of the cost. The qualifier is in
+            // the sentence rather than in a rule the model is asked to hold.
+            .saying(
+                Voice::Plain,
+                format!("The venue's own round-trip fee, from its on-chain schedule, is {rt} bps, which is not the cost of trading it."),
+            )
+            .saying(
+                Voice::Blunt,
+                format!("Venue fee alone: {rt} bps round trip. That is the floor, not the bill."),
             ),
-            values: vec![rt, rt / 100.0],
-        });
+        );
     }
 }
 
 fn push_cost(facts: &mut Vec<Fact>, rates: &BaseRates) {
-    facts.push(Fact::exact(
-        "measured all-in round trip Radar's kernel assumes, on fresh launches",
-        rates.round_trip_kernel,
-        format!("{} bps", rates.round_trip_kernel),
-    ));
-    facts.push(Fact::exact(
-        "expected edge a strategy must clear before one trade is worth making",
-        rates.round_trip_bar,
-        format!("{} bps", rates.round_trip_bar),
-    ));
+    let kernel = format!("{} bps", rates.round_trip_kernel);
+    facts.push(
+        Fact::exact(
+            Kind::RoundTripKernel,
+            "measured all-in round trip Radar's kernel assumes, on fresh launches",
+            rates.round_trip_kernel,
+            kernel.clone(),
+        )
+        .saying(
+            Voice::Plain,
+            format!("A round trip on a fresh launch costs {kernel} all in, as Radar's kernel measures it."),
+        )
+        .saying(Voice::Blunt, format!("{kernel} to get in and out, all in.")),
+    );
+    let bar = format!("{} bps", rates.round_trip_bar);
+    facts.push(
+        Fact::exact(
+            Kind::RoundTripBar,
+            "expected edge a strategy must clear before one trade is worth making",
+            rates.round_trip_bar,
+            bar.clone(),
+        )
+        .saying(
+            Voice::Plain,
+            format!(
+                "A strategy has to clear {bar} of expected edge before one trade is worth making."
+            ),
+        )
+        .saying(
+            Voice::Blunt,
+            format!("Clear {bar} of edge or do not trade."),
+        ),
+    );
     for band in &rates.cost_bands {
-        facts.push(Fact {
-            about: About::Measurement,
-            label: format!("round trip for a position of {}", band.band),
-            rendered: format!("{} bps ({:.1}%)", band.round_trip, band.round_trip / 100.0),
-            values: vec![band.round_trip, band.round_trip / 100.0],
-        });
+        let size = &band.band;
+        let rendered = format!("{} bps ({:.1}%)", band.round_trip, band.round_trip / 100.0);
+        facts.push(
+            Fact {
+                about: About::Measurement,
+                kind: Kind::CostBand,
+                label: format!("round trip for a position of {size}"),
+                rendered: rendered.clone(),
+                values: vec![band.round_trip, band.round_trip / 100.0],
+                clauses: Vec::new(),
+            }
+            .saying(
+                Voice::Plain,
+                format!("A position of {size} pays {rendered} to go round."),
+            )
+            .saying(Voice::Blunt, format!("{size} costs {rendered} round trip.")),
+        );
     }
 }
 
@@ -791,19 +1240,34 @@ mod tests {
         // graduate instantly 0.02% of the time. At one decimal that is "0.0%",
         // which reads as *never* rather than *rare* -- wrong in the direction
         // that gets quoted back at you.
-        assert_eq!(Fact::share("x", 0.000_2).rendered, "0.02%");
-        assert_eq!(Fact::share("x", 0.000_5).rendered, "0.05%");
+        assert_eq!(
+            Fact::share(Kind::LaunchRecipients, "x", 0.000_2).rendered,
+            "0.02%"
+        );
+        assert_eq!(
+            Fact::share(Kind::LaunchRecipients, "x", 0.000_5).rendered,
+            "0.05%"
+        );
 
         // Zero is not "0.00%". It is genuinely zero, and the two-decimal form is
         // for small-but-real, so the lower bound is exclusive.
-        assert_eq!(Fact::share("x", 0.0).rendered, "0.0%");
+        assert_eq!(
+            Fact::share(Kind::LaunchRecipients, "x", 0.0).rendered,
+            "0.0%"
+        );
 
         // And a tenth of a percent is the upper bound, also exclusive: 0.1% has
         // no hidden precision to show.
-        assert_eq!(Fact::share("x", 0.001).rendered, "0.1%");
+        assert_eq!(
+            Fact::share(Kind::LaunchRecipients, "x", 0.001).rendered,
+            "0.1%"
+        );
 
         // Ordinary magnitudes are unaffected.
-        assert_eq!(Fact::share("x", 0.251).rendered, "25.1%");
+        assert_eq!(
+            Fact::share(Kind::LaunchRecipients, "x", 0.251).rendered,
+            "25.1%"
+        );
     }
 
     #[test]
@@ -841,7 +1305,7 @@ mod tests {
 
     #[test]
     fn a_share_authorises_its_ordinary_roundings_and_nothing_else() {
-        let f = Fact::share("x", 0.251);
+        let f = Fact::share(Kind::LaunchRecipients, "x", 0.251);
         assert!(f.values.iter().any(|v| (*v - 0.251).abs() < 1e-9));
         assert!(f.values.iter().any(|v| (*v - 25.1).abs() < 1e-9));
         assert!(f.values.iter().any(|v| (*v - 25.0).abs() < 1e-9));
@@ -879,6 +1343,8 @@ mod tests {
     fn a_price_fact() -> Fact {
         Fact {
             about: About::Price,
+            kind: Kind::SelfMintWithheld,
+            clauses: Vec::new(),
             label: "market capitalisation when read".to_owned(),
             rendered: "69000 USD".to_owned(),
             values: vec![69_000.0, 69.0],
@@ -893,7 +1359,10 @@ mod tests {
         //
         // Re-apply the bug by deleting the `retain` in `withhold_price`: the
         // 69000 stays authorised and this fails on the first assertion.
-        let mut facts = vec![Fact::exact("recipients", 6.0, "6"), a_price_fact()];
+        let mut facts = vec![
+            Fact::exact(Kind::LaunchRecipients, "recipients", 6.0, "6"),
+            a_price_fact(),
+        ];
         withhold_price(&mut facts);
         let sheet = FactSheet {
             mint: "M".to_owned(),

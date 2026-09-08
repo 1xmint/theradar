@@ -146,7 +146,14 @@ const MAX_FACTS: usize = 5;
 ///
 /// `None` when the sheet has neither. **An unknown creator is not a creator
 /// with zero launches** -- rule 9 -- so there is nothing to lead with and the
-/// model is given no headline rather than a misleading one.
+/// template prints no headline rather than a misleading one.
+///
+/// **This is the template's own first line now, not an offer to the model.** It
+/// was handed to the model as a tag until 2026-09-08, because a model writing
+/// prose needed an anchor about this coin. A model that selects clauses has
+/// one by construction -- the sheet leads with this coin's own sentences -- so
+/// the offer was removed rather than translated into a clause nobody would
+/// pick over the sentence it was built from.
 ///
 /// Under a hundred characters, because the first sentence is what gets
 /// screenshotted without the rest.
@@ -199,9 +206,8 @@ pub fn headline(sheet: &FactSheet) -> Option<String> {
 pub fn template(sheet: &FactSheet) -> String {
     let mut out = String::new();
     let _ = writeln!(out, "Radar on {}:", sheet.mint);
-    // The headline, when there is one: the same anchor the model is offered,
-    // so the floor and the voice pass lead on the same fact rather than on
-    // whichever fact happened to sort first.
+    // The headline, when there is one, so the floor leads on the fact that is
+    // about this coin rather than on whichever fact happened to sort first.
     if let Some(headline) = headline(sheet) {
         let _ = writeln!(out, "{headline}");
     }
@@ -307,6 +313,7 @@ fn short(label: &str) -> &str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::clause::Kind;
     use crate::sheet::{About, Fact};
 
     /// A sheet shaped like the real ones the box produced on 2026-09-04: a
@@ -324,34 +331,53 @@ mod tests {
                 // real sheet it published $0.20-$2's 3042 bps.
                 Fact {
                     about: About::Measurement,
+                    kind: Kind::CostBand,
+                    clauses: Vec::new(),
                     label: "round trip for a position of $0.20-$2".to_owned(),
                     rendered: "3042 bps (30.4%)".to_owned(),
                     values: vec![3042.0, 30.4],
                 },
                 Fact {
                     about: About::Measurement,
+                    kind: Kind::CostBand,
+                    clauses: Vec::new(),
                     label: "round trip for a position of $2-$20".to_owned(),
                     rendered: "250 bps (2.5%)".to_owned(),
                     values: vec![250.0, 2.5],
                 },
                 Fact {
                     about: About::Measurement,
+                    kind: Kind::CostBand,
+                    clauses: Vec::new(),
                     label: "round trip for a position of $20-$200".to_owned(),
                     rendered: "456 bps (4.6%)".to_owned(),
                     values: vec![456.0, 4.6],
                 },
-                Fact::exact("tokens this creator has launched", 150.0, "150"),
-                Fact::exact("how many reached an AMM by filling over time", 0.0, "0"),
+                Fact::exact(
+                    Kind::CreatorLaunches,
+                    "tokens this creator has launched",
+                    150.0,
+                    "150",
+                ),
+                Fact::exact(
+                    Kind::CreatorOrganic,
+                    "how many reached an AMM by filling over time",
+                    0.0,
+                    "0",
+                ),
                 Fact::share(
+                    Kind::VenueGraduated,
                     "of every measured launch, how many graduated at all",
                     0.0281,
                 ),
                 Fact::exact(
+                    Kind::LaunchRecipients,
                     "distinct token accounts receiving the token in its own launch block",
                     4.0,
                     "4",
                 ),
                 Fact::share(
+                    Kind::VenueStillborn,
                     "of every measured launch, how many showed almost no activity at all",
                     0.230,
                 ),
@@ -541,8 +567,12 @@ mod tests {
             mint: "MintOne".to_owned(),
             read_at: Some(radar_types::Slot(444_007_820)),
             facts: vec![
-                Fact::exact("recipients", 11.0, "11"),
-                Fact::share("share of never-graduated in that band", 0.005),
+                Fact::exact(Kind::LaunchRecipients, "recipients", 11.0, "11"),
+                Fact::share(
+                    Kind::BandNeverGraduated,
+                    "share of never-graduated in that band",
+                    0.005,
+                ),
             ],
             untrusted: vec![("token name".to_owned(), "Gay Pepe".to_owned())],
             unknown: vec!["the creator's launch count".to_owned()],
@@ -563,6 +593,8 @@ mod tests {
         let mut s = sheet();
         s.facts = vec![Fact {
             about: About::Measurement,
+            kind: Kind::LaunchRecipients,
+            clauses: Vec::new(),
             label: wanted.to_owned(),
             rendered: String::new(),
             values: vec![],
@@ -594,7 +626,7 @@ mod tests {
         let mut s = sheet();
         s.facts = LEAD
             .iter()
-            .map(|wanted| Fact::exact((*wanted).to_owned(), 11.0, "11"))
+            .map(|wanted| Fact::exact(Kind::LaunchRecipients, (*wanted).to_owned(), 11.0, "11"))
             .collect();
         // The unknowns are printed as `- ` lines too, and they are not what the
         // ceiling governs. Counting them made the first run of this read five

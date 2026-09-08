@@ -220,10 +220,12 @@ And these product-level refusals, each already argued in a document:
   channel at launch, 8.94× lift) is **unavailable by decision**. If you want to
   reopen that, argue it explicitly as a decision rather than smuggling it in.
 - `Policy::CLOSED` stays closed.
-- The model that writes replies **cannot emit a digit**. It writes `[F1]`-style
-  slot tags into prose and Radar substitutes its own measured strings; a digit
-  anywhere in its output discards the reply. Any voice work must live inside
-  that.
+- The model that writes replies **writes no words at all**. It chooses whole
+  sentences Radar already wrote from what it measured, by number and register
+  (`F1.plain`), and anything else in its output discards the reply. It still
+  chooses which facts land, in what order, and in what tone. Any voice work is
+  authoring those sentences, not loosening the grammar. See ADR 0016 and
+  `crates/radar-roast/src/clause.rs`.
 
 ---
 

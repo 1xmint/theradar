@@ -2,17 +2,26 @@
 # ADR 0016 — The model selects whole clauses, never a number in its own sentence
 
 **Date:** 2026-09-07
-**Status:** accepted, and **not yet implemented**. The tag substitution this
-builds on ships today in
-[`crates/radar-roast/src/tags.rs`](../../crates/radar-roast/src/tags.rs); the
-clause layer is item 5 of [plan 0010](../plans/0010-radar-actualization.md).
+**Status:** accepted, and **implemented 2026-09-08** in
+[`crates/radar-roast/src/clause.rs`](../../crates/radar-roast/src/clause.rs).
+Commitments 1 and 2 are done in the narrow form described below; commitment 1's
+*metadata* half — typed scope, measurement time, watermark, source references,
+completeness, schema version — is item 5b, the receipt, and is **not** in the
+type yet. Commitment 3 is unchanged and still gates any new fact family.
 **Decides:** what unit of language the model is allowed to choose, now that it
 has been established that a correct number can be attached to a wrong claim.
-**Builds on:** the fact-slot design in `tags.rs`, which it keeps in full.
+**Replaces:** the fact-slot design that lived in the `radar-roast` crate's `tags`
+module, which this change **deletes** — so it is named here without a path, since
+there is no longer a file for a link to reach. The first draft of this ADR was
+wrong about its own consequence: once the model selects whole clauses it writes
+no prose, so there is no text for a tag to sit in and no digit for the refusal to
+catch. Keeping the module would have left 475 lines that nothing could reach. Its
+argument is kept verbatim in `clause.rs`'s header, which is where it is now
+answered rather than merely cited.
 
 ## Context
 
-`tags.rs` closed a real hole. The model writes `[F1]` and no digits; Radar
+The `tags` module closed a real hole. The model writes `[F1]` and no digits; Radar
 substitutes its own rendering; a digit outside a tag or an unknown tag rejects
 the whole reply and ships the deterministic template instead. The number in a
 published sentence is therefore always a number Radar wrote. That property is
@@ -57,6 +66,22 @@ The model does not write a subject, a number, a negation, a comparison or a
 verdict. The connective tissue between clauses is a short dry connector, also
 written in code. The existing digit refusal and the existing tag exception are
 unchanged and now apply to a smaller surface.
+
+**Two sentences of that paragraph did not survive implementation, and they are
+corrected here rather than quietly.**
+
+- **The connector is a space, and there is no table of dry connectors.** "But",
+  "and yet" and "despite that" each assert a *relationship* between the two
+  clauses they join, and a relationship between two measurements is a
+  comparison — which the paragraph above forbids the model from writing. A
+  connector table sitting between two facts it does not know cannot write one
+  honestly either. So the clauses are complete sentences and nothing joins them.
+- **The digit refusal and the tag exception are not "unchanged on a smaller
+  surface"; they are gone, with the module that held them.** A model that emits
+  only `F1.plain` has no prose position, so there is no text for a digit to
+  appear in. `forbidden::check` and `fidelity::check` both survive and now read
+  *Radar's own clauses* — which is a real job, and a different one: the author
+  they catch is a person adding a badly worded variant.
 
 **Why this and not a stronger checker.** AGENTS.md §5's ladder: make it
 impossible, then one mechanical check, then a test, then prose. A checker that

@@ -201,9 +201,14 @@ pub const RULES: &[Rule] = &[
     //
     // **This is the weaker half of the defence and is meant to be.** A
     // substring list can only ever refuse the phrasings somebody thought of;
-    // `crate::tags` is the half that works by construction, and it removes the
-    // *numbers* rather than the words. These are here because they are obvious
-    // once named, not because the list is now complete.
+    // `crate::clause` is the half that works by construction, and it removes
+    // the model's ability to write a word at all. These are here because they
+    // are obvious once named, not because the list is now complete.
+    //
+    // What this list is *for* changed with that: it no longer reads the model's
+    // prose, because there is none. It reads Radar's own clauses, so the author
+    // it catches is a person adding a vetted sentence -- which is a slower and
+    // rarer mistake, and the one that would otherwise ship unchallenged.
     Rule {
         phrase: "honeypot",
         because: "a verdict about an identifiable project",
