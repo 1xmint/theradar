@@ -19,11 +19,12 @@
 //!
 //! # The seam this leaves
 //!
-//! `AUDIENCE` below is a constant, and that is the honest shape of what the
-//! interface currently knows: nothing authenticates a customer, Cloudflare
-//! Access gates the whole site, so every reader really is an operator. A lookup
-//! would be a guess wearing the shape of a fact. It is the single place that
-//! changes when the customer lane switches on.
+//! `AUDIENCE` below is a constant, and that is still the honest shape of what
+//! the interface knows — but the value changed on 2026-09-08, when the shell
+//! became public. It was `"operator"` because Cloudflare Access gated the whole
+//! site and every reader really was the operator. Now a reader is whoever
+//! opened the page, the interface cannot tell an operator from a stranger, and
+//! the constant says so.
 
 import { Link, Route, Switch, useRoute } from "wouter";
 
@@ -40,14 +41,31 @@ import { navFor, type Audience } from "./routes";
 /**
  * Who the interface believes it is talking to.
  *
- * A constant, deliberately. Cloudflare Access gates the whole site to one
- * operator and no customer authenticator is configured, so `"operator"` is not
- * an assumption — it is the only thing a reader can currently be.
+ * It was the constant `"operator"`, and the comment here said why: Cloudflare
+ * Access gated the whole site, so every reader really was the operator and a
+ * lookup would have been a guess wearing the shape of a fact. That comment also
+ * said this was "the single place that changes when the customer lane switches
+ * on". It has.
  *
- * When `RADAR_PRIVY_APP_ID` is set this becomes an answer derived from the
- * verified session, and `Instance` stops appearing for customers.
+ * The shell is public now, so a reader is whoever opened the page. It is a
+ * constant again, and the honest value is `"customer"` — because the interface
+ * cannot tell an operator from anybody else and should not pretend to.
+ *
+ * A wallet session does not help: it proves a customer, never an operator. The
+ * only thing that proves an operator is an operator-gated read succeeding, and
+ * probing for one would put a 403 on every stranger's first page load to
+ * decide the contents of a menu.
+ *
+ * So the operator reaches `/instance` and `/analyst` by typing them. They are
+ * the one person who knows those pages exist, the server admits them, and the
+ * pages render. That is a smaller cost than either a lie or a probe.
+ *
+ * **This decides what is *offered*, never what is *allowed*.** The server
+ * classifies every read and refuses an operator route to a customer token
+ * whatever this says. Hiding a link is a courtesy; treating it as a control is
+ * how a client-side check becomes the only check.
  */
-const AUDIENCE: Audience = "operator";
+const AUDIENCE: Audience = "customer";
 
 export function App() {
   return (

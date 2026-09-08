@@ -53,6 +53,31 @@ function customerBlock(): string {
   return source.slice(start, end);
 }
 
+/**
+ * The body of `audience_of`'s public expression.
+ *
+ * The shell — `/`, the bundle, and the client routes that serve the same HTML —
+ * moved here on 2026-09-08 so a visitor reaches the interface's own sign-in
+ * control instead of the operator's identity provider.
+ *
+ * So a customer page may now be classified `Public` *or* `Customer`, and this
+ * check has to read both. What it must not lose is the direction that leaks: an
+ * **operator** page in either block is an operator page a stranger can reach.
+ */
+function publicBlock(): string {
+  const start = source.indexOf('if path == "/health"');
+  expect(start, "the public expression not found in access.rs").toBeGreaterThan(-1);
+  const end = source.indexOf("return Audience::Public;", start);
+  expect(end, "the public expression is not terminated").toBeGreaterThan(start);
+  return source.slice(start, end);
+}
+
+/** Everything `audience_of` hands to somebody who is not the operator. */
+function reachableBlock(): string {
+  return `${publicBlock()}
+${customerBlock()}`;
+}
+
 /** A wouter pattern reduced to what the server would match on. */
 function serverPath(pattern: string): string {
   // `/token/:mint` is `path.starts_with("/token/")` on the server. Anything
@@ -70,24 +95,27 @@ describe("the route table matches the server", () => {
   });
 
   it.each(ROUTES.filter((r) => r.audience === "customer").map((r) => [r.path]))(
-    "%s is classified as a customer route by the server",
+    "%s is reachable without operator identity",
     (pattern) => {
       const path = serverPath(pattern);
       expect(
-        customerBlock(),
-        `${pattern} is not in audience_of's customer list, so the server will ` +
-          `treat it as Audience::Operator and refuse it to every customer`,
+        reachableBlock(),
+        `${pattern} is in neither audience_of's public nor its customer list, ` +
+          `so the server will treat it as Audience::Operator and refuse it to ` +
+          `every customer`,
       ).toContain(`"${path}"`);
     },
   );
 
   it.each(ROUTES.filter((r) => r.audience === "operator").map((r) => [r.path]))(
-    "%s is not handed to customers by the server",
+    "%s is not handed to customers or to strangers by the server",
     (pattern) => {
       // The other direction, and the one that would actually leak. An operator
-      // page appearing in the customer list is a page a paying customer can
-      // read.
-      expect(customerBlock()).not.toContain(`"${serverPath(pattern)}"`);
+      // page in the customer list is a page a paying customer can read; in the
+      // public list it is a page anybody can read. Both blocks are checked,
+      // because the shell moving to `Public` created the second way to get this
+      // wrong.
+      expect(reachableBlock()).not.toContain(`"${serverPath(pattern)}"`);
     },
   );
 
