@@ -172,6 +172,60 @@ fn limit_of(args: &[String]) -> usize {
         .unwrap_or(20)
 }
 
+/// What `inspect` counted, apart from the printing.
+///
+/// Split out so the counting can be tested. `inspect` reads a store and prints;
+/// the arithmetic in the middle is the part that can be wrong in a way an
+/// operator would believe, and it was reachable by no test until a mutation run
+/// on 2026-09-07 replaced `unresolved += 1` with `-=` and nothing noticed.
+#[derive(Default, PartialEq, Eq, Debug)]
+struct Tally {
+    by_table: BTreeMap<&'static str, usize>,
+    by_instruction: BTreeMap<String, usize>,
+    /// Instructions the decoder did not recognise. The program-upgrade alarm.
+    unknown: usize,
+    /// Transactions the chain **rejected**.
+    failed: usize,
+    /// Rows whose outcome nobody established either way.
+    ///
+    /// Apart from `failed`, because `!succeeded` folded them together until
+    /// 2026-09-07: a rise here is a fault in the recorder, not an event on
+    /// chain, and an operator reading one as the other goes looking in the
+    /// wrong place.
+    unresolved: usize,
+}
+
+fn tally(events: &[Event]) -> Tally {
+    let mut t = Tally::default();
+    for e in events {
+        *t.by_table
+            .entry(match e {
+                Event::Launch(_) => "launches",
+                Event::Trade(_) => "trades",
+                Event::Graduation(_) => "graduations",
+            })
+            .or_default() += 1;
+        let origin = match e {
+            Event::Launch(l) => &l.origin,
+            Event::Trade(t) => &t.origin,
+            Event::Graduation(g) => &g.origin,
+        };
+        *t.by_instruction
+            .entry(origin.instruction.clone())
+            .or_default() += 1;
+        if !origin.known {
+            t.unknown += 1;
+        }
+        if e.envelope().failed() {
+            t.failed += 1;
+        }
+        if e.envelope().outcome_unknown() {
+            t.unresolved += 1;
+        }
+    }
+    t
+}
+
 fn inspect(args: &[String]) -> Result<(), String> {
     let reader = store_of(args)?;
     let events = read_all(&reader)?;
@@ -202,39 +256,13 @@ fn inspect(args: &[String]) -> Result<(), String> {
             .len()
     );
 
-    let mut by_table: BTreeMap<&str, usize> = BTreeMap::new();
-    let mut by_instruction: BTreeMap<String, usize> = BTreeMap::new();
-    let mut unknown = 0usize;
-    let mut failed = 0usize;
-    let mut unresolved = 0usize;
-    for e in &events {
-        *by_table
-            .entry(match e {
-                Event::Launch(_) => "launches",
-                Event::Trade(_) => "trades",
-                Event::Graduation(_) => "graduations",
-            })
-            .or_default() += 1;
-        let origin = match e {
-            Event::Launch(l) => &l.origin,
-            Event::Trade(t) => &t.origin,
-            Event::Graduation(g) => &g.origin,
-        };
-        *by_instruction
-            .entry(origin.instruction.clone())
-            .or_default() += 1;
-        if !origin.known {
-            unknown += 1;
-        }
-        // Counted apart, because `!succeeded` folded them together: a rise in
-        // unresolved rows is a fault in the recorder, not an event on chain.
-        if e.envelope().failed() {
-            failed += 1;
-        }
-        if e.envelope().outcome_unknown() {
-            unresolved += 1;
-        }
-    }
+    let Tally {
+        by_table,
+        by_instruction,
+        unknown,
+        failed,
+        unresolved,
+    } = tally(&events);
 
     println!("\nby table:");
     for (t, n) in &by_table {
@@ -996,5 +1024,57 @@ mod tests {
         assert_eq!(flag(&args, "--store"), Some("/tmp/s".to_owned()));
         assert_eq!(limit_of(&args), 5);
         assert_eq!(limit_of(&args[..1]), 20, "defaults when absent");
+    }
+
+    #[test]
+    fn the_inspect_tally_counts_rejected_and_unresolved_rows_apart() {
+        // `radar events` prints these two numbers side by side, and an operator
+        // acts on them differently: failures are a fact about the chain,
+        // unresolved rows are a fault in the recorder. `!succeeded` folded them
+        // together until 2026-09-07, so an outage in the backfill's join read as
+        // a burst of on-chain failures.
+        //
+        // Re-apply by replacing either `+= 1` with `-= 1` or `*= 1`, which is
+        // what a mutation run reported as reachable by no test at all.
+        fn graduation(mint: u8, success: Option<bool>, known: bool) -> Event {
+            let program = radar_types::Address::new([5u8; 32]);
+            Event::Graduation(Box::new(radar_store::Graduation {
+                envelope: radar_store::Envelope {
+                    slot: radar_types::Slot(10),
+                    signature: radar_types::Signature::new([mint; 64]),
+                    tx_index: Some(1),
+                    instruction_index: 0,
+                    parent_index: None,
+                    success,
+                },
+                origin: if known {
+                    radar_store::Origin::known(program, "migrate_v2")
+                } else {
+                    radar_store::Origin::unknown(program, "577c34bf3426d6e8")
+                },
+                mint: radar_types::Address::new([mint; 32]),
+            }))
+        }
+
+        let t = tally(&[
+            graduation(1, Some(true), true),
+            graduation(2, Some(false), true),
+            graduation(3, None, true),
+            graduation(4, None, false),
+        ]);
+
+        assert_eq!(t.failed, 1, "one row the chain rejected");
+        assert_eq!(t.unresolved, 2, "two rows nobody resolved either way");
+        assert_eq!(t.unknown, 1, "one instruction the decoder does not know");
+        assert_eq!(t.by_table.get("graduations"), Some(&4));
+        assert_eq!(t.by_instruction.get("migrate_v2"), Some(&3));
+    }
+
+    #[test]
+    fn an_empty_store_tallies_to_zero_rather_than_to_nothing() {
+        // The other direction, so the assertions above cannot be satisfied by a
+        // function that counts nothing: zero is the answer for no events, and
+        // every map is empty rather than absent.
+        assert_eq!(tally(&[]), Tally::default());
     }
 }

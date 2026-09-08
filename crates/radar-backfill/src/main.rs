@@ -470,6 +470,33 @@ type Universe = (
     BTreeMap<radar_types::Address, radar_types::Slot>,
 );
 
+/// When each mint graduated, from graduation events the chain **accepted**.
+///
+/// Split out of [`universe`] so the two rules in it can be tested without a
+/// store on disk. Both have cost something already:
+///
+/// - **A failed `migrate` moved nothing.** It is worth recording — a migration
+///   attempted and reverted is real information — but it is not a graduation,
+///   and counting it as one inflated the rarest and most load-bearing label in
+///   the store by about a third. An **unresolved** outcome is excluded for the
+///   other reason: nobody established that it happened.
+/// - **Earliest wins.** A token graduates once, and a partition written twice
+///   must not turn one event into a later-looking second one.
+fn earliest_graduations(events: &[Event]) -> BTreeMap<radar_types::Address, radar_types::Slot> {
+    let mut graduated: BTreeMap<radar_types::Address, radar_types::Slot> = BTreeMap::new();
+    for event in events {
+        if !event.envelope().succeeded() {
+            continue;
+        }
+        let slot = event.envelope().slot;
+        graduated
+            .entry(event.mint())
+            .and_modify(|at| *at = (*at).min(slot))
+            .or_insert(slot);
+    }
+    graduated
+}
+
 /// Reads the token universe from the store, deduplicated by mint.
 fn universe(reader: &Reader, as_of: AsOf) -> Result<Universe, String> {
     let mut launches: Vec<(radar_types::Address, radar_types::Slot)> = reader
@@ -486,26 +513,11 @@ fn universe(reader: &Reader, as_of: AsOf) -> Result<Universe, String> {
     launches.sort_unstable();
     launches.dedup_by_key(|(mint, _)| *mint);
 
-    // Earliest wins: a token graduates once, and a partition written twice must
-    // not turn one event into a later-looking second one.
-    let mut graduated: BTreeMap<radar_types::Address, radar_types::Slot> = BTreeMap::new();
-    for event in reader
-        .read(Table::Graduations, as_of)
-        .map_err(|e| e.to_string())?
-    {
-        // A failed `migrate` moved nothing. It is worth recording — a migration
-        // that was attempted and reverted is real information — but it is not a
-        // graduation, and counting it as one inflated the rarest and most
-        // load-bearing label in the store by about a third.
-        if !event.envelope().succeeded() {
-            continue;
-        }
-        let slot = event.envelope().slot;
-        graduated
-            .entry(event.mint())
-            .and_modify(|at| *at = (*at).min(slot))
-            .or_insert(slot);
-    }
+    let graduated = earliest_graduations(
+        &reader
+            .read(Table::Graduations, as_of)
+            .map_err(|e| e.to_string())?,
+    );
 
     Ok((launches, graduated))
 }
@@ -1013,5 +1025,61 @@ mod tests {
         merge(&mut a, &b);
         assert_eq!(a.emitted, 5);
         assert_eq!(a.skipped.get(&Skipped::NoMint), Some(&4));
+    }
+
+    /// A graduation event for `mint` at `slot`, with the outcome given.
+    fn graduation(mint: u8, slot: u64, success: Option<bool>) -> Event {
+        Event::Graduation(Box::new(radar_store::Graduation {
+            envelope: radar_store::Envelope {
+                slot: radar_types::Slot(slot),
+                signature: radar_types::Signature::new([mint; 64]),
+                tx_index: Some(1),
+                instruction_index: 0,
+                parent_index: None,
+                success,
+            },
+            origin: radar_store::Origin::known(radar_types::Address::new([5u8; 32]), "migrate_v2"),
+            mint: radar_types::Address::new([mint; 32]),
+        }))
+    }
+
+    #[test]
+    fn only_a_migration_the_chain_accepted_is_a_graduation() {
+        // Re-apply by deleting the `!`: the reverted and the unresolved
+        // migrations both become graduations, and the rarest label in the store
+        // gains two mints that never left their curve. Counting reverted
+        // migrations inflated it by about a third when it last happened.
+        let graduated = earliest_graduations(&[
+            graduation(1, 100, Some(true)),
+            graduation(2, 200, Some(false)),
+            graduation(3, 300, None),
+        ]);
+
+        assert_eq!(graduated.len(), 1, "one accepted migration: {graduated:?}");
+        assert_eq!(
+            graduated.get(&radar_types::Address::new([1u8; 32])),
+            Some(&radar_types::Slot(100))
+        );
+        assert!(!graduated.contains_key(&radar_types::Address::new([2u8; 32])));
+        assert!(
+            !graduated.contains_key(&radar_types::Address::new([3u8; 32])),
+            "an unresolved migration is not one that happened"
+        );
+    }
+
+    #[test]
+    fn a_mint_graduates_at_the_earliest_slot_recorded_for_it() {
+        // A partition written twice must not turn one event into a
+        // later-looking second one. Order is deliberately reversed, so a
+        // mutation to `max` -- or to insert-first-wins -- changes the answer.
+        let graduated = earliest_graduations(&[
+            graduation(1, 900, Some(true)),
+            graduation(1, 100, Some(true)),
+        ]);
+
+        assert_eq!(
+            graduated.get(&radar_types::Address::new([1u8; 32])),
+            Some(&radar_types::Slot(100))
+        );
     }
 }
