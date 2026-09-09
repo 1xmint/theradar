@@ -316,6 +316,38 @@ fn write_coverage(
     Ok(())
 }
 
+/// The windows a run walks, in order, tiling `start..end` exactly.
+///
+/// This is one line of arithmetic pulled out of `run`, and it is pulled out
+/// because of what the rest of this file now does. The backfill writes down
+/// which ranges it covered. An error in this stepping would therefore not lose
+/// data quietly — it would file a confident coverage record for a range nobody
+/// read, which is the single failure the coverage table exists to make
+/// impossible. `run` fetches over the network, so its loop cannot be driven
+/// from a test. This can.
+///
+/// A `step` of zero or less would not terminate, so it is clamped. `Args`
+/// already clamps `window_minutes` with `.max(1)`, but the clamp belongs where
+/// the loop is, not only where the argument is parsed.
+/// Built on `step_by` rather than a cursor that advances itself, so it
+/// terminates whatever the arithmetic below it does. That is deliberate: a
+/// cursor loop mutated from `+` to `-` or `*` does not return a wrong answer,
+/// it spins forever, and a test that hangs is a weaker signal than one that
+/// fails. This shape turns both of those into a wrong list a test can name.
+fn windows(start: i64, end: i64, step: i64) -> Vec<(i64, i64)> {
+    let step = step.max(1);
+    // `step_by` wants a `usize`. The clamp above makes the value positive, so
+    // the only way this conversion fails is a step larger than a 32-bit pointer
+    // can hold — which would be a single window spanning the whole range, and
+    // `usize::MAX` gives exactly that rather than a truncated stride that would
+    // silently collect the range several times over.
+    let stride = usize::try_from(step).unwrap_or(usize::MAX);
+    (start..end)
+        .step_by(stride)
+        .map(|from| (from, (from + step).min(end)))
+        .collect()
+}
+
 fn run(args: &Args) -> Result<(), String> {
     let start = to_epoch(&args.from)?;
     let end = to_epoch(&args.to)?;
@@ -342,9 +374,7 @@ fn run(args: &Args) -> Result<(), String> {
         .watermark()
         .map_err(|e| e.to_string())?;
 
-    let mut cursor = start;
-    while cursor < end {
-        let window_end = (cursor + step).min(end);
+    for (cursor, window_end) in windows(start, end, step) {
         let rows = match fetch_window(&client, cursor, window_end, 0, args.scope) {
             Ok(rows) => rows,
             Err(e) => {
@@ -392,7 +422,6 @@ fn run(args: &Args) -> Result<(), String> {
             stats.total_skipped()
         );
 
-        cursor = window_end;
         std::thread::sleep(PAUSE_BETWEEN_WINDOWS);
     }
 
@@ -1170,5 +1199,34 @@ mod tests {
             graduated.get(&radar_types::Address::new([1u8; 32])),
             Some(&radar_types::Slot(100))
         );
+    }
+
+    #[test]
+    fn windows_tile_the_range_exactly() {
+        let walked = windows(0, 250, 100);
+        assert_eq!(walked, vec![(0, 100), (100, 200), (200, 250)]);
+
+        // Each window begins where the last ended, and the whole walk spans the
+        // range and no more. A gap here is a range nobody collected; an overlap
+        // is one collected twice and recorded once. Both would be written into
+        // the coverage table as fact.
+        assert_eq!(walked.first().map(|w| w.0), Some(0));
+        assert_eq!(walked.last().map(|w| w.1), Some(250));
+        for pair in walked.windows(2) {
+            assert_eq!(pair[0].1, pair[1].0, "windows must not gap or overlap");
+        }
+    }
+
+    #[test]
+    fn a_range_with_nothing_in_it_walks_no_windows() {
+        assert!(windows(100, 100, 60).is_empty(), "empty range");
+        assert!(windows(100, 50, 60).is_empty(), "backwards range");
+    }
+
+    #[test]
+    fn a_step_that_would_not_terminate_is_clamped() {
+        // `Args` clamps `window_minutes` with `.max(1)`, but the loop must not
+        // depend on that: a zero step would append the same window forever.
+        assert_eq!(windows(0, 3, 0).len(), 3);
     }
 }
