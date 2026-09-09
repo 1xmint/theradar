@@ -46,7 +46,7 @@ use radar_risk::{Action, Authorization, Autonomy, Policy, PortfolioState, Verdic
 use radar_sim::ExitReport;
 use radar_sim::exit::{Confidence, QuotePoint};
 use radar_strategy::{Candidate, CreatorEdge, CreatorRecord, Decision, Strategy};
-use radar_types::{Address, MicroUsd, Signature, Slot, SlotDelta};
+use radar_types::{Address, Market, MicroUsd, Signature, Slot, SlotDelta};
 
 const NOW: Slot = Slot(10_000);
 /// 1e9 tokens at six decimals, as a pump.fun mint carries.
@@ -107,6 +107,11 @@ fn candidate() -> Candidate {
         mint: Address::new([7u8; 32]),
         creator: Address::new([8u8; 32]),
         launch_slot: Slot(1_000),
+        // The lane this test composes is the curve one: `measured_exit` below is
+        // a curve quote ladder, so the venue is known and named. A candidate
+        // priced through an aggregator would carry `None` here and the strategy
+        // would refuse it rather than guess.
+        market: Some(Market::PUMP_FUN_BONDING_CURVE),
         coordination: None,
         as_of: AsOf::at(NOW),
         exit: Some(measured_exit()),
