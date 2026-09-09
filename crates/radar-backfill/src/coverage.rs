@@ -223,6 +223,23 @@ mod tests {
     }
 
     #[test]
+    fn a_windows_own_top_is_its_highest_slot_and_nothing_when_it_has_none() {
+        // The input to `established_at`, and the two ways it goes wrong are the
+        // two that matter: the *lowest* slot would stamp records earlier than
+        // the range they describe, and a zero would stamp them at genesis --
+        // visible to every replay, which is rule 3 broken by a default.
+        assert_eq!(
+            highest_slot(&[launch(10), launch(40), launch(25)]),
+            Some(Slot(40))
+        );
+        assert_eq!(
+            highest_slot(&[]),
+            None,
+            "no event, no slot -- the caller falls back to the store's own top"
+        );
+    }
+
+    #[test]
     fn the_watermark_never_goes_backwards_and_never_invents_one() {
         assert_eq!(
             established_at(Some(Slot(10)), Some(Slot(90))),
