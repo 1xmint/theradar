@@ -536,6 +536,14 @@ mod tests {
             p.market, elsewhere,
             "the venue on the proposal is not the venue that was measured"
         );
+        // The quote asset is sound *because* the venue is the curve: the
+        // notional is a share of lamports the curve pays out. This fixture
+        // names a pool under the same program, which is the nearest thing to a
+        // second venue that exists today -- so this assertion is what breaks
+        // when a venue arrives whose settlement is not native SOL, rather than
+        // the proposal silently carrying the wrong asset. See the note on
+        // `quote` in `consider`.
+        assert_eq!(p.quote, Asset::Sol);
     }
 
     #[test]
