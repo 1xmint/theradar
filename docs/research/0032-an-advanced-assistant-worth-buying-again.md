@@ -11,6 +11,15 @@ the inspected `b1ba58f63f90696ef951d3250f4a28dbe2cdeaa9` exactly.
 including its correction. This is a recommendation for Josh to evaluate, not an
 accepted product decision, implementation plan, legal opinion or new edge result.
 
+> **Sequence superseded 2026-09-09:** Josh subsequently chose to build and improve
+> a private autonomous trader before considering sales, with Solana-wide coverage
+> beyond pump.fun. [Design 0017](../design/0017-a-private-autonomous-trader.md) and
+> [plan 0011](../plans/0011-private-autonomous-trader.md) are the current handoff
+> for that direction. This document's research-first commercial recommendation
+> remains an evaluated option, not a prerequisite for the trader. Its dated
+> measurements, legal questions, free-tool commitments and retained-research
+> requirements remain relevant; none establishes or rules out future AI edge.
+
 ## The answer
 
 **Yes: a paid advanced Radar assistant is a viable product hypothesis worth
