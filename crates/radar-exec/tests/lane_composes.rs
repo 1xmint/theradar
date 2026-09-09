@@ -107,8 +107,8 @@ fn candidate() -> Candidate {
         mint: Address::new([7u8; 32]),
         creator: Address::new([8u8; 32]),
         launch_slot: Slot(1_000),
-        // The lane this test composes is the curve one: `measured_exit` below is
-        // a curve quote ladder, so the venue is known and named. A candidate
+        // The lane this test composes is the curve one: the fixture stands in
+        // for a curve sale, so the venue is known and named. A candidate
         // priced through an aggregator would carry `None` here and the strategy
         // would refuse it rather than guess.
         market: Some(Market::PUMP_FUN_BONDING_CURVE),
