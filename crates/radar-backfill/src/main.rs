@@ -12,11 +12,12 @@ use std::time::{Duration, Instant};
 
 use radar_asof::AsOf;
 use radar_backfill::checkpoints;
+use radar_backfill::coverage;
 use radar_backfill::extract::{Row, Skipped, Stats};
 use radar_backfill::outcomes::{self, AggregateRow, HeadRow, TimeRow};
 use radar_backfill::prices::{self, PriceRow};
 use radar_backfill::{Client, QueryError, Scope, events_from_rows, query_for_window};
-use radar_store::{Event, Reader, Table, Writer, from_epoch, now_epoch, to_epoch};
+use radar_store::{Completion, Event, Reader, Table, Writer, from_epoch, now_epoch, to_epoch};
 
 /// Narrower than the server's sixty-second cap allows, because a window that
 /// fits at three in the morning may not fit at peak.
@@ -295,6 +296,26 @@ fn fetch_window(
     }
 }
 
+/// Writes one coverage record per table the scope collected into.
+///
+/// Both paths go through here so that neither can quietly stop recording a
+/// window: what a reader must be able to tell apart is *ran and found nothing*
+/// from *never ran*, and that only holds if every window that ends leaves a
+/// record — including the empty ones, which are the whole point.
+fn write_coverage(
+    writer: &mut Writer,
+    scope: Scope,
+    status: Completion,
+    events: &[Event],
+    recorded_at: radar_types::Slot,
+    source: &str,
+) -> Result<(), String> {
+    for record in coverage::records_for_window(scope, status, events, recorded_at, source) {
+        writer.append_coverage(record).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
 fn run(args: &Args) -> Result<(), String> {
     let start = to_epoch(&args.from)?;
     let end = to_epoch(&args.to)?;
@@ -314,15 +335,49 @@ fn run(args: &Args) -> Result<(), String> {
         args.scope, args.from, args.to, args.window_minutes, args.store
     );
 
+    // The highest slot anything in the run has seen, for stamping coverage
+    // records with. Read once from the store rather than per window: it only
+    // moves forward, and every window that finds a row moves it here.
+    let mut store_high = Reader::open(&args.store)
+        .watermark()
+        .map_err(|e| e.to_string())?;
+
     let mut cursor = start;
     while cursor < end {
         let window_end = (cursor + step).min(end);
-        let rows =
-            fetch_window(&client, cursor, window_end, 0, args.scope).map_err(|e| e.to_string())?;
+        let rows = match fetch_window(&client, cursor, window_end, 0, args.scope) {
+            Ok(rows) => rows,
+            Err(e) => {
+                // The range was attempted and did not finish, and that is a
+                // fact about it. Recorded before the error propagates, so the
+                // window a stopped run died on reads as an unfinished attempt
+                // rather than as a range nobody ever asked for.
+                write_coverage(
+                    &mut writer,
+                    args.scope,
+                    Completion::Partial,
+                    &[],
+                    coverage::established_at(None, store_high),
+                    coverage::SOURCE_BACKFILL,
+                )?;
+                writer.flush().map_err(|e| e.to_string())?;
+                return Err(e.to_string());
+            }
+        };
         rows_seen += rows.len() as u64;
 
         let (events, stats) = events_from_rows(&rows);
         let emitted = events.len();
+        let recorded_at = coverage::established_at(coverage::highest_slot(&events), store_high);
+        store_high = Some(recorded_at);
+        write_coverage(
+            &mut writer,
+            args.scope,
+            Completion::Complete,
+            &events,
+            recorded_at,
+            coverage::SOURCE_BACKFILL,
+        )?;
         for e in events {
             writer.append(e).map_err(|e| e.to_string())?;
         }
@@ -385,6 +440,13 @@ fn follow(args: &Args) -> Result<(), String> {
     println!("staying {FOLLOW_LAG_SECONDS}s behind the chain; ctrl-c to stop");
 
     let mut totals = Stats::default();
+    // The highest slot the recorder has seen, for stamping coverage records
+    // with. Read from the store once at startup and carried forward: a window
+    // that finds no row has no slot of its own, and the store's own top is the
+    // latest moment anything here can honestly point at.
+    let mut store_high = Reader::open(&args.store)
+        .watermark()
+        .map_err(|e| e.to_string())?;
     // Consecutive failed windows, for the backoff. Reset by any success, so a
     // transient upstream wobble does not leave the recorder crawling for hours.
     let mut failures: u32 = 0;
@@ -425,18 +487,45 @@ fn follow(args: &Args) -> Result<(), String> {
                     from_epoch(cursor)
                 );
                 current_step = shrunk;
+                // The attempt happened and did not finish. Written down as
+                // `Partial`, which covers nothing: without the row, an outage
+                // is a stretch of store with no coverage records in it, which
+                // is exactly what a stretch nobody has reached yet looks like.
+                let mut writer = Writer::open(&args.store, 20_000).map_err(|e| e.to_string())?;
+                write_coverage(
+                    &mut writer,
+                    args.scope,
+                    Completion::Partial,
+                    &[],
+                    coverage::established_at(None, store_high),
+                    coverage::SOURCE_FOLLOW,
+                )?;
+                writer.flush().map_err(|e| e.to_string())?;
                 std::thread::sleep(wait);
                 continue;
             }
         };
         let (events, stats) = events_from_rows(&rows);
         let emitted = events.len();
+        let recorded_at = coverage::established_at(coverage::highest_slot(&events), store_high);
+        store_high = Some(recorded_at);
 
         // Open, write and flush per window. Holding a writer across the whole
         // loop would buffer events indefinitely on a quiet market, and a process
         // killed mid-buffer would lose them.
         {
             let mut writer = Writer::open(&args.store, 20_000).map_err(|e| e.to_string())?;
+            // Buffered here, written last: `Writer::flush` puts the coverage
+            // file down after the event files, so a crash mid-flush loses the
+            // record and keeps the rows rather than the other way round.
+            write_coverage(
+                &mut writer,
+                args.scope,
+                Completion::Complete,
+                &events,
+                recorded_at,
+                coverage::SOURCE_FOLLOW,
+            )?;
             for e in events {
                 writer.append(e).map_err(|e| e.to_string())?;
             }
