@@ -35,7 +35,7 @@
 //! not a design.
 
 use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 
 use crate::Address;
 
@@ -43,12 +43,29 @@ use crate::Address;
 ///
 /// Keyed by mint address rather than by ticker, because tickers are
 /// creator-controlled text and two mints may share one. The named variants are
-/// the canonical spelling of the three assets Radar accounts for separately:
-/// write [`Asset::WrappedSol`], never `Asset::Spl(Asset::WRAPPED_SOL_MINT)`,
-/// which is the same asset under a name that will not compare equal.
-#[derive(
-    Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Debug, Serialize, Deserialize, JsonSchema,
-)]
+/// the canonical spelling of the three assets Radar accounts for separately.
+///
+/// # One asset has one value
+///
+/// `Asset::Spl(Asset::WRAPPED_SOL_MINT)` and [`Asset::WrappedSol`] would be the
+/// same asset under two values that do not compare equal and hash apart, and
+/// the same for the USDC mint. Two spellings of one trade content-address to
+/// two nonces, so an auditor recomputing an authorisation would see a mismatch
+/// on a trade that was in fact authorised.
+///
+/// That is closed by construction rather than by this paragraph:
+///
+/// - [`Asset::spl`] and [`Asset::token_2022`] are the only way to build the
+///   mint-carrying variants, and `spl` folds the two named mints into their
+///   named variants. The variants themselves are `#[non_exhaustive]`, so no
+///   crate outside this one can write `Asset::Spl(..)` at all.
+/// - Deserialisation runs through the same constructors — see `AssetRepr` — so
+///   `{"spl":"So111…112"}` on the wire arrives as [`Asset::WrappedSol`].
+///
+/// A private field would say this more directly, but Rust has no field
+/// visibility inside an enum variant; `#[non_exhaustive]` is the nearest thing
+/// it offers, and it stops at the crate rather than at the module.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Debug, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Asset {
     /// Native SOL: an account's own lamport balance. Has no mint, because it is
@@ -61,8 +78,14 @@ pub enum Asset {
     /// not a separate chain or venue."*
     Usdc,
     /// Any other mint on the classic SPL Token program.
+    ///
+    /// Build it with [`Asset::spl`]. `#[non_exhaustive]` so that no other crate
+    /// can name the field and write the wrapped-SOL or USDC mint here, which
+    /// would be one of those assets under a value that does not compare equal
+    /// to its own canonical spelling.
+    #[non_exhaustive]
     Spl(
-        /// The mint.
+        /// The mint. Never [`Asset::WRAPPED_SOL_MINT`] or [`Asset::USDC_MINT`].
         Address,
     ),
     /// Any mint on the Token-2022 program.
@@ -71,10 +94,59 @@ pub enum Asset {
     /// allows — transfer fees and hooks, permanent delegates, freeze and pause,
     /// scaled display amounts — can change what a transfer moves and what a
     /// balance is worth. "It is a token" is not enough to price one.
+    ///
+    /// Build it with [`Asset::token_2022`]. `#[non_exhaustive]` for the reason
+    /// [`Spl`](Self::Spl) is, though this one folds nothing: the two named mints
+    /// are classic SPL, so the same address under Token-2022 is a different
+    /// asset and not a second spelling of the same one.
+    #[non_exhaustive]
     Token2022(
         /// The mint.
         Address,
     ),
+}
+
+/// The wire shape of an [`Asset`], and the only thing that deserialises one.
+///
+/// Every deserialised value goes through [`Asset::spl`] and lands canonical.
+/// Without this, `#[non_exhaustive]` would close the hole for code and leave it
+/// open for anything arriving as JSON — serde constructs a variant whatever the
+/// visibility of its fields, and JSON is how a proposal reaches a recomputing
+/// auditor.
+///
+/// It must stay a mirror of `Asset`, variant for variant and name for name. A
+/// variant added there and not here fails to deserialise, and the `From` below
+/// is where that is caught: it stops compiling.
+///
+/// `Asset` derives `Serialize` and `JsonSchema` itself rather than delegating
+/// here, so the schema and the written form stay descriptions of `Asset`. Only
+/// the read is redirected, because only the read can smuggle a value in.
+#[derive(Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum AssetRepr {
+    Sol,
+    WrappedSol,
+    Usdc,
+    Spl(Address),
+    Token2022(Address),
+}
+
+impl From<AssetRepr> for Asset {
+    fn from(repr: AssetRepr) -> Self {
+        match repr {
+            AssetRepr::Sol => Self::Sol,
+            AssetRepr::WrappedSol => Self::WrappedSol,
+            AssetRepr::Usdc => Self::Usdc,
+            AssetRepr::Spl(mint) => Self::spl(mint),
+            AssetRepr::Token2022(mint) => Self::token_2022(mint),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for Asset {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        AssetRepr::deserialize(d).map(Self::from)
+    }
 }
 
 impl Asset {
@@ -91,6 +163,37 @@ impl Asset {
         0x31, 0xb1, 0xbb, 0xe4, 0xc2, 0xd2, 0xf6, 0xe0, 0xe4, 0x7c, 0xa6, 0x02, 0x03, 0x45, 0x2f,
         0x5d, 0x61,
     ]);
+
+    /// The asset for a mint on the classic SPL Token program.
+    ///
+    /// Folds the two mints that have their own variants into those variants,
+    /// which is the whole reason this exists rather than the variant being
+    /// public: `Asset::spl(Asset::WRAPPED_SOL_MINT)` is [`Asset::WrappedSol`],
+    /// so a caller that reads a mint off a token account cannot produce a
+    /// second, unequal spelling of an asset Radar already accounts for.
+    #[must_use]
+    pub fn spl(mint: Address) -> Self {
+        if mint == Self::WRAPPED_SOL_MINT {
+            Self::WrappedSol
+        } else if mint == Self::USDC_MINT {
+            Self::Usdc
+        } else {
+            Self::Spl(mint)
+        }
+    }
+
+    /// The asset for a mint on the Token-2022 program.
+    ///
+    /// Folds nothing, and that is not an oversight. Wrapped SOL and USDC are
+    /// classic SPL mints, so the same address under Token-2022 is a *different*
+    /// asset — different transfer semantics, different tag — and collapsing it
+    /// into [`Asset::WrappedSol`] would be the error this module exists to
+    /// refuse, not a canonicalisation. It is a constructor because the variant
+    /// is `#[non_exhaustive]` and other crates need some way to build one.
+    #[must_use]
+    pub const fn token_2022(mint: Address) -> Self {
+        Self::Token2022(mint)
+    }
 
     /// The mint that holds this asset, or `None` for native SOL.
     ///
@@ -112,6 +215,9 @@ impl Asset {
     /// the risk kernel's nonce, so a recorded authorisation stays recomputable
     /// only while they hold still. **Never renumber one; only append.**
     /// Reordering the variants would silently change every historical nonce.
+    ///
+    /// Held by `every_asset_carries_a_distinct_tag`, which pins the numbers
+    /// themselves rather than their distinctness: a swap leaves them distinct.
     #[must_use]
     pub const fn tag(self) -> u8 {
         match self {
@@ -127,6 +233,7 @@ impl Asset {
 #[cfg(test)]
 mod tests {
     use super::Asset;
+    use crate::Address;
 
     #[test]
     fn the_named_mints_are_the_addresses_they_claim_to_be() {
@@ -156,23 +263,24 @@ mod tests {
 
     #[test]
     fn every_asset_carries_a_distinct_tag() {
-        // The tags go into a nonce. Two assets sharing one would make two
-        // different decisions content-address to the same authorisation, which
-        // is the exact collapse this vocabulary exists to prevent.
+        // The values, not merely their distinctness. These numbers are hashed
+        // into a nonce, so swapping two of them keeps every asset distinct and
+        // changes every authorisation ever recorded -- a rewrite that no
+        // dedup check can see. `tag()`'s doc says "never renumber one; only
+        // append"; this is what holds it. 0 is absent from the list because it
+        // is reserved: it reads as an absent asset.
         let mint = Asset::WRAPPED_SOL_MINT;
-        let tags = [
-            Asset::Sol,
-            Asset::WrappedSol,
-            Asset::Usdc,
-            Asset::Spl(mint),
-            Asset::Token2022(mint),
-        ]
-        .map(Asset::tag);
-        let mut unique = tags.to_vec();
-        unique.sort_unstable();
-        unique.dedup();
-        assert_eq!(unique.len(), tags.len(), "tags collide: {tags:?}");
-        assert!(!tags.contains(&0), "0 is reserved: it reads as absent");
+        assert_eq!(
+            [
+                Asset::Sol.tag(),
+                Asset::WrappedSol.tag(),
+                Asset::Usdc.tag(),
+                Asset::Spl(mint).tag(),
+                Asset::Token2022(mint).tag(),
+            ],
+            [1, 2, 3, 4, 5],
+            "tags are hashed into nonces; append only"
+        );
     }
 
     #[test]
@@ -181,7 +289,71 @@ mod tests {
         // that read one as classic SPL would be describing a transfer that may
         // not happen. Collapsing the two variants makes this fail.
         let mint = Asset::WRAPPED_SOL_MINT;
-        assert_ne!(Asset::Spl(mint), Asset::Token2022(mint));
         assert_ne!(Asset::Spl(mint).tag(), Asset::Token2022(mint).tag());
+    }
+
+    #[test]
+    fn a_named_mint_written_as_plain_spl_is_the_named_asset() {
+        // The two spellings hash apart and do not compare equal, so a trade
+        // written one way and recomputed the other way content-addresses to a
+        // different nonce -- an auditor sees a mismatch on a trade that was in
+        // fact authorised. `spl` is the only constructor, so there is nowhere
+        // for the second spelling to come from.
+        assert_eq!(Asset::spl(Asset::WRAPPED_SOL_MINT), Asset::WrappedSol);
+        assert_eq!(Asset::spl(Asset::USDC_MINT), Asset::Usdc);
+        assert_eq!(Asset::spl(Asset::WRAPPED_SOL_MINT).tag(), 2);
+
+        // Any other mint is left alone: this folds two addresses, it does not
+        // rewrite the variant.
+        let other = Address::new([9u8; 32]);
+        assert_eq!(Asset::spl(other).mint(), Some(other));
+        assert_eq!(Asset::spl(other).tag(), 4);
+
+        // Token-2022 folds nothing. Wrapped SOL is a classic SPL mint, so the
+        // same address under the other program is a different asset and not a
+        // second spelling of this one.
+        assert_eq!(
+            Asset::token_2022(Asset::WRAPPED_SOL_MINT).tag(),
+            Asset::Token2022(Asset::WRAPPED_SOL_MINT).tag()
+        );
+        assert_ne!(
+            Asset::token_2022(Asset::WRAPPED_SOL_MINT),
+            Asset::WrappedSol
+        );
+    }
+
+    #[test]
+    fn the_second_spelling_does_not_survive_the_wire_either() {
+        // `#[non_exhaustive]` stops a *crate* writing the non-canonical value.
+        // It does not stop serde constructing one, and JSON is how a proposal
+        // reaches a recomputing auditor -- so the same fold has to run on the
+        // way in or the guarantee holds only for code.
+        let smuggled = format!("{{\"spl\":\"{}\"}}", Asset::WRAPPED_SOL_MINT);
+        let got: Asset = serde_json::from_str(&smuggled).expect("a valid asset");
+        assert_eq!(got, Asset::WrappedSol, "the wire kept the second spelling");
+        assert_eq!(got.tag(), Asset::WrappedSol.tag());
+
+        let smuggled_usdc = format!("{{\"spl\":\"{}\"}}", Asset::USDC_MINT);
+        assert_eq!(
+            serde_json::from_str::<Asset>(&smuggled_usdc).expect("a valid asset"),
+            Asset::Usdc
+        );
+
+        // Everything else still round-trips unchanged, including the
+        // Token-2022 value that must *not* be folded.
+        for asset in [
+            Asset::Sol,
+            Asset::WrappedSol,
+            Asset::Usdc,
+            Asset::spl(Address::new([9u8; 32])),
+            Asset::token_2022(Asset::WRAPPED_SOL_MINT),
+        ] {
+            let json = serde_json::to_string(&asset).expect("serialisable");
+            assert_eq!(
+                serde_json::from_str::<Asset>(&json).expect("a valid asset"),
+                asset,
+                "{json} did not survive its own round trip"
+            );
+        }
     }
 }

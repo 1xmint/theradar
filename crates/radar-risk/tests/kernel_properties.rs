@@ -50,8 +50,8 @@ fn asset() -> impl Strategy<Value = Asset> {
         Just(Asset::Sol),
         Just(Asset::WrappedSol),
         Just(Asset::Usdc),
-        address().prop_map(Asset::Spl),
-        address().prop_map(Asset::Token2022),
+        address().prop_map(Asset::spl),
+        address().prop_map(Asset::token_2022),
     ]
 }
 
