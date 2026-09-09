@@ -25,11 +25,34 @@ use std::collections::BTreeMap;
 
 use proptest::prelude::*;
 use radar_risk::{Action, Policy, PortfolioState, Proposal, Refusal, Verdict, evaluate};
-use radar_types::{Address, MicroUsd, Slot, SlotDelta};
+use radar_types::{Address, Asset, Market, MicroUsd, Slot, SlotDelta};
 
 /// An address from a single byte, so shrinking produces readable failures.
 fn address() -> impl Strategy<Value = Address> {
     any::<u8>().prop_map(|b| Address::new([b; 32]))
+}
+
+/// Markets, including several on one program.
+///
+/// Generated rather than fixed because the market is part of what a proposal
+/// *is*: every property below — purity, the closed policy, the bounds an
+/// authorisation carries — has to hold across venues, and a generator that
+/// produced one venue would be checking them on the only case nobody doubts.
+fn market() -> impl Strategy<Value = Market> {
+    (address(), proptest::option::of(address()))
+        .prop_map(|(program, pool)| Market { program, pool })
+}
+
+/// Quote assets, including the two that share a name and are not the same
+/// balance.
+fn asset() -> impl Strategy<Value = Asset> {
+    prop_oneof![
+        Just(Asset::Sol),
+        Just(Asset::WrappedSol),
+        Just(Asset::Usdc),
+        address().prop_map(Asset::spl),
+        address().prop_map(Asset::token_2022),
+    ]
 }
 
 fn action() -> impl Strategy<Value = Action> {
@@ -52,6 +75,8 @@ fn money() -> impl Strategy<Value = MicroUsd> {
 fn proposal() -> impl Strategy<Value = Proposal> {
     (
         address(),
+        market(),
+        asset(),
         address(),
         action(),
         money(),
@@ -60,8 +85,10 @@ fn proposal() -> impl Strategy<Value = Proposal> {
         proptest::option::of(money()),
     )
         .prop_map(
-            |(mint, creator, action, notional, cost, slot, capacity)| Proposal {
+            |(mint, market, quote, creator, action, notional, cost, slot, capacity)| Proposal {
                 mint,
+                market,
+                quote,
                 creator,
                 action,
                 notional,

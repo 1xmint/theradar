@@ -212,6 +212,11 @@ impl Universe {
             launch_slot: facts.slot,
             as_of: self.as_of,
             exit,
+            // Not named. Only the caller that chose the pricing instrument
+            // knows which venue the exit was measured on, and it says so with
+            // [`Candidate::measured_on`] -- absent here for the same reason
+            // `coordination` is, and refused rather than guessed downstream.
+            market: None,
             creator_record: self.creator_record(&facts.creator),
             // Not looked at. The caller adds it with
             // [`Candidate::with_coordination`] if it paid for the look.

@@ -5,7 +5,7 @@
 //! other crate in the workspace depends on it, so anything that can fail at
 //! runtime belongs somewhere further out.
 //!
-//! Three ideas here carry more weight than the rest and are worth reading before
+//! Four ideas here carry more weight than the rest and are worth reading before
 //! the code that uses them:
 //!
 //! - [`Slot`] is the only clock Radar has. Wall-clock time is never the basis of
@@ -16,6 +16,10 @@
 //!   convention a caller has to remember.
 //! - [`MicroUsd`] is integer money. Costs are summed across millions of calls and
 //!   compared against hard budget caps; floating point has no place in that path.
+//! - [`Market`] and [`Asset`] are what keep a mint from standing in for a trade.
+//!   A token trades on several venues at once, at different prices and against
+//!   different quote assets, and a decision that names only the token cannot say
+//!   which of them it was about.
 
 #![forbid(unsafe_code)]
 
@@ -31,6 +35,8 @@ pub mod b64;
 pub mod civil;
 
 mod address;
+mod asset;
+mod market;
 mod money;
 mod mutability;
 mod provenance;
@@ -72,6 +78,8 @@ pub fn build_sha_or_unknown() -> &'static str {
 }
 
 pub use address::{Address, AddressParseError, Signature};
+pub use asset::Asset;
+pub use market::Market;
 pub use money::MicroUsd;
 pub use mutability::{Latch, LatchReopened, Mutability, Revalidation};
 pub use provenance::{EvidenceTier, Provenance, SourceId, Trust};

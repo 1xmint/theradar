@@ -54,6 +54,23 @@ pub struct Candidate {
     /// `None` is not "probably fine". A strategy that proposes without one is
     /// proposing a position it has no evidence it can close.
     pub exit: Option<ExitReport>,
+    /// The venue [`Self::exit`] was measured on, or `None` if it cannot be named.
+    ///
+    /// A mint is not a market. The same token has different depth on its bonding
+    /// curve and on any AMM pool that exists for it, so a capacity is only
+    /// attributable to the venue the quotes came from — and only the caller that
+    /// chose the instrument knows which that was. A strategy reading a constant
+    /// here would be naming a venue nobody measured.
+    ///
+    /// `None` is rule 9, not a gap to be filled with the usual answer. An
+    /// aggregator routes across whatever pools it likes, so a ladder measured
+    /// through one names no single venue; a proposal must refuse rather than
+    /// claim the curve. See [`PassReason::VenueUnknown`].
+    ///
+    /// Set with [`Self::measured_on`], and absent by default for the same reason
+    /// [`Self::coordination`] is: a caller that did not say is a caller that did
+    /// not know.
+    pub market: Option<radar_types::Market>,
     /// How this creator's previous launches turned out.
     pub creator_record: CreatorRecord,
     /// What the launch block looked like, if it was fetched.
@@ -96,6 +113,17 @@ impl Candidate {
     #[must_use]
     pub const fn with_coordination(mut self, coordination: radar_graph::Coordination) -> Self {
         self.coordination = Some(coordination);
+        self
+    }
+
+    /// Names the venue the exit was measured on.
+    ///
+    /// Takes an `Option` rather than a `Market` so that a caller whose
+    /// instrument cannot name one says so in the same call, instead of
+    /// silently not calling this at all.
+    #[must_use]
+    pub const fn measured_on(mut self, market: Option<radar_types::Market>) -> Self {
+        self.market = market;
         self
     }
 

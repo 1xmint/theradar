@@ -32,7 +32,7 @@ use radar_risk::{Policy, PortfolioState, Proposal, Verdict, evaluate};
 use radar_sim::{JupiterQuoter, RpcClient};
 use radar_store::Reader;
 use radar_strategy::{Candidate, CreatorEdge, Decision, PassReason, Strategy, Universe, universe};
-use radar_types::{Address, MicroUsd};
+use radar_types::{Address, Market, MicroUsd};
 
 /// How many candidates the paid tier will be spent on in one pass.
 ///
@@ -79,27 +79,10 @@ pub fn run(
     // Tier 0 and 1: free. No exit report, so every candidate fails at least on
     // NoExitSimulated, and the interesting ones fail on nothing else.
     let strategy = CreatorEdge::default();
-    let mut tally: BTreeMap<PassReason, usize> = BTreeMap::new();
-    let mut worth_paying_for = Vec::new();
-
-    for mint in &recent {
-        let Some(candidate) = universe.candidate(mint, None, None) else {
-            continue;
-        };
-        let reasons = strategy.consider(&candidate).reasons().to_vec();
-        for reason in &reasons {
-            *tally.entry(*reason).or_default() += 1;
-        }
-        // NoExitSimulated and NoPrice are the two that a paid look removes.
-        // Anything else failing means the answer cannot change, so the call
-        // would buy nothing.
-        if reasons
-            .iter()
-            .all(|r| matches!(r, PassReason::NoExitSimulated | PassReason::NoPrice))
-        {
-            worth_paying_for.push(*mint);
-        }
-    }
+    let FreeTier {
+        tally,
+        worth_paying_for,
+    } = free_tier(&universe, &strategy, &recent, pricing);
 
     println!(
         "free tier — why {} candidates were passed over:",
@@ -180,6 +163,62 @@ pub fn run(
         write_decisions(dir, &examined)?;
     }
     Ok(())
+}
+
+/// What the free tier learned: why each candidate was passed over, and which
+/// ones a paid look could still change the answer for.
+struct FreeTier {
+    /// How many candidates each reason was raised against.
+    tally: BTreeMap<PassReason, usize>,
+    /// The mints whose only failures a paid look removes.
+    worth_paying_for: Vec<Address>,
+}
+
+/// The free tier, and the gate that decides what the paid one is spent on.
+///
+/// Split out of [`run`] because it is the only part of the pass that touches
+/// no network: `run` cannot be tested past this point without one, and this
+/// gate closing on everything is exactly how the command came to print its
+/// tally and then do nothing at all. See
+/// `the_free_tier_names_the_venue_the_paid_tier_will_price_on`.
+fn free_tier(
+    universe: &Universe,
+    strategy: &CreatorEdge,
+    recent: &[Address],
+    pricing: Pricing,
+) -> FreeTier {
+    let mut tally: BTreeMap<PassReason, usize> = BTreeMap::new();
+    let mut worth_paying_for = Vec::new();
+
+    for mint in recent {
+        let Some(candidate) = universe.candidate(mint, None, None) else {
+            continue;
+        };
+        // The venue the paid tier *will* measure on, named before it is spent.
+        // Not decoration: the strategy refuses a capacity it cannot attribute
+        // to a venue (rule 9), and a free-tier candidate with no venue fails on
+        // `VenueUnknown` — which no exit report removes, so the gate below
+        // closes on every mint and the paid tier is never reached.
+        let candidate = candidate.measured_on(pricing.market());
+        let reasons = strategy.consider(&candidate).reasons().to_vec();
+        for reason in &reasons {
+            *tally.entry(*reason).or_default() += 1;
+        }
+        // NoExitSimulated and NoPrice are the two that a paid look removes.
+        // Anything else failing means the answer cannot change, so the call
+        // would buy nothing.
+        if reasons
+            .iter()
+            .all(|r| matches!(r, PassReason::NoExitSimulated | PassReason::NoPrice))
+        {
+            worth_paying_for.push(*mint);
+        }
+    }
+
+    FreeTier {
+        tally,
+        worth_paying_for,
+    }
 }
 
 /// Appends the examined candidates to the store.
@@ -318,6 +357,29 @@ impl Pricing {
             other => Err(format!(
                 "unknown --quoter {other}; expected curve or jupiter"
             )),
+        }
+    }
+
+    /// The venue a capacity measured with this instrument was measured on.
+    ///
+    /// This is the only place that knows. `Pricing::Curve` reads the bonding
+    /// curve's own accounts, so the venue is exactly
+    /// [`Market::PUMP_FUN_BONDING_CURVE`] and its `pool` is `None` because the
+    /// curve account is `["bonding-curve", mint]` under that program.
+    ///
+    /// `Pricing::Jupiter` is `None`, and that is rule 9 rather than a gap. The
+    /// aggregator returns a *route* — it picks whatever pools price the size
+    /// best, may split across several, and does not report which. There is no
+    /// single `Market` that depth belongs to, so the honest answer is that the
+    /// venue is unknown and the proposal must refuse. Naming the curve here
+    /// would put curve-shaped identity on AMM-measured depth, which is the
+    /// collapse `crates/radar-risk/tests/two_markets_are_two_trades.rs` exists
+    /// to prevent.
+    #[must_use]
+    pub const fn market(self) -> Option<Market> {
+        match self {
+            Self::Curve => Some(Market::PUMP_FUN_BONDING_CURVE),
+            Self::Jupiter => None,
         }
     }
 
@@ -534,6 +596,13 @@ where
             // sample, and the sample then supporting a confident conclusion
             // about the selection. LEARNINGS 7 and 10, a third time.
             if let Some(base) = universe.candidate(mint, None, Some(sol_price)) {
+                // Named here too, for the same reason as the priced branch: the
+                // instrument is chosen and known even though this candidate is
+                // refused before it is used. Without it the recorded decision
+                // carries a spurious `VenueUnknown` beside the finding that
+                // actually stopped it, and a reader of the decisions table
+                // cannot tell which one did.
+                let base = base.measured_on(sources.pricing.market());
                 let candidate = match coordination {
                     Some(verdict) => base.with_coordination(verdict),
                     None => base,
@@ -565,6 +634,10 @@ where
         let Some(candidate) = universe.candidate(mint, Some(exit), Some(sol_price)) else {
             continue;
         };
+        // The venue that exit was measured on, from the instrument that measured
+        // it. `capacity_of` above is the only thing that knows, and the strategy
+        // used to write the curve in as a constant regardless.
+        let candidate = candidate.measured_on(sources.pricing.market());
         let candidate = match coordination {
             Some(c) => candidate.with_coordination(c),
             // Carried as absent rather than as clean. The strategy will not
@@ -1373,6 +1446,94 @@ mod tests {
         );
     }
 
+    /// One launch, recent, by a creator whose measured record qualifies.
+    ///
+    /// Built to fail on *only* the two things a paid look removes, so that
+    /// anything else the free tier raises against it is the defect under test
+    /// rather than the fixture.
+    fn a_universe_worth_paying_for() -> radar_strategy::Universe {
+        let mint = radar_types::Address::new([7u8; 32]);
+        let creator = radar_types::Address::new([8u8; 32]);
+        let mut universe = radar_strategy::Universe {
+            launches: BTreeMap::new(),
+            creators: BTreeMap::new(),
+            creators_observed_at: BTreeMap::new(),
+            as_of: radar_asof::AsOf::at(radar_types::Slot(500_000)),
+        };
+        universe.launches.insert(
+            mint,
+            radar_strategy::assemble::LaunchFacts {
+                creator,
+                slot: radar_types::Slot(499_000),
+                observed_at: radar_types::Slot(499_000),
+            },
+        );
+        universe.creators.insert(
+            creator,
+            radar_strategy::CreatorRecord {
+                launches: 20,
+                measured: 20,
+                stillborn: 10,
+                graduated: 3,
+                graduated_organic: 3,
+                launches_per_day: None,
+            },
+        );
+        universe
+            .creators_observed_at
+            .insert(creator, radar_types::Slot(499_000));
+        universe
+    }
+
+    #[test]
+    fn the_free_tier_names_the_venue_the_paid_tier_will_price_on() {
+        // The gate the whole command hangs on. A free-tier candidate is built
+        // with no exit report, so it must fail on `NoExitSimulated` and
+        // `NoPrice` and nothing else -- those two are what the paid look
+        // removes. Leaving `market` absent adds `VenueUnknown`, which no exit
+        // report can remove, so the gate closes on every mint, `run` returns at
+        // "0 candidate(s) fail on nothing a paid look cannot resolve", and no
+        // proposal or decision is ever produced. The workspace suite stayed
+        // green throughout, because nothing exercised this.
+        let universe = a_universe_worth_paying_for();
+        let recent = universe.recent(6_000);
+        assert_eq!(recent.len(), 1, "the fixture is not recent enough to run");
+
+        let free = free_tier(&universe, &CreatorEdge::default(), &recent, Pricing::Curve);
+        assert_eq!(
+            free.worth_paying_for, recent,
+            "the paid tier would never be reached; the free tier said: {:?}",
+            free.tally
+        );
+        assert_eq!(
+            free.tally.get(&PassReason::VenueUnknown),
+            None,
+            "the instrument is chosen, so the venue is knowable here"
+        );
+    }
+
+    #[test]
+    fn a_route_priced_exit_is_not_worth_paying_for() {
+        // The other half, and rule 9 rather than a gap: `--quoter jupiter`
+        // measures depth across whatever pools the aggregator picked, which
+        // belongs to no single `Market`. The strategy refuses such a capacity,
+        // so an exit report would change no answer and the call is not made.
+        let universe = a_universe_worth_paying_for();
+        let recent = universe.recent(6_000);
+
+        let free = free_tier(
+            &universe,
+            &CreatorEdge::default(),
+            &recent,
+            Pricing::Jupiter,
+        );
+        assert!(
+            free.worth_paying_for.is_empty(),
+            "paid for an exit the strategy will refuse regardless"
+        );
+        assert_eq!(free.tally.get(&PassReason::VenueUnknown), Some(&1));
+    }
+
     fn a_candidate() -> Candidate {
         Candidate {
             mint: radar_types::Address::new([7u8; 32]),
@@ -1380,6 +1541,7 @@ mod tests {
             launch_slot: radar_types::Slot(1_000),
             as_of: radar_asof::AsOf::at(radar_types::Slot(10_000)),
             exit: None,
+            market: Some(radar_types::Market::PUMP_FUN_BONDING_CURVE),
             creator_record: radar_strategy::CreatorRecord::default(),
             coordination: None,
             sol_price_micro_usd: None,
@@ -1822,6 +1984,10 @@ mod tests {
             .iter()
             .map(|mint| radar_risk::Proposal {
                 mint: *mint,
+                // The market and quote this lane trades: pre-graduation
+                // pump.fun, direct to the bonding curve, settled in lamports.
+                market: radar_types::Market::PUMP_FUN_BONDING_CURVE,
+                quote: radar_types::Asset::Sol,
                 creator: Address::new([9u8; 32]),
                 action: radar_risk::Action::Buy,
                 notional: radar_types::MicroUsd(5_000_000),
@@ -1844,6 +2010,23 @@ mod tests {
                 "the shipped policy authorises nothing: {verdict:?}"
             );
         }
+    }
+
+    #[test]
+    fn the_program_this_lane_trades_is_the_one_it_decodes() {
+        // Two copies of one address. `radar-decode` owns `PROGRAM_ID` and cannot
+        // be reached from `radar-types`, because the decoder depends on the
+        // vocabulary and not the other way round -- so the constant is written
+        // twice and this is the only crate that sees both.
+        //
+        // If they ever disagree, every proposal names a venue the decoder does
+        // not recognise while both crates' own tests pass. Retype either
+        // constant: this fails.
+        assert_eq!(
+            radar_types::Market::PUMP_FUN_PROGRAM,
+            radar_decode::pumpfun::PROGRAM_ID,
+            "a proposal must name the program the decoder recognises"
+        );
     }
 
     #[test]
@@ -2091,6 +2274,56 @@ mod tests {
         );
         assert_eq!(examined.len(), 1, "and the refusal is still recorded");
         assert!(pass.proposals.is_empty());
+    }
+
+    #[test]
+    fn a_coordination_refusal_records_only_what_actually_refused_it() {
+        // The recorded decision is the research artefact, so the reasons on it
+        // have to be the ones that stopped this candidate. This branch refuses
+        // before the exit is probed, but the instrument is already chosen --
+        // leaving the venue unnamed here stored a spurious `VenueUnknown`
+        // beside `LaunchLooksCoordinated`, and a later reader counting bundles
+        // could not tell which finding did the work.
+        let mint = Address::new([4u8; 32]);
+        let slot = radar_types::Slot(1_000);
+        let blocks = BundledLater {
+            launch: radar_graph::LaunchBlockShape {
+                recipients: radar_graph::BUNDLE_CENTRE,
+                transactions: 6,
+            },
+            later: Vec::new(),
+        };
+
+        let mints = [mint];
+        let mut examined = Vec::new();
+        paid_tier(
+            &one_launch(mint, slot),
+            &CreatorEdge::default(),
+            mints.iter(),
+            &Sources {
+                blocks: &blocks,
+                structures: &NoStructures,
+                quoter: &UnusedQuoter,
+                // The curve: an instrument that *can* name its venue, which is
+                // the only case where the omission is visible.
+                pricing: Pricing::Curve,
+            },
+            radar_types::MicroUsd::from_dollars(200.0),
+            slot,
+            &mut examined,
+        );
+
+        let (record, _) = examined.first().expect("the refusal is recorded");
+        assert!(
+            record.reasons.iter().any(|r| r == "LaunchLooksCoordinated"),
+            "recorded the wrong refusal: {:?}",
+            record.reasons
+        );
+        assert!(
+            !record.reasons.iter().any(|r| r == "VenueUnknown"),
+            "recorded a venue as unknown while the instrument names one: {:?}",
+            record.reasons
+        );
     }
 
     #[test]
