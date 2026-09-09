@@ -25,28 +25,28 @@
 //! better-informed than it was. AGENTS.md rule 3, applied to the evidence about
 //! the evidence.
 //!
-//! # Nothing in production writes one yet, and that is deliberate
-//!
-//! The reader is real: [`crate::Reader::read_coverage`] serves it and
-//! `radar-research`'s feature pass is its caller. The **producer** is not, and
-//! it is a harder question than it looks, so it is a change of its own rather
-//! than a guess bolted onto this one.
+//! # What a time window can honestly attest about slots
 //!
 //! The backfill queries CryptoHouse by `block_timestamp` and the store is keyed
-//! by `block_slot`. A completed *time* window therefore attests a slot range
-//! only through the events it returned — and a completed window that returned
-//! nothing, which is the exact case this table exists to express, returns no
-//! slots to bound it with. The workable answer is per-run rather than
-//! per-window: a contiguous chain of completed windows attests the slot span
-//! its events cover, under-claiming at the edges, which is the safe direction.
-//! Writing that down is the next item, with its own regression.
+//! by `block_slot`. There is no conversion between them here and there must not
+//! be one: the "~2.5 slots a second" figures in this tree are bucketing
+//! heuristics, and using one to name a boundary would fabricate the very number
+//! this table exists to make honest.
 //!
-//! Until then every trade-derived feature is **absent**. On the production
-//! store that changes nothing today: the trades directory was created
-//! 2026-08-23 and has never been written to, so those features were already
-//! absent, by the older and weaker rule this table replaces.
+//! So a completed *time* window attests a slot range only through the events it
+//! returned — the lowest and highest slot among them, which under-claims at the
+//! edges, and under-claiming is the safe direction. **A completed window that
+//! returned nothing has no slot range at all**, which is the exact case this
+//! table exists to express. That is [`ObservedSlots::Nothing`], and it is a
+//! recorded fact rather than a missing row: the difference between *we looked
+//! and the market was quiet* and *nobody looked* is the whole point of the
+//! table, and it cannot survive being written as slots zero to zero.
+//!
+//! [`radar-backfill`] writes these records — one per table a window collected,
+//! on both the historical and the follow path.
 //!
 //! [LEARNINGS]: https://github.com/hey-vera/radar/blob/main/LEARNINGS.md
+//! [`radar-backfill`]: https://github.com/hey-vera/radar/blob/main/crates/radar-backfill/src/main.rs
 
 use radar_types::Slot;
 use serde::{Deserialize, Serialize};
@@ -87,6 +87,83 @@ impl Completion {
     }
 }
 
+/// The slots a recorded range actually touched.
+///
+/// # Why this is not two `Slot` fields
+///
+/// It was, and the pair could not say the one thing the table is for. A window
+/// that ran to the end and returned no rows observed **no slot**, and every
+/// value available to fill a `from`/`to` pair with is a fabrication: zero is
+/// rule 9's forbidden default, and the window's own time bounds are not slots.
+/// Writing no record at all is worse still — it is indistinguishable from a
+/// window nobody ran, which is the failure this table exists to close.
+///
+/// So the range is one field with two states, and "ran, saw nothing" is
+/// [`Nothing`](Self::Nothing): a fact the reader can act on rather than a
+/// silence it has to guess at.
+///
+/// # Why not two `Option<Slot>` fields
+///
+/// Because `(Some(from), None)` would compile, and it means nothing. One field
+/// holding both bounds together makes a half-known range unrepresentable rather
+/// than merely undocumented — AGENTS.md §5, enforced at level 1.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ObservedSlots {
+    /// The rows the range returned, bounded by the lowest and highest slot
+    /// among them. Inclusive at both ends.
+    ///
+    /// This under-claims deliberately: the queried window may reach past the
+    /// first and last row it found, and the amount it reaches by is not
+    /// knowable from the rows. Claiming less coverage than was collected is
+    /// recoverable; claiming more is the quiet-market bug.
+    Span {
+        /// The lowest slot observed.
+        from: Slot,
+        /// The highest slot observed.
+        to: Slot,
+    },
+    /// The range ran and returned no rows, so it observed no slot at all.
+    ///
+    /// Read with [`Completion::Complete`] this is a **measurement**: the
+    /// collection finished and there was nothing there. Read with
+    /// [`Completion::Partial`] it is an attempt that did not finish.
+    Nothing,
+}
+
+impl ObservedSlots {
+    /// The span of the slots a window's rows landed at, or [`Nothing`] when it
+    /// landed none.
+    ///
+    /// The one place the min/max is taken, so both the historical and the
+    /// follow path get the same answer and the empty case cannot be handled
+    /// differently in one of them.
+    ///
+    /// [`Nothing`]: Self::Nothing
+    #[must_use]
+    pub fn over(slots: impl IntoIterator<Item = Slot>) -> Self {
+        let mut slots = slots.into_iter();
+        let Some(first) = slots.next() else {
+            return Self::Nothing;
+        };
+        let (from, to) = slots.fold((first, first), |(lo, hi), s| (lo.min(s), hi.max(s)));
+        Self::Span { from, to }
+    }
+
+    /// The bounds, when there are any.
+    ///
+    /// `None` is "this range covers no slots", which is what a caller mapping
+    /// coverage to covered slot ranges wants: a window that saw nothing extends
+    /// no range, however complete it was.
+    #[must_use]
+    pub const fn span(self) -> Option<(Slot, Slot)> {
+        match self {
+            Self::Span { from, to } => Some((from, to)),
+            Self::Nothing => None,
+        }
+    }
+}
+
 /// One ingestion range, as the recorder actually ran it.
 #[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub struct Coverage {
@@ -102,10 +179,11 @@ pub struct Coverage {
     /// and covers **nothing else** in the interval — a cohort capture is not a
     /// statement about the venue.
     pub filter: Option<String>,
-    /// First slot of the range, inclusive.
-    pub from_slot: Slot,
-    /// Last slot of the range, inclusive.
-    pub to_slot: Slot,
+    /// The slots this range actually touched, or that it touched none.
+    ///
+    /// Bounded by the rows the collection returned, never derived from the
+    /// window it was queried over. See [`ObservedSlots`].
+    pub observed: ObservedSlots,
     /// Where the rows came from, so a range can be attributed to the query that
     /// produced it.
     pub source: String,

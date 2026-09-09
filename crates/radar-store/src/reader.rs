@@ -9,7 +9,7 @@ use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 use radar_asof::{AsOf, PointInTime};
 use radar_types::{Address, Signature, Slot};
 
-use crate::coverage::{Completion, Coverage};
+use crate::coverage::{Completion, Coverage, ObservedSlots};
 use crate::decision::{Conclusion, Decision, KernelOutcome};
 use crate::error::StoreError;
 use crate::event::{Envelope, Event, Graduation, Launch, Origin, Side, Table, Trade};
@@ -254,12 +254,23 @@ impl Reader {
                     let Some(named) = Table::from_dir(table.value(i)) else {
                         continue;
                     };
+                    // Both bounds or neither. A row carrying one of them is not
+                    // a range this build can claim anything from, and the safe
+                    // reading of a claim it cannot check is the smaller one —
+                    // the same direction `from_str_or_partial` takes for a
+                    // status it does not recognise.
+                    let observed = match (from_slot.is_valid(i), to_slot.is_valid(i)) {
+                        (true, true) => ObservedSlots::Span {
+                            from: Slot(from_slot.value(i)),
+                            to: Slot(to_slot.value(i)),
+                        },
+                        _ => ObservedSlots::Nothing,
+                    };
                     out.push(Coverage {
                         recorded_at: at,
                         table: named,
                         filter: filter.is_valid(i).then(|| filter.value(i).to_owned()),
-                        from_slot: Slot(from_slot.value(i)),
-                        to_slot: Slot(to_slot.value(i)),
+                        observed,
                         source: source.value(i).to_owned(),
                         decoder_version: decoder_version.value(i).to_owned(),
                         status: Completion::from_str_or_partial(status.value(i)),
@@ -267,7 +278,12 @@ impl Reader {
                 }
             }
         }
-        out.sort_by_key(|c| (c.recorded_at.get(), c.from_slot.get(), c.to_slot.get()));
+        out.sort_by_key(|c| {
+            (
+                c.recorded_at.get(),
+                c.observed.span().map(|(f, t)| (f.get(), t.get())),
+            )
+        });
         Ok(out)
     }
 

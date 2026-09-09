@@ -452,6 +452,13 @@ pub fn build(
 /// covers nothing. A record about a narrower filter covers nothing here either,
 /// because a cohort capture is not a statement about the venue.
 ///
+/// **A record that observed no slots covers nothing here as well**, and that is
+/// not the same as it being uninformative. A completed window that returned no
+/// trades is a real measurement — the recorder writes it down precisely so it
+/// can be told apart from a window nobody ran — but it bounds no slot range, so
+/// it cannot extend the ranges this returns. Under-claiming, in the safe
+/// direction.
+///
 /// The records are read at the watermark, so a range collected today cannot
 /// make a replay of last week better-informed than it was.
 fn trade_coverage(reader: &Reader, as_of: AsOf) -> Result<Vec<(Slot, Slot)>, StoreError> {
@@ -461,7 +468,7 @@ fn trade_coverage(reader: &Reader, as_of: AsOf) -> Result<Vec<(Slot, Slot)>, Sto
         .filter(|c| {
             c.table == Table::Trades && c.status == Completion::Complete && c.filter.is_none()
         })
-        .map(|c| (c.from_slot, c.to_slot))
+        .filter_map(|c| c.observed.span())
         .collect();
     ranges.sort_unstable();
     Ok(ranges)

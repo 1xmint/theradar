@@ -36,7 +36,7 @@ mod reader;
 mod schema;
 mod writer;
 
-pub use coverage::{Completion, Coverage};
+pub use coverage::{Completion, Coverage, ObservedSlots};
 pub use cursor::{CURSOR_FILE, from_epoch, now_epoch, read_cursor, to_epoch, write_cursor};
 pub use decision::{Conclusion, Decision, KernelOutcome};
 pub use error::StoreError;
