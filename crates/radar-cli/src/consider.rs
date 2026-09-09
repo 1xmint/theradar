@@ -32,7 +32,7 @@ use radar_risk::{Policy, PortfolioState, Proposal, Verdict, evaluate};
 use radar_sim::{JupiterQuoter, RpcClient};
 use radar_store::Reader;
 use radar_strategy::{Candidate, CreatorEdge, Decision, PassReason, Strategy, Universe, universe};
-use radar_types::{Address, MicroUsd};
+use radar_types::{Address, Market, MicroUsd};
 
 /// How many candidates the paid tier will be spent on in one pass.
 ///
@@ -321,6 +321,29 @@ impl Pricing {
         }
     }
 
+    /// The venue a capacity measured with this instrument was measured on.
+    ///
+    /// This is the only place that knows. `Pricing::Curve` reads the bonding
+    /// curve's own accounts, so the venue is exactly
+    /// [`Market::PUMP_FUN_BONDING_CURVE`] and its `pool` is `None` because the
+    /// curve account is `["bonding-curve", mint]` under that program.
+    ///
+    /// `Pricing::Jupiter` is `None`, and that is rule 9 rather than a gap. The
+    /// aggregator returns a *route* — it picks whatever pools price the size
+    /// best, may split across several, and does not report which. There is no
+    /// single `Market` that depth belongs to, so the honest answer is that the
+    /// venue is unknown and the proposal must refuse. Naming the curve here
+    /// would put curve-shaped identity on AMM-measured depth, which is the
+    /// collapse `crates/radar-risk/tests/two_markets_are_two_trades.rs` exists
+    /// to prevent.
+    #[must_use]
+    pub const fn market(self) -> Option<Market> {
+        match self {
+            Self::Curve => Some(Market::PUMP_FUN_BONDING_CURVE),
+            Self::Jupiter => None,
+        }
+    }
+
     /// What to print beside the pass, so a reader knows which instrument
     /// produced the capacity they are looking at.
     #[must_use]
@@ -565,6 +588,10 @@ where
         let Some(candidate) = universe.candidate(mint, Some(exit), Some(sol_price)) else {
             continue;
         };
+        // The venue that exit was measured on, from the instrument that measured
+        // it. `capacity_of` above is the only thing that knows, and the strategy
+        // used to write the curve in as a constant regardless.
+        let candidate = candidate.measured_on(sources.pricing.market());
         let candidate = match coordination {
             Some(c) => candidate.with_coordination(c),
             // Carried as absent rather than as clean. The strategy will not
@@ -1380,6 +1407,7 @@ mod tests {
             launch_slot: radar_types::Slot(1_000),
             as_of: radar_asof::AsOf::at(radar_types::Slot(10_000)),
             exit: None,
+            market: Some(radar_types::Market::PUMP_FUN_BONDING_CURVE),
             creator_record: radar_strategy::CreatorRecord::default(),
             coordination: None,
             sol_price_micro_usd: None,

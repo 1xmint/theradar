@@ -22,7 +22,7 @@
 //! since the kernel is the only thing with authority.
 
 use radar_risk::{Action, Proposal};
-use radar_types::{Asset, Market, MicroUsd};
+use radar_types::{Asset, MicroUsd};
 
 use crate::avoidance::{PassReason, disqualify};
 use crate::{Candidate, Decision, Strategy, lamports_to_micro_usd};
@@ -281,6 +281,13 @@ impl Strategy for CreatorEdge {
             reasons.push(PassReason::LaunchLooksCoordinated);
         }
 
+        // Rule 9. A capacity nobody can attribute to a venue cannot be sized
+        // from: the proposal would name one market and the depth behind its
+        // notional would have been measured on another.
+        if candidate.market.is_none() {
+            reasons.push(PassReason::VenueUnknown);
+        }
+
         let age_of = |observed| candidate.as_of.slot().saturating_since(observed).get();
         if age_of(candidate.token_observed_at) > t.max_token_age {
             reasons.push(PassReason::TokenReadingTooOld);
@@ -313,20 +320,32 @@ impl Strategy for CreatorEdge {
         let Some(notional) = notional else {
             return Decision::pass(vec![PassReason::CapacityBelowFloor]);
         };
+        let Some(market) = candidate.market else {
+            return Decision::pass(vec![PassReason::VenueUnknown]);
+        };
 
         Decision::Propose(Box::new(Proposal {
             mint: candidate.mint,
-            // The bonding curve, in native SOL, because that is the trade this
-            // strategy is describing and not a default. Its size is a share of
-            // `capacity_lamports` — lamports the curve pays out, converted at a
-            // SOL price — so the transaction it stands for is a direct curve
+            // The venue the exit was measured on, carried rather than assumed.
+            // This was `Market::PUMP_FUN_BONDING_CURVE` written as a constant,
+            // at a site that cannot know it: `consider` sees only a `Candidate`,
+            // and the capacity it sizes from is measured by the caller — off the
+            // curve under `--quoter curve` and off an aggregator's ladder under
+            // `--quoter jupiter`, which is a route across whatever pools that
+            // aggregator picked. The constant made the second case emit a
+            // proposal naming the curve while its depth came from an AMM, and
+            // the kernel content-addressed it as a curve trade.
+            market,
+            // Native SOL, and only sound because `market` is the curve: the
+            // notional is a share of `capacity_lamports` — lamports the curve
+            // pays out — so the transaction this stands for is a direct curve
             // sale settled in an account's own lamports. Wrapped SOL would be a
-            // different balance and a router's trade, which is a different
-            // decision from this one.
+            // different balance and a router's trade.
             //
-            // No pool: the curve account is `["bonding-curve", mint]` under this
-            // program, so `mint` above and this program already name it.
-            market: Market::PUMP_FUN_BONDING_CURVE,
+            // It holds today because the curve is the only venue any caller can
+            // supply — the aggregator's arm yields `None` and refuses above. A
+            // second venue that can actually be named has to change this line
+            // too, not only the one above it.
             quote: Asset::Sol,
             creator: candidate.creator,
             action: Action::Buy,
@@ -404,7 +423,7 @@ mod tests {
     use radar_asof::AsOf;
     use radar_sim::ExitReport;
     use radar_sim::exit::{Confidence, QuotePoint};
-    use radar_types::{Address, Slot};
+    use radar_types::{Address, Market, Slot};
 
     use super::*;
     use crate::CreatorRecord;
@@ -444,6 +463,7 @@ mod tests {
                 can_be_diluted: false,
                 confidence: Confidence::Measured,
             }),
+            market: Some(Market::PUMP_FUN_BONDING_CURVE),
             creator_record: CreatorRecord {
                 launches: 20,
                 measured: 20,
@@ -466,6 +486,56 @@ mod tests {
         };
         assert_eq!(p.action, Action::Buy);
         assert_eq!(p.mint, Address::new([7u8; 32]));
+    }
+
+    #[test]
+    fn a_capacity_measured_on_no_nameable_venue_cannot_propose_one() {
+        // `radar consider --quoter jupiter` measures depth through an
+        // aggregator's ladder, which is a route across whatever pools it picked
+        // and belongs to no single `Market`. Everything else about this
+        // candidate qualifies -- so if the strategy still names a venue, it is
+        // naming one nobody measured, and the kernel content-addresses the
+        // proposal as a trade on that venue.
+        //
+        // Rule 9: unknown is not safe, so it refuses instead.
+        let unattributed = Candidate {
+            market: None,
+            ..good()
+        };
+        let d = CreatorEdge::default().consider(&unattributed);
+        assert!(
+            !d.is_proposal(),
+            "proposed on an unnameable venue: {:?}",
+            d.reasons()
+        );
+        assert_eq!(d.reasons(), [PassReason::VenueUnknown]);
+    }
+
+    #[test]
+    fn the_proposal_names_the_venue_it_was_measured_on() {
+        // The other half. A venue the caller *could* name is carried through
+        // rather than replaced by a constant, and the pool stays `None` because
+        // the curve account is `["bonding-curve", mint]` under this program --
+        // not because no pool was looked for.
+        let Decision::Propose(p) = CreatorEdge::default().consider(&good()) else {
+            panic!("expected a proposal");
+        };
+        assert_eq!(p.market, Market::PUMP_FUN_BONDING_CURVE);
+
+        let elsewhere = Market {
+            program: Market::PUMP_FUN_PROGRAM,
+            pool: Some(Address::new([42u8; 32])),
+        };
+        let Decision::Propose(p) = CreatorEdge::default().consider(&Candidate {
+            market: Some(elsewhere),
+            ..good()
+        }) else {
+            panic!("expected a proposal");
+        };
+        assert_eq!(
+            p.market, elsewhere,
+            "the venue on the proposal is not the venue that was measured"
+        );
     }
 
     #[test]

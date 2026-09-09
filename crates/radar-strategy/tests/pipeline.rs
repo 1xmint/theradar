@@ -112,6 +112,7 @@ fn candidate() -> Candidate {
         coordination: None,
         as_of: AsOf::at(NOW),
         exit: Some(measured_exit()),
+        market: Some(radar_types::Market::PUMP_FUN_BONDING_CURVE),
         creator_record: CreatorRecord {
             launches: 20,
             measured: 20,

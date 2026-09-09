@@ -48,6 +48,19 @@ pub enum PassReason {
     /// test, the other means the test was never given. Collapsing them would
     /// hide a gap in the pipeline as a property of the token.
     NoExitSimulated,
+    /// The exit was measured, but nothing can say which venue it was measured on.
+    ///
+    /// A third thing again: the test was given, the token passed it, and the
+    /// result cannot be attributed. An aggregator routes across whatever pools
+    /// it picks, so a capacity discovered through one describes a route rather
+    /// than a venue.
+    ///
+    /// It refuses because rule 9 says unknown is not safe. The alternative is
+    /// what this replaces — a proposal naming the bonding curve while the depth
+    /// behind its size was measured on an AMM route, content-addressed by the
+    /// kernel as a curve trade. That is two markets collapsed into one
+    /// authorisation, one layer above the kernel that exists to keep them apart.
+    VenueUnknown,
     /// The creator has too few measured launches to say anything about them.
     CreatorUnproven,
     /// The creator's measured launches mostly died.
@@ -191,6 +204,7 @@ mod tests {
             launch_slot: Slot(1_000),
             as_of: AsOf::at(Slot(10_000)),
             exit,
+            market: Some(radar_types::Market::PUMP_FUN_BONDING_CURVE),
             creator_record: CreatorRecord::default(),
             coordination: None,
             sol_price_micro_usd: Some(MicroUsd::from_dollars(200.0)),
