@@ -4,12 +4,15 @@
 import { Link, Route, Switch, useLocation } from "wouter";
 
 import { About } from "./About";
+import { Contact } from "./Contact";
 import { account, handleHref } from "./honesty";
 import { History } from "./History";
 import { Home } from "./Home";
 import { Leaderboard } from "./Leaderboard";
 import { Pool } from "./Pool";
-import { nav } from "./routes";
+import { Privacy } from "./Privacy";
+import { footer as footerRoutes, nav } from "./routes";
+import { Terms } from "./Terms";
 import { Token } from "./Token";
 
 function Header() {
@@ -68,6 +71,21 @@ function Footer() {
             What this is, who runs it, and what it will never say
           </Link>
         </p>
+        {/* The pages a stranger looks for before deciding whether to believe
+            any of the above. Derived from ROUTES rather than listed again, so
+            a page marked `inNav: false` cannot end up reachable only by
+            somebody typing its address. */}
+        <nav className="mt-4 flex flex-wrap gap-x-4 gap-y-2">
+          {footerRoutes().map((r) => (
+            <Link
+              key={r.path}
+              href={r.path}
+              className="underline hover:text-[var(--color-dim)]"
+            >
+              {r.short ?? r.label}
+            </Link>
+          ))}
+        </nav>
         {/* The two appointments the whole contest runs on. A reader who wants
             to enter needs to know when the week ends before they need anything
             else on this site. */}
@@ -104,6 +122,9 @@ export function App() {
           <Route path="/history" component={History} />
           <Route path="/token" component={Token} />
           <Route path="/about" component={About} />
+          <Route path="/privacy" component={Privacy} />
+          <Route path="/terms" component={Terms} />
+          <Route path="/contact" component={Contact} />
           <Route>
             {/* Static hosting serves index.html for any path, so an unknown one
                 reaches the router rather than the host. Said plainly: a blank

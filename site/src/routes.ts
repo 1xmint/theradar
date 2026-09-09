@@ -24,7 +24,19 @@ export interface Route {
    * own heading still says "The prize pool", so nothing is lost.
    */
   readonly short?: string;
-  /** Whether it appears in the header. */
+  /**
+   * Whether it appears in the header.
+   *
+   * `false` does not mean hidden. It means the footer, which is where a reader
+   * looks for a privacy policy, terms, or a way to reach whoever runs the
+   * thing — and it keeps the header at six items on a 375px phone, which is
+   * the width most of this traffic arrives at.
+   *
+   * Both lists are derived from this table rather than written out again, so
+   * the way to lose a page is to leave it out of the table entirely. A page in
+   * the table with no `<Route>` in `App.tsx` renders the 404, and
+   * `routes.test.tsx` fails on it.
+   */
   readonly inNav: boolean;
 }
 
@@ -35,9 +47,27 @@ export const ROUTES = [
   { path: "/history", label: "Past weeks", short: "History", inNav: true },
   { path: "/token", label: "Tokenomics", short: "Token", inNav: true },
   { path: "/about", label: "About", inNav: true },
+  // The three trust pages. Footer, not header: a stranger looks for these
+  // before deciding whether to believe the rest of the site, and a young
+  // domain talking about tokens without any of them reads to a reputation
+  // classifier -- and to a person -- exactly the way it reads.
+  { path: "/privacy", label: "Privacy", inNav: false },
+  { path: "/terms", label: "Terms of use", short: "Terms", inNav: false },
+  { path: "/contact", label: "Contact", inNav: false },
 ] as const satisfies readonly Route[];
 
 /** The pages the header shows. */
 export function nav(): readonly Route[] {
   return ROUTES.filter((r) => r.inNav);
+}
+
+/**
+ * The pages the footer shows.
+ *
+ * The complement of [`nav`], deliberately: every page is in exactly one of the
+ * two, so a page cannot be added to the table and then be reachable only by
+ * typing its address.
+ */
+export function footer(): readonly Route[] {
+  return ROUTES.filter((r) => !r.inNav);
 }
