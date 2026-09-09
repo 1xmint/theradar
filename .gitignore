@@ -37,3 +37,17 @@ docs/research/data/creator-index.json
 site/dist/
 site/node_modules/
 site/tsconfig.tsbuildinfo
+
+# Agent worktrees. `isolation: "worktree"` checks a whole second copy of this
+# repository out under here, so an unignored `.claude/worktrees/` is a `??` entry
+# holding thousands of files -- and a `git add` that caught it would commit the
+# repository into itself. `.claude/commands/` and `.claude/launch.json` stay
+# tracked; only the scratch copies are ignored.
+.claude/worktrees/
+
+# The orchestrator's run ledger. Session machinery, not project state: AGENTS.md
+# §10 puts plans, task lists and handbacks in `docs/plans/`, on the branch they
+# describe. This directory is where one session tracks its own dispatches, and it
+# is per-machine. It was ignored in `.git/info/exclude` on one clone, which does
+# not travel; this makes it hold for every checkout.
+.orchestrator/
