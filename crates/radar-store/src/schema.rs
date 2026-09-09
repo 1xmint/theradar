@@ -148,8 +148,14 @@ fn recorded_schema(table: Table) -> Arc<Schema> {
             // capture and covers nothing else in it -- a cohort capture is not
             // a statement about the venue.
             Field::new("filter", DataType::Utf8, true),
-            Field::new("from_slot", DataType::UInt64, false),
-            Field::new("to_slot", DataType::UInt64, false),
+            // Nullable together, and only together: null in both is a range
+            // that ran and observed no slot at all, which is the fact this
+            // table exists to record. Zero would be a slot, and a coverage
+            // claim starting at genesis. Files written before 2026-09-09
+            // declare these non-null and always carry values, so they read back
+            // as the span they always were.
+            Field::new("from_slot", DataType::UInt64, true),
+            Field::new("to_slot", DataType::UInt64, true),
             Field::new("source", DataType::Utf8, false),
             Field::new("decoder_version", DataType::Utf8, false),
             // "complete" or "partial". A status this build does not recognise

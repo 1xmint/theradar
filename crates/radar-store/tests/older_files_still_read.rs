@@ -25,7 +25,7 @@ use arrow::datatypes::{DataType, Field, Schema};
 use arrow::record_batch::RecordBatch;
 use parquet::arrow::ArrowWriter;
 use radar_asof::AsOf;
-use radar_store::{Event, Reader, Table};
+use radar_store::{Completion, Event, ObservedSlots, Reader, Table};
 use radar_types::Slot;
 
 /// The decisions schema as it stood *before* `authority_prevalence`.
@@ -491,4 +491,93 @@ fn a_trade_file_written_with_the_old_sentinels_reads_back_as_unknown() {
     // Unknown sorts last within the slot, so a "first trade in the block" read
     // cannot land on the least-known row.
     assert!(trades[0].envelope().position_key() < trades[1].envelope().position_key());
+}
+
+/// The coverage schema as it stood *before* an empty range could be recorded.
+///
+/// Copied rather than derived, for the reason the two above give. `from_slot`
+/// and `to_slot` were non-null: every range had to name a slot, so a completed
+/// window that returned no rows could not be written down at all.
+fn coverage_schema_before_empty_ranges() -> Arc<Schema> {
+    Arc::new(Schema::new(vec![
+        Field::new("recorded_at", DataType::UInt64, false),
+        Field::new("table", DataType::Utf8, false),
+        Field::new("filter", DataType::Utf8, true),
+        Field::new("from_slot", DataType::UInt64, false),
+        Field::new("to_slot", DataType::UInt64, false),
+        Field::new("source", DataType::Utf8, false),
+        Field::new("decoder_version", DataType::Utf8, false),
+        Field::new("status", DataType::Utf8, false),
+    ]))
+}
+
+/// One coverage row in that shape, written to a real Parquet file.
+fn write_old_coverage_file(dir: &std::path::Path) {
+    let mut recorded_at = UInt64Builder::new();
+    let mut table = StringBuilder::new();
+    let mut filter = StringBuilder::new();
+    let mut from_slot = UInt64Builder::new();
+    let mut to_slot = UInt64Builder::new();
+    let mut source = StringBuilder::new();
+    let mut decoder_version = StringBuilder::new();
+    let mut status = StringBuilder::new();
+
+    recorded_at.append_value(10_000);
+    table.append_value(Table::Trades.dir());
+    filter.append_null();
+    from_slot.append_value(400);
+    to_slot.append_value(900);
+    source.append_value("cryptohouse");
+    decoder_version.append_value("0.0.1");
+    status.append_value("complete");
+
+    let columns: Vec<ArrayRef> = vec![
+        Arc::new(recorded_at.finish()),
+        Arc::new(table.finish()),
+        Arc::new(filter.finish()),
+        Arc::new(from_slot.finish()),
+        Arc::new(to_slot.finish()),
+        Arc::new(source.finish()),
+        Arc::new(decoder_version.finish()),
+        Arc::new(status.finish()),
+    ];
+    let batch = RecordBatch::try_new(coverage_schema_before_empty_ranges(), columns)
+        .expect("the old shape is valid");
+
+    let coverage = dir.join(Table::Coverage.dir());
+    std::fs::create_dir_all(&coverage).expect("mkdir");
+    let file =
+        std::fs::File::create(coverage.join("slot_000000000000_g0001.parquet")).expect("create");
+    let mut writer = ArrowWriter::try_new(file, batch.schema(), None).expect("writer");
+    writer.write(&batch).expect("write");
+    writer.close().expect("close");
+}
+
+#[test]
+fn a_coverage_file_written_before_empty_ranges_still_reads_as_the_range_it_claimed() {
+    // The direction that matters. `from_slot` and `to_slot` became nullable so
+    // that "ran, saw nothing" could be written down; a file from before that
+    // always carries both, and it must come back as the span it always was.
+    // Reading an old row as an empty range would be the *safe* direction of a
+    // wrong answer and still wrong: it would silently withdraw coverage the
+    // recorder really established.
+    let dir = tempfile::tempdir().expect("tempdir");
+    write_old_coverage_file(dir.path());
+
+    let coverage = Reader::open(dir.path())
+        .read_coverage(AsOf::at(Slot(20_000)))
+        .expect("a file written before the columns were nullable is still a valid file");
+
+    assert_eq!(coverage.len(), 1);
+    assert_eq!(
+        coverage[0].observed,
+        ObservedSlots::Span {
+            from: Slot(400),
+            to: Slot(900),
+        },
+        "an old row named both bounds, so it is a span and never an empty range"
+    );
+    assert_eq!(coverage[0].status, Completion::Complete);
+    assert_eq!(coverage[0].filter, None);
+    assert_eq!(coverage[0].recorded_at, Slot(10_000));
 }

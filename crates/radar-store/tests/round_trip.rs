@@ -3,8 +3,8 @@
 
 use radar_asof::{AsOf, PointInTime};
 use radar_store::{
-    Completion, Coverage, Envelope, Event, Graduation, Launch, Origin, Outcome, Reader,
-    SLOTS_PER_PARTITION, Side, Table, Trade, Writer,
+    Completion, Coverage, Envelope, Event, Graduation, Launch, ObservedSlots, Origin, Outcome,
+    Reader, SLOTS_PER_PARTITION, Side, Table, Trade, Writer,
 };
 use radar_types::{Address, Signature, Slot};
 
@@ -1169,8 +1169,10 @@ fn a_coverage_record_survives_a_round_trip_through_parquet() {
         recorded_at: Slot(500),
         table: Table::Trades,
         filter: None,
-        from_slot: Slot(10),
-        to_slot: Slot(400),
+        observed: ObservedSlots::Span {
+            from: Slot(10),
+            to: Slot(400),
+        },
         source: "cryptohouse".to_owned(),
         decoder_version: "0.0.1".to_owned(),
         status: Completion::Complete,
@@ -1180,8 +1182,10 @@ fn a_coverage_record_survives_a_round_trip_through_parquet() {
         recorded_at: Slot(600),
         table: Table::Trades,
         filter: Some("So11111111111111111111111111111111111111112".to_owned()),
-        from_slot: Slot(400),
-        to_slot: Slot(500),
+        observed: ObservedSlots::Span {
+            from: Slot(400),
+            to: Slot(500),
+        },
         source: "rpc".to_owned(),
         decoder_version: "0.0.1".to_owned(),
         status: Completion::Partial,
@@ -1196,7 +1200,13 @@ fn a_coverage_record_survives_a_round_trip_through_parquet() {
     assert_eq!(got[0].status, Completion::Complete);
     assert_eq!(got[0].filter, None);
     assert_eq!(got[0].source, "cryptohouse");
-    assert_eq!(got[0].from_slot, Slot(10));
+    assert_eq!(
+        got[0].observed,
+        ObservedSlots::Span {
+            from: Slot(10),
+            to: Slot(400)
+        }
+    );
     assert_eq!(got[1].status, Completion::Partial);
     assert_eq!(
         got[1].filter.as_deref(),
@@ -1217,8 +1227,10 @@ fn coverage_is_gated_on_when_the_range_was_established() {
         recorded_at: Slot(600),
         table: Table::Trades,
         filter: None,
-        from_slot: Slot(10),
-        to_slot: Slot(400),
+        observed: ObservedSlots::Span {
+            from: Slot(10),
+            to: Slot(400),
+        },
         source: "cryptohouse".to_owned(),
         decoder_version: "0.0.1".to_owned(),
         status: Completion::Complete,
@@ -1402,8 +1414,10 @@ fn coverage_skips_a_partition_that_starts_after_the_watermark() {
             recorded_at: Slot(at),
             table: Table::Trades,
             filter: None,
-            from_slot: Slot(0),
-            to_slot: Slot(10),
+            observed: ObservedSlots::Span {
+                from: Slot(0),
+                to: Slot(10),
+            },
             source: "test".to_owned(),
             decoder_version: "test".to_owned(),
             status: Completion::Complete,
@@ -1444,8 +1458,10 @@ fn coverage_reaches_disk_on_the_buffer_it_was_given() {
         recorded_at: Slot(at),
         table: Table::Trades,
         filter: None,
-        from_slot: Slot(0),
-        to_slot: Slot(10),
+        observed: ObservedSlots::Span {
+            from: Slot(0),
+            to: Slot(10),
+        },
         source: "test".to_owned(),
         decoder_version: "test".to_owned(),
         status: Completion::Complete,

@@ -109,6 +109,19 @@ shadow process cannot reach a live signer. Do not create unused framework crates
 - [ ] Record source event time, slot, capture/available time, gaps, successful
   transaction status and cohort filters. Define filtered completeness at readers;
   never claim an observed sample is the whole venue.
+  - Partly done 2026-09-09 on `agent/9-9-0005a-coverage-writer`, which closes
+    plan 0010 item 2c: both backfill paths now write a
+    [`Coverage`](../../crates/radar-store/src/coverage.rs) record per window per
+    table, and a completed window that returned no rows is recorded as
+    `ObservedSlots::Nothing` rather than skipped or written as slots zero to
+    zero. Proved by
+    [`an_empty_window_is_not_an_unvisited_one`](../../crates/radar-store/tests/an_empty_window_is_not_an_unvisited_one.rs).
+    **Still open here:** these records carry `filter: None`, which is exact only
+    while a table holds one venue — the moment a second venue writes into
+    `Table::Trades`, the venue has to move into `filter` and the reader contract
+    for filtered completeness has to be defined with it. Capture and available
+    time are not recorded; a window attests only the slots its own rows landed
+    at, because there is no epoch-to-slot conversion and none may be invented.
 - [ ] Start the prospective cohort with at least two pool families and both SOL
   and USDC routes; publish broad discovery gaps and the remaining adapter queue.
 - [ ] Meter call credits, bandwidth, local decoding time, stored bytes, freshness

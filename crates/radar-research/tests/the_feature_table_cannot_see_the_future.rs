@@ -18,7 +18,7 @@
 
 use radar_asof::AsOf;
 use radar_research::features::{self, FeatureTable, Missing};
-use radar_store::{Envelope, Event, Launch, Origin, Outcome, Reader, Trade, Writer};
+use radar_store::{Envelope, Event, Launch, ObservedSlots, Origin, Outcome, Reader, Trade, Writer};
 use radar_types::{Address, Signature, Slot};
 
 /// The offset from a launch to T, taken from the module rather than restated.
@@ -184,8 +184,10 @@ fn trades_covered(from: u64, to: u64) -> radar_store::Coverage {
         recorded_at: Slot(0),
         table: radar_store::Table::Trades,
         filter: None,
-        from_slot: Slot(from),
-        to_slot: Slot(to),
+        observed: ObservedSlots::Span {
+            from: Slot(from),
+            to: Slot(to),
+        },
         source: "test".to_owned(),
         decoder_version: "test".to_owned(),
         status: radar_store::Completion::Complete,

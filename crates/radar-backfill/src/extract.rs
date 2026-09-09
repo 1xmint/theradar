@@ -12,7 +12,7 @@
 
 use radar_decode::pumpfun;
 use radar_decode::{Decoded, Discriminator, decode_pumpfun};
-use radar_store::{Envelope, Event, Graduation, Launch, Origin, Side, Trade};
+use radar_store::{Envelope, Event, Graduation, Launch, Origin, Side, Table, Trade};
 use radar_types::{Address, Signature, Slot};
 use serde::Deserialize;
 
@@ -376,6 +376,23 @@ pub enum Scope {
 }
 
 impl Scope {
+    /// The store tables a window under this scope collects into.
+    ///
+    /// Beside [`discriminators`](Self::discriminators) and matching the same
+    /// way: the two together are the whole of what a scope means, and a scope
+    /// that asked for an instruction whose events land in a table nobody
+    /// recorded coverage for would report a gap as a quiet market. Exhaustive,
+    /// so a fourth scope stops compiling here rather than silently covering
+    /// nothing.
+    #[must_use]
+    pub const fn tables(self) -> &'static [Table] {
+        match self {
+            Self::Lifecycle => &[Table::Launches, Table::Graduations],
+            Self::Trades => &[Table::Trades],
+            Self::Graduations => &[Table::Graduations],
+        }
+    }
+
     /// The discriminators this scope asks CryptoHouse for.
     #[must_use]
     pub fn discriminators(self) -> Vec<String> {

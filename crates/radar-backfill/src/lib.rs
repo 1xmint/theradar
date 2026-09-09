@@ -16,6 +16,7 @@
 
 pub mod checkpoints;
 pub mod cost;
+pub mod coverage;
 pub mod cryptohouse;
 pub mod extract;
 pub mod launch_block;

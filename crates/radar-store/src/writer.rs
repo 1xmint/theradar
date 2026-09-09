@@ -274,18 +274,6 @@ impl Writer {
             self.written_files += 1;
         }
 
-        for (partition, coverage) in std::mem::take(&mut self.pending_coverage) {
-            if coverage.is_empty() {
-                continue;
-            }
-            let rows = coverage.len() as u64;
-            let batch = build_coverage_batch(&coverage)?;
-            let path = self.next_path(Table::Coverage, partition);
-            write_parquet(&path, &batch)?;
-            self.written_rows += rows;
-            self.written_files += 1;
-        }
-
         let pending = std::mem::take(&mut self.pending);
         for ((table, partition), events) in pending {
             if events.is_empty() {
@@ -294,6 +282,23 @@ impl Writer {
             let rows = events.len() as u64;
             let batch = build_batch(table, &events)?;
             let path = self.next_path(table, partition);
+            write_parquet(&path, &batch)?;
+            self.written_rows += rows;
+            self.written_files += 1;
+        }
+
+        // Last, and deliberately so. A coverage record is a claim about rows,
+        // and a crash between two files in this loop must not leave the claim
+        // on disk without them -- that is a covered range with nothing in it,
+        // which reads as a quiet market. The other order loses the record and
+        // keeps the rows, which only under-claims.
+        for (partition, coverage) in std::mem::take(&mut self.pending_coverage) {
+            if coverage.is_empty() {
+                continue;
+            }
+            let rows = coverage.len() as u64;
+            let batch = build_coverage_batch(&coverage)?;
+            let path = self.next_path(Table::Coverage, partition);
             write_parquet(&path, &batch)?;
             self.written_rows += rows;
             self.written_files += 1;
@@ -365,8 +370,11 @@ fn build_coverage_batch(coverage: &[crate::Coverage]) -> Result<RecordBatch, Sto
         recorded_at.append_value(c.recorded_at.get());
         table.append_value(c.table.dir());
         filter.append_option(c.filter.as_deref());
-        from_slot.append_value(c.from_slot.get());
-        to_slot.append_value(c.to_slot.get());
+        // Both or neither, from one value, so a half-written range cannot be
+        // produced here at all.
+        let bounds = c.observed.span();
+        from_slot.append_option(bounds.map(|(from, _)| from.get()));
+        to_slot.append_option(bounds.map(|(_, to)| to.get()));
         source.append_value(&c.source);
         decoder_version.append_value(&c.decoder_version);
         status.append_value(c.status.as_str());

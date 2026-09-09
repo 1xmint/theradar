@@ -12,11 +12,12 @@ use std::time::{Duration, Instant};
 
 use radar_asof::AsOf;
 use radar_backfill::checkpoints;
+use radar_backfill::coverage;
 use radar_backfill::extract::{Row, Skipped, Stats};
 use radar_backfill::outcomes::{self, AggregateRow, HeadRow, TimeRow};
 use radar_backfill::prices::{self, PriceRow};
 use radar_backfill::{Client, QueryError, Scope, events_from_rows, query_for_window};
-use radar_store::{Event, Reader, Table, Writer, from_epoch, now_epoch, to_epoch};
+use radar_store::{Completion, Event, Reader, Table, Writer, from_epoch, now_epoch, to_epoch};
 
 /// Narrower than the server's sixty-second cap allows, because a window that
 /// fits at three in the morning may not fit at peak.
@@ -295,6 +296,58 @@ fn fetch_window(
     }
 }
 
+/// Writes one coverage record per table the scope collected into.
+///
+/// Both paths go through here so that neither can quietly stop recording a
+/// window: what a reader must be able to tell apart is *ran and found nothing*
+/// from *never ran*, and that only holds if every window that ends leaves a
+/// record — including the empty ones, which are the whole point.
+fn write_coverage(
+    writer: &mut Writer,
+    scope: Scope,
+    status: Completion,
+    events: &[Event],
+    recorded_at: radar_types::Slot,
+    source: &str,
+) -> Result<(), String> {
+    for record in coverage::records_for_window(scope, status, events, recorded_at, source) {
+        writer.append_coverage(record).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+/// The windows a run walks, in order, tiling `start..end` exactly.
+///
+/// This is one line of arithmetic pulled out of `run`, and it is pulled out
+/// because of what the rest of this file now does. The backfill writes down
+/// which ranges it covered. An error in this stepping would therefore not lose
+/// data quietly — it would file a confident coverage record for a range nobody
+/// read, which is the single failure the coverage table exists to make
+/// impossible. `run` fetches over the network, so its loop cannot be driven
+/// from a test. This can.
+///
+/// A `step` of zero or less would not terminate, so it is clamped. `Args`
+/// already clamps `window_minutes` with `.max(1)`, but the clamp belongs where
+/// the loop is, not only where the argument is parsed.
+/// Built on `step_by` rather than a cursor that advances itself, so it
+/// terminates whatever the arithmetic below it does. That is deliberate: a
+/// cursor loop mutated from `+` to `-` or `*` does not return a wrong answer,
+/// it spins forever, and a test that hangs is a weaker signal than one that
+/// fails. This shape turns both of those into a wrong list a test can name.
+fn windows(start: i64, end: i64, step: i64) -> Vec<(i64, i64)> {
+    let step = step.max(1);
+    // `step_by` wants a `usize`. The clamp above makes the value positive, so
+    // the only way this conversion fails is a step larger than a 32-bit pointer
+    // can hold — which would be a single window spanning the whole range, and
+    // `usize::MAX` gives exactly that rather than a truncated stride that would
+    // silently collect the range several times over.
+    let stride = usize::try_from(step).unwrap_or(usize::MAX);
+    (start..end)
+        .step_by(stride)
+        .map(|from| (from, (from + step).min(end)))
+        .collect()
+}
+
 fn run(args: &Args) -> Result<(), String> {
     let start = to_epoch(&args.from)?;
     let end = to_epoch(&args.to)?;
@@ -314,15 +367,47 @@ fn run(args: &Args) -> Result<(), String> {
         args.scope, args.from, args.to, args.window_minutes, args.store
     );
 
-    let mut cursor = start;
-    while cursor < end {
-        let window_end = (cursor + step).min(end);
-        let rows =
-            fetch_window(&client, cursor, window_end, 0, args.scope).map_err(|e| e.to_string())?;
+    // The highest slot anything in the run has seen, for stamping coverage
+    // records with. Read once from the store rather than per window: it only
+    // moves forward, and every window that finds a row moves it here.
+    let mut store_high = Reader::open(&args.store)
+        .watermark()
+        .map_err(|e| e.to_string())?;
+
+    for (cursor, window_end) in windows(start, end, step) {
+        let rows = match fetch_window(&client, cursor, window_end, 0, args.scope) {
+            Ok(rows) => rows,
+            Err(e) => {
+                // The range was attempted and did not finish, and that is a
+                // fact about it. Recorded before the error propagates, so the
+                // window a stopped run died on reads as an unfinished attempt
+                // rather than as a range nobody ever asked for.
+                write_coverage(
+                    &mut writer,
+                    args.scope,
+                    Completion::Partial,
+                    &[],
+                    coverage::established_at(None, store_high),
+                    coverage::SOURCE_BACKFILL,
+                )?;
+                writer.flush().map_err(|e| e.to_string())?;
+                return Err(e.to_string());
+            }
+        };
         rows_seen += rows.len() as u64;
 
         let (events, stats) = events_from_rows(&rows);
         let emitted = events.len();
+        let recorded_at = coverage::established_at(coverage::highest_slot(&events), store_high);
+        store_high = Some(recorded_at);
+        write_coverage(
+            &mut writer,
+            args.scope,
+            Completion::Complete,
+            &events,
+            recorded_at,
+            coverage::SOURCE_BACKFILL,
+        )?;
         for e in events {
             writer.append(e).map_err(|e| e.to_string())?;
         }
@@ -337,7 +422,6 @@ fn run(args: &Args) -> Result<(), String> {
             stats.total_skipped()
         );
 
-        cursor = window_end;
         std::thread::sleep(PAUSE_BETWEEN_WINDOWS);
     }
 
@@ -385,6 +469,13 @@ fn follow(args: &Args) -> Result<(), String> {
     println!("staying {FOLLOW_LAG_SECONDS}s behind the chain; ctrl-c to stop");
 
     let mut totals = Stats::default();
+    // The highest slot the recorder has seen, for stamping coverage records
+    // with. Read from the store once at startup and carried forward: a window
+    // that finds no row has no slot of its own, and the store's own top is the
+    // latest moment anything here can honestly point at.
+    let mut store_high = Reader::open(&args.store)
+        .watermark()
+        .map_err(|e| e.to_string())?;
     // Consecutive failed windows, for the backoff. Reset by any success, so a
     // transient upstream wobble does not leave the recorder crawling for hours.
     let mut failures: u32 = 0;
@@ -425,18 +516,45 @@ fn follow(args: &Args) -> Result<(), String> {
                     from_epoch(cursor)
                 );
                 current_step = shrunk;
+                // The attempt happened and did not finish. Written down as
+                // `Partial`, which covers nothing: without the row, an outage
+                // is a stretch of store with no coverage records in it, which
+                // is exactly what a stretch nobody has reached yet looks like.
+                let mut writer = Writer::open(&args.store, 20_000).map_err(|e| e.to_string())?;
+                write_coverage(
+                    &mut writer,
+                    args.scope,
+                    Completion::Partial,
+                    &[],
+                    coverage::established_at(None, store_high),
+                    coverage::SOURCE_FOLLOW,
+                )?;
+                writer.flush().map_err(|e| e.to_string())?;
                 std::thread::sleep(wait);
                 continue;
             }
         };
         let (events, stats) = events_from_rows(&rows);
         let emitted = events.len();
+        let recorded_at = coverage::established_at(coverage::highest_slot(&events), store_high);
+        store_high = Some(recorded_at);
 
         // Open, write and flush per window. Holding a writer across the whole
         // loop would buffer events indefinitely on a quiet market, and a process
         // killed mid-buffer would lose them.
         {
             let mut writer = Writer::open(&args.store, 20_000).map_err(|e| e.to_string())?;
+            // Buffered here, written last: `Writer::flush` puts the coverage
+            // file down after the event files, so a crash mid-flush loses the
+            // record and keeps the rows rather than the other way round.
+            write_coverage(
+                &mut writer,
+                args.scope,
+                Completion::Complete,
+                &events,
+                recorded_at,
+                coverage::SOURCE_FOLLOW,
+            )?;
             for e in events {
                 writer.append(e).map_err(|e| e.to_string())?;
             }
@@ -1081,5 +1199,34 @@ mod tests {
             graduated.get(&radar_types::Address::new([1u8; 32])),
             Some(&radar_types::Slot(100))
         );
+    }
+
+    #[test]
+    fn windows_tile_the_range_exactly() {
+        let walked = windows(0, 250, 100);
+        assert_eq!(walked, vec![(0, 100), (100, 200), (200, 250)]);
+
+        // Each window begins where the last ended, and the whole walk spans the
+        // range and no more. A gap here is a range nobody collected; an overlap
+        // is one collected twice and recorded once. Both would be written into
+        // the coverage table as fact.
+        assert_eq!(walked.first().map(|w| w.0), Some(0));
+        assert_eq!(walked.last().map(|w| w.1), Some(250));
+        for pair in walked.windows(2) {
+            assert_eq!(pair[0].1, pair[1].0, "windows must not gap or overlap");
+        }
+    }
+
+    #[test]
+    fn a_range_with_nothing_in_it_walks_no_windows() {
+        assert!(windows(100, 100, 60).is_empty(), "empty range");
+        assert!(windows(100, 50, 60).is_empty(), "backwards range");
+    }
+
+    #[test]
+    fn a_step_that_would_not_terminate_is_clamped() {
+        // `Args` clamps `window_minutes` with `.max(1)`, but the loop must not
+        // depend on that: a zero step would append the same window forever.
+        assert_eq!(windows(0, 3, 0).len(), 3);
     }
 }
