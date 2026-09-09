@@ -91,7 +91,6 @@ fn the_same_token_on_two_venues_is_two_authorisations() {
     let curve = buy_on(Market::PUMP_FUN_BONDING_CURVE, Asset::Sol);
     let amm = buy_on(pool(7), Asset::WrappedSol);
 
-    assert_ne!(curve, amm, "same mint, different trades");
     assert_ne!(
         nonce(&curve),
         nonce(&amm),

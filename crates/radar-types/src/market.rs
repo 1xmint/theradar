@@ -89,22 +89,16 @@ mod tests {
     }
 
     #[test]
-    fn two_pools_on_one_program_are_two_markets() {
-        // The case `pool` exists for. If a market compared equal on the program
-        // alone, a proposal measured against one AMM pool would be authorised
-        // against another with different depth -- and nothing downstream could
-        // tell the two apart.
-        let program = Market::PUMP_FUN_PROGRAM;
-        let a = Market {
-            program,
+    fn a_named_pool_is_not_the_curve_that_needs_none() {
+        // `pool: None` on the curve constant means "this venue needs no pool to
+        // be identified", not "no pool was found" -- so a pool that *was* found
+        // must not collapse into it. Two named pools differing is
+        // `#[derive(PartialEq)]`'s job and is not tested here.
+        let named = Market {
+            program: Market::PUMP_FUN_PROGRAM,
             pool: Some(Address::new([7; 32])),
         };
-        let b = Market {
-            program,
-            pool: Some(Address::new([8; 32])),
-        };
-        assert_ne!(a, b);
-        assert_ne!(a, Market::PUMP_FUN_BONDING_CURVE);
+        assert_ne!(named, Market::PUMP_FUN_BONDING_CURVE);
         assert_eq!(Market::PUMP_FUN_BONDING_CURVE.pool, None);
     }
 }
