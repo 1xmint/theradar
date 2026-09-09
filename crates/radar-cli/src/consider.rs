@@ -1822,6 +1822,10 @@ mod tests {
             .iter()
             .map(|mint| radar_risk::Proposal {
                 mint: *mint,
+                // The market and quote this lane trades: pre-graduation
+                // pump.fun, direct to the bonding curve, settled in lamports.
+                market: radar_types::Market::PUMP_FUN_BONDING_CURVE,
+                quote: radar_types::Asset::Sol,
                 creator: Address::new([9u8; 32]),
                 action: radar_risk::Action::Buy,
                 notional: radar_types::MicroUsd(5_000_000),
@@ -1844,6 +1848,23 @@ mod tests {
                 "the shipped policy authorises nothing: {verdict:?}"
             );
         }
+    }
+
+    #[test]
+    fn the_program_this_lane_trades_is_the_one_it_decodes() {
+        // Two copies of one address. `radar-decode` owns `PROGRAM_ID` and cannot
+        // be reached from `radar-types`, because the decoder depends on the
+        // vocabulary and not the other way round -- so the constant is written
+        // twice and this is the only crate that sees both.
+        //
+        // If they ever disagree, every proposal names a venue the decoder does
+        // not recognise while both crates' own tests pass. Retype either
+        // constant: this fails.
+        assert_eq!(
+            radar_types::Market::PUMP_FUN_PROGRAM,
+            radar_decode::pumpfun::PROGRAM_ID,
+            "a proposal must name the program the decoder recognises"
+        );
     }
 
     #[test]

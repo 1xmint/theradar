@@ -3,7 +3,7 @@
 
 use std::collections::BTreeMap;
 
-use radar_types::{Address, MicroUsd, Slot, SlotDelta};
+use radar_types::{Address, Asset, Market, MicroUsd, Slot, SlotDelta};
 use serde::{Deserialize, Serialize};
 
 use crate::policy::{Autonomy, Policy};
@@ -19,6 +19,25 @@ use crate::policy::{Autonomy, Policy};
 pub struct Proposal {
     /// Which token.
     pub mint: Address,
+    /// Where the trade would happen.
+    ///
+    /// A mint alone does not describe a trade. The same token trades on its
+    /// bonding curve and on whatever it graduates to, at different prices and
+    /// different depth in the same slot, so two proposals that name only the
+    /// mint are indistinguishable while describing different transactions —
+    /// and anything keyed by token silently keeps one of them.
+    ///
+    /// Carried rather than looked up, for the same reason `creator` is: a
+    /// lookup would be ambient state, and the kernel has none.
+    pub market: Market,
+    /// What `notional` would actually be paid in.
+    ///
+    /// `notional` is a valuation in dollars, which is what the policy's limits
+    /// are written in. It is not what changes hands. A bonding-curve buy is paid
+    /// in native SOL, an order book may want USDC, and wrapped SOL is a third
+    /// balance again — the signer builds a different transaction for each, so
+    /// the proposal has to say which one it priced.
+    pub quote: Asset,
     /// Who created it. Carried on the proposal so exposure can be aggregated by
     /// creator without the kernel needing to look anything up — a lookup would
     /// be ambient state, and the kernel has none.
@@ -347,6 +366,12 @@ pub fn inevitable_refusals(policy: &Policy) -> Vec<Refusal> {
     let now = Slot(1_000_000);
     let perfect = Proposal {
         mint: Address::new([0u8; 32]),
+        // The venue Radar actually trades, quoted the way it actually quotes.
+        // Same argument as the cost and the input age above: a probe on a market
+        // that could not exist reports a limit that no real proposal met as a
+        // finding about a token.
+        market: Market::PUMP_FUN_BONDING_CURVE,
+        quote: Asset::Sol,
         creator: Address::new([0u8; 32]),
         action: Action::Buy,
         notional: MicroUsd::DOLLAR,
@@ -404,6 +429,22 @@ fn over_cost_ceiling(proposal: &Proposal, policy: &Policy) -> bool {
 fn nonce_for(proposal: &Proposal, state: &PortfolioState) -> String {
     let mut h = blake3::Hasher::new();
     h.update(proposal.mint.as_bytes());
+    // The market and the quote are hashed because they are part of *which trade
+    // this is*. Left out, a buy on the bonding curve and a buy on the AMM that
+    // token graduated to would content-address to the same authorisation — one
+    // decision standing in for another that was never taken, against depth
+    // nobody measured. The mint is not enough to say what was authorised.
+    h.update(proposal.market.program.as_bytes());
+    match proposal.market.pool {
+        // Tagged rather than hashed bare, so "no pool" cannot collide with a
+        // pool whose address happens to be zeros.
+        None => h.update(&[0u8]),
+        Some(pool) => h.update(&[1u8]).update(pool.as_bytes()),
+    };
+    h.update(&[proposal.quote.tag()]);
+    if let Some(quote_mint) = proposal.quote.mint() {
+        h.update(quote_mint.as_bytes());
+    }
     h.update(proposal.creator.as_bytes());
     h.update(&proposal.notional.get().to_le_bytes());
     h.update(&state.now.get().to_le_bytes());

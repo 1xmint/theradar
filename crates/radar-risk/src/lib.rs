@@ -27,7 +27,7 @@
 //!
 //! ```
 //! use radar_risk::{Action, Autonomy, MicroUsd, Policy, PortfolioState, Proposal, Slot, evaluate};
-//! use radar_risk::{Address, SlotDelta};
+//! use radar_risk::{Address, Asset, Market, SlotDelta};
 //!
 //! let policy = Policy {
 //!     autonomy: Autonomy::Capped,
@@ -43,6 +43,10 @@
 //!
 //! let proposal = Proposal {
 //!     mint: Address::new([1; 32]),
+//!     // Which venue, and what the size is denominated in. A mint on its own
+//!     // does not say which trade this is.
+//!     market: Market::PUMP_FUN_BONDING_CURVE,
+//!     quote: Asset::Sol,
 //!     creator: Address::new([2; 32]),
 //!     action: Action::Buy,
 //!     notional: MicroUsd::from_dollars(20.0),
@@ -72,4 +76,4 @@ pub use kernel::{
 pub use policy::{Autonomy, Policy};
 
 // Re-exported so a caller building a proposal does not need three crates.
-pub use radar_types::{Address, MicroUsd, Slot, SlotDelta};
+pub use radar_types::{Address, Asset, Market, MicroUsd, Slot, SlotDelta};

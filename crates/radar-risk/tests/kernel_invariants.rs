@@ -8,8 +8,8 @@
 use std::collections::BTreeMap;
 
 use radar_risk::{
-    Action, Address, Autonomy, MicroUsd, Policy, PortfolioState, Proposal, Refusal, Slot,
-    SlotDelta, Verdict, evaluate,
+    Action, Address, Asset, Autonomy, Market, MicroUsd, Policy, PortfolioState, Proposal, Refusal,
+    Slot, SlotDelta, Verdict, evaluate,
 };
 
 fn policy() -> Policy {
@@ -33,6 +33,11 @@ fn mint(n: u8) -> Address {
 fn buy(notional_dollars: f64) -> Proposal {
     Proposal {
         mint: mint(1),
+        // What the trading lane actually proposes: a bonding-curve buy settled
+        // in native SOL. The other tests vary this where the market is the
+        // point; everywhere else it is the real one rather than a placeholder.
+        market: Market::PUMP_FUN_BONDING_CURVE,
+        quote: Asset::Sol,
         creator: mint(2),
         action: Action::Buy,
         notional: MicroUsd::from_dollars(notional_dollars),
@@ -540,6 +545,8 @@ fn the_refusal_production_actually_prints_is_entirely_about_the_policy() {
     let now = Slot(441_734_987);
     let real = Proposal {
         mint: mint(1),
+        market: Market::PUMP_FUN_BONDING_CURVE,
+        quote: Asset::Sol,
         creator: mint(2),
         action: Action::Buy,
         notional: MicroUsd::from_dollars(6.30),

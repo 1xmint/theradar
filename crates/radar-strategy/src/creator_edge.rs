@@ -22,7 +22,7 @@
 //! since the kernel is the only thing with authority.
 
 use radar_risk::{Action, Proposal};
-use radar_types::MicroUsd;
+use radar_types::{Asset, Market, MicroUsd};
 
 use crate::avoidance::{PassReason, disqualify};
 use crate::{Candidate, Decision, Strategy, lamports_to_micro_usd};
@@ -316,6 +316,18 @@ impl Strategy for CreatorEdge {
 
         Decision::Propose(Box::new(Proposal {
             mint: candidate.mint,
+            // The bonding curve, in native SOL, because that is the trade this
+            // strategy is describing and not a default. Its size is a share of
+            // `capacity_lamports` — lamports the curve pays out, converted at a
+            // SOL price — so the transaction it stands for is a direct curve
+            // sale settled in an account's own lamports. Wrapped SOL would be a
+            // different balance and a router's trade, which is a different
+            // decision from this one.
+            //
+            // No pool: the curve account is `["bonding-curve", mint]` under this
+            // program, so `mint` above and this program already name it.
+            market: Market::PUMP_FUN_BONDING_CURVE,
+            quote: Asset::Sol,
             creator: candidate.creator,
             action: Action::Buy,
             notional,
