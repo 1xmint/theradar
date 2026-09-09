@@ -8,9 +8,9 @@
 //! which of them it measured — and two such decisions look identical, which is
 //! how one silently overwrites the other in anything keyed by token.
 //!
-//! [design 0017](https://github.com/hey-vera/radar/blob/main/docs/design/0017-the-private-trader.md)
-//! §3: *"Use mint addresses and pool/program identities, never tickers, as
-//! keys."*
+//! Design 0017 §3 — the private trader, which is not in `docs/design/` at this
+//! commit, so this is a quotation and not a link: *"Use mint addresses and
+//! pool/program identities, never tickers, as keys."*
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -64,10 +64,8 @@ impl Market {
     /// `pool` is `None` for the reason the field documents: the curve account is
     /// `["bonding-curve", mint]` under this program, so the mint on the proposal
     /// and this program name it already. This is the venue Radar trades today,
-    /// and the only one — [design 0017] admits others by measurement, not by
+    /// and the only one: design 0017 admits others by measurement, not by
     /// assumption.
-    ///
-    /// [design 0017]: https://github.com/hey-vera/radar/blob/main/docs/design/0017-the-private-trader.md
     pub const PUMP_FUN_BONDING_CURVE: Self = Self {
         program: Self::PUMP_FUN_PROGRAM,
         pool: None,

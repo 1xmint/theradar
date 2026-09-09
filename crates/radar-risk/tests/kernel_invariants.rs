@@ -570,3 +570,118 @@ fn the_refusal_production_actually_prints_is_entirely_about_the_policy() {
          funnel measured, is refused for nothing it did: {about_this:?}"
     );
 }
+
+// --- the boundaries themselves -----------------------------------------------
+
+#[test]
+fn a_proposal_exactly_at_every_limit_is_authorised() {
+    // Every sizing limit here is `>`, not `>=`, and the difference is a whole
+    // trade. `cargo mutants` turns each of them around one at a time; before
+    // this test five survived, and so did the exit-capacity `<`. A kernel that
+    // refused at exactly the ceiling would be enforcing a limit nobody wrote,
+    // and the gap is invisible in every test that stays comfortably inside the
+    // bounds.
+    //
+    // So this proposal sits *on* every one at once: the position ceiling, the
+    // deployment ceiling, the creator ceiling, the canary ceiling, the cost
+    // ceiling, the staleness budget, and an exit that can absorb exactly the
+    // size proposed and not a dollar more.
+    let limit = MicroUsd::from_dollars(50.0);
+    let policy = Policy {
+        autonomy: Autonomy::Canary,
+        max_position: limit,
+        max_deployed: limit,
+        max_per_creator: limit,
+        max_canary: limit,
+        max_daily_loss: MicroUsd::from_dollars(25.0),
+        max_round_trip_cost_bps: 900,
+        max_input_staleness: SlotDelta(150),
+        max_consecutive_failures: 3,
+    };
+    let at_the_limit = Proposal {
+        notional: limit,
+        // 900 bps of $50, to the micro-dollar.
+        estimated_round_trip_cost: MicroUsd(4_500_000),
+        oldest_input_slot: Slot(1_000),
+        simulated_exit_capacity: Some(limit),
+        ..buy(50.0)
+    };
+    // Exactly the staleness budget old, and not a slot more.
+    let now = PortfolioState::flat(Slot(1_150));
+
+    let verdict = evaluate(&at_the_limit, &now, &policy);
+    assert!(
+        verdict.authorisation().is_some(),
+        "at the limit is inside it: {verdict:?}"
+    );
+    assert!(!verdict.is_refused(), "and a verdict is one or the other");
+
+    // And one micro-dollar or one slot past each is refused, or the limits
+    // above would be decoration rather than bounds.
+    for (over, expected) in [
+        (
+            Proposal {
+                notional: MicroUsd(limit.get() + 1),
+                ..at_the_limit.clone()
+            },
+            Refusal::OverPositionLimit,
+        ),
+        (
+            Proposal {
+                estimated_round_trip_cost: MicroUsd(4_500_001),
+                ..at_the_limit.clone()
+            },
+            Refusal::RoundTripTooExpensive,
+        ),
+        (
+            Proposal {
+                simulated_exit_capacity: Some(MicroUsd(limit.get() - 1)),
+                ..at_the_limit.clone()
+            },
+            Refusal::ExitCapacityTooSmall,
+        ),
+        (
+            Proposal {
+                oldest_input_slot: Slot(999),
+                ..at_the_limit.clone()
+            },
+            Refusal::InputsTooStale,
+        ),
+    ] {
+        assert!(
+            refusals(&evaluate(&over, &now, &policy)).contains(&expected),
+            "one step past the limit must raise {expected:?}"
+        );
+    }
+
+    // The deployment and creator ceilings are the same boundary read from the
+    // portfolio side: the same proposal, against a portfolio already holding a
+    // single micro-dollar.
+    let mut per_creator = BTreeMap::new();
+    per_creator.insert(mint(2), MicroUsd(1));
+    let nearly_full = PortfolioState {
+        deployed: MicroUsd(1),
+        per_creator,
+        ..now
+    };
+    let r = refusals(&evaluate(&at_the_limit, &nearly_full, &policy));
+    assert!(r.contains(&Refusal::OverDeploymentLimit), "got {r:?}");
+    assert!(r.contains(&Refusal::OverCreatorLimit), "got {r:?}");
+
+    // And the canary ceiling, which is the only one that depends on autonomy —
+    // so the other three have to be lifted out of the way to see it alone.
+    let over_canary = Proposal {
+        notional: MicroUsd(limit.get() + 1),
+        ..at_the_limit
+    };
+    let canary_policy = Policy {
+        max_position: MicroUsd::from_dollars(1_000.0),
+        max_deployed: MicroUsd::from_dollars(1_000.0),
+        max_per_creator: MicroUsd::from_dollars(1_000.0),
+        ..policy
+    };
+    assert!(
+        refusals(&evaluate(&over_canary, &now, &canary_policy)).contains(&Refusal::OverCanaryLimit),
+        "the canary ceiling is the one limit left"
+    );
+}

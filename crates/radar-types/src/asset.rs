@@ -10,8 +10,9 @@
 //!
 //! # Why the distinctions are the ones they are
 //!
-//! [design 0017](https://github.com/hey-vera/radar/blob/main/docs/design/0017-the-private-trader.md)
-//! §3: *"Use mint addresses and pool/program identities, never tickers, as keys.
+//! Design 0017 §3 — the private trader, which is not in `docs/design/` at this
+//! commit, so this is a quotation and not a link:
+//! *"Use mint addresses and pool/program identities, never tickers, as keys.
 //! SOL, wrapped SOL and USDC are distinct accounting assets; other SPL and
 //! Token-2022 assets can be admitted by supported semantics."*
 //!
@@ -26,14 +27,12 @@
 //!   extensions"*. A transfer fee means the amount received is not the amount
 //!   sent; a hook means a transfer can be refused outright. Reading one as plain
 //!   SPL is how a valuation ends up describing a transfer that cannot happen —
-//!   the same class of error [`radar-sim`'s mint reader] exists to catch, and
+//!   the same class of error `radar_sim::MintStructure` exists to catch, and
 //!   pump.fun's own mints are Token-2022.
 //!
-//! There is no arithmetic here on purpose. Multiplying an asset by a quantity is
-//! [task 9-9-0006]'s portfolio, and a type nothing calls is not a design.
-//!
-//! [`radar-sim`'s mint reader]: https://github.com/hey-vera/radar
-//! [task 9-9-0006]: https://github.com/hey-vera/radar
+//! There is no arithmetic here on purpose. Multiplying an asset by a quantity
+//! belongs to the portfolio that will hold balances, and a type nothing calls is
+//! not a design.
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
