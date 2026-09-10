@@ -75,8 +75,8 @@ field is refused rather than half-read.
    account list already said they were: accounts a caller passes, being the
    owner programs of the two mints. They must be read from the mints, and the
    capture records which each pool uses.
-3. **A non-SOL quote mint exists, and it is common.** `pump-public-docs/README.md`
-   said on 2026-09-09 that "no quote mint other than native SOL can be used",
+3. **A non-SOL quote mint exists, and it is common.** The vendor's
+   `pump-public-docs` README said on 2026-09-09 that "no quote mint other than native SOL can be used",
    while the venue's fee page said USDC has been live since 2026-05-21. Pool
    `82zcJ16FYLuqbjxbdHKbD3F7YigdhBe6YHTTvsErNHB` quotes in
    `EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v`, which is USDC. **Six of the
