@@ -420,9 +420,24 @@ field is refused. The README is wrong in three places the capture settles —
 `virtual_quote_reserves` is not zero everywhere, the two token programs are not
 fields of this account, and six of the ten pools quote in something other than
 SOL, one of them USDC (which verifies the row design 0010 marked unverified).
-**Still no quote, no price, no impact, no capacity**: the reserves are the
-balances of the two token accounts `Pool` names, and this repository has no
-SPL or Token-2022 token-account parser. That is the next slice.
+**And the reserves are now readable.** Later the same day
+`radar_pumpfun::token` gained an SPL and Token-2022 token-account and mint
+parser, and `radar_onchain::reserves` reads a pool with **both its vaults and
+both their mints in one `getMultipleAccounts` call**, so the figures share one
+slot by construction. A node that will not say which slot it read at is a
+refusal, not a best effort. Reserves carry their mint, their token program and
+their decimals — the captured mints have 6, 7 and 9 decimals and one pool quotes
+in USDC, so a quote side typed as lamports would be wrong by a factor of a
+thousand. Token-2022 extensions are walked and **three are accepted**
+(`ImmutableOwner`, `MetadataPointer`, `TokenMetadata`, all captured on PumpSwap's
+own accounts); every other one refuses the account by name, which is why two
+mints carrying a transfer fee, a permanent delegate and a transfer hook are
+captured beside the pools.
+
+**Still no quote, no price, no impact, no capacity**, and **no effective
+reserve**: the venue's rule adds `virtual_quote_reserves` to the vault balance,
+0033 read that field without establishing what it means, and `Reserve` reports
+the raw balance and says so.
 
 The reason it was worth doing first: Anchor hashes an instruction's *name* and
 not its program, so **seven discriminators are byte-identical across the two

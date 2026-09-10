@@ -152,9 +152,52 @@ struct AccountContext {
 }
 
 #[derive(Deserialize)]
+struct MultiEnvelope {
+    value: Option<Vec<Option<AccountValue>>>,
+    context: Option<AccountContext>,
+}
+
+#[derive(Deserialize)]
 struct AccountValue {
     data: Vec<String>,
     owner: Option<String>,
+}
+
+/// One account out of a multi-account read.
+#[derive(Clone, Debug)]
+pub struct OwnedAccount {
+    /// The account's raw data.
+    pub data: Vec<u8>,
+    /// The program that owns it, when the node said.
+    ///
+    /// `Option` because the node's shape allows it to be absent, and because a
+    /// caller that needs the owner has to refuse rather than guess: an account's
+    /// owner is what says whether it is an SPL token account, a Token-2022 one,
+    /// or something that is not a token account at all.
+    pub owner: Option<String>,
+}
+
+/// Several accounts read in one call, at one slot.
+///
+/// # Why this type exists rather than a `Vec<AccountRead>`
+///
+/// Reserves are a ratio between two balances. Read one vault at slot N and the
+/// other at slot N+40 and the ratio is a price that never existed on the chain
+/// — and it looks exactly like a price that did. `getMultipleAccounts` answers
+/// with a **single** `context.slot` covering every account in the request, so
+/// the one slot here is the slot all of them were read at, by construction, and
+/// there is no per-account slot to be tempted into mixing.
+///
+/// `slot` is still `Option`: a node that omits the context has not told us when
+/// it read, and rule 9 says that is a refusal for the caller to make rather than
+/// a zero to invent.
+#[derive(Clone, Debug)]
+pub struct MultiAccountRead {
+    /// The slot every account below was read at, when the node said.
+    pub slot: Option<Slot>,
+    /// The accounts, in the order they were asked for. `None` where nothing
+    /// exists at that address — which is a different fact from an empty account.
+    pub accounts: Vec<Option<OwnedAccount>>,
 }
 
 /// One account read, with the slot the node read it at.
@@ -366,6 +409,66 @@ impl RpcClient {
         let data = decode_base64(encoded)
             .ok_or_else(|| RpcError::Malformed("account data was not base64".to_owned()))?;
         Ok(Some(AccountRead { data, slot }))
+    }
+
+    /// Reads several accounts in one call, so that they share one slot.
+    ///
+    /// This is the only read in the crate that can answer a question about more
+    /// than one account at the same instant, and that is the whole reason it
+    /// exists: a pool's two vault balances read separately are two instants, and
+    /// the ratio between them is a price nobody could find on an explorer.
+    ///
+    /// The returned vector is the same length as `addresses` and in the same
+    /// order, with `None` where no account exists — checked here rather than
+    /// left to the caller, because a node that returned a short list would
+    /// otherwise shift every account onto the wrong address.
+    ///
+    /// # Errors
+    ///
+    /// [`RpcError`] on transport, node or shape failures, or when the budget is
+    /// spent. A response whose list is a different length from the request is
+    /// [`Malformed`](RpcError::Malformed).
+    pub fn accounts(
+        &self,
+        budget: &mut Budget,
+        addresses: &[Address],
+    ) -> Result<MultiAccountRead, RpcError> {
+        let asked: Vec<String> = addresses.iter().map(ToString::to_string).collect();
+        let result: MultiEnvelope = self.call(
+            budget,
+            "getMultipleAccounts",
+            &serde_json::json!([asked, { "encoding": "base64" }]),
+        )?;
+        let slot = result.context.map(|c| Slot(c.slot));
+        let values = result.value.ok_or_else(|| {
+            RpcError::Malformed("getMultipleAccounts returned no list".to_owned())
+        })?;
+        if values.len() != addresses.len() {
+            return Err(RpcError::Malformed(format!(
+                "asked for {} accounts and the node returned {}",
+                addresses.len(),
+                values.len()
+            )));
+        }
+
+        let mut accounts = Vec::with_capacity(values.len());
+        for value in values {
+            let Some(account) = value else {
+                accounts.push(None);
+                continue;
+            };
+            let encoded = account
+                .data
+                .first()
+                .ok_or_else(|| RpcError::Malformed("account data was empty".to_owned()))?;
+            let data = decode_base64(encoded)
+                .ok_or_else(|| RpcError::Malformed("account data was not base64".to_owned()))?;
+            accounts.push(Some(OwnedAccount {
+                data,
+                owner: account.owner,
+            }));
+        }
+        Ok(MultiAccountRead { slot, accounts })
     }
 
     /// Which program owns an address, or `None` when nothing is there.
@@ -877,6 +980,68 @@ mod tests {
             .account(&mut budget(), &Address::new([1u8; 32]))
             .expect("a read");
         assert!(got.is_none());
+    }
+
+    #[test]
+    fn a_multi_account_read_carries_one_slot_for_every_account_in_it() {
+        // The property the whole reserves path rests on: one call, one
+        // `context.slot`, and no per-account slot to be tempted into mixing.
+        // "QUJD" is base64 for "ABC" and "REVG" for "DEF".
+        let c = client(&[concat!(
+            r#"{"jsonrpc":"2.0","id":1,"result":{"context":{"slot":9},"value":["#,
+            r#"{"data":["QUJD","base64"],"owner":"11111111111111111111111111111111"},"#,
+            r#"null,"#,
+            r#"{"data":["REVG","base64"],"owner":"11111111111111111111111111111111"}]}}"#,
+        )]);
+        let got = c
+            .accounts(
+                &mut budget(),
+                &[
+                    Address::new([1u8; 32]),
+                    Address::new([2u8; 32]),
+                    Address::new([3u8; 32]),
+                ],
+            )
+            .expect("a read");
+
+        assert_eq!(got.slot, Some(Slot(9)));
+        assert_eq!(got.accounts.len(), 3);
+        assert_eq!(
+            got.accounts[0].as_ref().expect("an account").data,
+            b"ABC".to_vec(),
+        );
+        // A hole stays a hole and keeps its place, because the caller maps the
+        // list back onto the addresses by position.
+        assert!(got.accounts[1].is_none());
+        assert_eq!(
+            got.accounts[2].as_ref().expect("an account").data,
+            b"DEF".to_vec(),
+        );
+    }
+
+    #[test]
+    fn a_multi_account_read_of_the_wrong_length_is_refused() {
+        // Two accounts against three addresses would shift every account onto
+        // the wrong address, and every field of the result would look ordinary.
+        // Truncating to what came back would be the same bug with fewer rows.
+        let c = client(&[concat!(
+            r#"{"jsonrpc":"2.0","id":1,"result":{"context":{"slot":9},"value":["#,
+            r#"{"data":["QUJD","base64"],"owner":"11111111111111111111111111111111"},null]}}"#,
+        )]);
+        let refused = c
+            .accounts(
+                &mut budget(),
+                &[
+                    Address::new([1u8; 32]),
+                    Address::new([2u8; 32]),
+                    Address::new([3u8; 32]),
+                ],
+            )
+            .expect_err("three were asked for");
+        assert!(
+            matches!(&refused, RpcError::Malformed(why) if why.contains("asked for 3")),
+            "{refused:?}",
+        );
     }
 
     #[test]

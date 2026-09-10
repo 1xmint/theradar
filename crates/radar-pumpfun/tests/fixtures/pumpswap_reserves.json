@@ -1,0 +1,196 @@
+{
+ "source": "Solana mainnet via https://api.mainnet-beta.solana.com getMultipleAccounts, base64",
+ "endpoint": "https://api.mainnet-beta.solana.com",
+ "captured": "2026-09-09",
+ "why": "What a PumpSwap pool holds, read so that the numbers describe one instant. Each entry in `reads` is a single getMultipleAccounts call carrying the pool, both vaults and both mints, so the one `slot` recorded is the slot every account in it was read at -- reserves captured one getAccountInfo at a time would be a ratio that never existed. The vault owner programs are recorded because they, and not any field of the Pool account, are what say whether a vault is classic SPL Token or Token-2022. `specimens` are mints captured for their Token-2022 extensions alone: the parser refuses each of them by name, and these are the bytes that refusal is asserted against. Stored as base64, which is what the RPC returns and what radar_types::b64 reads.",
+ "reads": [
+  {
+   "pool": "C4mLt6fs2dL2W1oovZAT9QpM3tpL6CA7DZ8hqHU9Ldqb",
+   "slot": 445773212,
+   "note": "Token-2022 base against a classic SPL wrapped-SOL quote. The pool behind the buy research 0028 priced, so its vault addresses are ones a transaction the network accepted actually named.",
+   "accounts": [
+    {
+     "role": "pool",
+     "address": "C4mLt6fs2dL2W1oovZAT9QpM3tpL6CA7DZ8hqHU9Ldqb",
+     "owner": "pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA",
+     "len": 301,
+     "data_b64": "8ZptBBGxbbz/AACMb0i3hTe9n1e8lBqD3r9Cl7WG7Ux8fkGJR3CDjzALL4cmNAXyBdEBgo+ihoFaVg2fd1W3pIWrxqIqd/k6DQ5fBpuIV/6rgYT7aH9jRhjANdrEOdwa6ztVmKDwAAAAAAHJMjoGCOw/PRU4czjfxSR6lZlqjyYmpXs1p7f1SZOLqF9FRnLUG38XsdX7GBsK/BQjjyRciMjIYybs7WsIGUqwY+zNg0YMkwJZtLew7rrfcIphA0AyvRY5XeGl2NpiDtY2Q2tZ0AMAACIVX23z4qggJXOURYhxkQblM49+WTB7B8PBtW3ySgM7AADJQR4YBAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+    },
+    {
+     "role": "base_mint",
+     "address": "A6Zpvj47pSin4YLdUWKRG92x5HGJjtD35sZmJQ6cpump",
+     "owner": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+     "len": 399,
+     "data_b64": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAARe+dQXqNAwAGAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAARIAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAIcmNAXyBdEBgo+ihoFaVg2fd1W3pIWrxqIqd/k6DQ5fEwChAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAhyY0BfIF0QGCj6KGgVpWDZ93VbekhavGoip3+ToNDl8JAAAAUm9iaW5ob29kBAAAAEhPT0REAAAAaHR0cHM6Ly9nYXRld2F5LmlyeXMueHl6L0FYdFFNOGpYbVhxSDIyS29xdEZEbTN2UzVkRDl0R2RkbHRQYXZ2SmJjSzgAAAAA"
+    },
+    {
+     "role": "quote_mint",
+     "address": "So11111111111111111111111111111111111111112",
+     "owner": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+     "len": 82,
+     "data_b64": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAJAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+    },
+    {
+     "role": "base_vault",
+     "address": "7QtzvM1VFVRJMNVeSPNQ8kMzwpDDkPhEHDsV4VUrxiq5",
+     "owner": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+     "len": 170,
+     "data_b64": "hyY0BfIF0QGCj6KGgVpWDZ93VbekhavGoip3+ToNDl+kZ2/pSzrPgO23unv/5JdPVT4kZkQzmy2av+ELx0r/akxxjsJ95QEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAgcAAAA="
+    },
+    {
+     "role": "quote_vault",
+     "address": "7j4nv9cYSye9gbdNtQyMTHNZD54V96BWqYQStaZ8i6xM",
+     "owner": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+     "len": 165,
+     "data_b64": "BpuIV/6rgYT7aH9jRhjANdrEOdwa6ztVmKDwAAAAAAGkZ2/pSzrPgO23unv/5JdPVT4kZkQzmy2av+ELx0r/attXPa8DAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQEAAABRUBwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    }
+   ]
+  },
+  {
+   "pool": "6xsdRpzd53b7LsLHjNppa7fZzJu1xW3s1jAV8X79gPvd",
+   "slot": 445773232,
+   "note": "The mirror image: classic SPL wrapped-SOL base against a Token-2022 quote. Neither program belongs to a side.",
+   "accounts": [
+    {
+     "role": "pool",
+     "address": "6xsdRpzd53b7LsLHjNppa7fZzJu1xW3s1jAV8X79gPvd",
+     "owner": "pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA",
+     "len": 301,
+     "data_b64": "8ZptBBGxbbz6AADSWpMxMn02gEwCl5IYgMSltPs4lEO9tWslyW2pBWvloAabiFf+q4GE+2h/Y0YYwDXaxDncGus7VZig8AAAAAABI1CptIf/PyFUZ47caxgeraDbT+3+EH5iqy8yZd5GiS7mFOFgHwr2Y+UyBb/6g4xtYpyvAnw708nhT8w7/oBp/n+KTz4YP4hwoS4IgTYo5HDzOAAte0d56Ra9uahEfkxptQ7zwnWiDviqbfSCYakPsOQwVB5RkGGoJwzjFUV4NT+16LSCEQQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+    },
+    {
+     "role": "base_mint",
+     "address": "So11111111111111111111111111111111111111112",
+     "owner": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+     "len": 82,
+     "data_b64": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAJAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+    },
+    {
+     "role": "quote_mint",
+     "address": "3NrcGgMw8hiqb4okLECc51hShCTyLTX8NbhPqexqofPB",
+     "owner": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+     "len": 404,
+     "data_b64": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAiEzwxXyNAwAGAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAARIAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACNQqbSH/z8hVGeO3GsYHq2g20/t/hB+YqsvMmXeRokuEwCmAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAI1CptIf/PyFUZ47caxgeraDbT+3+EH5iqy8yZd5GiS4DAAAASm9lAwAAAEpvZVAAAABodHRwczovL2lwZnMuaW8vaXBmcy9iYWZrcmVpZXhqeGR5bHk3c2U3M20zcW02b2VhNTV3eGdsNnZlejZjMnpxZnN2dGdxcWJqaW56dm0ybQAAAAA="
+    },
+    {
+     "role": "base_vault",
+     "address": "9as6kxmDVK5N7wNAUMaLZQX2nfx3jjgzpbS54da6YTBv",
+     "owner": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+     "len": 165,
+     "data_b64": "BpuIV/6rgYT7aH9jRhjANdrEOdwa6ztVmKDwAAAAAAFYmp/dZ+56eNGVxxxp0QXxAN8XhLQRfi915acTtQ0GlnsMacw4AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQEAAABRUBwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    },
+    {
+     "role": "quote_vault",
+     "address": "DBn1zUGMaeakYxVrW6n8T2vDFPLs91Q9KGpiNdk2vJKG",
+     "owner": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+     "len": 170,
+     "data_b64": "I1CptIf/PyFUZ47caxgeraDbT+3+EH5iqy8yZd5GiS5Ymp/dZ+56eNGVxxxp0QXxAN8XhLQRfi915acTtQ0GlkG9wfUScgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAgcAAAA="
+    }
+   ]
+  },
+  {
+   "pool": "13bkcX5JGKaaj35brGP9ZUJtG1iUAbQVVqYDnUFL1B9",
+   "slot": 445773252,
+   "note": "Both sides classic SPL, and a 211-byte pool -- the shortest that exists, with no coin_creator and no virtual_quote_reserves.",
+   "accounts": [
+    {
+     "role": "pool",
+     "address": "13bkcX5JGKaaj35brGP9ZUJtG1iUAbQVVqYDnUFL1B9",
+     "owner": "pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA",
+     "len": 211,
+     "data_b64": "8ZptBBGxbbz/AACRQY7KlVsNe0ig1Z7o2XaRrzrfhDEvgaJOSL3Go4UuTwZNkVpsh+0oNI9GwKOblb8d+wuii00imSEEeUB7uMS/BpuIV/6rgYT7aH9jRhjANdrEOdwa6ztVmKDwAAAAAAH8MUQmqa5WJCdReXn5DGxjG3wIAYU1nkwbJgc8nuAzGlcwednndcEEGmK2ujHee2OrYd5I4VyY7VIefEp7IlYBhl3h0K8PibXOCknMPoeFmRKHh+HC7H4O3OM9wbdvoEtkAAAAAAAAAA=="
+    },
+    {
+     "role": "base_mint",
+     "address": "Rc3ktd4RvE72ddsdS97VrVko5KN9yQoktfFmF1xpump",
+     "owner": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+     "len": 82,
+     "data_b64": "AAAAAJFBjsqVWw17SKDVnujZdpGvOt+EMS+Bok5IvcajhS5PXRgAAAAAAAAHAQAAAACRQY7KlVsNe0ig1Z7o2XaRrzrfhDEvgaJOSL3Go4UuTw=="
+    },
+    {
+     "role": "quote_mint",
+     "address": "So11111111111111111111111111111111111111112",
+     "owner": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+     "len": 82,
+     "data_b64": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAJAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+    },
+    {
+     "role": "base_vault",
+     "address": "6sMLqrXH8BwDbD6QWqqJdkZS6PTMWsoxKCX6hLG4mQRe",
+     "owner": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+     "len": 165,
+     "data_b64": "Bk2RWmyH7Sg0j0bAo5uVvx37C6KLTSKZIQR5QHu4xL8AAvBbQKgg8symGa8UmbTgVdEQeHexFL0eNe4GEfqIRF0YAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    },
+    {
+     "role": "quote_vault",
+     "address": "A3WfMbwNa1bVoM5TEhE7Xj9H7zvJYkdAQmcg8ztGnTJr",
+     "owner": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+     "len": 165,
+     "data_b64": "BpuIV/6rgYT7aH9jRhjANdrEOdwa6ztVmKDwAAAAAAEAAvBbQKgg8symGa8UmbTgVdEQeHexFL0eNe4GEfqIRAIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQEAAADwHR8AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    }
+   ]
+  },
+  {
+   "pool": "82zcJ16FYLuqbjxbdHKbD3F7YigdhBe6YHTTvsErNHB",
+   "slot": 445773272,
+   "note": "Quotes in USDC, which has six decimals against wrapped SOL's nine. A quote reserve read as lamports here is wrong by a factor of a thousand.",
+   "accounts": [
+    {
+     "role": "pool",
+     "address": "82zcJ16FYLuqbjxbdHKbD3F7YigdhBe6YHTTvsErNHB",
+     "owner": "pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA",
+     "len": 270,
+     "data_b64": "8ZptBBGxbbz/AAAUOev0aokzstv9MyImesj9z/ox/ybbZny8CRBsBUgB7yEjVLZSObguwrk7dnwVNRtkkvJe9sHU3Yw2iWnaGXrPxvp6877brTo9ZfNqq8l0MbG75MLS9uDkfKYCA0UvXWFwWfaR4H9epp5TIjbbygBpqcAuAJrzxfi9T5XEUndSITOaazpukSMuqqnkU+NlhYP2zrniUIQR8vd5xIMglclX+lYFXXmcKr/9S3BggX4tY3FXZBlhMpfJWL2xJ5q5JaQGbUAHAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    },
+    {
+     "role": "base_mint",
+     "address": "3EMheh5MPVWpAGDdXnGBgs6uaukKL29zv65uuXxspump",
+     "owner": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+     "len": 82,
+     "data_b64": "AAAAAAbFwc5jjSVn0mRosF65UdGijcxuEjSCtcZ1FJdw5ivyOBaNLZhrAQAGAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+    },
+    {
+     "role": "quote_mint",
+     "address": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+     "owner": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+     "len": 82,
+     "data_b64": "AQAAAJj+huiNm+Lqi8HMpIeLKYjCQPUrhCS/tA7Rot3LXhmbHD+RcGJQHAAGAQEAAABicKqKWcWUBbRShshncubNEm6bil06OFNtN/e0FOi2Zw=="
+    },
+    {
+     "role": "base_vault",
+     "address": "4USMxnBPkU44DarRS9TabfjfxYCcZmsW8PVj9Du7fsC2",
+     "owner": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+     "len": 165,
+     "data_b64": "ISNUtlI5uC7CuTt2fBU1G2SS8l72wdTdjDaJadoZes8BzVHGuTQ7u+Km0KBGW3Yi8D5R4Z8lf5pXhBE2g06mliutP/IEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    },
+    {
+     "role": "quote_vault",
+     "address": "HrD176Q5JY8Q5gqv7ghsu74EabBbRKz2rD4UcSKDuq15",
+     "owner": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+     "len": 165,
+     "data_b64": "xvp6877brTo9ZfNqq8l0MbG75MLS9uDkfKYCA0UvXWEBzVHGuTQ7u+Km0KBGW3Yi8D5R4Z8lf5pXhBE2g06mloqlCgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    }
+   ]
+  }
+ ],
+ "specimens": [
+  {
+   "address": "CKfatsPMUf8SkiURsDXs7eK6GWb4Jsd6UDbs7twMCWxo",
+   "kind": "mint",
+   "owner": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+   "slot": 445773282,
+   "note": "A Token-2022 mint whose only extension is TransferFeeConfig. The cleanest refusal there is: nothing else about this mint is unusual, and a balance in it still cannot be moved without losing a fee the parser does not model.",
+   "len": 278,
+   "data_b64": "AAAAAF6FlBDp84quKJTnIC3eZq7d8SbOoKlPCfCAsA30E9mWkeCl9yhWAAAFAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQEAbABehZQQ6fOKriiU5yAt3mau3fEmzqCpTwnwgLAN9BPZll6FlBDp84quKJTnIC3eZq7d8SbOoKlPCfCAsA30E9mWaLpvoAEAAABwAgAAAAAAAACg3sWtyTU2pAG6AgAAAAAAAACg3sWtyTU2DQE="
+  },
+  {
+   "address": "2b1kV6DkPAnxd5ixfnxCpjxmKwqjjaYmCZfHsFu24GXo",
+   "kind": "mint",
+   "owner": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+   "slot": 445773292,
+   "note": "Eight extensions on one mint, four of which change what a balance is worth or who may move it: a permanent delegate, a transfer fee, a transfer hook and confidential transfers. Proof that extensions arrive in bundles and that finding one harmless one says nothing about the next.",
+   "len": 866,
+   "data_b64": "AQAAAGyRqkllkBL4q+lh7CS2EHSSZUdTL/CU7VtpOYLbmHMTbRXnI1WwAgAGAQEAAAAXhTJh72q4Uypn8FOGWq0xKT/PB88SCrW5oVcGVI3AKwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQMAIAAXhTJh72q4Uypn8FOGWq0xKT/PB88SCrW5oVcGVI3AKwwAIAAXhTJh72q4Uypn8FOGWq0xKT/PB88SCrW5oVcGVI3AKwEAbAAXhTJh72q4Uypn8FOGWq0xKT/PB88SCrW5oVcGVI3AKxeFMmHvarhTKmfwU4ZarTEpP88HzxIKtbmhVwZUjcArAAAAAAAAAABdAgAAAAAAAAAAAAAAAAAAAABdAgAAAAAAAAAAAAAAAAAAAAAEAEEAF4UyYe9quFMqZ/BThlqtMSk/zwfPEgq1uaFXBlSNwCsAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQAIEAF4UyYe9quFMqZ/BThlqtMSk/zwfPEgq1uaFXBlSNwCscN+ZDO3ME3YJzeuQNm4vzxJ9bDmxJqNUzKLPlBpAcVwEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADgBAABeFMmHvarhTKmfwU4ZarTEpP88HzxIKtbmhVwZUjcArAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAASAEAAF4UyYe9quFMqZ/BThlqtMSk/zwfPEgq1uaFXBlSNwCsXkkg7bIoqh7dHHYFPlZH5OVyECpzj2fTVun06S4p0nhMArgAXhTJh72q4Uypn8FOGWq0xKT/PB88SCrW5oVcGVI3AKxeSSDtsiiqHt0cdgU+Vkfk5XIQKnOPZ9NW6fTpLinSeCgAAAFBheVBhbCBVU0QFAAAAUFlVU0RPAAAAaHR0cHM6Ly90b2tlbi1tZXRhZGF0YS5wYXhvcy5jb20vcHl1c2RfbWV0YWRhdGEvcHJvZC9zb2xhbmEvcHl1c2RfbWV0YWRhdGEuanNvbgAAAAA="
+  }
+ ]
+}
