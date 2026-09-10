@@ -400,6 +400,28 @@ below 420 SOL, 95 from there to 1,470, down to 5 above 98,240 — the venue's
 published ladder, to the row, with live swaps paying it. The same parser read
 it; the prize page now says which fee applies where.
 
+**PumpSwap is now a program `radar-decode` can name, and only that.** On
+2026-09-09 the decoder gained `radar_decode::pumpswap` — the program id
+`pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA`, tied by test to the mainnet
+capture in `crates/radar-pumpfun/tests/fixtures/pumpswap_fees.json` that already
+held it, and a 27-row instruction table. **No pool layout, no quote, no
+reserves**; those are later slices, and `Pool`'s discriminator and byte length
+remain unverified. Design 0017 §3 puts the curve and PumpSwap on one row, so this
+does **not** satisfy plan 0011 P1's "two pool families" — that is counted when a
+non-pump venue (Raydium CPMM) lands beside it.
+
+The reason it was worth doing first: Anchor hashes an instruction's *name* and
+not its program, so **seven discriminators are byte-identical across the two
+programs** — `buy`, `sell`, `claim_cashback`, `extend_account` and the three
+volume-accumulator instructions. Decoding therefore now takes a
+`radar_decode::Program` and the instruction tables are unreachable without one.
+Two caveats, both recorded rather than closed: the PumpSwap table's bytes are
+**derived from the vendor's IDL name list, not captured** (`withdraw` is omitted
+because the IDL's own declared bytes contradict Anchor's rule), and
+`radar_decode::decode_pumpfun` still exists for `radar-backfill`, whose
+CryptoHouse rows carry no program column — the one entry point left that assumes
+a venue.
+
 The shipped policy is `Policy::CLOSED`, which refuses every proposal. But the lane
 is shut a long way upstream of that too: on 2026-08-25 a live run over 41,254
 candidates raised **zero proposals**, and the cause was a hardcoded exit-probe size

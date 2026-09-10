@@ -13,7 +13,7 @@
 
 use radar_types::Address;
 
-use crate::args::{Layout, Side};
+use crate::args::{ArgError, Launch, Layout, Side, Trade};
 use crate::discriminator::Discriminator;
 
 /// The pump.fun program address, `6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P`.
@@ -198,10 +198,45 @@ pub const KNOWN: &[(Instruction, [u8; 8], &str)] = &[
     ),
 ];
 
+/// Reads a trade instruction's arguments.
+///
+/// Takes the instruction rather than the raw bytes, and that is the whole
+/// safety of it: a [`pumpfun::Instruction`](Instruction) can only be obtained by
+/// naming this program, so there is no path from eight ambiguous bytes to a
+/// bonding-curve trade. PumpSwap's `buy` carries the same discriminator and a
+/// different payload.
+///
+/// # Errors
+///
+/// Returns `None` if the instruction is not a trade; returns [`ArgError`] if it
+/// is one but its payload is truncated.
+#[must_use]
+pub fn trade_args(instruction: Instruction, data: &[u8]) -> Option<Result<Trade, ArgError>> {
+    let (side, layout) = (instruction.side()?, instruction.layout()?);
+    Some(crate::args::trade(data, side, layout))
+}
+
+/// Reads a launch instruction's arguments.
+///
+/// Takes the instruction for the reason [`trade_args`] does.
+///
+/// # Errors
+///
+/// Returns `None` if the instruction is not a launch; returns [`ArgError`] if it
+/// is one but its payload is malformed. Launch text is creator-supplied and
+/// arbitrary, so malformed input is expected rather than exceptional.
+#[must_use]
+pub fn launch_args(instruction: Instruction, data: &[u8]) -> Option<Result<Launch<'_>, ArgError>> {
+    instruction.is_launch().then(|| crate::args::launch(data))
+}
+
 impl Instruction {
     /// Looks up an instruction by discriminator.
-    #[must_use]
-    pub fn from_discriminator(d: Discriminator) -> Option<Self> {
+    ///
+    /// Private on purpose: reaching this table means having already said the
+    /// program is pump.fun, and [`crate::decode`] is where that is said. Seven
+    /// of these discriminators are also PumpSwap instructions.
+    pub(crate) fn from_discriminator(d: Discriminator) -> Option<Self> {
         KNOWN
             .iter()
             .find(|(_, bytes, _)| bytes == d.as_bytes())

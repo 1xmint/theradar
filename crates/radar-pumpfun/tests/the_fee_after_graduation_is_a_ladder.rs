@@ -154,6 +154,34 @@ fn three_live_swaps_paid_the_row_their_market_cap_selects() {
 }
 
 #[test]
+fn the_program_address_is_the_one_that_owns_the_captured_account() {
+    // `radar_decode::pumpswap::PROGRAM_ID` is a byte literal, and a byte literal
+    // is only as good as its source. This is the source: the network's own
+    // answer to `getAccountInfo` for PumpSwap's global config, captured
+    // 2026-09-05 at slot 444,505,829. The constant lives in `radar-decode`,
+    // which cannot see this fixture; the fixture lives here, which does not
+    // decode instructions. This crate sees both, so the tie is asserted here --
+    // the same arrangement `Market::PUMP_FUN_PROGRAM` uses in
+    // `crates/radar-cli/src/consider.rs`.
+    let value = fixture();
+    let owner = value["accounts"]["global_config"]["owner"]
+        .as_str()
+        .expect("the capture records who owns the account");
+    assert_eq!(
+        owner,
+        radar_decode::pumpswap::PROGRAM_ID.to_string(),
+        "the decoder's PumpSwap program id is not the one that owns the \
+         captured account"
+    );
+    // And the account it owns is the one the ladder above is read from, so this
+    // is not a stray string in an unrelated corner of the fixture.
+    assert_eq!(
+        value["accounts"]["global_config"]["address"].as_str(),
+        Some("ADyA8hdefvWN2dbGGWFotbzWxrAvLW83WG6QCVXvJKqw")
+    );
+}
+
+#[test]
 fn the_flat_entry_and_the_global_config_still_disagree_with_the_rows() {
     // Flat: lp 25, protocol 5, creator 0. Global config (PumpSwap's own
     // account, offsets 40 and 48 for lp and protocol, 313 for the creator

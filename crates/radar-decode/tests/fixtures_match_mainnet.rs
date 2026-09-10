@@ -21,7 +21,7 @@
 use std::collections::BTreeMap;
 
 use radar_decode::pumpfun::{self, Instruction};
-use radar_decode::{Decoded, Discriminator, decode_pumpfun};
+use radar_decode::{Decoded, Discriminator, Instruction as AnyInstruction, Program, decode};
 use sha2::{Digest, Sha256};
 
 const FIXTURES: &str = include_str!("fixtures/pumpfun_instructions.json");
@@ -89,8 +89,8 @@ fn captured_mainnet_bytes_decode_to_the_expected_instruction() {
             data.len() >= fx.min_data_len,
             "{name}: sample is shorter than the observed minimum"
         );
-        match decode_pumpfun(&data) {
-            Decoded::Known(got) => assert_eq!(
+        match decode(Program::PumpFun, &data) {
+            Decoded::Known(AnyInstruction::PumpFun(got)) => assert_eq!(
                 got, expected,
                 "{name} ({disc_hex}): decoded to {got:?} (sig {})",
                 fx.example_signature
@@ -180,7 +180,7 @@ fn instructions_the_table_does_not_know_decode_to_unknown() {
             continue;
         }
         let data = decode_b58(&fx.sample_data_b58);
-        let d = decode_pumpfun(&data);
+        let d = decode(Program::PumpFun, &data);
         assert!(
             d.is_unrecognised(),
             "unnamed discriminator {disc_hex} decoded to {d:?} — a name was guessed"
@@ -207,7 +207,7 @@ fn the_anchor_event_tag_is_present_and_not_treated_as_an_instruction() {
     assert_eq!(event.discriminator, pumpfun::ANCHOR_EVENT_CPI.to_string());
     let data = decode_b58(&event.sample_data_b58);
     assert!(
-        decode_pumpfun(&data).is_unrecognised(),
+        decode(Program::PumpFun, &data).is_unrecognised(),
         "the event CPI tag must not resolve to a user instruction"
     );
 }

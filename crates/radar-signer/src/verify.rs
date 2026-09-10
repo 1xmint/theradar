@@ -440,16 +440,23 @@ fn lamports_transferred(message: &Message) -> u64 {
 /// instruction whose discriminator is not in the decoder's table or whose
 /// arguments are truncated. Rule 9: an unreadable size is unknown, not zero.
 fn lamports_bought(message: &Message) -> Result<u64, Vec<Rejection>> {
+    let program = radar_decode::Program::PumpFun;
     let mut total = 0u64;
     let mut unreadable = Vec::new();
+    // The venue is named once, here, and the decoder is given it. It is
+    // deliberately `PumpFun` and nothing else: this process signs the bonding
+    // curve and only the bonding curve, and PumpSwap's `buy` carries the same
+    // eight bytes, so a filter that widened by accident would have read an AMM
+    // trade as a curve trade and bounded a spend against the wrong pool.
     for instruction in message
         .instructions
         .iter()
-        .filter(|i| i.program_id == *radar_decode::pumpfun::PROGRAM_ID.as_bytes())
+        .filter(|i| radar_decode::Program::at(&Address::new(i.program_id)) == Some(program))
     {
-        let Some(known) = radar_decode::decode_pumpfun(&instruction.data)
+        let Some(known) = radar_decode::decode(program, &instruction.data)
             .known()
             .copied()
+            .and_then(radar_decode::Instruction::pumpfun)
         else {
             unreadable.push(Rejection::UnreadableVenueInstruction(
                 radar_decode::Discriminator::from_data(&instruction.data)
@@ -463,7 +470,7 @@ fn lamports_bought(message: &Message) -> Result<u64, Vec<Rejection>> {
         // A buy that decodes to a known variant but whose arguments are
         // truncated is refused rather than skipped: the discriminator said this
         // instruction spends, and the payload would not say how much.
-        let Some(Ok(trade)) = radar_decode::decode_pumpfun_trade(&instruction.data) else {
+        let Some(Ok(trade)) = radar_decode::pumpfun::trade_args(known, &instruction.data) else {
             unreadable.push(Rejection::UnreadableVenueInstruction(
                 known.anchor_name().to_owned(),
             ));
