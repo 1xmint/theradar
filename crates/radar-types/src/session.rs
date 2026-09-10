@@ -113,7 +113,7 @@ pub struct SessionRecord {
     /// The clocks that make a fill honest.
     pub timings: Timings,
     /// What the account is worth, or why that cannot be said.
-    pub equity: EquityReport,
+    pub equity: AccountView,
 }
 
 impl SessionRecord {
@@ -589,6 +589,40 @@ pub enum NoEntryTime {
     VisibilityUnattested,
 }
 
+/// Whether the account could be read at all.
+///
+/// An account that could not be read is not an empty one, and the two would
+/// print identically as a row of zeros. `radar consider` already refuses to size
+/// against a portfolio it could not read; this is the same refusal on the
+/// reporting side, where the convenient default is a clean sheet.
+#[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AccountView {
+    /// It was read, and this is what it said.
+    Read(EquityReport),
+    /// It was not, and nothing about it is known — not even that it is empty.
+    Unreadable {
+        /// What the read said, as the operator would have been told.
+        because: String,
+    },
+}
+
+impl AccountView {
+    /// The equity, when an account was read and could state one.
+    ///
+    /// Two absences fold into `None` here and they are kept apart everywhere a
+    /// reader looks: an account nobody could read, and one holding something
+    /// nobody could price. This method exists for the callers that only need to
+    /// know there is no number.
+    #[must_use]
+    pub fn equity_micro_usd(&self) -> Option<i64> {
+        match self {
+            Self::Read(report) => report.equity.micro_usd(),
+            Self::Unreadable { .. } => None,
+        }
+    }
+}
+
 /// What the account is worth, or why that cannot be said.
 #[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub struct EquityReport {
@@ -716,8 +750,9 @@ impl EquityTotal {
 #[cfg(test)]
 mod tests {
     use super::{
-        CoverageState, EarliestEntry, EquityTotal, Funnel, MoneySpent, NoEntryTime, Refusals,
-        SessionRecord, Spend, UnmeasuredCost, UnrealisedReport, Visibility, WindowCoverage,
+        AccountView, CostsReport, CoverageState, EarliestEntry, EquityReport, EquityTotal, Funnel,
+        MoneySpent, NoEntryTime, Refusals, SessionRecord, Spend, UnmeasuredCost, UnrealisedReport,
+        Visibility, WindowCoverage,
     };
     use crate::{SignedMicroUsd, Slot, Unrealised, Unvaluable};
 
@@ -858,7 +893,11 @@ mod tests {
             ..Funnel::default()
         };
         assert_eq!(f.paid_unaccounted(), 0);
-        assert_eq!(f.unaccounted(), 0, "an empty outer funnel is still balanced");
+        assert_eq!(
+            f.unaccounted(),
+            0,
+            "an empty outer funnel is still balanced"
+        );
     }
 
     #[test]
@@ -927,7 +966,10 @@ mod tests {
         // Three reasons on one candidate is three raisings and one candidate,
         // and the report must never present the first number as the second.
         let r = Refusals {
-            free_tier: vec![("NoExitSimulated".to_owned(), 40), ("NoRoute".to_owned(), 2)],
+            free_tier: vec![
+                ("NoExitSimulated".to_owned(), 40),
+                ("NoRoute".to_owned(), 2),
+            ],
             paid_tier: vec![("CreatorUnproven".to_owned(), 3)],
             kernel: vec![("NoAutonomy".to_owned(), 1)],
             portfolio: vec![],
@@ -979,6 +1021,39 @@ mod tests {
                 SessionRecord::key(Slot(10), 5),
             ]
         );
+    }
+
+    #[test]
+    fn an_account_nobody_could_read_is_not_an_empty_one() {
+        // A row of zeros is what an unreadable account and a flat one both look
+        // like once a report has flattened them, and only one of them is a
+        // measurement. Re-apply the bug -- report an unreadable account as a
+        // read one holding nothing -- and this fails.
+        let unreadable = AccountView::Unreadable {
+            because: "positions unreadable".to_owned(),
+        };
+        assert_eq!(unreadable.equity_micro_usd(), None);
+
+        let flat = AccountView::Read(EquityReport {
+            holdings: 0,
+            unaccounted: 0,
+            realised_micro_usd: 0,
+            unrealised: UnrealisedReport::Known {
+                micro_usd: 0,
+                as_of: Slot(1),
+            },
+            equity: EquityTotal::Known {
+                micro_usd: 0,
+                as_of: Slot(1),
+            },
+            costs: CostsReport::default(),
+        });
+        assert_eq!(
+            flat.equity_micro_usd(),
+            Some(0),
+            "an account that was read and holds nothing states its zero"
+        );
+        assert_ne!(unreadable, flat);
     }
 
     #[test]

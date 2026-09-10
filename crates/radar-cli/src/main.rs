@@ -29,6 +29,7 @@ mod replay;
 mod roast;
 mod route;
 mod selection;
+mod session;
 mod seven_days;
 mod study;
 
@@ -68,7 +69,13 @@ commands:
                                  run the whole decision lane over recorded
                                  tokens; commits nothing. --record appends what
                                  was decided to the store's decisions table,
-                                 which is what a later join against prices needs
+                                 which is what a later join against prices needs,
+                                 and keeps one session record per run under
+                                 <dir>/sessions
+  report --store <dir>           the morning report: the last consider run's
+                                 coverage, denominators, refusals, spend, fill
+                                 clocks and equity. Says what it could not see
+                                 rather than printing a zero for it
   replay --store <dir> --record <file> [--window N] [--cohort N]
                                  record what the strategy decides now
   replay --store <dir> --check <file>
@@ -636,7 +643,18 @@ fn graduation_report(args: &[String]) -> Result<(), String> {
 
 /// Runs the whole decision lane over recorded tokens.
 fn decision_lane(args: &[String]) -> Result<(), String> {
-    let reader = store_of(args)?;
+    // Named as well as opened. The session record says which store a run was
+    // taken against, because a report read a month later beside a different
+    // store is a report about a run nobody can find.
+    let store = flag(args, "--store").ok_or_else(|| {
+        format!(
+            "--store is required
+
+{}",
+            usage()
+        )
+    })?;
+    let reader = Reader::open(&store);
     let window = flag(args, "--window")
         .and_then(|v| v.parse().ok())
         // ~24 hours at 2.5 slots a second. A token older than this has either
@@ -653,7 +671,7 @@ fn decision_lane(args: &[String]) -> Result<(), String> {
         Some(value) => consider::Pricing::parse(&value)?,
         None => consider::Pricing::default(),
     };
-    consider::run(&reader, window, cap, record_to.as_deref(), pricing)
+    consider::run(&reader, &store, window, cap, record_to.as_deref(), pricing)
 }
 
 /// Where `consider` should record its decisions, if anywhere.
@@ -670,6 +688,40 @@ fn record_target(args: &[String]) -> Option<String> {
     flag(args, "--record")
         .filter(|v| !v.starts_with("--"))
         .or_else(|| flag(args, "--store"))
+}
+
+/// Prints the last kept `consider` run.
+///
+/// # Errors
+///
+/// Returns a message when the sessions directory cannot be listed, when the
+/// newest record does not parse, or when there is no record at all.
+///
+/// The last of those is an error rather than an empty page, and the distinction
+/// is the same one the whole report is about: a store nobody has run the lane
+/// against and a run that found nothing print identically otherwise, and only
+/// one of them is a measurement.
+fn morning_report(args: &[String]) -> Result<(), String> {
+    let dir = flag(args, "--store").ok_or_else(|| {
+        format!(
+            "--store is required
+
+{}",
+            usage()
+        )
+    })?;
+    match session::latest(&dir)? {
+        Some(record) => {
+            print!("{}", session::render(&record));
+            Ok(())
+        }
+        None => Err(format!(
+            "no session record under {dir}/{}.
+
+             `radar consider --store {dir} --record` keeps one per run. A store              with none is a store nobody has run the decision lane against, which              is not the same as a run that found nothing -- and printing an empty              report would make the two look alike.",
+            session::SESSIONS_DIR
+        )),
+    }
 }
 
 /// Reports whether the selection beat the population.
@@ -849,6 +901,7 @@ fn main() -> ExitCode {
         "audit" => audit::run(&args),
         "model-prices" => model_prices::run(&args),
         "selection" => selection_report(&args),
+        "report" => morning_report(&args),
         "basis" => basis_report(&args),
         "control" => control_report(&args),
         "cost" => cost_report(&args),
