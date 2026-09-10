@@ -427,3 +427,32 @@ fn the_usdc_quoted_pool_reads_as_usdc_and_not_as_lamports() {
         "the slot the capture recorded"
     );
 }
+
+#[test]
+fn each_role_names_itself_distinctly_in_a_refusal() {
+    // `Role::name` only ever reaches a person, in the message saying which of
+    // five accounts could not be read. That makes it plumbing rather than
+    // logic -- but plumbing with one job, and it fails at that job in exactly
+    // two ways: a name that is blank, and five names that are the same.
+    //
+    // Both leave an operator holding "could not read the account" with no way
+    // to know which account, against a read that fetches five of them in one
+    // call. So the property worth pinning is not the spelling, it is that the
+    // five are distinguishable and non-empty. Asserting the literals instead
+    // would be a test of the words, which is the redundancy AGENTS.md refuses.
+    let names: Vec<&str> = Role::ORDER.iter().map(|r| r.name()).collect();
+    assert_eq!(names.len(), 5, "five accounts are read together");
+
+    for (role, name) in Role::ORDER.iter().zip(&names) {
+        assert!(!name.is_empty(), "{role:?} has no name to print");
+    }
+
+    let mut unique = names.clone();
+    unique.sort_unstable();
+    unique.dedup();
+    assert_eq!(
+        unique.len(),
+        names.len(),
+        "two roles share a name, so a refusal cannot say which account failed: {names:?}"
+    );
+}

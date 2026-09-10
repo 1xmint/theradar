@@ -212,6 +212,28 @@ exclude_re = [
     # discovered on the first real reply.
     'replace Credentials::from_env -> Option<Self> with None',
 
+    # A third category, and it is neither of the two above, so it says so rather
+    # than borrowing a word that would not be true.
+    #
+    # `extensions` walks a Token-2022 account's extension list, and every path
+    # out of the loop returns. The `Err` after it computes `data.len() - at` for
+    # a `remaining` field, and it is reachable only if the walk stopped
+    # advancing -- which the arithmetic in the loop cannot do, because the walk
+    # is bounded and `at` strictly increases. It is written as a refusal rather
+    # than `unreachable!` on purpose: the one thing worse than a parser that
+    # gives up on a token account is one that panics on it.
+    #
+    # So the mutation is not equivalent -- `+` and `/` genuinely compute
+    # something else -- and it is not dead in the sandbox either. It is dead
+    # everywhere, and the line exists so that a future change which *does* make
+    # the walk stall reports a length instead of aborting. Deleting the line to
+    # satisfy the mutant would remove that, which is the wrong trade.
+    #
+    # Applied by hand, both operators: the suite passes unchanged, because no
+    # input reaches the line to observe the difference.
+    'replace - with + in extensions',
+    'replace - with / in extensions',
+
     # `Router::from_env` is the fourth of the shape and the same argument. It
     # reads one environment variable and hands it to `from_vars`, which decides
     # -- and that decision is tested three ways in
