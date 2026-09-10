@@ -333,13 +333,10 @@ pub async fn ask(
     // something is broken now. Collapsing them into a 200 carrying an
     // abstention would be how a spent budget gets diagnosed as a bad answer.
     if let Some(radar_agent::Abstained::Unavailable(why)) = &outcome.abstained {
-        if let Ok(mut last) = chat.last.lock() {
-            *last = match why {
-                Unavailable::Unreachable(detail) => LastCall::Failed {
-                    why: detail.clone(),
-                },
-                _ => LastCall::Ok,
-            };
+        if let Some(record) = last_call(why, outcome.turns)
+            && let Ok(mut last) = chat.last.lock()
+        {
+            *last = record;
         }
         return unavailable(why);
     }
@@ -387,6 +384,26 @@ pub fn today_utc() -> u64 {
 /// A refusal with a reason a person can act on.
 pub(crate) fn refuse(status: StatusCode, why: &str) -> Response {
     (status, Json(json!({ "error": why }))).into_response()
+}
+
+/// What an investigation that the boundary refused says about the provider.
+///
+/// `None` means **nothing was learned**, and that is the answer for three of
+/// the four. A budget that refused before the first turn never contacted the
+/// provider, so recording either `Ok` or `Failed` would be a claim about a call
+/// nobody made — the rule 9 shape, in the one field `radar brief` alarms on.
+///
+/// The exceptions are the two ends. A provider that could not be reached failed,
+/// whatever else went on. And a budget that ran out *after* some turns went out
+/// means those turns succeeded, so the provider is demonstrably working.
+fn last_call(why: &Unavailable, turns: u32) -> Option<LastCall> {
+    match why {
+        Unavailable::Unreachable(detail) => Some(LastCall::Failed {
+            why: detail.clone(),
+        }),
+        _ if turns > 0 => Some(LastCall::Ok),
+        _ => None,
+    }
 }
 
 /// Maps a policy refusal to a status.
@@ -538,6 +555,36 @@ mod tests {
             !SYSTEM.contains("cannot request more evidence"),
             "the pre-loop instruction is gone, not merely contradicted"
         );
+    }
+
+    #[test]
+    fn a_refusal_before_the_first_turn_says_nothing_about_the_provider() {
+        // `radar brief` alarms on this field, so a value written about a call
+        // nobody made is a false green or a false red. Both directions, and
+        // both sides of the turn count.
+        assert_eq!(
+            last_call(&Unavailable::Unreachable("the CLI exited".to_owned()), 0),
+            Some(LastCall::Failed {
+                why: "the CLI exited".to_owned()
+            }),
+            "an unreachable provider failed whatever else went on"
+        );
+        for why in [
+            Unavailable::OverBudget,
+            Unavailable::NoBudget,
+            Unavailable::NoProvider,
+        ] {
+            assert_eq!(
+                last_call(&why, 0),
+                None,
+                "{why:?}: nothing was called, so nothing is known"
+            );
+            assert_eq!(
+                last_call(&why, 1),
+                Some(LastCall::Ok),
+                "{why:?}: a turn went out and came back, so it works"
+            );
+        }
     }
 
     #[test]

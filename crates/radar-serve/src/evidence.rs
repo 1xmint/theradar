@@ -176,17 +176,28 @@ pub fn look_up(
     // default: a size chosen here would invent the premise of the answer.
     match instrument.call(json!({ "creator": argument, "mint": argument }), context) {
         Ok(value) => {
-            let rendered = value.to_string();
-            // An instrument that answered with an empty object looked and found
-            // nothing, which is a real answer and not a fault.
-            let availability = if rendered == "{}" || rendered == "null" {
+            // An instrument answering as of slot zero is answering about an
+            // empty instance: `Reader::watermark` returned nothing, so there is
+            // no recorded history for it to have read. Its zeros are real zeros
+            // about no data, and calling that `Recorded` is the rule 9 failure
+            // in its most convincing form -- a full object of confident zeroes.
+            //
+            // An earlier draft decided this by comparing the rendered JSON
+            // against `{}` and `null`. No instrument in the registry can produce
+            // either, so the branch was unreachable and three mutants of it
+            // survived CI. Deciding it from the watermark is both reachable and
+            // the thing actually being asked.
+            let availability = if as_of_slot == 0 {
                 Availability::Absent {
-                    why: format!("`{name}` has no record of {argument} at slot {as_of_slot}"),
+                    why: format!(
+                        "nothing is recorded on this instance, so `{name}` had no history \
+                         of {argument} to read"
+                    ),
                 }
             } else {
                 Availability::Recorded { as_of_slot }
             };
-            Fact::found(&source, availability, truncate(&rendered))
+            Fact::found(&source, availability, truncate(&value.to_string()))
                 .map(|fact| fact.not_knowing(format!("anything observed after slot {as_of_slot}")))
                 .ok_or_else(|| format!("`{name}`: a look-up with no source is not a fact"))
         }

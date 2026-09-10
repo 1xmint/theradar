@@ -23,7 +23,7 @@
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use radar_agent::investigate::{Abstained, Action, Bounds, Rejected};
+use radar_agent::investigate::{Abstained, Action, Availability, Bounds, Rejected};
 use radar_agent::{Agent, Allowlist, Budget, Config, Unavailable};
 use radar_instruments::{CreatorHistory, CreatorTrackRecord, Registry, SimulateExit};
 use radar_model::{Answer, Provider, Request, Unreachable};
@@ -542,6 +542,55 @@ fn the_turn_counter_is_the_only_one_and_it_bounds_the_whole_investigation() {
     assert_eq!(
         outcome.spent,
         MicroUsd(ESTIMATE.get() * u64::from(Bounds::SHIPPED.max_turns))
+    );
+}
+
+#[test]
+fn an_empty_instance_answers_absent_rather_than_a_confident_zero() {
+    // Rule 9's most convincing failure. `creator_history` on an instance with
+    // nothing recorded returns a full object of zeroes -- launches 0, duplicates
+    // 0, failures 0 -- which reads exactly like a clean creator, and a model
+    // shown it will say so. It is not clean; there is no data.
+    //
+    // Both directions, because the whole point is that they must not look alike.
+    let empty = tempfile::tempdir().expect("tempdir");
+    let full = populated();
+    let registry = registry();
+
+    let mut absent = None;
+    let mut recorded = None;
+    for (dir, slot) in [(empty.path(), &mut absent), (full.path(), &mut recorded)] {
+        let store = Reader::open(dir);
+        let mut agent = agent(8);
+        let puppet = Puppet::new(vec![ask_for("creator_history", HARMLESS)]);
+        let investigation = Investigation {
+            registry: &registry,
+            store: &store,
+            bounds: Bounds::SHIPPED,
+            strategy_version: STRATEGY_VERSION,
+        };
+        let outcome = investigation.run(
+            SYSTEM,
+            "what do we know?",
+            &mut agent,
+            &Session {
+                provider: &puppet,
+                day: 1,
+                elapsed: &|| 0,
+                record: &|_| {},
+            },
+        );
+        assert_eq!(outcome.facts.len(), 1, "{:?}", outcome.facts);
+        *slot = Some(outcome.facts[0].availability().clone());
+    }
+
+    assert!(
+        matches!(absent, Some(Availability::Absent { .. })),
+        "an instance with nothing recorded said: {absent:?}"
+    );
+    assert!(
+        matches!(recorded, Some(Availability::Recorded { .. })),
+        "an instance with data said: {recorded:?}"
     );
 }
 
