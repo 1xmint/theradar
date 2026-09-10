@@ -42,6 +42,15 @@ use radar_types::{Address, Custody, Market, MicroUsd, Portfolio};
 /// somebody's free endpoint.
 const PAID_TIER_CAP: usize = 25;
 
+/// Where operations against the account are recorded.
+///
+/// Alongside the analyst's journal rather than inside it: the two are read by
+/// different commands and one of them is on the money path. Nothing writes this
+/// file yet — execution is shut — and an absent one opens as a log with nothing
+/// outstanding, which is the honest reading for an instance that has never
+/// operated.
+const OPERATIONS_JOURNAL: &str = "data/execution/operations.jsonl";
+
 /// Runs the lane.
 ///
 /// # Errors
@@ -284,7 +293,28 @@ fn inventory(
     // `Custody::Unattributed` rather than an invented address. No position row
     // names a wallet and this instance has none configured, so the honest value
     // is the one that can hold nothing and reserve nothing (rule 8).
-    let portfolio = radar_store::portfolio_from(Custody::Unattributed, watermark, &folded);
+    let mut portfolio = radar_store::portfolio_from(Custody::Unattributed, watermark, &folded);
+
+    // Capital an unfinished operation already claimed is not capital this pass
+    // may size against, and the claim lives in a process that may have died
+    // since. Re-taking it happens **before** the kernel sees the account: a
+    // portfolio assembled from balances alone reports a wallet that looks
+    // richer than it is by exactly the amount somebody else's transaction is
+    // about to spend.
+    //
+    // The file does not exist on any instance today, and an operations journal
+    // that was never written to opens empty — nothing outstanding, nothing
+    // re-taken. That is a measurement rather than a silence: the log
+    // distinguishes it from a file it could not read, which is an error here.
+    let mut operations = radar_journal::OperationLog::open(OPERATIONS_JOURNAL).map_err(|e| {
+        format!("the operations journal at {OPERATIONS_JOURNAL} cannot be read, so what is already claimed is unknown: {e}")
+    })?;
+    operations.rehold(&mut portfolio).map_err(|e| {
+        format!(
+            "an operation still outstanding cannot be re-held against the account ({e}); refusing to size new risk while a claim is unaccounted for"
+        )
+    })?;
+
     if let Some(gap) = portfolio.incompleteness() {
         return Err(format!(
             "the recorded inventory cannot be fully accounted for ({gap:?}); refusing to size new risk against totals that are lower bounds"

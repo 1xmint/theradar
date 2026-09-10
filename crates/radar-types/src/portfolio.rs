@@ -507,7 +507,14 @@ impl Reservation {
 ///
 /// There is no `Expired`. See the module documentation: a claim released on a
 /// timer frees capital while the transaction may still land.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+///
+/// Serialisable because a durable operation record has to carry the outcome it
+/// closed on — `radar-journal`'s `OperationState` writes one to disk. A
+/// settlement that only existed in memory would be re-derived after a restart
+/// from whatever the world looks like then, which is the divergence
+/// `audit replay` is missing its inputs to avoid.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum Settlement {
     /// Everything outstanding was spent. The claim closes.
     Filled,

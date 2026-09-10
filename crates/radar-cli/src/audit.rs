@@ -309,6 +309,7 @@ const fn stage_label(stage: Stage) -> &'static str {
         Stage::WinnerSelected => "winner       ",
         Stage::Claim => "claim        ",
         Stage::Payout => "payout       ",
+        Stage::Operation => "operation    ",
     }
 }
 

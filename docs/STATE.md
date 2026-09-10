@@ -343,14 +343,33 @@ deployed. It now propagates.
 
 Be exact about the reach. **Nothing writes a position row**, so every portfolio
 this assembles today is empty and complete — which is true, and is why the
-refusal is not a check that fires on the normal case. There is no durable
-operation record, so
+refusal is not a check that fires on the normal case.
 [`radar_store::portfolio_from`](../crates/radar-store/src/portfolio.rs) records
 an open position as **exposure it cannot quantify** rather than as a holding: the
 row carries dollars committed, not units received, decimals, or which token
 program the mint is on. And nothing reconciles any of it against the chain —
 [`radar-onchain`](../crates/radar-onchain) can read accounts atomically at one
 slot and is deliberately not wired in yet.
+
+**As of 2026-09-10 a claim on capital also survives the process holding it.**
+[ADR 0022](adr/0022-a-claim-on-capital-outlives-the-process-holding-it.md).
+[`radar_journal::OperationLog`](../crates/radar-journal/src/operation.rs) is the
+durable operation record, and the first caller of ADR 0017's rule on the money
+path: six states, a claim re-taken at startup, one recorded change applied once,
+and an effect that runs only after its intent reached disk. `SubmissionUnknown`
+— an effect released whose answer never arrived — **cannot be written off as a
+failure**; the only exits carry a settlement somebody established, so a lost
+response can no longer free capital while the transaction is still landing.
+`radar consider` reopens the log and re-holds what is outstanding before the
+kernel sizes anything.
+
+The same exactness applies. **No instance has an operations journal**: execution
+is shut, nothing writes the file, and an absent one opens with nothing
+outstanding — kept apart from a file that could not be read, which is a refusal.
+Nothing reconciles an unknown submission against the chain either, so one that
+never hears back holds its claim until a person resolves it. That is the safe
+direction and it is a real cost: an unattended loop can starve itself of capital
+this way, and it cannot lose it.
 
 **The customer lane also composes, as of 2026-09-01**, in
 [`the_customer_lane_composes.rs`](../crates/radar-exec/tests/the_customer_lane_composes.rs),
