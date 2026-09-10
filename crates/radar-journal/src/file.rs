@@ -6,6 +6,7 @@ use std::io::Write as _;
 use std::path::{Path, PathBuf};
 
 use crate::event::{Correlation, Event, MAX_REDACTED, Outcome, Recorded, SCHEMA_VERSION, Stage};
+use crate::operation::OperationEntry;
 
 /// The line terminator, as a byte.
 ///
@@ -158,7 +159,7 @@ impl Journal {
             return Err(JournalError::NoCorrelation);
         }
 
-        let mut event = Event {
+        self.append(Event {
             schema: SCHEMA_VERSION,
             sequence: self.sequence + 1,
             id: String::new(),
@@ -173,7 +174,58 @@ impl Journal {
             config: None,
             public_reason,
             redacted,
-        };
+            operation: None,
+        })
+    }
+
+    /// Writes one event about an operation, and returns the receipt.
+    ///
+    /// A second entry point rather than a ninth parameter on
+    /// [`record`](Self::record): the two callers want different things, and
+    /// widening the shared signature would have changed every existing call
+    /// site to pass `None` for a field none of them has.
+    ///
+    /// The receipt's id is what identifies the operation — see
+    /// [`OperationId`](crate::OperationId). A caller cannot choose it, which is
+    /// the property the whole module rests on.
+    ///
+    /// # Errors
+    ///
+    /// [`JournalError`] if the event is refused or the write fails. **A caller
+    /// that receives one must not perform the effect it was about to perform.**
+    pub fn record_operation(
+        &mut self,
+        outcome: Outcome,
+        at: u64,
+        correlation: Correlation,
+        operation: OperationEntry,
+        build: Option<String>,
+        public_reason: Option<String>,
+    ) -> Result<Recorded, JournalError> {
+        if correlation.is_empty() {
+            return Err(JournalError::NoCorrelation);
+        }
+        self.append(Event {
+            schema: SCHEMA_VERSION,
+            sequence: self.sequence + 1,
+            id: String::new(),
+            previous: self.previous.clone(),
+            correlation,
+            stage: Stage::Operation,
+            outcome,
+            at,
+            took_ms: None,
+            build,
+            versions: Vec::new(),
+            config: None,
+            public_reason,
+            redacted: None,
+            operation: Some(operation),
+        })
+    }
+
+    /// Fills in the id, writes the line, and syncs it before the receipt exists.
+    fn append(&mut self, mut event: Event) -> Result<Recorded, JournalError> {
         event.id = event.digest();
 
         let line = serde_json::to_string(&event)?;

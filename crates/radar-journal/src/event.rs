@@ -52,6 +52,13 @@ pub enum Stage {
     Claim,
     /// A payout was prepared, submitted, confirmed or reconciled.
     Payout,
+    /// An operation against the account moved from one state to the next.
+    ///
+    /// The money path's own stage. Every event carrying it also carries an
+    /// [`OperationEntry`](crate::OperationEntry), which is what makes the record
+    /// something a restart can be rebuilt from rather than something a person
+    /// can read.
+    Operation,
 }
 
 /// How a stage came out.
@@ -106,6 +113,14 @@ pub struct Correlation {
     /// The mint everything here is about.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mint: Option<String>,
+    /// The operation this event advances.
+    ///
+    /// The id of the event that proposed it, so every later event about the
+    /// same operation is findable from the one that opened it. Absent on the
+    /// proposal itself, which *is* that event and cannot name its own id
+    /// without the digest covering a field derived from the digest.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub operation: Option<String>,
 }
 
 impl Correlation {
@@ -123,6 +138,7 @@ impl Correlation {
             && self.claim.is_none()
             && self.payout.is_none()
             && self.mint.is_none()
+            && self.operation.is_none()
     }
 }
 
@@ -186,6 +202,20 @@ pub struct Event {
     /// chain of thought — see [`MAX_REDACTED`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub redacted: Option<String>,
+    /// What an operation intended, what it reserved, and where it got to.
+    ///
+    /// Structured rather than folded into [`redacted`](Self::redacted), because
+    /// this is the field a restart is rebuilt from. A diagnostic string is
+    /// something a person reads; this is something the process parses before it
+    /// is allowed to believe its own balances.
+    ///
+    /// `None` on every event that is not about an operation, and **skipped
+    /// entirely** when it is `None`. The digest hashes it only when it is
+    /// present, so every chain written before this field existed still
+    /// verifies — an id that moved because a field was added would break every
+    /// journal already on disk.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub operation: Option<crate::operation::OperationEntry>,
 }
 
 impl Event {
@@ -234,6 +264,21 @@ impl Event {
             // would share an id.
             out.push(0);
             out.extend_from_slice(field.unwrap_or("").as_bytes());
+        }
+        // Appended **only when present**, and with a marker byte of its own.
+        //
+        // Nothing is pushed for `None`, which is what keeps every journal
+        // written before this field existed hashing to the same ids it already
+        // has on disk. Writing an unconditional separator here instead would
+        // change the digest of every historical event and turn every intact
+        // chain into `Verified::Broken` at sequence one.
+        if let Some(operation) = &self.operation {
+            out.push(1);
+            out.extend_from_slice(
+                serde_json::to_string(operation)
+                    .unwrap_or_default()
+                    .as_bytes(),
+            );
         }
         out
     }

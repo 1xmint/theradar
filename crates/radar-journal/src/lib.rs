@@ -9,11 +9,18 @@
 //! replace it and does not change it.
 //!
 //! It records the reply. It does not record the winner selection, the scoring
-//! mode, the spend reservation, the payout signature and its validity bounds, or
-//! the **ordering** of an external effect against the durable record of
-//! intending it. Those are the places where an unattended process loses money or
-//! publishes twice, and Radar is about to run a money-bearing loop with no human
-//! in it.
+//! mode, the payout signature and its validity bounds, or the **ordering** of an
+//! external effect against the durable record of intending it. Those are the
+//! places where an unattended process loses money or publishes twice, and Radar
+//! is about to run a money-bearing loop with no human in it.
+//!
+//! The spend reservation *is* recorded now, by [`OperationLog`]: a claim on
+//! capital survives a restart, a change recorded twice is applied once, and the
+//! effect runs only after the intent reached disk. That is also where
+//! [`Outcome::Uncertain`] finally has a state machine behind it —
+//! [`OperationState::SubmissionUnknown`] cannot be written off as a failure,
+//! which is how a reservation frees itself while the transaction is still
+//! landing.
 //!
 //! [ADR 0017](https://github.com/hey-vera/radar/blob/main/docs/adr/0017-the-journal-records-intent-before-effect-and-replay-proves-only-the-decision.md).
 //!
@@ -46,6 +53,11 @@
 
 mod event;
 mod file;
+mod operation;
 
 pub use event::{Correlation, Event, MAX_REDACTED, Outcome, Recorded, SCHEMA_VERSION, Stage};
 pub use file::{Journal, JournalError, Verified};
+pub use operation::{
+    Applied, Intent, OperationEntry, OperationError, OperationId, OperationLog, OperationState,
+    Released,
+};
