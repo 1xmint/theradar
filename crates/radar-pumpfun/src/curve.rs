@@ -57,9 +57,15 @@ pub struct BondingCurve {
 
 /// Why an account could not be read as the layout it was asked for.
 ///
-/// Shared by every parser in this crate -- the curve, the fee schedule and the
-/// global account -- because the two ways a Solana account can be the wrong
-/// thing do not vary by which thing you wanted.
+/// Shared by every parser in this crate -- the curve, the fee schedule, the
+/// global account and the PumpSwap pool -- because the ways a Solana account can
+/// be the wrong thing do not vary by which thing you wanted.
+///
+/// The first two are all a fixed layout can go wrong in. The last three exist
+/// because [`Pool`](crate::pool::Pool) is **not** a fixed layout: the same
+/// account is live on mainnet at eight different lengths, each one a longer
+/// prefix of the same field order, so "the account stopped early" is a legitimate
+/// state and "the account stopped in the *middle of a field*" is not.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Malformed {
     /// Fewer bytes than the layout needs.
@@ -77,6 +83,44 @@ pub enum Malformed {
     WrongDiscriminator {
         /// What the first eight bytes actually were.
         found: [u8; 8],
+    },
+    /// The account ends part-way through a field, so that field is neither
+    /// present nor absent.
+    ///
+    /// An account one byte into a thirty-two byte pubkey is a shape this layout
+    /// does not describe. Reading the field from the bytes that did arrive would
+    /// invent an address; treating it as absent would silently discard whichever
+    /// byte did arrive. Rule 9: unknown is not safe.
+    PartialField {
+        /// How many bytes the account has.
+        len: usize,
+        /// The field the account stops inside.
+        field: &'static str,
+        /// The length at which that field would be complete.
+        needed: usize,
+    },
+    /// A byte past the last known field is not zero.
+    ///
+    /// Every capture holds zero there and the field order is the vendor's, so a
+    /// non-zero byte means a field this layout does not know about is set. The
+    /// refusal is the alarm: a decoder that ignored the region would keep
+    /// answering confidently through a program upgrade that changed the answer.
+    UnknownTrailingData {
+        /// Offset of the first non-zero byte past the known fields.
+        at: usize,
+        /// What was there.
+        found: u8,
+    },
+    /// A byte the layout reads as a `bool` is neither zero nor one.
+    ///
+    /// Borsh refuses this and so does this parser. A byte of `2` in a flag slot
+    /// means the layout is wrong about where the flag is, and "not zero, so
+    /// true" would turn that into a confident answer.
+    NotABool {
+        /// Which flag.
+        field: &'static str,
+        /// What was there.
+        found: u8,
     },
 }
 
