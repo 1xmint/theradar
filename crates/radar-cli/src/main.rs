@@ -718,7 +718,10 @@ fn morning_report(args: &[String]) -> Result<(), String> {
         None => Err(format!(
             "no session record under {dir}/{}.
 
-             `radar consider --store {dir} --record` keeps one per run. A store              with none is a store nobody has run the decision lane against, which              is not the same as a run that found nothing -- and printing an empty              report would make the two look alike.",
+`radar consider --store {dir} --record` keeps one per run. A store with none is
+a store nobody has run the decision lane against, which is not the same as a run
+that found nothing -- and printing an empty report would make the two look
+alike.",
             session::SESSIONS_DIR
         )),
     }

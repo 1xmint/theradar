@@ -179,15 +179,7 @@ pub fn run(
     // pass that proposes nothing -- but propagated only where it always was, so
     // an unreadable inventory still stops the *sizing* and only the sizing.
     let inventory = inventory(reader, watermark);
-    session.equity = account_view(&inventory);
-    if let Ok((portfolio, _)) = &inventory {
-        session.refusals.portfolio = tally_of(
-            portfolio
-                .unaccounted()
-                .map(|(_, why)| format!("{why:?}"))
-                .collect(),
-        );
-    }
+    note_account(&mut session, &inventory);
 
     let verdicts_by_mint = verdicts(&pass.proposals, &inventory)?;
     record_pass(
@@ -555,6 +547,25 @@ const fn earliest_entry(policy_closed: bool, visible: Visibility) -> EarliestEnt
     match visible {
         Visibility::Unattested => EarliestEntry::Unknown(NoEntryTime::VisibilityUnattested),
         Visibility::At(_) => EarliestEntry::Unknown(NoEntryTime::LandingLatencyUnmeasured),
+    }
+}
+
+/// Writes the account and what it could not place into the record.
+///
+/// The exposure the account refused is a denominator too: a mint it could not
+/// place is not a mint it does not hold.
+fn note_account(
+    session: &mut SessionRecord,
+    inventory: &Result<(Portfolio, PortfolioState), String>,
+) {
+    session.equity = account_view(inventory);
+    if let Ok((portfolio, _)) = inventory {
+        session.refusals.portfolio = tally_of(
+            portfolio
+                .unaccounted()
+                .map(|(_, why)| format!("{why:?}"))
+                .collect(),
+        );
     }
 }
 
@@ -1917,6 +1928,399 @@ pub const fn default_cap() -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// One coverage row, with the fields a test cares about named.
+    fn covering(
+        table: Table,
+        recorded_at: u64,
+        observed: ObservedSlots,
+        status: Completion,
+    ) -> Coverage {
+        Coverage {
+            recorded_at: radar_types::Slot(recorded_at),
+            table,
+            filter: None,
+            observed,
+            source: "test".to_owned(),
+            decoder_version: "0".to_owned(),
+            status,
+        }
+    }
+
+    fn span(from: u64, to: u64) -> ObservedSlots {
+        ObservedSlots::Span {
+            from: radar_types::Slot(from),
+            to: radar_types::Slot(to),
+        }
+    }
+
+    #[test]
+    fn the_free_tier_refusals_land_in_the_funnel_and_the_funnel_balances() {
+        // The denominator, at the point it is written down. Design 0017 §6:
+        // "Do not discard excluded candidates from measurement." Re-apply the
+        // bug -- set `refused_free` to zero, or report the survivors as the
+        // window -- and `unaccounted` stops being nought and this fails.
+        let slot = radar_types::Slot(10_000);
+        let mut universe = one_launch(Address::new([1u8; 32]), slot);
+        for i in 2u8..=4 {
+            universe.launches.insert(
+                Address::new([i; 32]),
+                radar_strategy::assemble::LaunchFacts {
+                    creator: Address::new([9u8; 32]),
+                    slot,
+                    observed_at: slot,
+                },
+            );
+        }
+        let recent: Vec<Address> = universe.launches.keys().copied().collect();
+        assert_eq!(recent.len(), 4);
+
+        let mut session = draft(
+            "store",
+            slot,
+            216_000,
+            25,
+            &CreatorEdge::default(),
+            Pricing::Curve,
+            &[],
+        );
+        session.funnel.in_window = recent.len();
+        let worth = free_pass(
+            &mut session,
+            &universe,
+            &CreatorEdge::default(),
+            &recent,
+            Pricing::Curve,
+        );
+
+        // Every one of these creators is unproven, so the free tier refuses all
+        // four outright and no paid look could change it.
+        assert!(
+            worth.is_empty(),
+            "an unproven creator is not a paid question"
+        );
+        assert_eq!(
+            session.funnel.refused_free, 4,
+            "the refused candidates are counted, not dropped"
+        );
+        assert_eq!(
+            session.funnel.unaccounted(),
+            0,
+            "every in-window candidate lands in exactly one bucket"
+        );
+        assert!(
+            !session.refusals.free_tier.is_empty(),
+            "and each refusal keeps its reason and its count"
+        );
+        let raisings: usize = session.refusals.free_tier.iter().map(|(_, n)| *n).sum();
+        assert!(
+            raisings >= 4,
+            "one candidate raises at least one reason: {:?}",
+            session.refusals.free_tier
+        );
+    }
+
+    #[test]
+    fn a_window_nobody_collected_is_unattested_rather_than_empty() {
+        // The whole point of the coverage table, at the one call site that
+        // decides whether the run's counts mean anything. Re-apply the bug --
+        // return `MeasuredEmpty` when nothing is known -- and this fails, and a
+        // report over an uncollected window starts printing zeros that read as
+        // measurements.
+        let watermark = radar_types::Slot(500_000);
+        let window = 216_000;
+
+        assert_eq!(
+            window_coverage(&[], watermark, window),
+            WindowCoverage::Unattested,
+            "no coverage record at all attests nothing"
+        );
+
+        // A completed range that observed slots outside the window attests the
+        // window no more than an absent one does.
+        let elsewhere = [covering(
+            Table::Launches,
+            100,
+            span(1_000, 2_000),
+            Completion::Complete,
+        )];
+        assert_eq!(
+            window_coverage(&elsewhere, watermark, window),
+            WindowCoverage::Unattested
+        );
+
+        // A range that did not finish is an attempt, not a measurement.
+        let unfinished = [covering(
+            Table::Launches,
+            100,
+            span(300_000, 400_000),
+            Completion::Partial,
+        )];
+        assert_eq!(
+            window_coverage(&unfinished, watermark, window),
+            WindowCoverage::Unattested,
+            "an unfinished range covers nothing"
+        );
+
+        // And a range that finished and observed slots inside it does attest,
+        // clipped to the window rather than claiming past it.
+        let inside = [covering(
+            Table::Launches,
+            499_999,
+            span(200_000, 600_000),
+            Completion::Complete,
+        )];
+        assert_eq!(
+            window_coverage(&inside, watermark, window),
+            WindowCoverage::Attested {
+                from: radar_types::Slot(284_000),
+                to: watermark,
+            },
+            "a range is clipped to the window, never claimed past it"
+        );
+    }
+
+    #[test]
+    fn a_completed_collection_that_saw_nothing_is_a_measurement() {
+        // The other direction, and it has to hold or the test above passes by
+        // refusing to attest anything at all.
+        let rows = [covering(
+            Table::Launches,
+            499_999,
+            ObservedSlots::Nothing,
+            Completion::Complete,
+        )];
+        assert_eq!(
+            window_coverage(&rows, radar_types::Slot(500_000), 216_000),
+            WindowCoverage::MeasuredEmpty
+        );
+    }
+
+    #[test]
+    fn a_cohort_capture_does_not_attest_the_window_it_sits_in() {
+        // A row with a filter covers one mint. Reading it as coverage of the
+        // venue is the same error as reading a partition filename as coverage
+        // of a range, one level up.
+        let mut row = covering(
+            Table::Launches,
+            499_999,
+            span(400_000, 500_000),
+            Completion::Complete,
+        );
+        row.filter = Some("one-mint".to_owned());
+        assert_eq!(
+            window_coverage(
+                std::slice::from_ref(&row),
+                radar_types::Slot(500_000),
+                216_000
+            ),
+            WindowCoverage::Unattested
+        );
+        assert_eq!(
+            visibility(std::slice::from_ref(&row), radar_types::Slot(450_000)),
+            Visibility::Unattested,
+            "and it cannot date a launch's visibility either"
+        );
+    }
+
+    #[test]
+    fn a_launch_is_visible_no_earlier_than_the_collection_that_found_it() {
+        // Availability time, not event time. Re-apply the bug -- fall back to
+        // the launch slot when nothing attests -- and the second assertion
+        // fails, and every fill dates itself forty minutes early.
+        let rows = [
+            covering(Table::Launches, 900, span(100, 500), Completion::Complete),
+            covering(Table::Launches, 700, span(100, 500), Completion::Complete),
+            covering(Table::Launches, 600, span(600, 900), Completion::Complete),
+        ];
+        assert_eq!(
+            visibility(&rows, radar_types::Slot(300)),
+            Visibility::At(radar_types::Slot(700)),
+            "the earliest collection that contained it, not the first row"
+        );
+        assert_eq!(
+            visibility(&rows, radar_types::Slot(9_999)),
+            Visibility::Unattested,
+            "a launch no completed range contains has no attested visibility"
+        );
+    }
+
+    #[test]
+    fn a_table_with_no_coverage_record_is_never_attested() {
+        // Every table appears, and the ones nobody collected are the entries
+        // worth reading. A map that omitted them would report "nobody collected
+        // this" by saying nothing at all.
+        let rows = [covering(
+            Table::Launches,
+            10,
+            ObservedSlots::Nothing,
+            Completion::Complete,
+        )];
+        let tables = table_coverage(&rows);
+        assert_eq!(
+            tables.len(),
+            Table::ALL.len(),
+            "a table missing from the report is a table nobody can ask about"
+        );
+        let by_name = |name: &str| {
+            tables
+                .iter()
+                .find(|t| t.table == name)
+                .map(|t| t.state)
+                .expect("every table appears")
+        };
+        assert_eq!(
+            by_name("launches"),
+            CoverageState::Attested {
+                complete_spans: 0,
+                measured_empty: 1,
+                unfinished: 0,
+            }
+        );
+        assert_eq!(
+            by_name("trades"),
+            CoverageState::NeverAttested,
+            "a table with no record is not a table that was collected and empty"
+        );
+    }
+
+    #[test]
+    fn no_earliest_entry_is_named_under_a_closed_policy() {
+        // Not "the watermark, but we declined". There was no eligible slot at
+        // all, and the reason is recorded so an open policy gives a different
+        // answer rather than the same one for a new reason.
+        assert_eq!(
+            earliest_entry(true, Visibility::At(radar_types::Slot(10))),
+            EarliestEntry::Unknown(NoEntryTime::PolicyRefused)
+        );
+        assert_eq!(
+            earliest_entry(false, Visibility::At(radar_types::Slot(10))),
+            EarliestEntry::Unknown(NoEntryTime::LandingLatencyUnmeasured),
+            "an open policy still cannot name a slot without a measured latency"
+        );
+        assert_eq!(
+            earliest_entry(false, Visibility::Unattested),
+            EarliestEntry::Unknown(NoEntryTime::VisibilityUnattested)
+        );
+    }
+
+    #[test]
+    fn the_ledger_charges_the_calls_that_bought_nothing() {
+        // An arm cannot improve its number by discarding what it wasted.
+        // Mutation testing turns these `+= 1`s into `-= 1`s; without this the
+        // whole spend section is unreachable by any test.
+        let mut ledger = Ledger::default();
+        ledger.charged("launch_block", false);
+        ledger.charged("launch_block", false);
+        ledger.charged("launch_block", true);
+        ledger.attempted("launch_block", false);
+        ledger.attempted("exit_probe", true);
+
+        let spend = ledger.spend();
+        let launch = spend
+            .calls
+            .iter()
+            .find(|c| c.kind == "launch_block")
+            .expect("the kind is recorded under its own name");
+        assert_eq!(launch.attempted, 4);
+        assert_eq!(launch.failed, 1);
+        assert_eq!(
+            launch.produced_nothing, 2,
+            "answered and changed nothing is counted apart from failed"
+        );
+        assert_eq!(spend.attempted(), 5);
+        assert_eq!(spend.wasted(), 2);
+        assert_eq!(
+            spend.money.micro_usd(),
+            None,
+            "no rate table exists here, so the bill is unknown rather than free"
+        );
+    }
+
+    #[test]
+    fn an_unvaluable_holding_leaves_the_account_with_no_equity_figure() {
+        // The account side of rule 9, at the point the report is built from.
+        // Re-apply the bug -- report the realised half as the equity -- and
+        // this fails on the figure it finds.
+        let wallet = Address::new([7u8; 32]);
+        let mut portfolio = Portfolio::at(wallet, radar_types::Slot(1_000));
+        portfolio
+            .hold(
+                radar_types::Asset::Sol,
+                radar_types::Holding::new(
+                    radar_types::AssetRole::Position,
+                    radar_types::Balance::Counted(radar_types::TokenQuantity::lamports(
+                        1_000_000_000,
+                    )),
+                    // Held, counted, and unpriceable. Not absent -- absent would
+                    // be a different refusal.
+                    radar_types::Valuation::Unknown(radar_types::Unvaluable::NoPrice),
+                    radar_types::Valuation::Known {
+                        value: MicroUsd(2_000_000),
+                        as_of: radar_types::Slot(900),
+                    },
+                ),
+            )
+            .expect("an attributed portfolio can hold");
+
+        let view = account_view(&Ok((
+            portfolio,
+            radar_strategy::state_from(
+                &[],
+                radar_types::Slot(1_000),
+                radar_strategy::Operator {
+                    halted: false,
+                    consecutive_failures: 0,
+                },
+            ),
+        )));
+        let radar_types::AccountView::Read(report) = &view else {
+            panic!("the account was readable");
+        };
+        assert_eq!(
+            report.equity,
+            radar_types::EquityTotal::Unknown(radar_types::Unvaluable::NoPrice),
+            "one holding nobody could price removes the total"
+        );
+        assert_eq!(view.equity_micro_usd(), None);
+        assert_eq!(report.holdings, 1, "and the holding is still reported");
+    }
+
+    #[test]
+    fn an_unreadable_account_is_not_an_empty_one() {
+        // The state `inventory` refuses the pass on. A row of zeros here would
+        // be a report claiming the account is flat when nobody could read it.
+        let view = account_view(&Err("positions unreadable".to_owned()));
+        assert_eq!(
+            view,
+            radar_types::AccountView::Unreadable {
+                because: "positions unreadable".to_owned()
+            }
+        );
+        assert_eq!(view.equity_micro_usd(), None);
+    }
+
+    #[test]
+    fn the_window_line_says_which_of_the_three_answers_it_is() {
+        // The line an operator reads before any count, and a `match` inside a
+        // `println!` is a match no test can reach.
+        let unattested = render_window_coverage(WindowCoverage::Unattested);
+        assert!(
+            unattested.contains("NOTHING ATTESTS THESE SLOTS"),
+            "{unattested}"
+        );
+        assert!(
+            render_window_coverage(WindowCoverage::MeasuredEmpty)
+                .contains("A zero below is a measurement"),
+        );
+        assert!(
+            render_window_coverage(WindowCoverage::Attested {
+                from: radar_types::Slot(1),
+                to: radar_types::Slot(2),
+            })
+            .contains("attested over slots 1"),
+        );
+    }
 
     #[test]
     fn only_a_stronger_later_reading_is_announced() {
