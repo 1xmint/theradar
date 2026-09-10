@@ -126,14 +126,21 @@ pub fn launch_from(tx: &Transaction) -> Result<(Address, Metadata), NotALaunch> 
         // `is_launch` covers `create` and `create_v2` both: checking for one
         // silently drops the other, and a launch Radar never sees is a launch
         // Radar reports as absent.
-        let decoded = radar_decode::decode_pumpfun(&ix.data);
-        let radar_decode::Decoded::Known(instruction) = decoded else {
+        // The program is handed to the decoder rather than merely checked before
+        // it: pump.fun and PumpSwap share seven discriminators, so bytes alone
+        // do not say which venue an instruction is on.
+        let decoded = radar_decode::decode(radar_decode::Program::PumpFun, &ix.data);
+        let Some(instruction) = decoded
+            .known()
+            .copied()
+            .and_then(radar_decode::Instruction::pumpfun)
+        else {
             continue;
         };
         if !instruction.is_launch() {
             continue;
         }
-        let Some(parsed) = radar_decode::decode_pumpfun_launch(&ix.data) else {
+        let Some(parsed) = radar_decode::pumpfun::launch_args(instruction, &ix.data) else {
             return Err(NotALaunch::UnreadableArguments);
         };
         let launch = parsed.map_err(|_| NotALaunch::UnreadableArguments)?;
@@ -208,14 +215,17 @@ pub fn dev_buy_lamports(transactions: &[Transaction], creator: &Address) -> Opti
             continue;
         }
         for ix in tx.instructions.iter().filter(|i| i.program == program) {
-            let radar_decode::Decoded::Known(instruction) = radar_decode::decode_pumpfun(&ix.data)
+            let Some(instruction) = radar_decode::decode(radar_decode::Program::PumpFun, &ix.data)
+                .known()
+                .copied()
+                .and_then(radar_decode::Instruction::pumpfun)
             else {
                 continue;
             };
             if !instruction.is_buy() {
                 continue;
             }
-            let Some(Ok(trade)) = radar_decode::decode_pumpfun_trade(&ix.data) else {
+            let Some(Ok(trade)) = radar_decode::pumpfun::trade_args(instruction, &ix.data) else {
                 continue;
             };
             // `exact_lamports` is `None` for a token-exact buy, where the SOL figure

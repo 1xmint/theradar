@@ -21,7 +21,30 @@
 use std::collections::BTreeMap;
 
 use radar_decode::pumpfun::Instruction;
-use radar_decode::{Layout, Side, decode_pumpfun_launch, decode_pumpfun_trade};
+use radar_decode::{ArgError, Decoded, Launch, Layout, Program, Side, Trade, decode, pumpfun};
+
+/// Reads a trade out of a captured pump.fun payload.
+///
+/// Every sample in the fixture was captured from the pump.fun program, so the
+/// program is known here and is stated rather than assumed away: `decode` will
+/// not answer without it, because PumpSwap shares seven of these
+/// discriminators.
+fn pumpfun_trade(data: &[u8]) -> Option<Result<Trade, ArgError>> {
+    let Decoded::Known(radar_decode::Instruction::PumpFun(ix)) = decode(Program::PumpFun, data)
+    else {
+        return None;
+    };
+    pumpfun::trade_args(ix, data)
+}
+
+/// Reads a launch out of a captured pump.fun payload. See [`pumpfun_trade`].
+fn pumpfun_launch(data: &[u8]) -> Option<Result<Launch<'_>, ArgError>> {
+    let Decoded::Known(radar_decode::Instruction::PumpFun(ix)) = decode(Program::PumpFun, data)
+    else {
+        return None;
+    };
+    pumpfun::launch_args(ix, data)
+}
 
 const PAYLOADS: &str = include_str!("fixtures/pumpfun_payloads.json");
 
@@ -90,13 +113,13 @@ fn every_captured_payload_decodes() {
         for s in &blob.samples {
             let data = bytes(s);
             if ix.is_trade() {
-                let t = decode_pumpfun_trade(&data)
+                let t = pumpfun_trade(&data)
                     .unwrap_or_else(|| panic!("{name}: not recognised as a trade"))
                     .unwrap_or_else(|e| panic!("{name} sig {}: {e}", s.signature));
                 assert_eq!(t.side, if ix.is_buy() { Side::Buy } else { Side::Sell });
                 trades += 1;
             } else if ix.is_launch() {
-                decode_pumpfun_launch(&data)
+                pumpfun_launch(&data)
                     .unwrap_or_else(|| panic!("{name}: not recognised as a launch"))
                     .unwrap_or_else(|e| panic!("{name} sig {}: {e}", s.signature));
                 launches += 1;
@@ -137,9 +160,7 @@ fn the_layout_is_distinguishable_from_its_opposite() {
         let mut exacts = Vec::new();
         let mut bounds = Vec::new();
         for s in &blob.samples {
-            let t = decode_pumpfun_trade(&bytes(s))
-                .expect("trade")
-                .expect("decodes");
+            let t = pumpfun_trade(&bytes(s)).expect("trade").expect("decodes");
             exacts.push(t.exact.raw());
             bounds.push(t.limit.raw());
         }
@@ -207,7 +228,7 @@ fn sol_exact_instructions_pin_the_sol_side() {
             .samples
             .iter()
             .map(|s| {
-                decode_pumpfun_trade(&bytes(s))
+                pumpfun_trade(&bytes(s))
                     .expect("trade")
                     .expect("decodes")
                     .exact_lamports()
@@ -239,9 +260,7 @@ fn token_exact_instructions_pin_a_nonzero_token_amount() {
 
         let mut unbounded = 0;
         for s in &blob.samples {
-            let t = decode_pumpfun_trade(&bytes(s))
-                .expect("trade")
-                .expect("decodes");
+            let t = pumpfun_trade(&bytes(s)).expect("trade").expect("decodes");
             assert!(
                 t.exact_tokens().is_some_and(|v| v > 0),
                 "{name} sig {}: zero token amount",
@@ -279,9 +298,7 @@ fn launch_metadata_decodes_as_creator_supplied_text() {
         };
         for s in &blob.samples {
             let data = bytes(s);
-            let l = decode_pumpfun_launch(&data)
-                .expect("launch")
-                .expect("decodes");
+            let l = pumpfun_launch(&data).expect("launch").expect("decodes");
             assert_ne!(
                 l.creator,
                 radar_types::Address::new([0u8; 32]),
