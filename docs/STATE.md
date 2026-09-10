@@ -795,6 +795,27 @@ against the chain and append-only against its own log.
   [`radar-serve`'s ledger](../crates/radar-serve/src/ledger.rs) persists that
   across a restart. It is rule 8 enforced in the running system.
 
+  **As of 2026-09-10 the chat route is a loop rather than one call**, and the
+  meter is what bounds it. [ADR 0020](adr/0020-the-model-may-ask-and-the-answer-it-writes-is-a-recommendation-nobody-obeys.md):
+  the model may ask for a named piece of evidence, a request outside the
+  read-only allowlist is refused by name, and what it writes is a typed
+  `Recommendation` a deterministic adapter validates against the watermark, the
+  running strategy version and the sources Radar actually returned. Every model
+  call in a turn reserves before it goes out and settles after, and an
+  investigation that abstains — exhausted budget, tool outage, passed deadline,
+  rejected recommendation — reports what it spent rather than nothing.
+
+  **What that reaches: a `<p>` and a JSON field.** The adapter ships with a
+  requested-amount ceiling of zero, so it cannot adopt an `enter` at any size;
+  there is no path from a recommendation to a `Proposal` and `radar-agent` still
+  cannot depend on `radar-risk`, `radar-exec`, `radar-strategy` or
+  `radar-store`. **No live model has run through the loop.** The four safety
+  properties are proved against a deterministic fake in
+  [`the_loop_refuses_what_it_reads.rs`](../crates/radar-serve/tests/the_loop_refuses_what_it_reads.rs),
+  each verified by re-applying the bug; what has *not* been observed is how a
+  real model behaves inside it, including whether it answers in the wire format
+  at all.
+
   What is gone: the cache, the breaker and the planner that composed them —
   about 1,300 lines against the 484 that run, with no caller outside the crate
   and none since it was written. This file called for them to be wired or
