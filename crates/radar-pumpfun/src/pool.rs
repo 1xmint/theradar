@@ -46,7 +46,7 @@
 //! byte through 261 and the rest is zero. They are the owner programs of the two
 //! mints and must be read from the mints. They are worth naming here anyway
 //! because the capture disposes of two comfortable assumptions: they are not the
-//! same program as each other (four of the ten captured pools mix SPL Token and
+//! same program as each other (five of the ten captured pools mix SPL Token and
 //! Token-2022 across the two sides), and neither side is a constant (a pool's
 //! base can be Token-2022 with an SPL Token quote, and another pool has it the
 //! other way round). Token-2022's extensions change what a transfer delivers, so
@@ -103,9 +103,9 @@ pub struct Pool {
     /// `None` below 261 bytes. Signed and sixteen bytes wide because the chain
     /// says so -- see the module documentation. Every value observed on
     /// 2026-09-09 was non-negative and fitted in eight bytes, and the vendor's
-    /// IDL comment says it is zero on non-boost pools; four of the ten captures
-    /// disagree with the vendor's README, which says it is currently zero
-    /// everywhere.
+    /// IDL comment says it is zero on non-boost pools. Two of the six captures
+    /// long enough to hold the field carry a non-zero value, which the vendor's
+    /// README -- "currently zero across all pools" -- says cannot happen.
     ///
     /// **This is not a reserve you may price against on its own.** The vendor's
     /// rule is `effective_quote_reserves = quote vault balance + this`, and the

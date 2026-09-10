@@ -404,11 +404,25 @@ it; the prize page now says which fee applies where.
 2026-09-09 the decoder gained `radar_decode::pumpswap` — the program id
 `pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA`, tied by test to the mainnet
 capture in `crates/radar-pumpfun/tests/fixtures/pumpswap_fees.json` that already
-held it, and a 27-row instruction table. **No pool layout, no quote, no
-reserves**; those are later slices, and `Pool`'s discriminator and byte length
-remain unverified. Design 0017 §3 puts the curve and PumpSwap on one row, so this
-does **not** satisfy plan 0011 P1's "two pool families" — that is counted when a
-non-pump venue (Raydium CPMM) lands beside it.
+held it, and a 27-row instruction table. Design 0017 §3 puts the curve and
+PumpSwap on one row, so this does **not** satisfy plan 0011 P1's "two pool
+families" — that is counted when a non-pump venue (Raydium CPMM) lands beside it.
+
+**And PumpSwap now has state.** On the same day
+[`0033`](../docs/research/0033-the-pumpswap-pool-account-has-eight-lengths.md)
+captured ten `Pool` accounts and `radar_pumpfun::pool::Pool` decodes them. The
+account turned out to have **eight lengths** on mainnet — 211, 243, 244, 245,
+261, 270, 300 and 301 bytes across 1,374,123 accounts — five of which are exactly
+the cumulative field boundaries of the vendor's field order. That is what proves
+`virtual_quote_reserves` is sixteen bytes and not eight, and it makes the layout
+a prefix ladder: the later fields are `Option`, and a length that stops inside a
+field is refused. The README is wrong in three places the capture settles —
+`virtual_quote_reserves` is not zero everywhere, the two token programs are not
+fields of this account, and six of the ten pools quote in something other than
+SOL, one of them USDC (which verifies the row design 0010 marked unverified).
+**Still no quote, no price, no impact, no capacity**: the reserves are the
+balances of the two token accounts `Pool` names, and this repository has no
+SPL or Token-2022 token-account parser. That is the next slice.
 
 The reason it was worth doing first: Anchor hashes an instruction's *name* and
 not its program, so **seven discriminators are byte-identical across the two
