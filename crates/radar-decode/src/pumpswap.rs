@@ -327,6 +327,39 @@ mod tests {
     use super::*;
 
     #[test]
+    fn every_way_of_acquiring_the_base_token_counts_as_a_buy() {
+        // LEARNINGS 3 in its PumpSwap form. A detector that compares against
+        // one variant goes blind to the others, and the others are not rare --
+        // `BuyExactQuoteIn` is how a buyer who names a SOL amount arrives,
+        // which is most of them.
+        assert!(Instruction::Buy.is_buy(), "the plain buy");
+        assert!(
+            Instruction::BuyExactQuoteIn.is_buy(),
+            "quote-in is a buy and skipping it loses most of them"
+        );
+        assert!(Instruction::Sell.is_sell(), "the plain sell");
+
+        // And the ones that are not trades. Liquidity movement changes the
+        // reserves without anyone taking a side, so counting it as a trade
+        // would inflate volume with money that never chose a direction.
+        assert!(!Instruction::Deposit.is_buy(), "deposit acquires nothing");
+        assert!(!Instruction::Deposit.is_sell());
+        assert!(!Instruction::Deposit.is_trade(), "deposit is not a trade");
+        assert!(!Instruction::CreatePool.is_trade());
+        // `Withdraw` is absent from this table on purpose and cannot be named
+        // here: the vendor IDL declares bytes for it that Anchor's own naming
+        // rule does not produce, so no row was shipped rather than guessing
+        // which half of the reference is wrong. It reads as `Unknown` instead.
+
+        // `is_trade` is the union and nothing else. Both halves have to reach
+        // it: an `and` here would call nothing a trade at all, and a version
+        // fixed at true would call a deposit one.
+        assert!(Instruction::Buy.is_trade());
+        assert!(Instruction::BuyExactQuoteIn.is_trade());
+        assert!(Instruction::Sell.is_trade());
+    }
+
+    #[test]
     fn the_program_address_renders_as_the_captured_owner() {
         // Tied to the capture itself by
         // `the_program_address_is_the_one_that_owns_the_captured_account` in

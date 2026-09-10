@@ -216,35 +216,6 @@ pub fn decode(program: Program, data: &[u8]) -> Decoded<Instruction> {
     )
 }
 
-/// Decodes a pump.fun instruction from its data.
-///
-/// **This is the one entry point left that assumes a venue, and it is a hole.**
-/// `radar-backfill`'s CryptoHouse query filters by program in SQL, so its rows
-/// carry no program column and its call site has nothing to pass; converting it
-/// to [`decode`] is a one-line change (`decode(Program::PumpFun, &data)`) that
-/// was outside the file list of the change that added [`Program`]. Every other
-/// caller has been converted. **Do not reach for this from new code** — bytes
-/// from PumpSwap will decode here as confident bonding-curve instructions.
-#[must_use]
-pub fn decode_pumpfun(data: &[u8]) -> Decoded<pumpfun::Instruction> {
-    match decode(Program::PumpFun, data) {
-        Decoded::Known(Instruction::PumpFun(ix)) => Decoded::Known(ix),
-        // Unreachable: `decode` returns the arm matching the program it was
-        // given. Folded rather than asserted so this shim cannot panic.
-        Decoded::Known(_) => Decoded::Malformed {
-            data_len: data.len(),
-        },
-        Decoded::Unknown {
-            discriminator,
-            data_len,
-        } => Decoded::Unknown {
-            discriminator,
-            data_len,
-        },
-        Decoded::Malformed { data_len } => Decoded::Malformed { data_len },
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -326,23 +297,26 @@ mod tests {
     }
 
     #[test]
-    fn the_shim_left_for_the_backfill_still_reads_the_curve() {
-        // `decode_pumpfun` is documented as the one venue-assuming entry point
-        // left. While it exists it must agree with `decode`, or the two decoders
-        // in this crate would disagree about the same bytes.
+    fn there_is_no_way_to_decode_without_naming_the_program() {
+        // The property this crate now holds, stated where somebody looking for
+        // a shortcut will read it. `decode` is the only entry point, and it
+        // takes the program first. The venue-assuming `decode_pumpfun` that
+        // stood here was deleted once its last caller in `radar-backfill` was
+        // converted; if a future one reappears, it reopens the hole seven
+        // shared discriminators make.
         let mut data = pumpfun::Instruction::Sell
             .discriminator()
             .as_bytes()
             .to_vec();
         data.extend_from_slice(&[0u8; 16]);
         assert_eq!(
-            decode_pumpfun(&data),
-            Decoded::Known(pumpfun::Instruction::Sell)
+            decode(Program::PumpFun, &data),
+            Decoded::Known(Instruction::PumpFun(pumpfun::Instruction::Sell))
         );
         assert_eq!(
-            decode_pumpfun(&[1, 2, 3]),
+            decode(Program::PumpFun, &[1, 2, 3]),
             Decoded::Malformed { data_len: 3 }
         );
-        assert!(decode_pumpfun(&[0xAAu8; 24]).is_unrecognised());
+        assert!(decode(Program::PumpFun, &[0xAAu8; 24]).is_unrecognised());
     }
 }

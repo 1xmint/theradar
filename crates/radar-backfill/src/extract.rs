@@ -11,7 +11,7 @@
 //! silently dropping them would leave the store looking like a quiet market.
 
 use radar_decode::pumpfun;
-use radar_decode::{Decoded, Discriminator, decode_pumpfun};
+use radar_decode::{Decoded, Discriminator, Instruction, Program, decode};
 use radar_store::{Envelope, Event, Graduation, Launch, Origin, Side, Table, Trade};
 use radar_types::{Address, Signature, Slot};
 use serde::Deserialize;
@@ -251,9 +251,23 @@ pub fn event_from_row(row: &Row) -> Result<Event, Skipped> {
         .into_vec()
         .map_err(|_| Skipped::BadData)?;
 
-    let instruction = match decode_pumpfun(&data) {
-        Decoded::Known(ix) => ix,
-        Decoded::Unknown { .. } | Decoded::Malformed { .. } => {
+    // The program is named here rather than inferred from the bytes, because
+    // the bytes cannot name it: pump.fun and PumpSwap share seven discriminators
+    // exactly, so `buy` from either is the same eight bytes.
+    //
+    // `Program::PumpFun` is true of these rows because the CryptoHouse query
+    // filters on that program in SQL, and `Row` carries no program column to
+    // read it back from. That makes this the one place the two must agree, and
+    // agreeing by construction beats agreeing by comment: **when the query
+    // learns a second venue, this argument has to come from the row**, or every
+    // PumpSwap trade it returns will be recorded as a bonding-curve one.
+    let instruction = match decode(Program::PumpFun, &data) {
+        Decoded::Known(Instruction::PumpFun(ix)) => ix,
+        // `decode` answers in the program it was given, so a PumpSwap arm here
+        // would mean the decoder ignored its own argument. Folded into the same
+        // refusal as unknown bytes rather than asserted: a backfill row is not
+        // worth a panic, and the row is skipped either way.
+        Decoded::Known(_) | Decoded::Unknown { .. } | Decoded::Malformed { .. } => {
             return Err(Skipped::UnknownInstruction);
         }
     };
