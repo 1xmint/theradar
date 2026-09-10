@@ -42,6 +42,7 @@ mod mutability;
 mod portfolio;
 mod provenance;
 mod quantity;
+mod session;
 mod slot;
 
 /// The commit this binary was built from, or `None`.
@@ -89,6 +90,12 @@ pub use portfolio::{
     Refusal, Reservation, ReservationId, Results, Settlement, Unrealised, Unvaluable, Valuation,
 };
 pub use provenance::{EvidenceTier, Provenance, SourceId, Trust};
+pub use session::{
+    CallTally, CandidateTiming, CostsReport, CoverageReport, CoverageState, EarliestEntry,
+    EquityReport, EquityTotal, Funnel, MoneySpent, NoEntryTime, Refusals, SESSION_SCHEMA,
+    SessionRecord, Spend, TableCoverage, Timings, UnmeasuredCost, UnrealisedReport, Visibility,
+    WindowCoverage,
+};
 pub use quantity::{Decimals, TokenQuantity};
 pub use slot::{Slot, SlotDelta};
 
