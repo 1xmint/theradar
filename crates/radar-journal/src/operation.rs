@@ -107,6 +107,11 @@ pub struct OperationId(String);
 
 impl OperationId {
     /// The id, as it is written in a later event's correlation.
+    ///
+    /// The join between an operation and the journal lines about it: every
+    /// event after the proposal carries this string in
+    /// `Correlation::operation`, which is what `radar audit explain` finds an
+    /// operation's history by.
     #[must_use]
     pub fn as_str(&self) -> &str {
         &self.0
@@ -166,15 +171,6 @@ pub enum OperationState {
 }
 
 impl OperationState {
-    /// Whether this state can still change.
-    #[must_use]
-    pub const fn is_terminal(self) -> bool {
-        matches!(
-            self,
-            Self::Confirmed(_) | Self::Failed | Self::Reconciled(_)
-        )
-    }
-
     /// Whether an operation in this state still holds a claim on capital.
     ///
     /// [`SubmissionUnknown`](Self::SubmissionUnknown) does. That single `true`
@@ -839,7 +835,6 @@ mod tests {
             OperationState::Confirmed(some()),
             OperationState::Reconciled(some()),
         ] {
-            assert!(from.is_terminal());
             assert!(from.advance(OperationState::Reserved).is_err());
             assert!(from.advance(OperationState::SubmissionUnknown).is_err());
         }

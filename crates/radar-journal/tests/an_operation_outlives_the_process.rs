@@ -316,6 +316,124 @@ fn a_journal_the_operations_were_never_written_to_opens_empty() {
 }
 
 #[test]
+fn the_operation_lines_are_a_chain_like_every_other_line() {
+    // An operation event is an ordinary journal event and has to obey the
+    // ordinary guarantee: a sequence from one with no gaps, each line hashed to
+    // the one before it. `record_operation` fills the sequence itself, and CI's
+    // mutation gate found this exact shape once already -- `next_id += 1`
+    // mutated to `*= 1` in `Portfolio::reserve`.
+    //
+    // Re-apply the bug by replacing `self.sequence + 1` with `self.sequence * 1`
+    // in `Journal::record_operation`: every operation line carries sequence
+    // zero, and this reads `Broken` at sequence one.
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = somewhere(&dir);
+
+    let mut portfolio = account();
+    let (mut log, id) = reserved(&path, &mut portfolio);
+    log.submit(&id, 1_002, |_| Ok::<(), ()>(()))
+        .expect("record")
+        .expect("effect");
+
+    let journal = radar_journal::Journal::open(&path).expect("open");
+    assert_eq!(
+        journal.verify().expect("verify"),
+        radar_journal::Verified::Intact { events: 3 }
+    );
+
+    // And every line after the proposal names the operation it advances, which
+    // is the only way `audit explain` can gather one operation's history. The
+    // proposal names nothing, because it *is* the identity.
+    let events = journal.events().expect("events");
+    assert_eq!(events[0].correlation.operation, None);
+    for event in &events[1..] {
+        assert_eq!(
+            event.correlation.operation.as_deref(),
+            Some(id.as_str()),
+            "a line about the operation that does not name it"
+        );
+    }
+}
+
+#[test]
+fn a_settlement_that_would_strand_the_remainder_is_refused() {
+    // A partial fill leaves the rest of the claim reserved. Closing the
+    // operation on one puts it in a state `rehold` does not re-take, so the
+    // remainder is lost at the next restart -- the same lamports handed back to
+    // the next proposal while the first operation's remainder is still out
+    // there.
+    //
+    // Re-apply the bug two ways, both of which CI found: make the reservation
+    // lookup `r.id() != claim` and nothing is found, so the guard never fires
+    // and the short fill is accepted; flip `outstanding != filled` to `==` and
+    // the guard fires on the fill that *does* close the claim and refuses it.
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = somewhere(&dir);
+
+    let mut portfolio = account();
+    let (mut log, id) = reserved(&path, &mut portfolio);
+    log.submit(&id, 1_002, |_| Ok::<(), ()>(()))
+        .expect("record")
+        .expect("effect");
+
+    let short = Settlement::PartiallyFilled(TokenQuantity::lamports(CLAIM / 2));
+    let refused = log.confirm(&id, short, &mut portfolio, 1_003);
+    assert!(
+        matches!(refused, Err(OperationError::RemainderWouldBeLost { .. })),
+        "got {refused:?}"
+    );
+    assert_eq!(free(&portfolio), HELD - CLAIM, "the claim is untouched");
+    assert_eq!(
+        log.entry(&id).map(|e| e.state),
+        Some(OperationState::SubmissionUnknown),
+        "and no line says the operation finished"
+    );
+
+    // A fill for exactly what was outstanding closes the claim, so it is a fill
+    // by another name and is accepted.
+    let whole = Settlement::PartiallyFilled(TokenQuantity::lamports(CLAIM));
+    assert_eq!(
+        log.confirm(&id, whole, &mut portfolio, 1_004)
+            .expect("whole"),
+        Applied::Advanced
+    );
+    assert_eq!(free(&portfolio), HELD - CLAIM);
+    assert_eq!(portfolio.reservations().count(), 0);
+}
+
+#[test]
+fn an_established_failure_is_recorded_as_a_failure() {
+    // `radar audit verify` reads the outcome column, and an operation that
+    // failed reading as `ok` is a machine reporting a clean run over a
+    // reservation it threw away.
+    //
+    // Re-apply the bug by deleting the `OperationState::Failed` arm of the
+    // outcome match in `close`: the line lands as `Outcome::Ok`.
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = somewhere(&dir);
+
+    let mut portfolio = account();
+    let (mut log, id) = reserved(&path, &mut portfolio);
+    assert_eq!(
+        log.fail(&id, &mut portfolio, 1_002).expect("fail"),
+        Applied::Advanced
+    );
+    assert_eq!(
+        free(&portfolio),
+        HELD,
+        "nothing was released, so nothing is held"
+    );
+
+    let events = radar_journal::Journal::open(&path)
+        .expect("open")
+        .events()
+        .expect("events");
+    let last = events.last().expect("a line");
+    assert_eq!(last.outcome, radar_journal::Outcome::Failed);
+    assert_eq!(last.correlation.operation.as_deref(), Some(id.as_str()));
+}
+
+#[test]
 fn an_event_about_nothing_operational_is_written_exactly_as_it_always_was() {
     // The operation entry is a new field on `Event`. Every journal already on
     // disk was written without it, and a field that serialised as `null` -- or
