@@ -1,11 +1,12 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # Plan 0011 — Build and measure a private autonomous trader
 
-**Status:** in progress — design/handoff prepared; all implementation items below
-are unstarted. No live operation is authorised by this document.
-**Date:** 2026-09-09.
-**Branch:** `research/advanced-assistant` — documentation only.
-**Inspected base:** `c39aabc8aafc3fcb9da2b0bf0c1329a18f75a212`.
+**Status:** in progress — **P0 complete, P1 partial, P7a complete; P2 and P4-P8
+unstarted.** No live operation is authorised by this document.
+**Date:** 2026-09-09, implementation begun 2026-09-09.
+**Branch:** merged to `main`; implementation lands there as ordinary pull requests.
+**Inspected base:** `c39aabc8aafc3fcb9da2b0bf0c1329a18f75a212`; implementation
+began from `main` @ `88a6551` and reached `31dddaf`.
 **Planned for:** Josh's implementation handoff to Opus 5.
 **Specification:** [design 0017](../design/0017-a-private-autonomous-trader.md).
 
@@ -410,6 +411,80 @@ wallet, production or protected-plan change was performed.
 does P0 against the actual current tree. Deliver P1–P4's multi-venue shadow loop
 before billing or customer-wallet work. Reuse shared fixes already landed by the
 other session. Record each completion with command, outcome and commit here.
+
+---
+
+## Handback — implementation session, 2026-09-09 to 2026-09-10
+
+**Stopped at:** ten pull requests merged, `main` at `31dddaf`. One task in
+flight and pushed but unmerged: `agent/9-9-0007-investigative-loop` @ `c6bf644`.
+
+### What is complete
+
+| Phase | State | Landed as |
+|---|---|---|
+| **P0** | **complete** | #230 the market-and-quote vocabulary; #232 design 0018, the frozen measurement contract |
+| **P1** | partial | #229 the production coverage writer (closes plan 0010 item 2c); #233 #234 #235 three PumpSwap slices |
+| **P7a** | **complete** | #231 Jupiter Router quotes, both directions, or a refusal |
+
+### What each change actually bought
+
+- **A proposal names its market and quote asset.** Before #230 a bonding-curve
+  trade and an AMM trade of the same mint were indistinguishable records, and
+  anything keyed by mint silently kept one.
+- **The store can tell three states apart** — never collected, collected and
+  empty, collected with rows. Before #229 the first two were the same silence,
+  and every completeness claim inherited that.
+- **Routing is authenticated and bidirectional.** #231 replaced a deprecated
+  keyless endpoint and made quoting refuse rather than fall back.
+- **A second venue is decodable.** #233 made decoding require the program,
+  because pump.fun and PumpSwap share **seven discriminators byte for byte**;
+  #234 captured the `Pool` layout from mainnet; #235 reads a pool and both vaults
+  at one slot or refuses.
+
+### Measured facts this session established
+
+- **PumpSwap pools quote in arbitrary mints.** Ten captured: four wrapped SOL,
+  **one USDC**, five other SPL mints including another `…pump` token. Settles two
+  contradicting vendor pages and is **wider than either**. Research 0033.
+- **1,374,123 `Pool` accounts, eight distinct lengths**, five of them field
+  boundaries — which is what proves `virtual_quote_reserves` is 16 bytes, not 8.
+- Research 0028's 58 unexplained trailing bytes are 18 fields plus 40 of padding.
+
+### Corrections recorded rather than buried
+
+- Design 0017 §3's quote-asset assumption is **too narrow**; see above.
+- An earlier costing claimed the `Pool` account names its two token programs.
+  **It does not** — each vault's owner must be read. The capture disproved it.
+- Design 0010's USDC rows were stale; corrected in #236.
+
+### What is NOT done, and it is most of it
+
+P2 (portfolio), P4 (shadow session and report), P5 (comparison arms), P6 (signer
+authorisation), P7b (versioned transactions and lookup tables), P8 (durable
+submission and the fault matrix). Inside P1: the market registry and the live raw
+recorder. **Roughly a fifth of P0–P8.**
+
+**P2 is the next thing**, because it is the last piece blocking an end-to-end
+shadow session and none of it exists.
+
+### Carried, deliberately
+
+- **56 files still contain `hey-vera/radar`.** The repository moved to
+  `1xmint/theradar`; redirects keep them working. One pass, not a partial one.
+- **`virtual_quote_reserves` is not understood**, so no effective reserve is
+  computed — raw vault balances only, and the type says why.
+- **The `hey-vera` org is still locked** over an unpaid $15.51, so gitlocus,
+  heyvera and somavera still have no CI. Radar left the org; the debt did not.
+  The recurring charge is one GitHub Secret Protection licence whose only
+  configured repository is public, which is a case to dispute rather than pay.
+
+### The number that did not move
+
+Measured selection edge remains **0 bps** against a **456 bps** bar. Nothing this
+session moved it and nothing was meant to. What changed is that design 0018 now
+fixes, before any outcome exists, what would count as moving it — one metric, one
+stopping rule, and every money figure left unset because they are the owner's.
 
 **Do not:** edit plan 0010 from this handoff; treat 0 bps as proof future AI cannot
 work; extrapolate pump.fun costs to every venue; open `Policy::CLOSED`; acquire
