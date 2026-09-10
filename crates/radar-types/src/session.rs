@@ -821,6 +821,15 @@ mod tests {
             assert_eq!(reported, UnrealisedReport::Unknown(why));
             assert_eq!(reported.micro_usd(), None);
             assert_eq!(
+                UnrealisedReport::Known {
+                    micro_usd: -3,
+                    as_of: Slot(4),
+                }
+                .micro_usd(),
+                Some(-3),
+                "and a figure that exists is returned rather than withheld"
+            );
+            assert_eq!(
                 EquityTotal::of(SignedMicroUsd(1), reported),
                 EquityTotal::Unknown(why),
                 "a reader is told what could not be priced, not only that something was not"
@@ -898,6 +907,61 @@ mod tests {
             0,
             "an empty outer funnel is still balanced"
         );
+
+        // And a paid tier that lost rows says by how many, in both directions.
+        let leaky = Funnel {
+            passed_paid: 10,
+            ..f
+        };
+        assert_eq!(leaky.paid_unaccounted(), 8);
+        let over = Funnel {
+            passed_paid: 30,
+            ..f
+        };
+        assert_eq!(over.paid_unaccounted(), -12);
+    }
+
+    #[test]
+    fn a_pass_reports_how_long_it_took_and_never_a_negative_duration() {
+        let record = |started: u64, finished: u64| -> u64 {
+            let base = super::SessionRecord {
+                schema: super::SESSION_SCHEMA,
+                run_id: SessionRecord::key(Slot(0), started),
+                started_at_unix: started,
+                finished_at_unix: finished,
+                decided_at: Slot(0),
+                store: String::new(),
+                window_slots: 0,
+                paid_tier_cap: 0,
+                strategy: String::new(),
+                strategy_version: String::new(),
+                assumed_round_trip_bps: 0,
+                pricing: String::new(),
+                policy_closed: true,
+                build: None,
+                coverage: super::CoverageReport {
+                    tables: Vec::new(),
+                    window: WindowCoverage::Unattested,
+                },
+                funnel: Funnel::default(),
+                refusals: Refusals::default(),
+                spend: Spend::default(),
+                timings: super::Timings {
+                    evidence_ready_at: Slot(0),
+                    reasoning_ms: 0,
+                    candidates: Vec::new(),
+                },
+                equity: AccountView::Unreadable {
+                    because: String::new(),
+                },
+            };
+            base.elapsed_secs()
+        };
+
+        assert_eq!(record(100, 147), 47);
+        // A clock that went backwards is a fact about the host. Zero rather
+        // than a duration that wrapped into eighteen quintillion seconds.
+        assert_eq!(record(147, 100), 0);
     }
 
     #[test]
@@ -972,9 +1036,12 @@ mod tests {
             ],
             paid_tier: vec![("CreatorUnproven".to_owned(), 3)],
             kernel: vec![("NoAutonomy".to_owned(), 1)],
-            portfolio: vec![],
+            // Every group non-empty, and no two of them equal. A zero anywhere
+            // lets one of the three additions be a subtraction and still land
+            // on the same total.
+            portfolio: vec![("NotRecorded".to_owned(), 7)],
         };
-        assert_eq!(r.raisings(), 46);
+        assert_eq!(r.raisings(), 53);
     }
 
     #[test]

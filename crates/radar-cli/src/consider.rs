@@ -1955,6 +1955,129 @@ mod tests {
     }
 
     #[test]
+    fn a_tally_counts_each_reason_once_per_raising() {
+        // Every refusal section on the page comes out of here, and a `+=` that
+        // became a `-=` would print a negative count of refusals as an enormous
+        // positive one.
+        let tally = tally_of(
+            [
+                "NoRoute",
+                "CreatorUnproven",
+                "NoRoute",
+                "NoRoute",
+                "CreatorUnproven",
+            ]
+            .iter()
+            .map(|r| (*r).to_owned())
+            .collect(),
+        );
+        assert_eq!(
+            tally,
+            vec![("CreatorUnproven".to_owned(), 2), ("NoRoute".to_owned(), 3),]
+        );
+        assert_eq!(
+            tally_of(Vec::new()),
+            Vec::new(),
+            "nothing raised is no rows"
+        );
+    }
+
+    #[test]
+    fn the_kernel_verdicts_reach_the_funnel_and_the_refusals_keep_their_reasons() {
+        // `record_pass` is where the paid tier's numbers become the report, and
+        // every line of it is a denominator. Nothing reached it before this:
+        // mutation testing turned both counters into subtractions and dropped
+        // the `!` that separates a refused row from a proposed one, and all
+        // three survived.
+        let watermark = radar_types::Slot(10_000);
+        let mut session = draft(
+            "store",
+            watermark,
+            216_000,
+            25,
+            &CreatorEdge::default(),
+            Pricing::Curve,
+            &[],
+        );
+
+        let mut ledger = Ledger {
+            passed_paid: 2,
+            dropped_after_probe: 1,
+            ..Ledger::default()
+        };
+        // One proposed row and two passed rows, so the filter that keeps the
+        // refusals has both sides to choose between.
+        for (i, reasons) in [
+            (1u8, vec!["CapacityBelowFloor"]),
+            (2u8, vec!["CapacityBelowFloor", "CreatorUnproven"]),
+        ] {
+            let mut row = decision_row(Address::new([i; 32]), watermark);
+            row.reasons = reasons.iter().map(|r| (*r).to_owned()).collect();
+            ledger.examined.push((row, Address::new([i; 32])));
+        }
+        let mut proposed_row = decision_row(Address::new([3u8; 32]), watermark);
+        proposed_row.conclusion = radar_store::Conclusion::Proposed;
+        proposed_row.reasons = vec!["ThisIsNotARefusal".to_owned()];
+        ledger
+            .examined
+            .push((proposed_row, Address::new([3u8; 32])));
+
+        let mut verdicts_by_mint = BTreeMap::new();
+        verdicts_by_mint.insert(
+            Address::new([3u8; 32]),
+            Verdict::Refused {
+                reasons: vec![radar_risk::Refusal::NoAutonomy, radar_risk::Refusal::Halted],
+            },
+        );
+        verdicts_by_mint.insert(
+            Address::new([4u8; 32]),
+            Verdict::Refused {
+                reasons: vec![radar_risk::Refusal::NoAutonomy],
+            },
+        );
+        verdicts_by_mint.insert(
+            Address::new([5u8; 32]),
+            Verdict::Authorised(Box::new(radar_risk::Authorization {
+                nonce: "n".to_owned(),
+                mint: Address::new([5u8; 32]),
+                action: radar_risk::Action::Buy,
+                max_notional: MicroUsd(1),
+                expires_after: watermark,
+                needs_operator_signature: false,
+            })),
+        );
+
+        let pass = Pass {
+            proposals: Vec::new(),
+            refused_on_shape: 4,
+            look_failed: 1,
+        };
+        record_pass(&mut session, &ledger, &pass, 9, &verdicts_by_mint, &[]);
+
+        assert_eq!(session.funnel.kernel_authorised, 1);
+        assert_eq!(session.funnel.kernel_refused, 2);
+        assert_eq!(session.funnel.refused_on_shape, 4);
+        assert_eq!(session.funnel.look_failed, 1);
+        assert_eq!(session.funnel.dropped_after_probe, 1);
+        assert_eq!(session.funnel.passed_paid, 2);
+        assert_eq!(session.funnel.paid_examined, 9);
+        assert_eq!(
+            session.refusals.kernel,
+            vec![("Halted".to_owned(), 1), ("NoAutonomy".to_owned(), 2)],
+            "a kernel reason keeps its own count across proposals"
+        );
+        assert_eq!(
+            session.refusals.paid_tier,
+            vec![
+                ("CapacityBelowFloor".to_owned(), 2),
+                ("CreatorUnproven".to_owned(), 1),
+            ],
+            "only the rows that were passed over are refusals; a proposed row's \
+             reasons are not"
+        );
+    }
+
+    #[test]
     fn the_free_tier_refusals_land_in_the_funnel_and_the_funnel_balances() {
         // The denominator, at the point it is written down. Design 0017 §6:
         // "Do not discard excluded candidates from measurement." Re-apply the
@@ -1972,8 +2095,13 @@ mod tests {
                 },
             );
         }
-        let recent: Vec<Address> = universe.launches.keys().copied().collect();
-        assert_eq!(recent.len(), 4);
+        let mut recent: Vec<Address> = universe.launches.keys().copied().collect();
+        // Two mints in the window that no candidate can be built from. The loop
+        // used to `continue` past these in silence, so a store missing launch
+        // facts and a market holding nothing produced the same tally.
+        recent.push(Address::new([200u8; 32]));
+        recent.push(Address::new([201u8; 32]));
+        assert_eq!(recent.len(), 6);
 
         let mut session = draft(
             "store",
@@ -1998,6 +2126,10 @@ mod tests {
         assert!(
             worth.is_empty(),
             "an unproven creator is not a paid question"
+        );
+        assert_eq!(
+            session.funnel.unbuildable, 2,
+            "a mint no candidate could be built from is counted, not skipped"
         );
         assert_eq!(
             session.funnel.refused_free, 4,
@@ -2150,12 +2282,24 @@ mod tests {
         // Every table appears, and the ones nobody collected are the entries
         // worth reading. A map that omitted them would report "nobody collected
         // this" by saying nothing at all.
-        let rows = [covering(
-            Table::Launches,
-            10,
-            ObservedSlots::Nothing,
-            Completion::Complete,
-        )];
+        let rows = [
+            covering(
+                Table::Launches,
+                10,
+                ObservedSlots::Nothing,
+                Completion::Complete,
+            ),
+            covering(
+                Table::Launches,
+                11,
+                ObservedSlots::Nothing,
+                Completion::Complete,
+            ),
+            covering(Table::Launches, 12, span(1, 2), Completion::Complete),
+            covering(Table::Launches, 13, span(3, 4), Completion::Complete),
+            covering(Table::Launches, 14, span(5, 6), Completion::Complete),
+            covering(Table::Launches, 15, span(7, 8), Completion::Partial),
+        ];
         let tables = table_coverage(&rows);
         assert_eq!(
             tables.len(),
@@ -2172,10 +2316,11 @@ mod tests {
         assert_eq!(
             by_name("launches"),
             CoverageState::Attested {
-                complete_spans: 0,
-                measured_empty: 1,
-                unfinished: 0,
-            }
+                complete_spans: 3,
+                measured_empty: 2,
+                unfinished: 1,
+            },
+            "each bucket counts its own rows, and none of them counts another's"
         );
         assert_eq!(
             by_name("trades"),
@@ -2446,6 +2591,31 @@ mod tests {
     }
 
     /// A universe holding one launch, for the sweep tests.
+    /// A recorded decision with the fields a funnel test cares about.
+    fn decision_row(mint: Address, decided_at: radar_types::Slot) -> radar_store::Decision {
+        radar_store::Decision {
+            mint,
+            creator: Address::new([9u8; 32]),
+            decided_at,
+            launch_slot: decided_at,
+            strategy: "creator_edge".to_owned(),
+            strategy_version: "0.1.0".to_owned(),
+            conclusion: radar_store::Conclusion::Passed,
+            reasons: Vec::new(),
+            notional_micro_usd: None,
+            exit_capacity_micro_usd: None,
+            assumed_round_trip_bps: 850,
+            coordination: None,
+            launch_recipients: None,
+            launch_transactions: None,
+            authority_prevalence: None,
+            kernel_outcome: None,
+            kernel_reasons: Vec::new(),
+            entry_price: None,
+            inputs_digest: String::new(),
+        }
+    }
+
     fn one_launch(mint: Address, slot: radar_types::Slot) -> Universe {
         let mut launches = std::collections::BTreeMap::new();
         launches.insert(
@@ -3297,6 +3467,116 @@ mod tests {
         assert_eq!(
             pass.look_failed, 0,
             "the block was read, and it was arranged"
+        );
+
+        // And the calls it made are charged. The launch block answered and the
+        // answer mattered -- it is what refused this candidate -- so it is not
+        // in the "bought nothing" column, and the exit was never probed at all.
+        let spend = ledger.spend();
+        let named = |kind: &str| {
+            spend
+                .calls
+                .iter()
+                .find(|c| c.kind == kind)
+                .map(|c| (c.attempted, c.failed, c.produced_nothing))
+        };
+        assert_eq!(named("launch_block"), Some((1, 0, 0)));
+        assert_eq!(
+            named("exit_probe"),
+            None,
+            "the shape refusal ended the question before anything was priced"
+        );
+        assert_eq!(ledger.dropped_after_probe, 0);
+        assert_eq!(ledger.passed_paid, 0, "it was refused, not passed over");
+        assert_eq!(
+            ledger.clocks.len(),
+            1,
+            "a candidate refused on shape still gets its clock written down"
+        );
+    }
+
+    #[test]
+    fn a_probe_that_could_not_price_an_exit_is_charged_as_a_failure() {
+        // Rule 9 in the spend column. An empty report is not a capacity of zero
+        // and it is not "no limit found" -- and a probe that measured nothing is
+        // money spent, not a call that did not happen. Delete the `!` and it
+        // books as an answer.
+        let mint = Address::new([1u8; 32]);
+        let slot = radar_types::Slot(1_000);
+        let mints = [mint];
+        let mut ledger = Ledger::default();
+        let _ = paid_tier(
+            &one_launch(mint, slot),
+            &CreatorEdge::default(),
+            mints.iter(),
+            &Sources {
+                blocks: &StubBlocks(Err("no table".to_owned())),
+                structures: &NoStructures,
+                quoter: &NoDepth,
+                pricing: Pricing::Jupiter,
+            },
+            radar_types::MicroUsd::from_dollars(200.0),
+            slot,
+            &mut ledger,
+        );
+
+        let spend = ledger.spend();
+        let probe = spend
+            .calls
+            .iter()
+            .find(|c| c.kind == "exit_probe")
+            .expect("the exit was probed");
+        assert_eq!(
+            (probe.attempted, probe.failed),
+            (1, 1),
+            "an unmeasurable exit is a charged call that failed"
+        );
+        assert_eq!(
+            ledger.passed_paid, 1,
+            "and the candidate it produced was passed over, not proposed"
+        );
+    }
+
+    #[test]
+    fn a_candidate_that_vanishes_after_the_probe_is_counted_rather_than_dropped() {
+        // The paid tier's own `continue`. Money was spent on the probe and the
+        // row lands in no bucket underneath, so a funnel that did not count it
+        // would report a proposal rate over a denominator with a hole in it.
+        //
+        // A mint the universe has no launch facts for is exactly that state: it
+        // reaches the probe and no candidate can be assembled from what comes
+        // back.
+        let known = Address::new([1u8; 32]);
+        let unknown = Address::new([2u8; 32]);
+        let slot = radar_types::Slot(1_000);
+        let mints = [unknown];
+        let mut ledger = Ledger::default();
+        let pass = paid_tier(
+            &one_launch(known, slot),
+            &CreatorEdge::default(),
+            mints.iter(),
+            &Sources {
+                blocks: &StubBlocks(Err("no table".to_owned())),
+                structures: &NoStructures,
+                quoter: &NoDepth,
+                pricing: Pricing::Jupiter,
+            },
+            radar_types::MicroUsd::from_dollars(200.0),
+            slot,
+            &mut ledger,
+        );
+
+        assert_eq!(
+            ledger.dropped_after_probe, 1,
+            "the row is counted where it left, not discarded"
+        );
+        assert!(ledger.examined.is_empty(), "and no decision was recorded");
+        assert_eq!(pass.proposals.len(), 0);
+        assert_eq!(
+            ledger.clocks.len(),
+            0,
+            "a mint with no launch slot records no clock rather than one dated \
+             to the genesis block"
         );
     }
 

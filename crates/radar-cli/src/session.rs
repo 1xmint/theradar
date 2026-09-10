@@ -108,7 +108,7 @@ pub fn latest(dir: &str) -> Result<Option<SessionRecord>, String> {
     if !sessions.is_dir() {
         return Ok(None);
     }
-    let mut newest: Option<PathBuf> = None;
+    let mut records: Vec<PathBuf> = Vec::new();
     let entries =
         fs::read_dir(&sessions).map_err(|e| format!("cannot list {}: {e}", sessions.display()))?;
     for entry in entries {
@@ -117,16 +117,19 @@ pub fn latest(dir: &str) -> Result<Option<SessionRecord>, String> {
         if path.extension().is_none_or(|ext| ext != "json") {
             continue;
         }
-        // Lexicographic on the file name, which is what the key is padded for.
-        // Reading a modification time instead would order by when a file was
-        // touched rather than by the watermark the run was taken at, and those
-        // differ the moment anything is copied.
-        if newest.as_ref().is_none_or(|best| {
-            best.file_name().unwrap_or_default() < path.file_name().unwrap_or_default()
-        }) {
-            newest = Some(path);
-        }
+        records.push(path);
     }
+    // A maximum on the file name, which is what the key is zero-padded for.
+    // `max_by` rather than a hand-rolled fold: the fold this replaced gave a
+    // different answer depending on the order the filesystem happened to hand
+    // the entries back, which is not a property a report may have.
+    //
+    // The name and not the modification time: a time orders by when a file was
+    // touched rather than by the watermark the run was taken at, and the two
+    // differ the moment anything is copied.
+    let newest = records
+        .into_iter()
+        .max_by(|a, b| a.file_name().cmp(&b.file_name()));
     newest.map(|p| read(&p)).transpose()
 }
 
@@ -772,6 +775,35 @@ mod tests {
     }
 
     #[test]
+    fn a_negative_figure_keeps_its_sign_and_a_zero_does_not_gain_one() {
+        // Every dollar figure on the page goes through here, and a realised
+        // loss printed as a gain is the one error a reader would act on.
+        assert_eq!(super::dollars(-1_500_000), "-$1.500000");
+        assert_eq!(super::dollars(1_500_000), "$1.500000");
+        assert_eq!(super::dollars(0), "$0.000000", "a measured zero, unsigned");
+        assert_eq!(super::dollars(-1), "-$0.000001");
+    }
+
+    #[test]
+    fn a_paid_tier_that_lost_rows_says_so_on_the_page_too() {
+        // The second residual, and it is silent unless something went wrong --
+        // which is exactly the shape a test has to hold, because the normal
+        // case prints nothing at all.
+        let mut r = a_run();
+        assert!(
+            !render(&r).contains("THE PAID TIER CANNOT ACCOUNT FOR"),
+            "a balanced paid tier says nothing"
+        );
+
+        r.funnel.passed_paid = 12;
+        let page = render(&r);
+        assert!(
+            page.contains("6 EXAMINED CANDIDATE(S) THE PAID TIER CANNOT ACCOUNT FOR"),
+            "{page}"
+        );
+    }
+
+    #[test]
     fn a_record_round_trips_through_disk_and_the_newest_comes_back() {
         let dir = tempfile::tempdir().expect("tempdir");
         let root = dir.path().to_str().expect("utf-8 path").to_owned();
@@ -783,18 +815,23 @@ mod tests {
              nothing"
         );
 
-        let older = a_run();
-        let mut newer = a_run();
-        newer.decided_at = Slot(600_000);
-        newer.run_id = SessionRecord::key(Slot(600_000), 1_757_462_400);
-
-        write(&root, &older).expect("writes");
+        let at = |slot: u64| {
+            let mut r = a_run();
+            r.decided_at = Slot(slot);
+            r.run_id = SessionRecord::key(Slot(slot), 1_757_462_400);
+            r
+        };
+        // Written middle, oldest, newest, so neither "the first written" nor
+        // "the last written" is the right answer by accident.
+        let newer = at(600_000);
+        write(&root, &at(500_000)).expect("writes");
+        write(&root, &at(400_000)).expect("writes");
         write(&root, &newer).expect("writes");
 
         let back = latest(&root).expect("lists").expect("a record is there");
         assert_eq!(
             back, newer,
-            "the newest watermark comes back, not the first"
+            "the highest watermark comes back, whatever order the disk lists them in"
         );
     }
 }
