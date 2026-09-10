@@ -1,0 +1,127 @@
+{
+ "source": "Solana mainnet via https://api.mainnet-beta.solana.com getAccountInfo, base64",
+ "captured": "2026-09-09",
+ "why": "The PumpSwap `Pool` account, read from the chain rather than from the vendor's README. One pool of every length the account has on mainnet -- 211, 243, 244, 245, 261, 270, 300 and 301 bytes -- because five of those are the cumulative field boundaries of the documented layout and together they prove the field widths that no single capture can. base_token_program and quote_token_program are NOT fields of this account; they are the owner programs of the two mints, recorded here because they differ from each other within a pool and swap roles between pools. Stored as hex so the test needs no base64 decoder.",
+ "pools": [
+  {
+   "address": "C4mLt6fs2dL2W1oovZAT9QpM3tpL6CA7DZ8hqHU9Ldqb",
+   "owner": "pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA",
+   "slot": 445767146,
+   "len": 301,
+   "note": "The pool behind the buy research 0028 priced. Its base, quote, and both vault addresses are the ones that transaction carried, so this capture ties the field order to a transaction the network accepted.",
+   "base_mint": "A6Zpvj47pSin4YLdUWKRG92x5HGJjtD35sZmJQ6cpump",
+   "quote_mint": "So11111111111111111111111111111111111111112",
+   "base_token_program": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+   "quote_token_program": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+   "data_hex": "f19a6d0411b16dbcff00008c6f48b78537bd9f57bc941a83debf4297b586ed4c7c7e41894770838f300b2f87263405f205d101828fa286815a560d9f7755b7a485abc6a22a77f93a0d0e5f069b8857feab8184fb687f634618c035dac439dc1aeb3b5598a0f00000000001c9323a0608ec3f3d15387338dfc5247a95996a8f2626a57b35a7b7f549938ba85f454672d41b7f17b1d5fb181b0afc14238f245c88c8c86326eced6b08194ab063eccd83460c930259b4b7b0eebadf708a61034032bd16395de1a5d8da620ed636436b59d003000022155f6df3e2a8202573944588719106e5338f7e59307b07c3c1b56df24a033b0000c9411e1804000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+  },
+  {
+   "address": "6xsdRpzd53b7LsLHjNppa7fZzJu1xW3s1jAV8X79gPvd",
+   "owner": "pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA",
+   "slot": 445767157,
+   "len": 301,
+   "note": "Base is wrapped SOL and quote is not, which is the reverse of every other pool here: neither side is a constant. Its virtual_quote_reserves is zero where its neighbours' is not.",
+   "base_mint": "So11111111111111111111111111111111111111112",
+   "quote_mint": "3NrcGgMw8hiqb4okLECc51hShCTyLTX8NbhPqexqofPB",
+   "base_token_program": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+   "quote_token_program": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+   "data_hex": "f19a6d0411b16dbcfa0000d25a9331327d36804c0297921880c4a5b4fb389443bdb56b25c96da9056be5a0069b8857feab8184fb687f634618c035dac439dc1aeb3b5598a0f000000000012350a9b487ff3f2154678edc6b181eada0db4fedfe107e62ab2f3265de46892ee614e1601f0af663e53205bffa838c6d629caf027c3bd3c9e14fcc3bfe8069fe7f8a4f3e183f8870a12e08813628e470f338002d7b4779e916bdb9a8447e4c69b50ef3c275a20ef8aa6df48261a90fb0e430541e519061a8270ce3154578353fb5e8b48211040000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+  },
+  {
+   "address": "GNUcWTRcY94cmP9HgxH8gMNRPg1PaDcukmWp15hA3Wfk",
+   "owner": "pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA",
+   "slot": 445767171,
+   "len": 301,
+   "note": "A third 301-byte pool, whose virtual_quote_reserves differs from the first's -- the field is read, not a constant.",
+   "base_mint": "J7ePNotqozFqwxWXmsHezWyQUnHBnqtriRgrX76fpump",
+   "quote_mint": "So11111111111111111111111111111111111111112",
+   "base_token_program": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+   "quote_token_program": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+   "data_hex": "f19a6d0411b16dbcff0000065a0e521662580f5507e37c0d128d440fc36615352a0afe4f5438d5065e1d42fe4a6f52917978038c33ded2856e2b3c51cf332f9534bfe6388fc52983ecdecf069b8857feab8184fb687f634618c035dac439dc1aeb3b5598a0f00000000001a3f0579d741fbfff286c6830b9329f30a37de94192a87f4eee810f91db4155cd543cc3b3e09532d61bb93bb103cf56ead287b971dcc62568c4332e6e4682ad7c572007e528f27847403c233f1dd851d1d6302197b50ae8e7312ba121c4e103a4a8816b59d00300004f5b2059c6faf36e2a919a50601f7780f89c1566c1f41ed23ee251d46a5d01ba000049421e1804000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+  },
+  {
+   "address": "13bkcX5JGKaaj35brGP9ZUJtG1iUAbQVVqYDnUFL1B9",
+   "owner": "pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA",
+   "slot": 445767185,
+   "len": 211,
+   "note": "211 bytes: through lp_supply, and no further.",
+   "base_mint": "Rc3ktd4RvE72ddsdS97VrVko5KN9yQoktfFmF1xpump",
+   "quote_mint": "So11111111111111111111111111111111111111112",
+   "base_token_program": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+   "quote_token_program": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+   "data_hex": "f19a6d0411b16dbcff000091418eca955b0d7b48a0d59ee8d97691af3adf84312f81a24e48bdc6a3852e4f064d915a6c87ed28348f46c0a39b95bf1dfb0ba28b4d2299210479407bb8c4bf069b8857feab8184fb687f634618c035dac439dc1aeb3b5598a0f00000000001fc314426a9ae562427517979f90c6c631b7c080185359e4c1b26073c9ee0331a573079d9e775c1041a62b6ba31de7b63ab61de48e15c98ed521e7c4a7b225601865de1d0af0f89b5ce0a49cc3e878599128787e1c2ec7e0edce33dc1b76fa04b6400000000000000"
+  },
+  {
+   "address": "114hoiDuak8RVc8JCQgX7hPrEuqaoUwKLeQrKE7ESFa",
+   "owner": "pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA",
+   "slot": 445767200,
+   "len": 243,
+   "note": "243 bytes: coin_creator present, the flags absent.",
+   "base_mint": "So11111111111111111111111111111111111111112",
+   "quote_mint": "6TSu8qRPdycEbcuXZQNkitCujHMKq1ztANyFY8Mspump",
+   "base_token_program": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+   "quote_token_program": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+   "data_hex": "f19a6d0411b16dbcfe00003fff2d1781f9d8b2f02f62a05613d3f71a413a174da60d7a0241d9506eb9b5bd069b8857feab8184fb687f634618c035dac439dc1aeb3b5598a0f000000000015110d1d2fa9dc9793f2317b3e5c2652d238b9d994084f51562de5816a4c77baf414493920d788c061785722dc14867e887cde0479b91daba1fef1ef8f17711e57347a8f5f44737ce0b7bc2556573a972138d140b2251d919044bb57518b83b0b386ccc03a95f40274716aefb8d66838c0d7d4078eb549b27e040090a36dd99b264000000000000000000000000000000000000000000000000000000000000000000000000000000"
+  },
+  {
+   "address": "11RWS7x2FrV847pEyz4QuPskgfAacMR42H7jrCfod1F",
+   "owner": "pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA",
+   "slot": 445767212,
+   "len": 244,
+   "note": "244 bytes: is_mayhem_mode present, is_cashback_coin absent.",
+   "base_mint": "So11111111111111111111111111111111111111112",
+   "quote_mint": "9XHrgXnCkCiqjRYFbPMtW4TVNe7RkWzjEZ41MhivBoDZ",
+   "base_token_program": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+   "quote_token_program": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+   "data_hex": "f19a6d0411b16dbcff000060401e27e1f32aa02776ed6e698e2b170d082bc6fc9d81c2a97d876805bb9ed3069b8857feab8184fb687f634618c035dac439dc1aeb3b5598a0f000000000017e9ffabf07047f471053b52ec38f9a73bed5e71edd9fe730d07c8f22abdfd1d04a6ff896cde5d5b5f5bf9913ad5a5bee79b4bc665a6d1017378db9fa84e46c29e292a0329cfc3073e032612b771531ac06d19fb977d86795dccde42852ea089245398b373c5e3bdc39a751683d8b74278d45256bf3ac94cfeb34dba3218916086400000000000000000000000000000000000000000000000000000000000000000000000000000000"
+  },
+  {
+   "address": "12Tmc1bcYnY3dJc8Gh8awuH77FLQvMema2Qmy8aF1nK",
+   "owner": "pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA",
+   "slot": 445767227,
+   "len": 245,
+   "note": "245 bytes: both flags present, virtual_quote_reserves absent.",
+   "base_mint": "So11111111111111111111111111111111111111112",
+   "quote_mint": "63utABMUSELHucZ8pQbDUMPcwnCkUvWPJz1MobvPxwnk",
+   "base_token_program": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+   "quote_token_program": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+   "data_hex": "f19a6d0411b16dbcfe000070a0dfa7533f9bac4255c62ea3df33b08bbfd32b22a1aa609a0355c047b73a82069b8857feab8184fb687f634618c035dac439dc1aeb3b5598a0f000000000014b0963e1a4d0e348343b19adecba8e470b312a77aab08dd2c163ab637fe33f8df4661768a260a8484828bf2666c9cad18f801b7a66d0e59b2df741e21949cd5bd308758509d823a6bfb245f763d3e2f73d8b562aa36ab099886da4b02d04dc57feda36aba278eeb63f4b0eebc12565e4bc74f9a6f80f8d1d081a45760a6701d5640000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+  },
+  {
+   "address": "1ED6iUwkgnqLBcASfPUcSKitowQdGqq52M6TLyohTpF",
+   "owner": "pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA",
+   "slot": 445767241,
+   "len": 261,
+   "note": "261 bytes: every documented field, no padding. Its index is 1, not 0.",
+   "base_mint": "So11111111111111111111111111111111111111112",
+   "quote_mint": "C4qPjAQtFfnYq5QeX6U4fwZbbXMySxvxUSUZQ8FKmoon",
+   "base_token_program": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+   "quote_token_program": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+   "data_hex": "f19a6d0411b16dbcff0100a7d2fc74578ce66fa7897208ab41dd5cf27ec46ede7930844fd0879d397773e2069b8857feab8184fb687f634618c035dac439dc1aeb3b5598a0f00000000001a46c03f47b26d637a2b5dda884e880b8225a0d79d09cc90461ec01658c7ae7114b4477ed236500bc410d407ac8e5056b4c933b915e18204c37d76bb10547b015553dc93b255ec95948a4b15af2ed20c901b2f800eee2b86c0aac91819e296ab4aabb81b6c71a72223b98047f0b55957713334a580a019b5bf28ff5d47e2fbd54802b0500000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+  },
+  {
+   "address": "82zcJ16FYLuqbjxbdHKbD3F7YigdhBe6YHTTvsErNHB",
+   "owner": "pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA",
+   "slot": 445767255,
+   "len": 270,
+   "note": "270 bytes, and its quote mint is USDC. The rarest shape on the chain (268 accounts) and the one that settles whether a non-SOL quote pool exists.",
+   "base_mint": "3EMheh5MPVWpAGDdXnGBgs6uaukKL29zv65uuXxspump",
+   "quote_mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+   "base_token_program": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+   "quote_token_program": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+   "data_hex": "f19a6d0411b16dbcff00001439ebf46a8933b2dbfd3322267ac8fdcffa31ff26db667cbc09106c054801ef212354b65239b82ec2b93b767c15351b6492f25ef6c1d4dd8c368969da197acfc6fa7af3bedbad3a3d65f36aabc97431b1bbe4c2d2f6e0e47ca60203452f5d617059f691e07f5ea69e532236dbca0069a9c02e009af3c5f8bd4f95c452775221339a6b3a6e91232eaaa9e453e3658583f6ceb9e2508411f2f779c4832095c957fa56055d799c2abffd4b7060817e2d6371576419613297c958bdb1279ab925a4066d4007000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+  },
+  {
+   "address": "118Kjv7HGmoVEnXRupC43AaB2aaAyitKHaW1Kdz1SJp",
+   "owner": "pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA",
+   "slot": 445767268,
+   "len": 300,
+   "note": "300 bytes: the documented fields and 39 bytes of padding.",
+   "base_mint": "TiHeVgMZzWpbWBSoavxkEkZTWiCSxcFS6gvYipYpump",
+   "quote_mint": "So11111111111111111111111111111111111111112",
+   "base_token_program": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+   "quote_token_program": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+   "data_hex": "f19a6d0411b16dbcfe0000ea1201ef14359a217a74d1045af6dc3eadc6cb0dc183e2455c19e8c502ea46a006d7c8cebcf354a6b507a9ad7cba36715534a21567b3bec285026efc6a293cdf069b8857feab8184fb687f634618c035dac439dc1aeb3b5598a0f000000000016ef15056ac3cee0073cc591474c6ef7615d4ec9dd3c76531cb2b9f61473fe98541c8da37e7ad143a7667e4f1b3c52b1b265d912b5d0044d87cdb5ea9879d42fe1857a626d619af0e14dea3f25d1ca706d823768a02c375b3d1584012be3e9f07944f9200000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+  }
+ ]
+}
