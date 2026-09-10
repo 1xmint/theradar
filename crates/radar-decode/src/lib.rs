@@ -138,29 +138,12 @@ impl Instruction {
         }
     }
 
-    /// Whether this instruction acquires the token, on whichever venue it is.
-    #[must_use]
-    pub const fn is_buy(self) -> bool {
-        match self {
-            Self::PumpFun(ix) => ix.is_buy(),
-            Self::PumpSwap(ix) => ix.is_buy(),
-        }
-    }
-
-    /// Whether this instruction disposes of the token, on whichever venue.
-    #[must_use]
-    pub const fn is_sell(self) -> bool {
-        match self {
-            Self::PumpFun(ix) => ix.is_sell(),
-            Self::PumpSwap(ix) => ix.is_sell(),
-        }
-    }
-
-    /// Whether this instruction moves a position, on whichever venue.
-    #[must_use]
-    pub const fn is_trade(self) -> bool {
-        self.is_buy() || self.is_sell()
-    }
+    // There is deliberately no venue-agnostic `is_buy`/`is_sell`/`is_trade`
+    // here. A caller that wants to know what an instruction *did* wants it in
+    // order to price or size something, and those answers are not transferable:
+    // a curve buy moves against a bonding curve, an AMM buy moves against two
+    // vaults with their own fee ladder. Ask through `pumpfun()` or `pumpswap()`,
+    // which makes the caller say which arithmetic it is about to apply.
 }
 
 /// The result of decoding an instruction.

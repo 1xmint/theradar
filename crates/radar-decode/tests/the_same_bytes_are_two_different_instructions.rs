@@ -100,6 +100,29 @@ fn every_shared_discriminator_decodes_to_the_program_it_was_given() {
             matches!(amm, Instruction::PumpSwap(_)),
             "{name} under PumpSwap is {amm:?}"
         );
+        // The accessors a caller reaches for are the place the misread would
+        // actually happen, so they are asserted in both directions: each answers
+        // for its own venue and refuses for the other.
+        assert!(
+            curve.pumpfun().is_some() && curve.pumpswap().is_none(),
+            "{name} under pump.fun answers as {curve:?} but not as a curve \
+             instruction"
+        );
+        assert!(
+            amm.pumpswap().is_some() && amm.pumpfun().is_none(),
+            "{name} under PumpSwap answers as {amm:?} but not as an AMM \
+             instruction"
+        );
+        assert_eq!(
+            curve.anchor_name(),
+            name,
+            "the curve's instruction lost its name"
+        );
+        assert_eq!(
+            amm.anchor_name(),
+            name,
+            "the AMM's instruction lost its name"
+        );
     }
 }
 
@@ -115,8 +138,17 @@ fn a_pumpswap_buy_is_never_reported_as_a_bonding_curve_buy() {
     };
     assert_eq!(ix, Instruction::PumpSwap(pumpswap::Instruction::Buy));
     assert_eq!(ix.pumpfun(), None, "an AMM buy is not a curve instruction");
-    assert!(ix.is_buy());
+    assert_eq!(ix.pumpswap(), Some(pumpswap::Instruction::Buy));
+    assert!(ix.pumpswap().is_some_and(pumpswap::Instruction::is_buy));
     assert_eq!(ix.anchor_name(), "buy");
+    assert_eq!(ix.program(), Program::PumpSwap);
+
+    // The same bytes under the curve are a curve buy, and answer only as one.
+    let Decoded::Known(curve) = decode(Program::PumpFun, &data) else {
+        panic!("the curve has these bytes too");
+    };
+    assert_eq!(curve.pumpfun(), Some(pumpfun::Instruction::Buy));
+    assert_eq!(curve.pumpswap(), None);
 }
 
 #[test]
@@ -136,9 +168,14 @@ fn an_instruction_only_one_program_has_is_unknown_on_the_other() {
         "PumpSwap's create_pool is not a curve instruction"
     );
     // And each is still known on its own program, so the assertions above are
-    // about the program and not about an unparseable payload.
+    // about the program and not about an unparseable payload. Asserted as *not*
+    // unrecognised as well as known, because those are the two halves of the
+    // alarm: a recognised instruction must not be counted toward the unknown
+    // rate that says a program has been upgraded under us.
     assert!(decode(Program::PumpFun, &launch).known().is_some());
+    assert!(!decode(Program::PumpFun, &launch).is_unrecognised());
     assert!(decode(Program::PumpSwap, &pool).known().is_some());
+    assert!(!decode(Program::PumpSwap, &pool).is_unrecognised());
 }
 
 #[test]
