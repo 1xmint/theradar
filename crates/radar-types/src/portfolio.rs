@@ -26,10 +26,10 @@
 //!
 //! # Why a valuation can be honestly absent
 //!
-//! `docs/research/0033` captured ten PumpSwap pools from mainnet: four quote in
-//! wrapped SOL, one in USDC, and **five in other SPL mints, one of them another
-//! `…pump` token**. So a holding's quote asset may itself have no dollar price
-//! without a chain of quotes that does not exist here yet.
+//! `docs/research/0033` captured ten PumpSwap pools from mainnet, and **six of
+//! the ten quote in something other than SOL** — one of them USDC, the rest in
+//! `pump` and other mints. So a holding's quote asset may itself have no dollar
+//! price without a chain of quotes that does not exist here yet.
 //!
 //! [`Unvaluable::QuoteUnpriced`] is that fact, written down. The alternative is
 //! an estimate, and an estimate in this field is a number a limit will be
@@ -130,9 +130,9 @@ pub enum Unvaluable {
     NoPrice,
     /// The asset this holding is quoted against has no dollar price itself.
     ///
-    /// `docs/research/0033`: five of ten captured PumpSwap pools quote in
-    /// arbitrary SPL mints, one of them another `…pump` token. Pricing through
-    /// one needs a chain of quotes that does not exist here.
+    /// `docs/research/0033`: six of ten captured PumpSwap pools quote in
+    /// something other than SOL, and only one of those six is USDC. Pricing
+    /// through the rest needs a chain of quotes that does not exist here.
     QuoteUnpriced,
     /// There is no counted quantity to price.
     BalanceUncounted,
@@ -1142,9 +1142,9 @@ mod tests {
     #[test]
     fn an_unknown_valuation_does_not_read_as_zero() {
         // The named test. A holding whose quote asset has no dollar price --
-        // five of ten captured PumpSwap pools quote in arbitrary SPL mints --
-        // reports no value, and `results` reports the whole account as unvalued
-        // rather than summing the priced half into a smaller total.
+        // six of ten captured PumpSwap pools quote in something other than SOL
+        // -- reports no value, and `results` reports the whole account as
+        // unvalued rather than summing the priced half into a smaller total.
         //
         // Re-apply the bug by defaulting `micro_usd` to `MicroUsd::ZERO`, or by
         // skipping unknown holdings in `results`, and both assertions below
