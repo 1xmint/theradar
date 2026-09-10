@@ -447,14 +447,19 @@ fn table_coverage(rows: &[Coverage]) -> Vec<TableCoverage> {
                     (Completion::Partial, _) => unfinished += 1,
                 }
             }
-            let state = if complete_spans + measured_empty + unfinished == 0 {
-                CoverageState::NeverAttested
-            } else {
+            // Whether a record exists, asked directly. Summing the three
+            // counters and comparing to zero was an indirect way of asking the
+            // same thing, and an indirect way that could be got wrong: with one
+            // complete span and one measured-empty range, a single subtraction
+            // in that sum reports a collected table as one nobody ever ran.
+            let state = if rows.iter().any(|r| r.table == *table) {
                 CoverageState::Attested {
                     complete_spans,
                     measured_empty,
                     unfinished,
                 }
+            } else {
+                CoverageState::NeverAttested
             };
             TableCoverage {
                 table: table.dir().to_owned(),
@@ -2326,6 +2331,23 @@ mod tests {
             by_name("trades"),
             CoverageState::NeverAttested,
             "a table with no record is not a table that was collected and empty"
+        );
+
+        // A table whose only records are attempts is still attested: somebody
+        // ran, and the report has to say the attempt happened rather than that
+        // nobody tried. This is the case the arithmetic this replaced could get
+        // wrong in the other direction.
+        let attempts = [covering(Table::Trades, 20, span(1, 2), Completion::Partial)];
+        assert_eq!(
+            table_coverage(&attempts)
+                .iter()
+                .find(|t| t.table == "trades")
+                .map(|t| t.state),
+            Some(CoverageState::Attested {
+                complete_spans: 0,
+                measured_empty: 0,
+                unfinished: 1,
+            })
         );
     }
 
