@@ -103,12 +103,49 @@ rather than quietly.
 - **Any mint carrying a Token-2022 extension that changes transfer amounts.**
   `crates/radar-pumpfun/src/token.rs` already refuses six by name.
 
+## The fees, added 2026-09-10
+
+The section below replaces this document's original "fees not settled" note. Same
+two trades, all eight fee-bearing fields read out and checked.
+
+**Fees are outside the product.** The value at offset 64 enters the constant
+product untouched — that is what makes the match exact — and the fee amounts are
+computed from it separately. A quoter that deducts a fee before applying the
+curve gets a smaller answer than the chain gives.
+
+**Two rates, both stored in the event, both rounding up.**
+
+| | rate | rate at | amount at | trade A | trade B |
+|---|---:|---|---|---:|---:|
+| liquidity fee | 93 bps | offset 88 | offset 96 | 185,978 | 209,999 |
+| creator fee | 30 bps | offset 344 | offset 352 | 59,993 | 67,742 |
+
+Both amounts reproduce exactly as `ceil(input x rate / 10000)` on both trades.
+Rounding **up** — the same direction 0028 found in the fee ladder, and the
+direction that costs the taker rather than the pool.
+
+And the two sum to a difference already present in the record:
+
+```
+offset 96 + offset 352  ==  offset 104 - offset 112
+245,971 == 245,971   (trade A)
+277,741 == 277,741   (trade B)
+```
+
+Exact on both. That identity is what ties the fee fields to the pair at 104 and
+112, whatever those two are named.
+
 ## What is still not established
 
-Whether fees sit inside or outside this product is **not** settled by these two
-trades. Using the gross `quote_in` at offset 64 gave the exact match, which is
-consistent with fees being taken elsewhere, but the fee-bearing fields at offsets
-80 through 112 were not reconciled and one interpretation was not ruled out.
+**Offset 384** is 46.50 basis points of the pool input on both trades — exactly
+half the liquidity rate on trade A, and one unit off half on trade B, which is
+rounding. It is consistent with a protocol share taken out of the liquidity fee,
+and that is a guess, not a reading. **Offset 376 is 5,000 on both trades** and is
+not a rate of the input at all. Neither is reconciled and neither is needed to
+quote.
+
+Nothing here names offsets 104 and 112. The identity above constrains their
+difference and says nothing about what either one is.
 
 The 2026-07-20 program upgrade report remains unverified. Both trades here are
 from after it, so they say nothing about how older data should be read — and a
