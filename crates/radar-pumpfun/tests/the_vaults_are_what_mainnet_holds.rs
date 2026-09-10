@@ -320,6 +320,114 @@ fn a_transfer_fee_is_refused_and_the_refusal_names_it() {
 }
 
 #[test]
+fn every_extension_code_the_program_defines_is_named_and_named_once() {
+    // The name is what a refusal hands an operator, so a gap in the table turns
+    // "PermanentDelegate (12)" into "extension 12 (no name known)" and a
+    // duplicate sends them to the wrong extension entirely. Both are one deleted
+    // or mistyped line away, and neither shows up anywhere else.
+    //
+    // The range is the program's published `ExtensionType` order, 0 through 27
+    // as of 2026-09-09. A twenty-eighth is not a failure here -- an unknown code
+    // is refused by number, which is the whole reason this table may be
+    // inference rather than measurement.
+    let mut seen: Vec<&'static str> = Vec::new();
+    for code in 0..=27u16 {
+        let name = Extension(code)
+            .name()
+            .unwrap_or_else(|| panic!("extension {code} has no name"));
+        assert!(
+            !seen.contains(&name),
+            "{name} names extension {code} and something else too",
+        );
+        seen.push(name);
+    }
+    assert_eq!(Extension(28).name(), None, "the table stops where it stops");
+    assert_eq!(
+        Extension(28).to_string(),
+        "extension 28 (no name known)",
+        "and an unnamed code still refuses by number",
+    );
+}
+
+#[test]
+fn the_specimen_carries_the_codes_and_lengths_mainnet_gave_them() {
+    // The evidence the numbering is right for the nine codes that were captured.
+    // Every one of these is read straight out of the mint's TLV list, and each
+    // length is the one the program's layout gives that extension -- a table
+    // shifted by one would not produce eight entries whose lengths all land.
+    let mint = specimen(MANY_EXTENSIONS_MINT);
+    let mut found: Vec<(u16, u16)> = Vec::new();
+    let mut at = 166;
+    while at + 4 <= mint.data.len() {
+        let code = u16::from_le_bytes(mint.data[at..at + 2].try_into().expect("two bytes"));
+        let length = u16::from_le_bytes(mint.data[at + 2..at + 4].try_into().expect("two bytes"));
+        found.push((code, length));
+        at += 4 + usize::from(length);
+    }
+
+    let named: Vec<(Option<&'static str>, u16)> = found
+        .iter()
+        .map(|(code, length)| (Extension(*code).name(), *length))
+        .collect();
+    assert_eq!(
+        named,
+        vec![
+            (Some("MintCloseAuthority"), 32),
+            (Some("PermanentDelegate"), 32),
+            (Some("TransferFeeConfig"), 108),
+            (Some("ConfidentialTransferMint"), 65),
+            (Some("ConfidentialTransferFeeConfig"), 129),
+            (Some("TransferHook"), 64),
+            (Some("MetadataPointer"), 64),
+            (Some("TokenMetadata"), 174),
+        ],
+    );
+    // Two of the eight are on the accepted list -- the metadata pair, the same
+    // two the pools' own mints carry. Which is the point: a mint can hold every
+    // familiar extension and still hold a permanent delegate beside them, so
+    // recognising one says nothing about the mint.
+    let accepted = found
+        .iter()
+        .filter(|(code, _)| Extension(*code).is_accepted())
+        .count();
+    assert_eq!(accepted, 2, "the metadata pair, and nothing else");
+    assert!(MintAccount::parse(&mint.data, &mint.owner).is_err());
+}
+
+#[test]
+fn the_walk_carries_on_past_an_accepted_extension_to_refuse_a_later_one() {
+    // The captured Token-2022 mints put their two accepted extensions first and
+    // then end, so nothing in the raw capture distinguishes a walk that advances
+    // correctly from one that lands somewhere harmless and stops. This takes a
+    // real 399-byte mint and changes only its **second** extension's type code
+    // from TokenMetadata to a transfer fee. Reaching that code at all requires
+    // stepping exactly over the first extension: 166 + 4 + 64 = 234.
+    //
+    // Without it, `at + 4 + length` mutated to `at + 4 - length` walks backwards
+    // into the zero padding, reads a zero type, and returns success on a mint
+    // that charges a fee on every transfer.
+    const SECOND_HEADER_AT: usize = 234;
+    let mint = role(MIXED_PROGRAMS, "base_mint");
+    let mut data = mint.data.clone();
+    assert_eq!(
+        u16::from_le_bytes(
+            data[SECOND_HEADER_AT..SECOND_HEADER_AT + 2]
+                .try_into()
+                .expect("two bytes")
+        ),
+        19,
+        "the capture's second extension is TokenMetadata",
+    );
+    data[SECOND_HEADER_AT..SECOND_HEADER_AT + 2].copy_from_slice(&1u16.to_le_bytes());
+
+    let refused = MintAccount::parse(&data, &mint.owner).expect_err("the second extension");
+    let TokenMalformed::UnmodelledExtension { extension } = refused else {
+        panic!("{refused:?} should have reached the second extension");
+    };
+    assert_eq!(extension.name(), Some("TransferFeeConfig"));
+}
+
+#[test]
 fn extensions_arrive_in_bundles_and_one_harmless_one_proves_nothing() {
     // Eight extensions on one mint, and the first two the walk meets are a mint
     // close authority and a permanent delegate. A parser that stopped at the

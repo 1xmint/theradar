@@ -454,8 +454,16 @@ fn extensions(data: &[u8], expected_type: u8) -> Result<(), TokenMalformed> {
         });
     }
 
+    // Bounded rather than `loop`, and the bound is not decoration. `cargo
+    // mutants` turned `at + 4 + length` into `at + 4 * length`, which for the
+    // zero-length `ImmutableOwner` that every captured vault carries leaves `at`
+    // exactly where it was and walks for ever. CI reports that as a sixty-second
+    // timeout, which is an expensive way to be told, and it is the same shape as
+    // the bound on `radar_onchain::rpc::decode_base58`'s carry loop. Every real
+    // pass consumes at least a four-byte header, so one pass per four bytes of
+    // account is a bound the correct arithmetic cannot reach.
     let mut at = EXTENSIONS_AT;
-    loop {
+    for _ in 0..data.len().div_ceil(4) {
         let remaining = data.len() - at;
         if remaining == 0 {
             return Ok(());
@@ -485,6 +493,13 @@ fn extensions(data: &[u8], expected_type: u8) -> Result<(), TokenMalformed> {
         }
         at = end;
     }
+    // Only reachable if the walk stopped advancing, which the arithmetic above
+    // cannot do. Kept as a refusal rather than an `unreachable!` because the one
+    // thing worse than a parser that gives up here is one that panics.
+    Err(TokenMalformed::TrailingExtensionBytes {
+        at,
+        remaining: data.len() - at,
+    })
 }
 
 /// Which shapes a length is allowed to be, and whether extensions follow.
