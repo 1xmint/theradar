@@ -39,7 +39,9 @@ mod asset;
 mod market;
 mod money;
 mod mutability;
+mod portfolio;
 mod provenance;
+mod quantity;
 mod slot;
 
 /// The commit this binary was built from, or `None`.
@@ -80,9 +82,14 @@ pub fn build_sha_or_unknown() -> &'static str {
 pub use address::{Address, AddressParseError, Signature};
 pub use asset::Asset;
 pub use market::Market;
-pub use money::MicroUsd;
+pub use money::{MicroUsd, SignedMicroUsd};
 pub use mutability::{Latch, LatchReopened, Mutability, Revalidation};
+pub use portfolio::{
+    AssetRole, Balance, CostKind, Costs, Custody, Holding, Incomplete, Portfolio, PortfolioError,
+    Refusal, Reservation, ReservationId, Results, Settlement, Unrealised, Unvaluable, Valuation,
+};
 pub use provenance::{EvidenceTier, Provenance, SourceId, Trust};
+pub use quantity::{Decimals, TokenQuantity};
 pub use slot::{Slot, SlotDelta};
 
 #[cfg(test)]
