@@ -1153,6 +1153,19 @@ mod tests {
         assert_eq!(unpriced.micro_usd(), None, "cannot value, not $0");
         assert_eq!(unpriced.as_of(), None, "and it is not dated either");
         assert_ne!(unpriced, priced(0, NOW), "nor equal to a measured zero");
+        assert_eq!(
+            unpriced.why_unknown(),
+            Some(Unvaluable::QuoteUnpriced),
+            "and it says which kind of absent it is"
+        );
+
+        // The other side of both accessors. Without these, an implementation
+        // that returned `None` for everything would satisfy the assertions
+        // above and report every priced holding as unvaluable.
+        let known = priced(40_000_000, Slot(9_000));
+        assert_eq!(known.micro_usd(), Some(MicroUsd(40_000_000)));
+        assert_eq!(known.as_of(), Some(Slot(9_000)));
+        assert_eq!(known.why_unknown(), None);
 
         let mut portfolio = with_cash(100_000_000);
         portfolio
@@ -1206,6 +1219,11 @@ mod tests {
                 ..
             })
         ));
+        assert_eq!(
+            portfolio.holding(mint).expect("held").balance().counted(),
+            None,
+            "and no quantity can be read out of it either"
+        );
         // And the valuation handed in was dropped: a price on a quantity nobody
         // counted is a figure about nothing.
         let held = portfolio.holding(mint).expect("held");
@@ -1242,6 +1260,45 @@ mod tests {
                 mint,
                 why: Refusal::NotRecorded
             })
+        );
+        // And the gap is enumerable, not merely counted. An accessor that
+        // reported nothing would let a caller print "0 unaccounted" beside a
+        // portfolio that has one.
+        assert_eq!(
+            with_gap.unaccounted().collect::<Vec<_>>(),
+            vec![(mint, Refusal::NotRecorded)]
+        );
+    }
+
+    #[test]
+    fn two_claims_on_one_asset_are_two_claims() {
+        // Each reservation needs its own identity. With a counter that does not
+        // advance, the second `reserve` overwrites the first in the map: the
+        // claims collapse into one, half the claimed capital silently becomes
+        // free again, and settling either settles both.
+        let mut portfolio = with_cash(100_000_000);
+        let first = portfolio
+            .reserve(Asset::Usdc, usdc(30_000_000), NOW)
+            .expect("free");
+        let second = portfolio
+            .reserve(Asset::Usdc, usdc(30_000_000), NOW)
+            .expect("free");
+
+        assert_ne!(first, second, "two claims, two identities");
+        assert_eq!(portfolio.reservations().count(), 2);
+        assert_eq!(
+            portfolio.free(Asset::Usdc).expect("readable"),
+            usdc(40_000_000),
+            "$60 claimed across the two of them"
+        );
+
+        portfolio
+            .settle(first, Settlement::Abandoned)
+            .expect("a known claim");
+        assert_eq!(
+            portfolio.free(Asset::Usdc).expect("readable"),
+            usdc(70_000_000),
+            "settling one leaves the other standing"
         );
     }
 
@@ -1397,9 +1454,41 @@ mod tests {
                 as_of: Slot(9_000),
             }
         );
+        assert_eq!(
+            results.unrealised.amount(),
+            Some(SignedMicroUsd(8_000_000)),
+            "and the amount reads out, rather than reading as absent"
+        );
+
         // Cash is not netted into the position result: SOL and USDC are not one
-        // number, and cash is not exposure.
-        assert_eq!(portfolio.cash().count(), 1);
+        // number, and cash is not exposure. Named, not counted -- there is one
+        // holding of each role here, so a filter inverted between them would
+        // still return exactly one row.
+        assert_eq!(
+            portfolio.cash().collect::<Vec<_>>(),
+            vec![(Asset::Usdc, portfolio.holding(Asset::Usdc).expect("held"))]
+        );
+        assert_eq!(
+            portfolio.holding(Asset::Usdc).expect("held").role(),
+            AssetRole::Cash
+        );
+        // And every holding is enumerable, not merely countable to zero.
+        assert_eq!(
+            portfolio
+                .holdings()
+                .map(|(asset, _)| asset)
+                .collect::<Vec<_>>(),
+            vec![Asset::Usdc, Asset::token_2022(Address::new([9u8; 32]))]
+        );
+        assert_eq!(
+            portfolio
+                .holding(Asset::Usdc)
+                .expect("held")
+                .balance()
+                .counted(),
+            Some(usdc(100_000_000)),
+            "a counted balance reads back as the quantity it was given"
+        );
     }
 
     #[test]

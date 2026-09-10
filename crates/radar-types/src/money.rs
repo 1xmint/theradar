@@ -88,12 +88,6 @@ impl SignedMicroUsd {
     /// that holds one; this type has no room for that state, on purpose.
     pub const ZERO: Self = Self(0);
 
-    /// Whole micro-dollars, signed.
-    #[must_use]
-    pub const fn get(self) -> i64 {
-        self.0
-    }
-
     /// Saturating addition.
     ///
     /// A running total that panicked mid-accounting is worse than one pinned at
@@ -102,19 +96,6 @@ impl SignedMicroUsd {
     #[must_use]
     pub const fn saturating_add(self, other: Self) -> Self {
         Self(self.0.saturating_add(other.0))
-    }
-
-    /// What this lost, in micro-dollars, or zero if it did not lose.
-    ///
-    /// `i64::MIN` has no positive counterpart, so it is dropped rather than
-    /// negated: wrapping would turn the largest representable loss into a
-    /// number that reads as a gain.
-    #[must_use]
-    pub const fn loss(self) -> u64 {
-        match self.0.checked_neg() {
-            Some(positive) if positive > 0 => positive.unsigned_abs(),
-            _ => 0,
-        }
     }
 }
 
@@ -231,18 +212,6 @@ mod tests {
         assert_eq!(SignedMicroUsd(1_500_000).to_string(), "$1.500000");
         assert_eq!(SignedMicroUsd::ZERO.to_string(), "$0.000000");
         assert!(SignedMicroUsd(i64::MIN).to_string().starts_with("-$"));
-    }
-
-    #[test]
-    fn the_most_negative_result_does_not_wrap_into_a_gain_when_read_as_a_loss() {
-        // `checked_neg` on `i64::MIN` is `None`. Casting instead would report
-        // the largest representable loss as zero loss in one direction and as a
-        // wrapped positive in the other; both let a daily-loss limit through.
-        assert_eq!(SignedMicroUsd(i64::MIN).loss(), 0, "dropped, never wrapped");
-        assert_eq!(SignedMicroUsd(i64::MIN + 1).loss(), i64::MAX.unsigned_abs());
-        assert_eq!(SignedMicroUsd(-650_000).loss(), 650_000);
-        assert_eq!(SignedMicroUsd::ZERO.loss(), 0);
-        assert_eq!(SignedMicroUsd(4_000_000).loss(), 0, "a gain is not a loss");
     }
 
     #[test]

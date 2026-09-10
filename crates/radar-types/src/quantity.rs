@@ -277,6 +277,13 @@ mod tests {
     fn quantities_in_the_same_unit_add_subtract_and_compare() {
         let a = TokenQuantity::lamports(3_000);
         let b = TokenQuantity::lamports(1_250);
+        // The accessors return what was put in. Not a formality: `raw` is what
+        // every caller sizes against, and a constant in its place is a balance
+        // that is the same number whatever the account holds.
+        assert_eq!(a.raw(), 3_000);
+        assert_eq!(a.decimals(), Decimals::NATIVE_SOL);
+        assert!(!a.is_zero());
+        assert!(TokenQuantity::zero(Decimals::NATIVE_SOL).is_zero());
         assert_eq!(a.checked_add(b), Some(TokenQuantity::lamports(4_250)));
         assert_eq!(a.checked_sub(b), Some(TokenQuantity::lamports(1_750)));
         assert_eq!(a.checked_cmp(b), Some(Ordering::Greater));
