@@ -541,16 +541,12 @@ impl Adapter {
         self.offered.insert(source.into());
     }
 
-    /// Every source that may be cited, in name order.
-    pub fn citable(&self) -> impl Iterator<Item = &str> {
-        self.offered.iter().map(String::as_str)
-    }
-
-    /// The watermark this adapter judges expiry against.
-    #[must_use]
-    pub const fn now_slot(&self) -> u64 {
-        self.now_slot
-    }
+    // A `citable()` iterator and a `now_slot()` getter were here and are
+    // deliberately not. Nothing called either: the model already sees every
+    // citable name as the label on its own fenced block, and the caller that
+    // knows the watermark is the one that handed it over. AGENTS.md section 5,
+    // at method scale -- an accessor nothing calls is untested surface that
+    // reads as a contract.
 
     /// Reads one turn of model output.
     ///
@@ -1093,6 +1089,23 @@ mod tests {
             )
             .is_some()
         );
+    }
+
+    #[test]
+    fn a_fact_hands_back_the_source_and_the_body_it_was_given() {
+        // Thin, and worth the four lines. `source` is the citation a caller
+        // records and re-runs, and `content` is the untrusted body it fences;
+        // either one returning a constant blanks every citation or fences the
+        // wrong text, and neither failure looks wrong from the outside.
+        // `cargo mutants` reported four survivors here before this existed.
+        let fact = Fact::found(
+            "creator_history(abc)",
+            Availability::Recorded { as_of_slot: 1 },
+            "{\"launches\":41}",
+        )
+        .expect("sourced");
+        assert_eq!(fact.source(), "creator_history(abc)");
+        assert_eq!(fact.content(), "{\"launches\":41}");
     }
 
     #[test]
