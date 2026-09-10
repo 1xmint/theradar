@@ -507,7 +507,20 @@ impl Router {
     /// therefore no quote.
     #[must_use]
     pub fn from_env() -> Option<Self> {
-        Credentials::from_env().map(Self::new)
+        Self::from_vars(|k| std::env::var(k).ok())
+    }
+
+    /// The same, from a supplied reader rather than the process environment.
+    ///
+    /// Split for the reason `Credentials::from_vars` is split, and it is the
+    /// same reason: `std::env::set_var` is `unsafe` in edition 2024 against a
+    /// workspace that forbids unsafe, and these tests run in parallel threads
+    /// where process-wide state races unrelated ones. So the decision lives
+    /// here, where a test can make it, and `from_env` is left holding only the
+    /// reading.
+    #[must_use]
+    pub fn from_vars(get: impl Fn(&str) -> Option<String>) -> Option<Self> {
+        Credentials::from_vars(get).map(Self::new)
     }
 
     /// Slippage tolerance, in basis points.
@@ -735,6 +748,26 @@ mod tests {
         assert_eq!(
             notional_to_lamports(MicroUsd::from_dollars(100.0), MicroUsd::ZERO),
             0
+        );
+    }
+
+    #[test]
+    fn a_router_is_built_from_a_key_and_refused_without_one() {
+        // The deny-by-default rule, at the level that decides it. `from_env`
+        // holds only the reading of the process environment; this holds the
+        // decision, and a router that appeared without a key would be a quote
+        // Radar could not have paid for.
+        assert!(
+            Router::from_vars(|k| (k == API_KEY_VAR).then(|| NOT_A_KEY.to_owned())).is_some(),
+            "a present key builds a router"
+        );
+        assert!(
+            Router::from_vars(|_| None).is_none(),
+            "no key, no router, and therefore no quote"
+        );
+        assert!(
+            Router::from_vars(|_| Some(String::new())).is_none(),
+            "a blank key is an absent key, not a key of length zero"
         );
     }
 

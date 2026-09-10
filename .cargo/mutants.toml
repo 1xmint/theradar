@@ -212,6 +212,21 @@ exclude_re = [
     # discovered on the first real reply.
     'replace Credentials::from_env -> Option<Self> with None',
 
+    # `Router::from_env` is the fourth of the shape and the same argument. It
+    # reads one environment variable and hands it to `from_vars`, which decides
+    # -- and that decision is tested three ways in
+    # `a_router_is_built_from_a_key_and_refused_without_one`: a present key
+    # builds a router, an absent one does not, and a blank one is absent rather
+    # than a key of length zero.
+    #
+    # The reading is what is left, and it cannot be tested for the reason above.
+    #
+    # The mutation's effect is the safe direction and it is loud rather than
+    # silent: `None` means no router, so `radar route` refuses with the missing
+    # variable named instead of quoting. A quote that could not be paid for is
+    # the failure worth preventing; a refusal that names its own cause is not.
+    'replace Router::from_env -> Option<Self> with None',
+
     # `Telegram::from_env` is the third of the shape, and the same argument: it
     # reads `RADAR_TELEGRAM_BOT_TOKEN`, `RADAR_TELEGRAM_API_BASE` and
     # `RADAR_TELEGRAM_CHANNEL` and hands them to `from_vars`, which is tested

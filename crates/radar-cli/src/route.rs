@@ -107,6 +107,21 @@ fn requested(args: &[String]) -> Result<QuoteRequest, String> {
 ///
 /// A message for the operator. Every failure here is informative rather than
 /// fatal to anything: nothing has been signed or sent.
+/// How an impact reading is shown to a person.
+///
+/// One line, pulled out of the printing, because the choice in it is rule 9 and
+/// nothing inside a `println!` can be tested. `u32::MAX` is the absent reading,
+/// not a very large one: it has to be said in words, never rendered as a number
+/// and never as zero. A mutation testing `!=` here inverts exactly that, and it
+/// survived until this function existed.
+fn impact_line(impact_bps: u32) -> String {
+    if impact_bps == u32::MAX {
+        "NOT STATED — priced as the worst case, never as 0".to_owned()
+    } else {
+        format!("{impact_bps} bps")
+    }
+}
+
 pub fn run(args: &[String]) -> Result<(), String> {
     let flag = |name: &str| crate::flag(args, name);
 
@@ -147,11 +162,7 @@ pub fn run(args: &[String]) -> Result<(), String> {
         Some(floor) => println!("  floor      : {floor} base units at the configured slippage"),
         None => println!("  floor      : NOT STATED by Jupiter — not zero, unknown"),
     }
-    if quote.impact_bps == u32::MAX {
-        println!("  impact     : NOT STATED — priced as the worst case, never as 0");
-    } else {
-        println!("  impact     : {} bps", quote.impact_bps);
-    }
+    println!("  impact     : {}", impact_line(quote.impact_bps));
     println!(
         "  mode       : {}",
         quote.swap_mode.as_deref().unwrap_or("not stated")
@@ -184,7 +195,7 @@ pub fn run(args: &[String]) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    use super::parse_asset;
+    use super::{impact_line, parse_asset};
     use radar_types::Asset;
 
     #[test]
@@ -211,6 +222,23 @@ mod tests {
             parse_asset("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"),
             Ok(Asset::Usdc)
         );
+    }
+
+    #[test]
+    fn an_unstated_impact_is_said_in_words_and_never_shown_as_a_number() {
+        // Rule 9 at the surface a person reads. `u32::MAX` is the absent
+        // reading, and printing it as a number would show a quote with
+        // 4,294,967,295 basis points of impact as though that were measured.
+        // Getting the comparison backwards is worse still: a real impact would
+        // be reported as unknown, and the one genuinely unknown reading as a
+        // number.
+        assert_eq!(
+            impact_line(u32::MAX),
+            "NOT STATED — priced as the worst case, never as 0"
+        );
+        assert_eq!(impact_line(0), "0 bps");
+        assert_eq!(impact_line(42), "42 bps");
+        assert_eq!(impact_line(u32::MAX - 1), "4294967294 bps");
     }
 
     #[test]
