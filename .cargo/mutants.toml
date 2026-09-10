@@ -231,7 +231,15 @@ exclude_re = [
     #
     # Applied by hand, both operators: the suite passes unchanged, because no
     # input reaches the line to observe the difference.
-    'replace - with + in extensions',
+    #
+    # The `+` is escaped because these are regexes, and an unescaped one is a
+    # quantifier meaning "one or more spaces" -- so `replace - with + in
+    # extensions` matches nothing and excludes nothing, silently. The `/` line
+    # worked on the first attempt and the `+` line did not, which is what made
+    # the cause obvious. That is the fourth run this file's header has now paid
+    # for on pattern syntax; the header's warning about `replace . with .` is
+    # the same mistake in the other direction.
+    'replace - with \+ in extensions',
     'replace - with / in extensions',
 
     # `Router::from_env` is the fourth of the shape and the same argument. It
