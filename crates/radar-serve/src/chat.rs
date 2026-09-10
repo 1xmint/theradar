@@ -9,14 +9,26 @@
 //!
 //! # What a reply cannot do
 //!
-//! It is rendered. That is the whole list.
+//! Two things happen to it. Its prose is rendered, and its **step** is parsed —
+//! since [`crate::evidence::Investigation`] landed, a model may ask for a named
+//! piece of evidence and may write a typed recommendation.
 //!
-//! There is no branch keyed on what the model said, no field extracted from it,
-//! no tool call parsed out of it and no decision it can reach — `radar-serve`
-//! does not depend on `radar-risk`'s authorisation path, on `radar-exec` or on
-//! `radar-signer`, and `repo-conformance` holds that. This is AGENTS.md rule 1
-//! made structural rather than enforced: a model fully persuaded by a token name
-//! can write anything into `text` and reach nothing but a `<p>`.
+//! That is a real change and the guarantee is unchanged, so it is worth saying
+//! exactly where the guarantee now lives:
+//!
+//! - **A request is a tool name and one string.** It is checked against the
+//!   read-only allowlist by name, and a name that is not on it is refused by
+//!   name rather than ignored.
+//! - **A recommendation is validated by a deterministic adapter** against the
+//!   watermark, the running strategy version and the sources Radar actually
+//!   returned. Anything it rejects becomes an abstention.
+//! - **An amount is a requested bound, never permission.** The adapter here is
+//!   [`radar_agent::Adapter::closed`], whose ceiling is zero, so this route
+//!   cannot adopt an `enter` at any size.
+//! - **There is still no decision it can reach.** `radar-serve` does not depend
+//!   on `radar-risk`'s authorisation path, on `radar-exec` or on `radar-signer`,
+//!   and `repo-conformance` holds that. A model fully persuaded by a token name
+//!   can write anything into `note` and reach nothing but a `<p>`.
 //!
 //! # Where the untrusted content comes in
 //!
@@ -44,20 +56,39 @@ use crate::share;
 ///
 /// Short on purpose. A long system prompt full of prohibitions is a prompt that
 /// invites negotiation, and the prohibitions that matter here are not enforced
-/// by asking: the model has no action tools and its output is never parsed.
-/// What is left for a system prompt to do is set the register — say what Radar
-/// is, and that a claim without a source is worse than no claim.
+/// by asking: the model has no action tools, every request it makes is checked
+/// against the read-only allowlist by name, and every recommendation it writes
+/// is validated by a deterministic adapter whose ceiling is zero. What is left
+/// for a system prompt to do is set the register — say what Radar is, that a
+/// claim without a source is worse than no claim, and that asking for evidence
+/// costs a turn.
+///
+/// The tool list, the watermark and the wire format are **not** here. They are
+/// added by [`crate::evidence::framing`] from the allowlist and the store that
+/// will actually answer, so a menu cannot drift from what `may_call` admits.
 pub const SYSTEM: &str = "You are the reading assistant for Radar, a Solana \
     research recorder. Radar's product is an honest account of what it refused \
     and why, not a profit forecast. The population Radar selects from has a \
     median return around -13% before costs and fewer than one token in ten \
     finishes above a round trip. Answer from the recorded evidence you are \
     given, name the source when you use one, and say plainly when the evidence \
-    does not settle the question. You cannot request more evidence: what you \
-    have been given is what Radar looked up, so say what is missing rather than \
-    asking for it. Never recommend buying or selling anything: \
-    you cannot see a position, a balance or a price, and Radar's trading policy \
-    is closed regardless of what you say.";
+    does not settle the question. You may ask for more evidence by name, a few \
+    times, before you answer; a name that is not on your tool list is refused \
+    and a request costs a turn, so ask for what would change your answer. \
+    Never recommend buying or selling anything: you cannot see a position, a \
+    balance or a price, and Radar's trading policy is closed regardless of what \
+    you say.";
+
+/// Which strategy a recommendation from this route is about.
+///
+/// A recommendation naming a different version is refused by the adapter, which
+/// is not decoration: reasoning done about last week's strategy, applied to this
+/// week's, is a category error that reads as a normal answer.
+///
+/// The reading assistant does not run a strategy, so this names the route rather
+/// than a strategy version — and it is deliberately a value the model is *told*,
+/// so that a model inventing one is caught rather than accommodated.
+pub const STRATEGY_VERSION: &str = "reading-assistant/1";
 
 /// A question from the operator.
 #[derive(Clone, Debug, Deserialize)]
@@ -79,6 +110,22 @@ pub struct Answered {
     pub citations: Vec<String>,
     /// Whether anything was consulted at all.
     pub uncited: bool,
+    /// The typed recommendation, validated, or the abstention that replaced it.
+    ///
+    /// Inert. Serialised for a reader and for a later replay; nothing on this
+    /// path acts on it, and the risk kernel that could is not in this crate's
+    /// path at all.
+    pub recommendation: radar_agent::Recommendation,
+    /// Every request Radar declined, named.
+    ///
+    /// Published rather than swallowed. A model spending its turns on refusals
+    /// is a prompt problem an operator can only see if the refusals are visible.
+    pub refusals: Vec<String>,
+    /// How many model calls the answer took.
+    pub turns: u32,
+    /// Why the investigation ended without a recommendation of its own.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub abstained: Option<radar_agent::Abstained>,
 }
 
 /// The longest question that will be considered.
@@ -257,78 +304,67 @@ pub async fn ask(
         }
     }
 
-    let estimate = chat.provider.estimate();
-
-    // Reserve before calling. Checking a budget and then spending it is a race
-    // whenever two questions are in flight, and this box is one browser tab
-    // with a retry button.
-    let commitment = {
-        let Ok(mut agent) = chat.agent.lock() else {
-            return refuse(StatusCode::SERVICE_UNAVAILABLE, "the meter is poisoned");
-        };
-        let commitment = match agent.begin(estimate, day) {
-            Ok(c) => c,
-            Err(why) => return unavailable(&why),
-        };
-        // Written while the reservation is held, before the call goes out. A
-        // ledger saved only on settlement loses exactly the calls that crashed
-        // mid-flight -- and `Meter::ledger` records in-flight commitments for
-        // the same reason: a process that dies mid-call cannot know whether the
-        // call happened, and assuming it did not risks paying twice.
-        record(chat, &agent);
-        commitment
-    };
-
-    // Gathered before the model sees anything, and by Radar rather than by the
-    // model. That direction is the whole design: letting a model ask for
-    // evidence means parsing its output into a request, which is the path an
-    // injected instruction travels.
-    let provider = &chat.provider;
-    let (blocks, outcome) = tokio::task::block_in_place(|| {
-        let blocks = crate::evidence::gather(&state.registry, &state.store, question);
-        let request = crate::evidence::request(SYSTEM, question, &blocks);
-        let outcome = provider.ask(&request);
-        (blocks, outcome)
-    });
-
+    // The meter is held for the whole investigation rather than per turn.
+    // Two questions in flight would otherwise interleave their reservations
+    // against one budget, and this box is one browser tab with a retry button.
     let Ok(mut agent) = chat.agent.lock() else {
         return refuse(StatusCode::SERVICE_UNAVAILABLE, "the meter is poisoned");
     };
 
-    match outcome {
-        Ok(answer) => {
-            // Rule 9: a cost the provider did not report is unknown, not zero.
-            // Charging the estimate is what stops a subscription -- which never
-            // reports one -- from being free forever.
-            agent.settle(commitment, answer.cost.unwrap_or(estimate));
-            record(chat, &agent);
-            if let Ok(mut last) = chat.last.lock() {
-                *last = LastCall::Ok;
-            }
-            // The instruments Radar actually invoked, not names the model chose
-            // to write down. A citation here can be re-run.
-            let citations: Vec<String> = blocks.into_iter().map(|b| b.source).collect();
-            Json(Answered {
-                text: answer.text,
-                uncited: citations.is_empty(),
-                citations,
-            })
-            .into_response()
+    let started = std::time::Instant::now();
+    let investigation = crate::evidence::Investigation {
+        registry: &state.registry,
+        store: &state.store,
+        bounds: radar_agent::Bounds::SHIPPED,
+        strategy_version: STRATEGY_VERSION,
+    };
+    let session = crate::evidence::Session {
+        provider: chat.provider.as_ref(),
+        day,
+        elapsed: &|| u64::try_from(started.elapsed().as_micros()).unwrap_or(u64::MAX),
+        record: &|agent| record(chat, agent),
+    };
+    let outcome =
+        tokio::task::block_in_place(|| investigation.run(SYSTEM, question, &mut agent, &session));
+    drop(agent);
+
+    // A refusal from the boundary itself keeps its own status. 402 says the
+    // operator has spent the day's budget and tomorrow will work; 503 says
+    // something is broken now. Collapsing them into a 200 carrying an
+    // abstention would be how a spent budget gets diagnosed as a bad answer.
+    if let Some(radar_agent::Abstained::Unavailable(why)) = &outcome.abstained {
+        if let Ok(mut last) = chat.last.lock() {
+            *last = match why {
+                Unavailable::Unreachable(detail) => LastCall::Failed {
+                    why: detail.clone(),
+                },
+                _ => LastCall::Ok,
+            };
         }
-        Err(why) => {
-            // A provider that failed did not charge. Holding the reservation
-            // would let a flapping provider exhaust a budget it never spent,
-            // which is a self-inflicted outage rather than a safety measure.
-            agent.abandon(commitment);
-            record(chat, &agent);
-            if let Ok(mut last) = chat.last.lock() {
-                *last = LastCall::Failed {
-                    why: why.to_string(),
-                };
-            }
-            unavailable(&Unavailable::Unreachable(why.to_string()))
-        }
+        return unavailable(why);
     }
+
+    if let Ok(mut last) = chat.last.lock() {
+        *last = LastCall::Ok;
+    }
+
+    // The instruments Radar actually invoked, not names the model chose to
+    // write down. A citation here can be re-run.
+    let citations: Vec<String> = outcome
+        .facts
+        .iter()
+        .map(|fact| fact.source().to_owned())
+        .collect();
+    Json(Answered {
+        text: outcome.note,
+        uncited: citations.is_empty(),
+        citations,
+        recommendation: outcome.recommendation,
+        refusals: outcome.refusals,
+        turns: outcome.turns,
+        abstained: outcome.abstained,
+    })
+    .into_response()
 }
 
 /// The day the meter accounts against.
@@ -493,10 +529,15 @@ mod tests {
         assert!(SYSTEM.contains("Never recommend buying or selling"));
         assert!(SYSTEM.contains("-13%"), "the base rate is in the framing");
         // And it says the one thing about the shape of the conversation that a
-        // model would otherwise get wrong: it cannot ask for anything. A model
-        // that replies "let me check the creator history" is a model whose
-        // answer never arrives, because there is no second turn.
-        assert!(SYSTEM.contains("cannot request more evidence"));
+        // model would otherwise get wrong. This used to be "you cannot request
+        // more evidence"; since the investigative loop landed it is the
+        // opposite, and a prompt still carrying the old sentence would teach a
+        // model not to use the turns it has been given.
+        assert!(SYSTEM.contains("may ask for more evidence by name"));
+        assert!(
+            !SYSTEM.contains("cannot request more evidence"),
+            "the pre-loop instruction is gone, not merely contradicted"
+        );
     }
 
     #[test]

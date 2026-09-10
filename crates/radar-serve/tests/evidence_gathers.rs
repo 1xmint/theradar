@@ -6,6 +6,7 @@
 //! citation names the invocation, and that an empty store yields no evidence
 //! rather than an error.
 
+use radar_agent::investigate::Availability;
 use radar_instruments::{CreatorHistory, CreatorTrackRecord, Registry, SimulateExit};
 use radar_serve::evidence;
 use radar_store::{Reader, Writer};
@@ -69,7 +70,10 @@ fn a_question_naming_a_creator_is_answered_by_the_creator_instruments() {
         "an address in the question is looked up"
     );
 
-    let sources: Vec<&str> = blocks.iter().map(|b| b.source.as_str()).collect();
+    let sources: Vec<&str> = blocks
+        .iter()
+        .map(radar_agent::investigate::Fact::source)
+        .collect();
     for source in &sources {
         assert!(
             source.starts_with("creator_history(") || source.starts_with("creator_track_record("),
@@ -109,35 +113,46 @@ fn the_citation_names_the_instrument_that_actually_answered() {
     assert_eq!(blocks.len(), 2, "both creator instruments ran");
     for block in &blocks {
         let named = block
-            .source
+            .source()
             .split('(')
             .next()
             .expect("the source names an instrument");
         assert!(
-            block.content.contains(fingerprint(named)),
+            block.content().contains(fingerprint(named)),
             "cited as {named}, but the output is not {named}'s: {}",
-            block.content
+            block.content()
         );
         assert!(
-            block.content.contains(&creator()),
+            block.content().contains(&creator()),
             "{named} answered about a different address than it was cited for"
         );
     }
 }
 
 #[test]
-fn a_registry_without_the_planned_instruments_yields_nothing_rather_than_failing() {
-    // A build that registered something else. Skipping is right — the plan is a
-    // list of what would be useful, and an instrument this build does not have
-    // is not an error in the question — but it must not panic or invent a
-    // citation for a call that never happened.
+fn a_registry_without_the_planned_instruments_reports_the_hole_rather_than_hiding_it() {
+    // A build that registered something else. This used to be skipped, and
+    // skipping was wrong for the reason AGENTS.md rule 9 gives: an instrument
+    // that is not there and an instrument that found nothing arrived as the same
+    // empty list, so the model reasoned over a hole it could not see the size
+    // of. It is now `Unavailable`, and `Investigation::run` stops on it.
     let dir = populated();
     let store = Reader::open(dir.path());
     let mut sparse = Registry::new();
     sparse.register(SimulateExit::default());
 
-    let blocks = evidence::gather(&sparse, &store, &format!("about {}", creator()));
-    assert!(blocks.is_empty(), "no call, so no citation: {blocks:?}");
+    let facts = evidence::gather(&sparse, &store, &format!("about {}", creator()));
+    assert_eq!(facts.len(), 2, "both planned look-ups are accounted for");
+    for fact in &facts {
+        assert!(
+            matches!(fact.availability(), Availability::Unavailable { .. }),
+            "a missing instrument must not read as an answer: {fact:?}"
+        );
+        assert!(
+            fact.content().is_empty(),
+            "and it must not invent content for a call that never happened"
+        );
+    }
 }
 
 #[test]
