@@ -295,6 +295,37 @@ exactly. `Router` and `Submitter` now implement the traits, and
 checks the trait methods delegate to the real ones rather than being present and
 inert.
 
+**As of 2026-09-09 `Routing::build_buy` is one of those implementations and it
+always refuses**, which is the honest answer and is recorded in
+[ADR 0019](adr/0019-radar-prices-through-jupiter-and-no-longer-asks-it-for-a-transaction.md).
+The unauthenticated `lite-api.jup.ag/swap/v1` endpoints Radar called are
+deprecated. Their replacement, Jupiter's Router at `api.jup.ag/swap/v2/build`,
+has **no `asLegacyTransaction` parameter and returns no transaction at all** —
+raw instructions plus `addressesByLookupTableAddress` — and every pair captured
+on 2026-09-09 routed through lookup tables, five for SOL→USDC and still one for
+USDC→SOL asked with `maxAccounts=20`. The captures are committed unedited in
+[`crates/radar-exec/fixtures/`](../crates/radar-exec/fixtures/) and the tests run
+against them rather than the network.
+
+So `radar-exec`'s Jupiter client is now a **pricing** instrument.
+`Router::quote` takes an `Asset` on each side, so any admitted pair is quotable
+in either direction — SOL or USDC as input or output — where `build_buy(mint,
+wallet, size_lamports)` could say only "SOL in, this mint out". It reports the
+route's lookup-table count, which is the measurement saying whether the signer
+could ever read a transaction built from it. **It refuses entirely without
+`RADAR_JUPITER_API_KEY`**, and that refusal is Radar's own: Jupiter still answers
+keyless requests at a lower rate limit, so a fallback would succeed quietly
+inside a live decision.
+
+Nothing has changed about what Radar can execute. Jupiter would not hand it a
+signable transaction before either — that is
+[`0021`](research/0021-the-signer-cannot-read-the-only-venue-that-lists-them.md)
+below — and its own venue is `radar-pumpfun` (ADR 0009). One unauthenticated
+caller survives outside `radar-exec`:
+[`crates/radar-sim/src/jupiter.rs`](../crates/radar-sim/src/jupiter.rs) still
+probes `lite-api.jup.ag/swap/v1/quote` for exit prices and will break when
+Jupiter finishes the phase-out.
+
 **There is still no production caller** for the *trading* path. Nothing invokes
 the pipeline, for the local wallet or a customer's. Writing one is opening the
 trading path, and it is a decision about money rather than a wiring task.

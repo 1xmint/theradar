@@ -17,11 +17,18 @@
 //! establish is that the trait methods **delegate to the real ones** rather than
 //! being present and inert. Both point at an address nothing answers on, so a
 //! stub returning success would be visible immediately.
+//!
+//! One of those guarantees changed on 2026-09-09 and the change is deliberate.
+//! `Routing::build_buy` no longer reaches the network, because no Jupiter
+//! endpoint returns a transaction `radar-signer` can read any more — see
+//! `the_routing_stage_refuses_a_transaction_rather_than_returning_an_unsignable_one`
+//! below, and the module documentation of `radar_exec::route`. The router's
+//! live path is now `Router::quote`, and that is what is checked for delegation.
 
 use radar_exec::pipeline::{Routing, Sending};
-use radar_exec::route::Router;
+use radar_exec::route::{API_KEY_VAR, Credentials, QuoteRequest, RouteError, Router};
 use radar_exec::submit::Submitter;
-use radar_types::Address;
+use radar_types::{Address, Asset};
 
 /// An endpoint that refuses a connection immediately.
 ///
@@ -33,42 +40,59 @@ use radar_types::Address;
 /// Port 1 needs root to bind and nothing does, so a refusal is what arrives.
 const NOWHERE: &str = "http://127.0.0.1:1/";
 
+/// Credentials that authorise nothing, for a router that never reaches Jupiter.
+fn credentials() -> Credentials {
+    Credentials::from_vars(|k| {
+        (k == API_KEY_VAR).then(|| "test-key-that-authorises-nothing".to_owned())
+    })
+    .expect("a supplied key makes credentials")
+}
+
 #[test]
-fn routing_reaches_the_real_router() {
+fn quoting_reaches_the_real_router() {
     // A stub would answer without touching the network. The real one tries, and
     // fails, which is the observable difference.
-    let router = Router::new(NOWHERE, NOWHERE);
-    let outcome = Routing::build_buy(
+    let router = Router::with_endpoint(NOWHERE, credentials());
+    let outcome = router.quote(&QuoteRequest::new(
+        Asset::Sol,
+        Asset::Usdc,
+        1_000_000,
+        Address::new([0x33; 32]),
+    ));
+    assert!(
+        outcome.is_err(),
+        "an unreachable Jupiter must produce an error, not a quote"
+    );
+}
+
+/// The routing stage refuses to produce a transaction, and says why.
+///
+/// This test replaced one asserting that `Routing::build_buy` delegated to a
+/// real network call. It no longer does, because as of 2026-09-09 there is no
+/// Jupiter endpoint that returns a transaction `radar-signer` can read: the
+/// Router returns raw instructions and address lookup tables, and `lite-api`'s
+/// `asLegacyTransaction` is deprecated. The honest implementation is a refusal.
+///
+/// So this test is the successor guarantee, and it is a stronger one than "it
+/// tried the network": **the pipeline can never be handed an unsignable
+/// transaction by this router**, because it is never handed one at all. A
+/// regression that started returning bytes here would fail this test.
+#[test]
+fn the_routing_stage_refuses_a_transaction_rather_than_returning_an_unsignable_one() {
+    let router = Router::with_endpoint(NOWHERE, credentials());
+    let err = Routing::build_buy(
         &router,
         &Address::new([0x22; 32]),
         &Address::new([0x33; 32]),
         1_000_000,
-    );
+    )
+    .expect_err("the Router API cannot supply a signable transaction");
+
+    // Not `NoRoute`. An operator reading this must not conclude the market was
+    // thin and try a different token forever.
     assert!(
-        outcome.is_err(),
-        "an unreachable Jupiter must produce an error, not a route"
-    );
-}
-
-#[test]
-fn the_trait_and_the_method_give_the_same_answer() {
-    // The delegation itself. An implementation that ignored its arguments and
-    // returned a fixed error would pass the test above; this one compares the
-    // two paths to the same failure.
-    let router = Router::new(NOWHERE, NOWHERE);
-    let mint = Address::new([0x22; 32]);
-    let wallet = Address::new([0x33; 32]);
-
-    let direct = router
-        .build_buy(&mint, &wallet, 1_000_000)
-        .expect_err("unreachable");
-    let through_trait =
-        Routing::build_buy(&router, &mint, &wallet, 1_000_000).expect_err("unreachable");
-
-    assert_eq!(
-        format!("{direct}"),
-        format!("{through_trait}"),
-        "the trait method must be the inherent one, not a second implementation"
+        matches!(err, RouteError::Unverifiable(ref m) if m.contains("lookup tables")),
+        "the refusal must carry the reason, got {err}"
     );
 }
 
