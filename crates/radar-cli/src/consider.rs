@@ -32,7 +32,7 @@ use radar_risk::{Policy, PortfolioState, Proposal, Verdict, evaluate};
 use radar_sim::{JupiterQuoter, RpcClient};
 use radar_store::Reader;
 use radar_strategy::{Candidate, CreatorEdge, Decision, PassReason, Strategy, Universe, universe};
-use radar_types::{Address, Market, MicroUsd};
+use radar_types::{Address, Custody, Market, MicroUsd, Portfolio};
 
 /// How many candidates the paid tier will be spent on in one pass.
 ///
@@ -144,7 +144,7 @@ pub fn run(
         &mut examined,
     );
 
-    let verdicts_by_mint = verdicts(&pass.proposals, watermark, reader);
+    let verdicts_by_mint = verdicts(&pass.proposals, watermark, reader)?;
 
     if let Some(dir) = record_to {
         // The kernel's verdict is folded in only now, because a decision is not
@@ -248,27 +248,63 @@ recorded {} decision(s) to {dir}/decisions",
     Ok(())
 }
 
-/// The kernel's view of the portfolio, from the positions on record.
+/// The account on record, and the kernel's view of it.
 ///
-/// A read that fails is treated as *no positions*, and that is safe only
-/// because it is also true: nothing writes a position yet, so an empty store
-/// and an unreadable one hold the same thing. When something does trade this
-/// must become a refusal — a kernel handed an empty portfolio because the read
-/// failed would size against capital it cannot see.
-fn portfolio_state(reader: &Reader, watermark: radar_types::Slot) -> PortfolioState {
+/// # Why an unreadable read stops the pass
+///
+/// This used to end in `unwrap_or_default()`, and the comment above it said
+/// that treating a failed read as "no positions" was safe *because nothing
+/// writes a position yet*. That was true and it was a fuse with no date on it:
+/// the day something does trade, a read that fails still returns an empty
+/// portfolio, every limit is measured against zero deployed, and the kernel
+/// authorises against capital it cannot see.
+///
+/// AGENTS.md rule 9 — absent is not zero, and unknown is not safe — so the
+/// error propagates. Refusing a pass costs nothing that cannot be recovered by
+/// running it again; sizing against an invented zero does not.
+///
+/// The same applies one step further in. A [`Portfolio`] that knows it cannot
+/// account for something on record is a portfolio whose totals are **lower
+/// bounds**, and a limit checked against a lower bound is a limit that binds
+/// late. So [`Portfolio::incompleteness`] stops the pass too.
+///
+/// # Errors
+///
+/// Returns a message when the positions cannot be read, or when what comes back
+/// cannot be fully accounted for.
+fn inventory(
+    reader: &Reader,
+    watermark: radar_types::Slot,
+) -> Result<(Portfolio, PortfolioState), String> {
     let rows = reader
         .read_positions(AsOf::at(watermark))
-        .inspect_err(|e| eprintln!("  positions unreadable, treating as none: {e}"))
-        .unwrap_or_default();
+        .map_err(|e| format!("positions unreadable, so there is nothing to size against: {e}"))?;
+    let folded = radar_store::fold_positions(rows);
 
-    radar_strategy::state_from(
-        &radar_store::fold_positions(rows),
+    // `Custody::Unattributed` rather than an invented address. No position row
+    // names a wallet and this instance has none configured, so the honest value
+    // is the one that can hold nothing and reserve nothing (rule 8).
+    let portfolio = radar_store::portfolio_from(Custody::Unattributed, watermark, &folded);
+    if let Some(gap) = portfolio.incompleteness() {
+        return Err(format!(
+            "the recorded inventory cannot be fully accounted for ({gap:?}); refusing to size new risk against totals that are lower bounds"
+        ));
+    }
+
+    // `halted` and `consecutive_failures` are supplied rather than defaulted:
+    // positions cannot know either, and the permissive answer arriving silently
+    // from a component that does not know is the shape rule 9 warns about.
+    // Zero failures is honest while nothing executes; there is no execution
+    // record yet to read them from.
+    let state = radar_strategy::state_from(
+        &folded,
         watermark,
         radar_strategy::Operator {
             halted: false,
             consecutive_failures: 0,
         },
-    )
+    );
+    Ok((portfolio, state))
 }
 
 /// The paid tier: the two calls that cost money, in the order that spends least.
@@ -1047,11 +1083,17 @@ fn search_for(strategy: &CreatorEdge) -> radar_sim::Search {
 }
 
 /// Puts every proposal through the kernel under the shipped policy.
+///
+/// # Errors
+///
+/// Returns a message when the inventory cannot be read or cannot be fully
+/// accounted for. See [`inventory`]: a verdict reached against a portfolio
+/// nobody could read is a verdict about nothing.
 fn verdicts(
     proposals: &[radar_risk::Proposal],
     watermark: radar_types::Slot,
     reader: &Reader,
-) -> BTreeMap<Address, Verdict> {
+) -> Result<BTreeMap<Address, Verdict>, String> {
     let mut by_mint = BTreeMap::new();
     println!(
         "
@@ -1059,7 +1101,7 @@ fn verdicts(
         proposals.len()
     );
     if proposals.is_empty() {
-        return by_mint;
+        return Ok(by_mint);
     }
 
     // The shipped policy. Building the trading lane deploys no capital; only
@@ -1075,12 +1117,16 @@ fn verdicts(
     // so on the day something does, and a position limit measured against a
     // portfolio that is always empty is not a limit.
     //
-    // `halted` and `consecutive_failures` are supplied rather than defaulted:
-    // positions cannot know either, and the permissive answer arriving silently
-    // from a component that does not know is the shape rule 9 warns about.
-    // Zero failures is honest while nothing executes; there is no execution
-    // record yet to read them from.
-    let state = portfolio_state(reader, watermark);
+    // The `?` is the point of this slice: an unreadable inventory stops the
+    // pass instead of arriving as an empty account. See `inventory`.
+    let (portfolio, state) = inventory(reader, watermark)?;
+    println!(
+        "
+portfolio    : {} holding(s), {} unaccounted, realised {}",
+        portfolio.holdings().count(),
+        portfolio.unaccounted().count(),
+        portfolio.results().realised
+    );
 
     println!("\nrisk kernel, under the policy this instance actually holds:");
     for proposal in proposals {
@@ -1133,7 +1179,7 @@ CAPITAL IS ARMED: autonomy {:?}, max position {}. What is above was judged
             policy.autonomy, policy.max_position
         );
     }
-    by_mint
+    Ok(by_mint)
 }
 
 /// Micro-USD as dollars, for display only.
@@ -1997,7 +2043,8 @@ mod tests {
             })
             .collect();
 
-        let by_mint = verdicts(&proposals, radar_types::Slot(1_000), &reader);
+        let by_mint = verdicts(&proposals, radar_types::Slot(1_000), &reader)
+            .expect("a readable, empty store");
 
         assert_eq!(by_mint.len(), proposals.len(), "one verdict per proposal");
         for mint in &mints {
@@ -2409,5 +2456,83 @@ mod tests {
         let report = radar_sim::ExitReport::build(Address::new([9u8; 32]), None, Vec::new());
         assert!(!report.is_exitable());
         assert_eq!(report.capacity_lamports(10_000), None);
+    }
+
+    /// A store whose positions directory holds one file the parquet reader
+    /// cannot open — what a truncated or half-written partition looks like.
+    ///
+    /// `Reader::files` selects on the `.parquet` extension alone, so this is
+    /// reached the same way a real corrupt partition would be.
+    fn store_with_an_unreadable_positions_file() -> tempfile::TempDir {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let positions = dir.path().join("positions");
+        std::fs::create_dir_all(&positions).expect("mkdir");
+        std::fs::write(
+            positions.join("00000000000000010000-0.parquet"),
+            b"not parquet",
+        )
+        .expect("write");
+        dir
+    }
+
+    #[test]
+    fn an_unreadable_inventory_refuses_rather_than_reporting_an_empty_account() {
+        // The named test, and the defect this slice exists to close. The call
+        // site ended in `unwrap_or_default()`: a read that failed came back as
+        // an empty `Vec<Position>`, the kernel was handed a portfolio with zero
+        // deployed, and every exposure limit was measured against a number that
+        // was a fact about the disk rather than about the account.
+        //
+        // Re-apply the bug -- put `.unwrap_or_default()` back in `inventory` in
+        // place of the `?` -- and this returns a healthy empty portfolio.
+        let dir = store_with_an_unreadable_positions_file();
+        let refused = inventory(&Reader::open(dir.path()), radar_types::Slot(20_000))
+            .expect_err("an unreadable inventory must refuse");
+        assert!(
+            refused.contains("positions unreadable"),
+            "and says what it could not read: {refused}"
+        );
+    }
+
+    #[test]
+    fn the_pass_stops_on_an_unreadable_inventory_instead_of_judging_against_it() {
+        // The refusal has to reach the caller, not merely exist. `verdicts` is
+        // where the kernel is invoked, so this is the boundary that matters:
+        // one proposal, one unreadable store, and no verdict is reached.
+        let dir = store_with_an_unreadable_positions_file();
+        let proposal = radar_risk::Proposal {
+            mint: Address::new([1u8; 32]),
+            market: radar_types::Market::PUMP_FUN_BONDING_CURVE,
+            quote: radar_types::Asset::Sol,
+            creator: Address::new([2u8; 32]),
+            action: radar_risk::Action::Buy,
+            notional: MicroUsd(5_000_000),
+            estimated_round_trip_cost: MicroUsd(100_000),
+            oldest_input_slot: radar_types::Slot(999),
+            simulated_exit_capacity: Some(MicroUsd(50_000_000)),
+        };
+        let outcome = verdicts(
+            std::slice::from_ref(&proposal),
+            radar_types::Slot(20_000),
+            &Reader::open(dir.path()),
+        );
+        assert!(
+            outcome.is_err(),
+            "a verdict against an unreadable portfolio is a verdict about nothing"
+        );
+    }
+
+    #[test]
+    fn an_empty_store_is_a_portfolio_that_holds_nothing_and_says_so() {
+        // The state every deployment is in today, and the reason the refusal
+        // above is not a check that fires on the normal case: a readable store
+        // with no positions is a complete account of holding nothing.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let (portfolio, state) = inventory(&Reader::open(dir.path()), radar_types::Slot(20_000))
+            .expect("an empty store is readable");
+        assert_eq!(portfolio.incompleteness(), None);
+        assert_eq!(portfolio.holdings().count(), 0);
+        assert_eq!(portfolio.wallet(), None, "no wallet is invented");
+        assert_eq!(state.deployed, MicroUsd::ZERO);
     }
 }

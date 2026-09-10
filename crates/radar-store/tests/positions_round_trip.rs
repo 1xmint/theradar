@@ -170,8 +170,9 @@ fn the_last_close_written_is_the_one_that_stands() {
 fn an_empty_store_holds_no_positions_rather_than_failing() {
     // A fresh instance. Nothing writes a position yet, so this is the state
     // every deployment is in today, and it must read as "none" rather than as
-    // an error -- the caller treats an error as none, and the two agreeing is
-    // what makes that safe.
+    // an error. The caller no longer treats an error as none -- `consider`'s
+    // `inventory` refuses on one -- so the two are now different answers, and
+    // an empty store returning the wrong one would stop every pass.
     let dir = tempfile::tempdir().expect("tempdir");
     let read = Reader::open(dir.path())
         .read_positions(AsOf::at(Slot(10_000)))
