@@ -330,6 +330,28 @@ Jupiter finishes the phase-out.
 the pipeline, for the local wallet or a customer's. Writing one is opening the
 trading path, and it is a decision about money rather than a wiring task.
 
+**As of 2026-09-10 there is an inventory type, and `radar consider` refuses
+rather than reading an unreadable one as empty.**
+[ADR 0021](adr/0021-the-account-says-what-it-cannot-say.md).
+[`radar_types::Portfolio`](../crates/radar-types/src/portfolio.rs) distinguishes
+a counted balance from one nobody could read, carries the slot every dollar
+figure was true at, keeps SOL, wrapped SOL, USDC and other quote assets apart,
+and makes two reservations that together exceed the balance impossible. The call
+site that mattered ended in `unwrap_or_default()`: a *failed* position read came
+back as an empty portfolio and every exposure limit was measured against zero
+deployed. It now propagates.
+
+Be exact about the reach. **Nothing writes a position row**, so every portfolio
+this assembles today is empty and complete — which is true, and is why the
+refusal is not a check that fires on the normal case. There is no durable
+operation record, so
+[`radar_store::portfolio_from`](../crates/radar-store/src/portfolio.rs) records
+an open position as **exposure it cannot quantify** rather than as a holding: the
+row carries dollars committed, not units received, decimals, or which token
+program the mint is on. And nothing reconciles any of it against the chain —
+[`radar-onchain`](../crates/radar-onchain) can read accounts atomically at one
+slot and is deliberately not wired in yet.
+
 **The customer lane also composes, as of 2026-09-01**, in
 [`the_customer_lane_composes.rs`](../crates/radar-exec/tests/the_customer_lane_composes.rs),
 and its shape differs from the local one in the way that matters: **no process in

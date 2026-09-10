@@ -64,6 +64,73 @@ impl MicroUsd {
     }
 }
 
+/// A signed dollar amount, in millionths.
+///
+/// [`MicroUsd`] is unsigned because a *cost* cannot be negative. A realised
+/// result can, and the difference is not cosmetic: a profit-and-loss figure
+/// stored unsigned has to carry its sign somewhere else, and the place it ends
+/// up is a separate flag a caller forgets to read.
+///
+/// Deliberately not a replacement for [`MicroUsd`]. Every crate that depends on
+/// that type is talking about a cost or a limit, where unsigned is the right
+/// shape and a negative value would be a bug the type already makes
+/// unrepresentable.
+#[derive(
+    Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, JsonSchema, Default,
+)]
+#[serde(transparent)]
+pub struct SignedMicroUsd(pub i64);
+
+impl SignedMicroUsd {
+    /// Broke exactly even.
+    ///
+    /// A *measured* zero. A result nobody computed is `None` at the call site
+    /// that holds one; this type has no room for that state, on purpose.
+    pub const ZERO: Self = Self(0);
+
+    /// Saturating addition.
+    ///
+    /// A running total that panicked mid-accounting is worse than one pinned at
+    /// the extreme, and the extreme trips every limit it is checked against —
+    /// the direction that refuses rather than authorises.
+    #[must_use]
+    pub const fn saturating_add(self, other: Self) -> Self {
+        Self(self.0.saturating_add(other.0))
+    }
+}
+
+impl Add for SignedMicroUsd {
+    type Output = Self;
+    fn add(self, other: Self) -> Self {
+        self.saturating_add(other)
+    }
+}
+
+impl Sum for SignedMicroUsd {
+    fn sum<I: Iterator<Item = Self>>(iter: I) -> Self {
+        iter.fold(Self::ZERO, Self::saturating_add)
+    }
+}
+
+impl fmt::Display for SignedMicroUsd {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let sign = if self.0 < 0 { "-" } else { "" };
+        let magnitude = self.0.unsigned_abs();
+        write!(
+            f,
+            "{sign}${}.{:06}",
+            magnitude / 1_000_000,
+            magnitude % 1_000_000
+        )
+    }
+}
+
+impl fmt::Debug for SignedMicroUsd {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "SignedMicroUsd({self})")
+    }
+}
+
 impl Add for MicroUsd {
     type Output = Self;
     fn add(self, other: Self) -> Self {
@@ -134,5 +201,30 @@ mod tests {
     #[test]
     fn addition_saturates_rather_than_overflowing() {
         assert_eq!(MicroUsd(u64::MAX) + MicroUsd(1), MicroUsd(u64::MAX));
+    }
+
+    #[test]
+    fn a_signed_result_renders_its_sign_and_does_not_wrap_at_the_extreme() {
+        // The magnitude is taken with `unsigned_abs`, because negating
+        // `i64::MIN` overflows -- and a loss rendered as a gain is the one
+        // direction that reads as permission.
+        assert_eq!(SignedMicroUsd(-1_500_000).to_string(), "-$1.500000");
+        assert_eq!(SignedMicroUsd(1_500_000).to_string(), "$1.500000");
+        assert_eq!(SignedMicroUsd::ZERO.to_string(), "$0.000000");
+        assert!(SignedMicroUsd(i64::MIN).to_string().starts_with("-$"));
+    }
+
+    #[test]
+    fn signed_addition_saturates_at_both_ends() {
+        assert_eq!(
+            SignedMicroUsd(i64::MAX) + SignedMicroUsd(1),
+            SignedMicroUsd(i64::MAX)
+        );
+        assert_eq!(
+            SignedMicroUsd(i64::MIN) + SignedMicroUsd(-1),
+            SignedMicroUsd(i64::MIN)
+        );
+        let mixed: SignedMicroUsd = [SignedMicroUsd(5), SignedMicroUsd(-8)].into_iter().sum();
+        assert_eq!(mixed, SignedMicroUsd(-3));
     }
 }
