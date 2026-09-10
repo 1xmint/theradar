@@ -90,17 +90,18 @@ fn role(pool: &str, role: &str) -> Captured {
 
 /// A specimen captured for its extensions rather than for its pool.
 fn specimen(pool_mint: &str) -> Captured {
-    fixture()["specimens"]
+    let found = fixture()["specimens"]
         .as_array()
         .expect("the fixture carries specimens")
         .iter()
         .find(|s| s["address"].as_str() == Some(pool_mint))
-        .map(|s| Captured {
-            address: address(s["address"].as_str().expect("an address")),
-            owner: address(s["owner"].as_str().expect("an owner")),
-            data: b64::decode(s["data_b64"].as_str().expect("base64")).expect("valid base64"),
-        })
         .unwrap_or_else(|| panic!("{pool_mint} is a specimen"))
+        .clone();
+    Captured {
+        address: address(found["address"].as_str().expect("an address")),
+        owner: address(found["owner"].as_str().expect("an owner")),
+        data: b64::decode(found["data_b64"].as_str().expect("base64")).expect("valid base64"),
+    }
 }
 
 /// Token-2022 base against a classic SPL wrapped-SOL quote.

@@ -50,9 +50,11 @@
 pub mod budget;
 pub mod dossier;
 pub mod launch;
+pub mod reserves;
 pub mod rpc;
 
 pub use budget::{Budget, Count, Exhausted};
 pub use dossier::{CurveFacts, Dossier, Unavailable, build};
 pub use launch::{LaunchBlock, Metadata, NotALaunch};
-pub use rpc::{AccountRead, RpcClient, RpcError};
+pub use reserves::{PoolReserves, Role, Unreadable};
+pub use rpc::{AccountRead, MultiAccountRead, OwnedAccount, RpcClient, RpcError};

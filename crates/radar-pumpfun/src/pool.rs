@@ -36,9 +36,12 @@
 //!
 //! # What is not here
 //!
-//! **The reserves.** They live in the two token accounts this struct names, and
-//! parsing those is the next piece of work, not this one. Nothing in this module
-//! quotes, prices, or estimates impact.
+//! **The reserves.** They live in the two token accounts this struct names.
+//! [`crate::token`] parses those, and `radar_onchain::reserves` reads them
+//! alongside this account at a single slot -- which is where the reserves have
+//! to be read, because a base balance and a quote balance from two instants are
+//! a ratio that never existed. Nothing in this module quotes, prices, or
+//! estimates impact, and neither does `token`.
 //!
 //! **The two token programs.** `base_token_program` and `quote_token_program`
 //! are accounts a PumpSwap instruction carries, and they are *not* fields of this
