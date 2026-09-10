@@ -176,6 +176,16 @@ fn the_captured_refusals_classify_as_what_they_are() {
         "a rejected key is an operator problem and must not read as a thin market: got {rejected}"
     );
 
+    // A rate limit is neither. The free tier is one request per second, and an
+    // operator who reads "unavailable" without that number tries again
+    // immediately and is refused again.
+    let throttled = RouteError::from_status(429, "{\"message\":\"Too many\"}", "SomeMint", 1_000);
+    assert!(
+        matches!(throttled, RouteError::Unavailable(ref m) if m.contains("rate limited")
+            && m.contains("one request per second")),
+        "a 429 must carry the limit that caused it, got {throttled}"
+    );
+
     // 400 with "No routes found" is read from `error`; 401 from `message`.
     // Jupiter uses both key names, so both are read, and neither is guessed.
     let odd = RouteError::from_status(500, "<html>gateway</html>", "SomeMint", 1_000);
@@ -211,6 +221,13 @@ fn what_jupiter_did_not_say_is_never_read_as_zero() {
         "an unstated floor is unstated; 0 would be a claim that nothing is guaranteed"
     );
     assert_eq!(quote.lookup_tables, 0, "a null map is no tables");
+    // And with no tables the answer flips. Asserted here because every captured
+    // route has tables, so without this case `signer_could_read` could return a
+    // constant `false` and the whole suite would still pass.
+    assert!(
+        quote.signer_could_read(),
+        "a route naming no lookup table is one the signer could read"
+    );
 }
 
 /// A zero out is a refusal, not a quote of nothing.
