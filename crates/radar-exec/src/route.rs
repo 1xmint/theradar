@@ -549,12 +549,7 @@ impl Router {
             // an agent built without it would otherwise report a refusal as
             // transport.
             Err(ureq::Error::StatusCode(status)) => {
-                return Err(RouteError::from_status(
-                    status,
-                    "",
-                    &output,
-                    request.amount,
-                ));
+                return Err(RouteError::from_status(status, "", &output, request.amount));
             }
             Err(e) => return Err(RouteError::Unavailable(e.to_string())),
         };

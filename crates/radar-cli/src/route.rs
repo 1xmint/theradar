@@ -33,7 +33,7 @@
 //! It also issues no `Authorization` and consults no policy, because it produces
 //! nothing anybody could act on.
 
-use radar_exec::route::{Credentials, QuoteRequest, Router, API_KEY_VAR, BUILD_API};
+use radar_exec::route::{API_KEY_VAR, BUILD_API, Credentials, QuoteRequest, Router};
 use radar_types::{Address, Asset};
 
 /// Reads an asset from an operator's argument.
@@ -152,7 +152,10 @@ pub fn run(args: &[String]) -> Result<(), String> {
     } else {
         println!("  impact     : {} bps", quote.impact_bps);
     }
-    println!("  mode       : {}", quote.swap_mode.as_deref().unwrap_or("not stated"));
+    println!(
+        "  mode       : {}",
+        quote.swap_mode.as_deref().unwrap_or("not stated")
+    );
 
     // Labels, not support. Radar decodes pump.fun and nothing else; reaching a
     // venue through an aggregator is not the same as understanding it.

@@ -10,14 +10,16 @@
 //! No network is touched here and no key is used. `Router::quote` is the thin
 //! HTTP wrapper around `Quote::from_response`, which is what these exercise.
 
-use radar_exec::route::{Credentials, Quote, QuoteRequest, RouteError, Router, API_KEY_VAR};
+use radar_exec::route::{API_KEY_VAR, Credentials, Quote, QuoteRequest, RouteError, Router};
 use radar_types::{Address, Asset};
 
 /// The `taker` every capture was taken with. Radar holds no key for it.
 const TAKER: &str = "CjfBjFVBs6QRvRTpMdKTBxZ7PZuJvHXWQKGRvR7wFbdz";
 
 fn taker() -> Address {
-    TAKER.parse().expect("the captured taker is a valid address")
+    TAKER
+        .parse()
+        .expect("the captured taker is a valid address")
 }
 
 fn fixture(name: &str) -> String {
@@ -127,7 +129,8 @@ fn a_quote_for_a_different_pair_is_refused_rather_than_attributed() {
 #[test]
 fn every_captured_route_runs_through_lookup_tables_the_signer_refuses() {
     let out = QuoteRequest::new(Asset::Sol, Asset::Usdc, 100_000_000, taker());
-    let quote = Quote::from_response(&fixture("jupiter-build-sol-usdc.json"), &out).expect("parses");
+    let quote =
+        Quote::from_response(&fixture("jupiter-build-sol-usdc.json"), &out).expect("parses");
     assert_eq!(quote.lookup_tables, 5);
     assert!(
         !quote.signer_could_read(),

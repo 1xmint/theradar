@@ -26,7 +26,7 @@
 //! live path is now `Router::quote`, and that is what is checked for delegation.
 
 use radar_exec::pipeline::{Routing, Sending};
-use radar_exec::route::{Credentials, QuoteRequest, RouteError, Router, API_KEY_VAR};
+use radar_exec::route::{API_KEY_VAR, Credentials, QuoteRequest, RouteError, Router};
 use radar_exec::submit::Submitter;
 use radar_types::{Address, Asset};
 
