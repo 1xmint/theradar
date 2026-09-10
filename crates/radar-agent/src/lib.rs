@@ -20,6 +20,16 @@
 //! model fully persuaded by a token name can emit any text it likes and reach
 //! nothing.
 //!
+//! Since [`investigate`] landed, model output *is* parsed — the model may ask
+//! for a named piece of evidence and may write a typed recommendation. That
+//! changes the argument's shape and not its conclusion, and the change is worth
+//! stating rather than leaving a reader to notice: what a request can express is
+//! a tool name and one string ([`Wanted`]), the name is checked against the
+//! read-only [`Allowlist`], and what a conclusion can express is validated by
+//! [`Adapter`] against facts the caller knows independently. **An amount in a
+//! recommendation is a requested bound, never permission**, and the shipped
+//! adapter's ceiling is zero.
+//!
 //! **Rule 8 — missing config refuses.** An [`Agent`] with no provider and no
 //! budget answers [`Unavailable`] rather than falling back to something cheaper.
 //! It never serves a cached answer as though it were live, and it never
@@ -34,6 +44,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod investigate;
 pub mod tools;
 pub mod untrusted;
 
@@ -43,6 +54,9 @@ use serde::{Deserialize, Serialize};
 // Re-exported so a caller configuring an agent needs one crate rather than two,
 // and so the budget type a caller constructs is provably the one the meter
 // consumes.
+pub use investigate::{
+    Abstained, Action, Adapter, Availability, Bounds, Fact, Recommendation, Rejected, Step, Wanted,
+};
 pub use radar_provider::{Budget, Ledger};
 pub use tools::{Allowlist, Refused};
 pub use untrusted::{Provenance, fence};
@@ -223,10 +237,16 @@ impl Agent {
 
 /// A model's answer, as it is handed back.
 ///
-/// **Text, and never parsed.** The whole reason injection is uninteresting here
-/// is that nothing turns this into a structured action: there is no branch
-/// keyed on what it says, no field extracted from it, and no decision it can
-/// reach. A reader sees it beside the citations it was given, and decides.
+/// **Text, and never parsed.** Nothing turns this into a structured action:
+/// there is no branch keyed on what it says, no field extracted from it, and no
+/// decision it can reach. A reader sees it beside the citations it was given,
+/// and decides.
+///
+/// The investigative loop does not use this type — it reads
+/// [`investigate::Step`], which is parsed, and puts the model's prose in
+/// [`investigate::Step::Conclude::note`] where the same guarantee holds for the
+/// same reason. This is the single-shot shape, kept for a caller that wants an
+/// answer rather than a recommendation.
 #[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub struct Reply {
     /// What the model said, verbatim.
