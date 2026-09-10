@@ -12,6 +12,14 @@
 //! happened on chain. Said plainly because a named stage reads as a built one,
 //! and the gap between them is where a fill nobody checked would live.
 //!
+//! **The routing stage prices; it does not produce a transaction.** As of
+//! 2026-09-09 [`route`] calls Jupiter's Router (`api.jup.ag/swap/v2/build`),
+//! which returns raw instructions and address lookup tables rather than the
+//! signer-readable legacy transaction the deprecated `lite-api` endpoint gave.
+//! So [`pipeline::Routing`] is implemented by [`Router`] as an explicit refusal
+//! that says why. Said here for the same reason the missing reconcile stage is:
+//! a named stage reads as a working one.
+//!
 //! It cannot sign. The key is in another process, reached over a pipe, and that
 //! process re-decodes whatever this one built. So a compromised executor can
 //! waste fees and produce refusals — it cannot move funds outside an
@@ -35,6 +43,6 @@ pub mod submit;
 
 pub use economics::{Costs, Economics, FailureRisk};
 pub use pipeline::{Attempt, Outcome, execute};
-pub use route::{Route, RouteError, Router};
+pub use route::{Credentials, Quote, QuoteRequest, Route, RouteError, Router};
 pub use signer_client::StreamSigner;
 pub use submit::{Finality, SubmitError, Submitter};
