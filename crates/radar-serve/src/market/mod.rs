@@ -130,9 +130,26 @@ impl Market {
 /// differently.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Degradation {
-    /// The request never reached CryptoHouse, or its response could not be
-    /// read.
+    /// The request never reached CryptoHouse.
     Unreachable,
+    /// CryptoHouse answered, and this build could not read the answer.
+    ///
+    /// **Separated from [`Self::Unreachable`] on 2026-09-11, because
+    /// collapsing them told a reader a fact about the network that was
+    /// actually a fact about this code.** `/v1/market/coins` returned
+    /// "could not reach the data source" while the identical query, issued by
+    /// hand from the same machine, answered in 350 milliseconds. The cause
+    /// was two columns selected without `toString()`: ClickHouse serialises a
+    /// `count()` as a quoted string but a summed `Decimal(38,9)` as a bare
+    /// JSON number — one of which was `36917103776789878943`, past what a
+    /// 64-bit integer holds — and neither deserialises into the `String` the
+    /// row struct declares.
+    ///
+    /// An operator reading "unreachable" checks the network and finds it
+    /// healthy. That is the wrong hour spent, and it is rule 9's failure in
+    /// its reporting form: a wrong answer offered with confidence where an
+    /// honest "this build could not read it" was available.
+    Malformed,
     /// Narrowing reached the floor and the query still would not finish in
     /// the execution cap.
     TimedOut,
@@ -145,7 +162,7 @@ impl Degradation {
     fn classify(error: &QueryError) -> Self {
         match error {
             QueryError::Transport(_) => Self::Unreachable,
-            QueryError::Row(_) => Self::Unreachable,
+            QueryError::Row(_) => Self::Malformed,
             QueryError::Server(message) if message.contains("TOO_MANY_ROWS") => Self::RowCapHit,
             QueryError::Server(_) => Self::TimedOut,
         }
@@ -154,6 +171,10 @@ impl Degradation {
     const fn status(self) -> StatusCode {
         match self {
             Self::Unreachable => StatusCode::BAD_GATEWAY,
+            // 502 as well: the upstream answered and this build could not use
+            // the answer, which is still a bad gateway and not the caller's
+            // fault. The code and message are what separate it for a reader.
+            Self::Malformed => StatusCode::BAD_GATEWAY,
             Self::TimedOut | Self::RowCapHit => StatusCode::SERVICE_UNAVAILABLE,
         }
     }
@@ -161,6 +182,7 @@ impl Degradation {
     const fn code(self) -> &'static str {
         match self {
             Self::Unreachable => "cryptohouse_unreachable",
+            Self::Malformed => "cryptohouse_answer_unreadable",
             Self::TimedOut => "query_timed_out",
             Self::RowCapHit => "row_cap_hit",
         }
@@ -169,6 +191,9 @@ impl Degradation {
     fn message(self) -> &'static str {
         match self {
             Self::Unreachable => "could not reach the data source; this is not a fact about the coin",
+            Self::Malformed => {
+                "the data source answered and this build could not read its answer; this is a fact about Radar, not about the coin or the connection"
+            }
             Self::TimedOut => {
                 "the query could not finish inside the data source's execution limit, even after narrowing the window"
             }

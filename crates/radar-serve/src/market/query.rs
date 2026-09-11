@@ -115,8 +115,9 @@ pub fn holder_transfers_query(mint: &str, from: &str, to: &str) -> String {
 #[must_use]
 pub fn coin_candidates_query(from: &str, to: &str, limit: usize) -> String {
     format!(
-        "SELECT mint, count(DISTINCT tx_signature) AS tx_count, \
-                sum(value) AS token_volume, any(decimals) AS token_decimals \
+        "SELECT mint, toString(count(DISTINCT tx_signature)) AS tx_count, \
+                toString(sum(value)) AS token_volume, \
+                toString(any(decimals)) AS token_decimals \
          FROM solana.token_transfers \
          WHERE block_timestamp >= '{from}' AND block_timestamp < '{to}' \
            AND mint NOT IN ({quotes}) \
@@ -170,7 +171,7 @@ pub fn coin_prices_query(mints: &[String], from: &str, to: &str) -> String {
                   s.quote_decimals AS quote_decimals, s.quote_mint AS quote_mint \
            FROM t INNER JOIN s ON t.tx_signature = s.tx_signature\
          ) \
-         SELECT mint, count() AS trade_count, \
+         SELECT mint, toString(count()) AS trade_count, \
                 toString(argMin(token_value, ts)) AS first_token_value, \
                 toString(argMin(token_decimals, ts)) AS first_token_decimals, \
                 toString(argMin(quote_value, ts)) AS first_quote_value, \
