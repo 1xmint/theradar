@@ -138,3 +138,101 @@ export function partitionReasons(reasons: readonly string[]): Reasons {
   }
   return out;
 }
+
+// --- the market terminal's honesty rules -----------------------------------
+//
+// Everything below backs a claim the terminal makes about a live market
+// rather than about a recorded decision, and each one has a wrong version
+// that looks right -- the reason this file exists at all.
+
+/**
+ * The words for an empty trade tape.
+ *
+ * "No trades yet" and "could not read the trade feed" are different facts
+ * about the world, and a single empty-state message would print the wrong one
+ * half the time. A coin that has never traded and a data source that is
+ * unreachable both render zero rows; only the words say which happened.
+ *
+ * `detail` is the transport's own error text, folded in rather than replaced,
+ * because "unreachable" alone sends a reader nowhere and the detail is
+ * usually the whole diagnosis -- the same reasoning `ApiError` already
+ * carries for the rest of the interface.
+ */
+export function emptyTapeMessage(
+  reason: "never-traded" | "unreachable",
+  detail?: string,
+): string {
+  if (reason === "never-traded") {
+    return "No trades recorded for this mint. That is a fact about the token, not about the connection.";
+  }
+  return `Could not read the trade feed${detail ? `: ${detail}` : ""}. This says nothing about whether the token has traded -- Radar could not look.`;
+}
+
+/**
+ * Whether a page of rows might be a cropped view of a longer list, inferred
+ * rather than asserted.
+ *
+ * No route in this contract reports a row-cap flag, so this compares what
+ * came back against what was asked for: a full page **might** be the whole
+ * list or might be the first slice of a longer one, and there is no way to
+ * tell them apart without asking for one more row than the limit. Treating a
+ * full page as "possibly more" is the safe direction to be wrong in -- the
+ * failure this exists to prevent is the opposite one, a capped response
+ * presented as a complete window.
+ *
+ * `returned` greater than `limit` is a defensive branch: it should not
+ * happen, and if it does, it is certainly not evidence the list is complete.
+ */
+export function isPossiblyCapped(returned: number, limit: number): boolean {
+  return returned >= limit;
+}
+
+/**
+ * The caption for a possibly-capped list, or `null` when the whole of it
+ * came back.
+ */
+export function capCaption(
+  returned: number,
+  limit: number,
+  noun: string,
+): string | null {
+  if (!isPossiblyCapped(returned, limit)) return null;
+  return `Showing the most recent ${limit} ${noun}. There may be more; this is not the whole history.`;
+}
+
+/**
+ * The holders panel's caption: what kind of fact the list is.
+ *
+ * The contract requires every holders response to carry this, and the rule
+ * says it "must not be dropped for being ugly" -- so a response that omits it
+ * does not fall back to silence. It falls back to a caption of its own, one
+ * that says the methodology is unknown rather than pretending there is
+ * nothing to say. A blank caption and a stated one both make a
+ * methodology claim; the difference is whether it is true.
+ */
+export function holdersBasisCaption(basis: string | null | undefined): string {
+  const trimmed = basis?.trim();
+  return trimmed
+    ? trimmed
+    : "Radar does not know how this holder list was computed. Treat the ranking as unverified.";
+}
+
+/**
+ * Whether the range a candle response actually covers is narrower than what
+ * was requested.
+ *
+ * "May be narrower than asked for" is the contract's own words, and a chart
+ * that just draws whatever came back without saying so implies it drew the
+ * whole of what was requested. A young token given a 1d/4h request and
+ * answered with three days of candles is not a data error; the caption this
+ * drives says so instead of leaving a reader to wonder why the chart looks
+ * short.
+ */
+export function isNarrowerThanRequested(
+  requestedFrom: number,
+  requestedTo: number,
+  coveredFrom: number,
+  coveredTo: number,
+): boolean {
+  return coveredFrom > requestedFrom || coveredTo < requestedTo;
+}
