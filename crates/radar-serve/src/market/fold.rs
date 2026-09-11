@@ -275,7 +275,17 @@ pub fn fold_tape(rows: &[TapeRow]) -> Vec<Trade> {
 /// One OHLCV bucket, folded from priced trades only.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Candle {
-    /// The start of the bucket, `YYYY-MM-DD HH:MM:SS`.
+    /// The start of the bucket in **seconds since the Unix epoch, UTC**.
+    ///
+    /// The field a chart plots against, and the reason it exists beside
+    /// [`Self::bucket_start`]: that one is `YYYY-MM-DD HH:MM:SS` with **no
+    /// zone marker**, and JavaScript's `Date.parse` reads exactly that shape
+    /// as *local* time. A browser in New York would have drawn every candle
+    /// shifted by four hours and shown no sign of it. Serialised first so the
+    /// unambiguous field is the one a reader of the JSON meets first.
+    pub time: i64,
+    /// The start of the bucket, `YYYY-MM-DD HH:MM:SS` UTC — for a human
+    /// reading the response, never for arithmetic. See [`Self::time`].
     pub bucket_start: String,
     /// Price of the earliest priced trade in the bucket.
     pub open: f64,
@@ -332,6 +342,7 @@ pub fn fold_candles(trades: &[Trade], interval_seconds: i64) -> Vec<Candle> {
             _ => candles.push((
                 bucket_epoch,
                 Candle {
+                    time: bucket_epoch,
                     bucket_start: radar_store::from_epoch(bucket_epoch),
                     open: price,
                     high: price,

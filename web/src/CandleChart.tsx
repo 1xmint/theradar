@@ -27,6 +27,39 @@ import { isNarrowerThanRequested } from "./honesty";
 import { formatPrice } from "./format";
 import { useApi } from "./useApi";
 
+/**
+ * The chart's colours, as sRGB rather than as the palette's `oklch()`.
+ *
+ * `lightweight-charts` parses its colour strings itself and its parser predates
+ * `oklch`: handed one it throws `Failed to parse color`, and because that throw
+ * happens inside the chart's own render it is uncaught and blanks the entire
+ * page — not just the chart. Observed 2026-09-11; the terminal rendered as an
+ * empty black rectangle with the error only visible in the console.
+ *
+ * So these are the palette's values converted once, here, rather than read from
+ * CSS custom properties at runtime. **They must be kept in step with
+ * `index.css` by hand**, which is a real cost and the reason it is written down:
+ * the alternative is reading the computed value and converting `oklch` to sRGB
+ * in this file, which is a colour-space conversion nobody should hand-roll to
+ * style a chart.
+ */
+const CHART_COLORS = {
+  /** `--color-dim`, the axis labels. */
+  dim: "#9aa0ab",
+  /** `--color-line`, the grid and the scale borders. */
+  line: "#3a3f47",
+  /** A fainter line still, for the volume histogram's baseline. */
+  faint: "#5c626b",
+  /** `--color-good`, a candle that closed up. */
+  up: "#5fd39a",
+  /** `--color-bad`, a candle that closed down. */
+  down: "#f08a5d",
+  /** The same two at half opacity, for volume bars under the candles. */
+  upSoft: "rgba(95, 211, 154, 0.5)",
+  downSoft: "rgba(240, 138, 93, 0.5)",
+} as const;
+
+
 const INTERVAL_LABEL: Record<CandleInterval, string> = {
   "1m": "1m",
   "5m": "5m",
@@ -123,28 +156,28 @@ function Chart({
     const chart = createChart(container, {
       layout: {
         background: { type: ColorType.Solid, color: "transparent" },
-        textColor: "oklch(0.68 0.012 260)",
+        textColor: CHART_COLORS.dim,
         fontSize: 11,
       },
       grid: {
-        vertLines: { color: "oklch(0.32 0.014 260)" },
-        horzLines: { color: "oklch(0.32 0.014 260)" },
+        vertLines: { color: CHART_COLORS.line },
+        horzLines: { color: CHART_COLORS.line },
       },
-      rightPriceScale: { borderColor: "oklch(0.32 0.014 260)" },
-      timeScale: { borderColor: "oklch(0.32 0.014 260)", timeVisible: true },
+      rightPriceScale: { borderColor: CHART_COLORS.line },
+      timeScale: { borderColor: CHART_COLORS.line, timeVisible: true },
       crosshair: { mode: 0 },
     });
 
     const series = chart.addSeries(CandlestickSeries, {
-      upColor: "oklch(0.8 0.13 155)",
-      downColor: "oklch(0.66 0.15 45)",
+      upColor: CHART_COLORS.up,
+      downColor: CHART_COLORS.down,
       borderVisible: false,
-      wickUpColor: "oklch(0.8 0.13 155)",
-      wickDownColor: "oklch(0.66 0.15 45)",
+      wickUpColor: CHART_COLORS.up,
+      wickDownColor: CHART_COLORS.down,
     });
 
     const volume = chart.addSeries(HistogramSeries, {
-      color: "oklch(0.49 0.014 260)",
+      color: CHART_COLORS.faint,
       priceFormat: { type: "volume" },
       priceScaleId: "",
     });
@@ -201,7 +234,7 @@ function Chart({
       candles.map((c) => ({
         time: c.time as UTCTimestamp,
         value: c.volume,
-        color: c.close >= c.open ? "oklch(0.8 0.13 155 / 0.5)" : "oklch(0.66 0.15 45 / 0.5)",
+        color: c.close >= c.open ? CHART_COLORS.upSoft : CHART_COLORS.downSoft,
       })),
     );
     chartRef.current?.timeScale().fitContent();

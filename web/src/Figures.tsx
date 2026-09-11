@@ -39,7 +39,7 @@ export function Address({
   value,
   className = "",
 }: {
-  value: string;
+  value: string | null | undefined;
   className?: string;
 }) {
   const [copied, setCopied] = useState(false);
@@ -49,7 +49,7 @@ export function Address({
     // views. Failing quietly is right here -- the address is still visible in
     // the tooltip, so a reader is not stuck -- but it must not throw.
     void navigator.clipboard
-      ?.writeText(value)
+      ?.writeText(value ?? "")
       .then(() => {
         setCopied(true);
         setTimeout(() => setCopied(false), 1200);
@@ -58,6 +58,31 @@ export function Address({
         /* The tooltip still carries it. */
       });
   }, [value]);
+
+  // An absent address renders as an absent address.
+  //
+  // **This was a crash, and it took the whole page with it.** `value` was
+  // typed `string`, three call sites pass something that is genuinely
+  // optional -- a trade whose trader could not be told from the pool, a token
+  // with no creator on record, a holder row read through a field name the
+  // server does not send -- and `value.length` on the first of those threw
+  // inside render. React unmounted the tree, and a terminal showing a live
+  // market became an empty black rectangle whose only symptom was in the
+  // console. Observed 2026-09-11.
+  //
+  // Typing it `string | null | undefined` is the fix rather than a guard at
+  // each call site: the optionality is real, so the component that draws an
+  // address is where it belongs, and the compiler now refuses a caller that
+  // assumed otherwise. "Unknown" rather than a dash or an empty cell, for
+  // AGENTS §4 rule 9's reason -- absent is not zero, and a blank looks like a
+  // value nobody bothered to show.
+  if (value === null || value === undefined || value === "") {
+    return (
+      <span className={`text-[var(--color-dim)] ${className}`} title="No address was recorded for this row.">
+        unknown
+      </span>
+    );
+  }
 
   const short =
     value.length > KEEP * 2 + 1
