@@ -190,7 +190,9 @@ impl Degradation {
 
     fn message(self) -> &'static str {
         match self {
-            Self::Unreachable => "could not reach the data source; this is not a fact about the coin",
+            Self::Unreachable => {
+                "could not reach the data source; this is not a fact about the coin"
+            }
             Self::Malformed => {
                 "the data source answered and this build could not read its answer; this is a fact about Radar, not about the coin or the connection"
             }
@@ -215,21 +217,26 @@ impl IntoResponse for Degradation {
 }
 
 fn bad_request(message: &str) -> Response {
-    (StatusCode::BAD_REQUEST, Json(json!({ "error": "bad_request", "message": message }))).into_response()
+    (
+        StatusCode::BAD_REQUEST,
+        Json(json!({ "error": "bad_request", "message": message })),
+    )
+        .into_response()
 }
 
-fn parse_mint(raw: &str) -> Result<String, Response> {
+fn parse_mint(raw: &str) -> Result<String, Box<Response>> {
     raw.parse::<Address>()
         .map(|a| a.to_string())
-        .map_err(|_| bad_request("mint must be a base58-encoded Solana address"))
+        .map_err(|_| Box::new(bad_request("mint must be a base58-encoded Solana address")))
 }
 
 /// A `YYYY-MM-DD HH:MM:SS` timestamp, as every query parameter accepting one
 /// expects. Fractional seconds are not accepted here — a caller building a
 /// cursor from a response's own `ts` field must trim them, since this module's
 /// output already carries CryptoHouse's microsecond precision.
-fn parse_stamp(raw: &str) -> Result<i64, Response> {
-    to_epoch(raw).map_err(|_| bad_request("expected a timestamp as 'YYYY-MM-DD HH:MM:SS'"))
+fn parse_stamp(raw: &str) -> Result<i64, Box<Response>> {
+    to_epoch(raw)
+        .map_err(|_| Box::new(bad_request("expected a timestamp as 'YYYY-MM-DD HH:MM:SS'")))
 }
 
 /// `/v1/market/trades/{mint}` query parameters.
@@ -250,13 +257,16 @@ pub async fn trades(
 ) -> Response {
     let mint = match parse_mint(&mint) {
         Ok(m) => m,
-        Err(r) => return r,
+        Err(r) => return *r,
     };
     let to = match params.before.as_deref().map(parse_stamp).transpose() {
         Ok(v) => v.unwrap_or_else(now_epoch),
-        Err(r) => return r,
+        Err(r) => return *r,
     };
-    let limit = params.limit.unwrap_or(DEFAULT_TRADE_LIMIT).min(MAX_TRADE_LIMIT).max(1);
+    let limit = params
+        .limit
+        .unwrap_or(DEFAULT_TRADE_LIMIT)
+        .clamp(1, MAX_TRADE_LIMIT);
     let from = to - DEFAULT_WINDOW_SECONDS;
 
     let key = format!("{mint}:{to}");
@@ -322,18 +332,18 @@ pub async fn candles(
 ) -> Response {
     let mint = match parse_mint(&mint) {
         Ok(m) => m,
-        Err(r) => return r,
+        Err(r) => return *r,
     };
     let Some(interval) = interval_seconds(params.interval.as_deref().unwrap_or("1m")) else {
         return bad_request("interval must be one of 1m, 5m, 15m, 1h, 4h, 1d");
     };
     let requested_to = match params.to.as_deref().map(parse_stamp).transpose() {
         Ok(v) => v.unwrap_or_else(now_epoch),
-        Err(r) => return r,
+        Err(r) => return *r,
     };
     let requested_from = match params.from.as_deref().map(parse_stamp).transpose() {
         Ok(v) => v.unwrap_or(requested_to - DEFAULT_WINDOW_SECONDS),
-        Err(r) => return r,
+        Err(r) => return *r,
     };
     if requested_from >= requested_to {
         return bad_request("from must be before to");
@@ -398,7 +408,7 @@ fn sort_coins(coins: &mut [fold::Coin], sort: &str) {
                 .unwrap_or(f64::MIN)
                 .total_cmp(&a.change_pct.unwrap_or(f64::MIN))
         }),
-        _ => coins.sort_by(|a, b| b.tx_count.cmp(&a.tx_count)),
+        _ => coins.sort_by_key(|c| std::cmp::Reverse(c.tx_count)),
     }
 }
 
@@ -411,7 +421,10 @@ pub async fn coins(
     State(state): State<Arc<crate::AppState>>,
     Query(params): Query<CoinsParams>,
 ) -> Response {
-    let limit = params.limit.unwrap_or(DEFAULT_COINS_LIMIT).min(MAX_COINS_LIMIT).max(1);
+    let limit = params
+        .limit
+        .unwrap_or(DEFAULT_COINS_LIMIT)
+        .clamp(1, MAX_COINS_LIMIT);
     let sort = params.sort.clone().unwrap_or_else(|| "activity".to_owned());
     let to = now_epoch();
     let from = to - COINS_WINDOW_SECONDS;
@@ -511,10 +524,13 @@ fn fold_metadata(rows: &[MetadataRow]) -> Option<TokenMetadata> {
 /// need either an unbounded transfer scan (refused by the endpoint's own row
 /// cap, see [ADR 0002](../../../../docs/adr/0002-historical-data-comes-from-cryptohouse-not-a-vendor-archive.md))
 /// or a live account-state read this module does not perform.
-pub async fn token(State(state): State<Arc<crate::AppState>>, Path(mint): Path<String>) -> Response {
+pub async fn token(
+    State(state): State<Arc<crate::AppState>>,
+    Path(mint): Path<String>,
+) -> Response {
     let mint = match parse_mint(&mint) {
         Ok(m) => m,
-        Err(r) => return r,
+        Err(r) => return *r,
     };
 
     let meta_key = mint.clone();
@@ -557,7 +573,9 @@ pub async fn token(State(state): State<Arc<crate::AppState>>, Path(mint): Path<S
             t.price,
             None,
             None::<u32>,
-            Some("decimals are carried per-trade, not exposed on the header; see a trade on the tape"),
+            Some(
+                "decimals are carried per-trade, not exposed on the header; see a trade on the tape",
+            ),
         ),
         None if recent_trades.is_empty() => (
             None,
@@ -620,9 +638,12 @@ pub async fn holders(
 ) -> Response {
     let mint = match parse_mint(&mint) {
         Ok(m) => m,
-        Err(r) => return r,
+        Err(r) => return *r,
     };
-    let limit = params.limit.unwrap_or(DEFAULT_HOLDERS_LIMIT).min(MAX_HOLDERS_LIMIT).max(1);
+    let limit = params
+        .limit
+        .unwrap_or(DEFAULT_HOLDERS_LIMIT)
+        .clamp(1, MAX_HOLDERS_LIMIT);
     let to = now_epoch();
     let from = to - HOLDERS_WINDOW_SECONDS;
     let (from_s, to_s) = (from_epoch(from), from_epoch(to));
@@ -668,7 +689,11 @@ mod tests {
         seconds.sort_unstable();
         seconds.dedup();
         assert_eq!(seconds.len(), names.len());
-        assert_eq!(interval_seconds("2m"), None, "an undeclared interval is refused");
+        assert_eq!(
+            interval_seconds("2m"),
+            None,
+            "an undeclared interval is refused"
+        );
     }
 
     #[test]
@@ -681,12 +706,19 @@ mod tests {
 
     #[test]
     fn degradation_reasons_are_distinguishable_and_never_look_like_success() {
-        for d in [Degradation::Unreachable, Degradation::TimedOut, Degradation::RowCapHit] {
+        for d in [
+            Degradation::Unreachable,
+            Degradation::TimedOut,
+            Degradation::RowCapHit,
+        ] {
             assert!(d.status().is_client_error() || d.status().is_server_error());
             assert_ne!(d.status(), StatusCode::OK);
         }
         assert_ne!(Degradation::TimedOut.code(), Degradation::RowCapHit.code());
-        assert_ne!(Degradation::Unreachable.code(), Degradation::TimedOut.code());
+        assert_ne!(
+            Degradation::Unreachable.code(),
+            Degradation::TimedOut.code()
+        );
     }
 
     #[test]
@@ -697,7 +729,9 @@ mod tests {
 
     #[test]
     fn a_plain_timeout_exception_is_classified_as_timed_out() {
-        let e = QueryError::Server("Code: 159. DB::Exception: Timeout exceeded (TIMEOUT_EXCEEDED)".to_owned());
+        let e = QueryError::Server(
+            "Code: 159. DB::Exception: Timeout exceeded (TIMEOUT_EXCEEDED)".to_owned(),
+        );
         assert_eq!(Degradation::classify(&e), Degradation::TimedOut);
     }
 
@@ -723,9 +757,7 @@ mod tests {
     fn a_malformed_mint_is_refused_before_any_query_is_built() {
         assert!(parse_mint("not-base58!!").is_err());
         assert!(parse_mint("").is_err());
-        assert!(
-            parse_mint("5NfV2sy8DqXamLvYEE4LcTWzGqZc5Emv4bqqhVDWpump").is_ok()
-        );
+        assert!(parse_mint("5NfV2sy8DqXamLvYEE4LcTWzGqZc5Emv4bqqhVDWpump").is_ok());
     }
 
     #[test]

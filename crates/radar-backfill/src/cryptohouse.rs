@@ -252,7 +252,8 @@ mod tests {
     /// hammer a public endpoint with the same broken query.
     #[test]
     fn a_bad_identifier_does_not_narrow_however_it_is_reported() {
-        let body = "Code: 47. DB::Exception: Unknown expression identifier `mnit` (UNKNOWN_IDENTIFIER)";
+        let body =
+            "Code: 47. DB::Exception: Unknown expression identifier `mnit` (UNKNOWN_IDENTIFIER)";
         let err = server_error(404, body, "SELECT mnit FROM solana.token_transfers");
         assert!(!err.should_narrow(), "{err}");
     }
@@ -260,7 +261,11 @@ mod tests {
     /// The status reaches the operator, and so does which query failed.
     #[test]
     fn the_error_names_the_status_and_the_query_that_failed() {
-        let err = server_error(500, "Code: 396 ...", "SELECT mint FROM solana.token_transfers");
+        let err = server_error(
+            500,
+            "Code: 396 ...",
+            "SELECT mint FROM solana.token_transfers",
+        );
         let text = err.to_string();
         assert!(text.contains("500"), "{text}");
         assert!(text.contains("solana.token_transfers"), "{text}");

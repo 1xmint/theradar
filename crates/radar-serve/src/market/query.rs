@@ -218,7 +218,10 @@ mod tests {
         let sql = trades_query(MINT, "2026-09-11 17:00:00", "2026-09-11 17:05:00");
         // The bug: `LIKE 'So1111...%'` matches this real, unrelated mint too
         // -- one character longer than wrapped SOL, confirmed live.
-        assert!(!sql.contains("LIKE"), "must not pattern-match the quote leg");
+        assert!(
+            !sql.contains("LIKE"),
+            "must not pattern-match the quote leg"
+        );
         for quote in QUOTE_MINTS {
             assert!(sql.contains(quote), "missing quote mint {quote}: {sql}");
         }

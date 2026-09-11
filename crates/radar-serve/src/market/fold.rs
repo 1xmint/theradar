@@ -189,10 +189,16 @@ fn detect_pool(rows: &[TapeRow]) -> Option<&str> {
     let mut counts: Vec<(&str, u64)> = freq.into_iter().collect();
     counts.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(b.0)));
     let (account, count) = counts[0];
-    if counts.get(1).is_some_and(|(_, runner_up)| *runner_up >= count) {
+    if counts
+        .get(1)
+        .is_some_and(|(_, runner_up)| *runner_up >= count)
+    {
         return None;
     }
-    #[expect(clippy::cast_precision_loss, reason = "a share for a threshold compare")]
+    #[expect(
+        clippy::cast_precision_loss,
+        reason = "a share for a threshold compare"
+    )]
     let share = count as f64 / legs as f64;
     (share >= POOL_SHARE_THRESHOLD).then_some(account)
 }
@@ -209,13 +215,15 @@ fn side_and_trader(row: &TapeRow, pool: Option<&str>) -> (Side, Option<String>) 
     let non_empty = |s: &str| (!s.is_empty()).then(|| s.to_owned());
     match pool {
         Some(pool)
-            if row.token_source == pool && !row.token_destination.is_empty()
+            if row.token_source == pool
+                && !row.token_destination.is_empty()
                 && row.token_destination != pool =>
         {
             (Side::Buy, non_empty(&row.quote_authority))
         }
         Some(pool)
-            if row.token_destination == pool && !row.token_source.is_empty()
+            if row.token_destination == pool
+                && !row.token_source.is_empty()
                 && row.token_source != pool =>
         {
             (Side::Sell, non_empty(&row.token_authority))
@@ -265,7 +273,10 @@ fn trade_from_row(row: &TapeRow, pool: Option<&str>) -> Option<Trade> {
 #[must_use]
 pub fn fold_tape(rows: &[TapeRow]) -> Vec<Trade> {
     let pool = detect_pool(rows);
-    let mut trades: Vec<Trade> = rows.iter().filter_map(|r| trade_from_row(r, pool)).collect();
+    let mut trades: Vec<Trade> = rows
+        .iter()
+        .filter_map(|r| trade_from_row(r, pool))
+        .collect();
     // Lexicographic order agrees with chronological order for this timestamp
     // format, so no epoch parse is needed just to sort.
     trades.sort_by(|a, b| b.ts.cmp(&a.ts).then_with(|| b.signature.cmp(&a.signature)));
@@ -535,7 +546,12 @@ pub struct Coin {
     pub change_pct: Option<f64>,
 }
 
-fn priced(token_value: &str, token_decimals: &str, quote_value: &str, quote_decimals: &str) -> Option<f64> {
+fn priced(
+    token_value: &str,
+    token_decimals: &str,
+    quote_value: &str,
+    quote_decimals: &str,
+) -> Option<f64> {
     let token = adjust(token_value, token_decimals)?;
     let quote = adjust(quote_value, quote_decimals)?;
     (token > 0.0).then_some(quote / token)
@@ -624,8 +640,16 @@ mod tests {
         assert_eq!(adjust("10000", "9"), Some(0.00001));
         // `Trade` has no raw field at all -- `trade_from_row` is the only
         // producer, and every numeric field on it comes from `adjust`.
-        let t = trade_from_row(&row("sig-1", "2026-09-11 17:35:00.000000", "So11111111111111111111111111111111111111112", "10000"), None)
-            .expect("converts");
+        let t = trade_from_row(
+            &row(
+                "sig-1",
+                "2026-09-11 17:35:00.000000",
+                "So11111111111111111111111111111111111111112",
+                "10000",
+            ),
+            None,
+        )
+        .expect("converts");
         assert_eq!(t.token_amount, 0.056626);
         assert_eq!(t.quote_amount, Some(0.00001));
     }
@@ -649,19 +673,38 @@ mod tests {
         // The other half of the same bug, at the level the sketch's INNER
         // JOIN actually broke: the row must still appear on the tape.
         let rows = vec![
-            row("sig-1", "2026-09-11 17:35:02.000000", "So11111111111111111111111111111111111111112", "10000"),
+            row(
+                "sig-1",
+                "2026-09-11 17:35:02.000000",
+                "So11111111111111111111111111111111111111112",
+                "10000",
+            ),
             row("sig-2", "2026-09-11 17:35:01.000000", "", "0"),
         ];
         let trades = fold_tape(&rows);
         assert_eq!(trades.len(), 2, "the quoteless trade must not be dropped");
-        assert!(trades.iter().any(|t| t.signature == "sig-2" && t.price.is_none()));
+        assert!(
+            trades
+                .iter()
+                .any(|t| t.signature == "sig-2" && t.price.is_none())
+        );
     }
 
     #[test]
     fn newest_first() {
         let rows = vec![
-            row("older", "2026-09-11 17:00:00.000000", "So11111111111111111111111111111111111111112", "10000"),
-            row("newer", "2026-09-11 17:05:00.000000", "So11111111111111111111111111111111111111112", "10000"),
+            row(
+                "older",
+                "2026-09-11 17:00:00.000000",
+                "So11111111111111111111111111111111111111112",
+                "10000",
+            ),
+            row(
+                "newer",
+                "2026-09-11 17:05:00.000000",
+                "So11111111111111111111111111111111111111112",
+                "10000",
+            ),
         ];
         let trades = fold_tape(&rows);
         assert_eq!(trades[0].signature, "newer");
@@ -676,7 +719,12 @@ mod tests {
     fn rows_against_one_pool(quote_mint: &str) -> Vec<TapeRow> {
         (0..3)
             .map(|i| {
-                let mut r = row(&format!("sig-{i}"), "2026-09-11 17:35:00.000000", quote_mint, "10000");
+                let mut r = row(
+                    &format!("sig-{i}"),
+                    "2026-09-11 17:35:00.000000",
+                    quote_mint,
+                    "10000",
+                );
                 r.token_destination = format!("TRADER-{i}");
                 r.quote_authority = format!("TRADERWALLET-{i}");
                 r
@@ -692,7 +740,11 @@ mod tests {
         for t in &trades {
             assert_eq!(t.side, Side::Buy);
         }
-        assert!(trades.iter().any(|t| t.trader.as_deref() == Some("TRADERWALLET-0")));
+        assert!(
+            trades
+                .iter()
+                .any(|t| t.trader.as_deref() == Some("TRADERWALLET-0"))
+        );
     }
 
     #[test]
@@ -705,7 +757,10 @@ mod tests {
         assert_eq!(trades.len(), 3);
         for t in &trades {
             assert_eq!(t.side, Side::Sell);
-            assert_eq!(t.trader.as_deref(), Some("POOLAUTH1111111111111111111111111111111111"));
+            assert_eq!(
+                t.trader.as_deref(),
+                Some("POOLAUTH1111111111111111111111111111111111")
+            );
         }
     }
 
@@ -713,10 +768,18 @@ mod tests {
     fn with_no_dominant_account_the_side_is_unknown_not_guessed() {
         // Every leg touches a different pair of accounts, so nothing clears
         // the pool-share threshold.
-        let rows = vec![
-            row("sig-1", "2026-09-11 17:00:00.000000", "So11111111111111111111111111111111111111112", "10000"),
-        ];
-        let mut r2 = row("sig-2", "2026-09-11 17:01:00.000000", "So11111111111111111111111111111111111111112", "5000");
+        let rows = vec![row(
+            "sig-1",
+            "2026-09-11 17:00:00.000000",
+            "So11111111111111111111111111111111111111112",
+            "10000",
+        )];
+        let mut r2 = row(
+            "sig-2",
+            "2026-09-11 17:01:00.000000",
+            "So11111111111111111111111111111111111111112",
+            "5000",
+        );
         r2.token_source = "OTHER_A".to_owned();
         r2.token_destination = "OTHER_B".to_owned();
         let all = [rows, vec![r2]].concat();
@@ -729,7 +792,12 @@ mod tests {
     #[test]
     fn candles_never_include_an_unpriced_trade() {
         let rows = vec![
-            row("priced", "2026-09-11 17:00:10.000000", "So11111111111111111111111111111111111111112", "10000"),
+            row(
+                "priced",
+                "2026-09-11 17:00:10.000000",
+                "So11111111111111111111111111111111111111112",
+                "10000",
+            ),
             row("unpriced", "2026-09-11 17:00:20.000000", "", "0"),
         ];
         let trades = fold_tape(&rows);
@@ -737,29 +805,59 @@ mod tests {
         assert_eq!(candles.len(), 1, "one priced trade makes one bucket");
         let only = &candles[0];
         assert_eq!(only.trade_count, 1);
-        assert_eq!(only.open, only.close, "the unpriced trade did not touch this bucket");
+        assert_eq!(
+            only.open, only.close,
+            "the unpriced trade did not touch this bucket"
+        );
     }
 
     #[test]
     fn candles_bucket_by_interval_and_track_high_low() {
-        let mut a = row("a", "2026-09-11 17:00:05.000000", "So11111111111111111111111111111111111111112", "10000");
-        let mut b = row("b", "2026-09-11 17:00:50.000000", "So11111111111111111111111111111111111111112", "20000");
-        let mut c = row("c", "2026-09-11 17:01:10.000000", "So11111111111111111111111111111111111111112", "5000");
+        let mut a = row(
+            "a",
+            "2026-09-11 17:00:05.000000",
+            "So11111111111111111111111111111111111111112",
+            "10000",
+        );
+        let mut b = row(
+            "b",
+            "2026-09-11 17:00:50.000000",
+            "So11111111111111111111111111111111111111112",
+            "20000",
+        );
+        let mut c = row(
+            "c",
+            "2026-09-11 17:01:10.000000",
+            "So11111111111111111111111111111111111111112",
+            "5000",
+        );
         for r in [&mut a, &mut b, &mut c] {
             r.token_value = "56626".to_owned();
             r.token_decimals = "6".to_owned();
         }
         let trades = fold_tape(&[a, b, c]);
         let candles = fold_candles(&trades, 60);
-        assert_eq!(candles.len(), 2, "a and b share the first minute, c is the next");
+        assert_eq!(
+            candles.len(),
+            2,
+            "a and b share the first minute, c is the next"
+        );
         assert_eq!(candles[0].trade_count, 2);
-        assert!(candles[0].high > candles[0].low, "a and b priced differently");
+        assert!(
+            candles[0].high > candles[0].low,
+            "a and b priced differently"
+        );
         assert_eq!(candles[1].trade_count, 1);
     }
 
     #[test]
     fn a_zero_interval_produces_no_candles_rather_than_dividing_by_zero() {
-        let rows = vec![row("a", "2026-09-11 17:00:05.000000", "So11111111111111111111111111111111111111112", "10000")];
+        let rows = vec![row(
+            "a",
+            "2026-09-11 17:00:05.000000",
+            "So11111111111111111111111111111111111111112",
+            "10000",
+        )];
         let trades = fold_tape(&rows);
         assert!(fold_candles(&trades, 0).is_empty());
     }
@@ -784,8 +882,11 @@ mod tests {
         let fold = fold_holders(&rows, "2026-09-11 00:00:00", "2026-09-11 01:00:00", 10);
         assert_eq!(fold.fact, "folded_transfers");
         assert_eq!(fold.granularity, "token_account");
-        let by_account: HashMap<&str, f64> =
-            fold.holders.iter().map(|h| (h.account.as_str(), h.balance)).collect();
+        let by_account: HashMap<&str, f64> = fold
+            .holders
+            .iter()
+            .map(|h| (h.account.as_str(), h.balance))
+            .collect();
         assert_eq!(by_account.get("vault-a"), Some(&0.6));
         assert_eq!(by_account.get("wallet-b"), Some(&0.3));
         // Supply is conserved: 1.0 minted, 0.1 burned, 0.9 left across accounts.
@@ -861,6 +962,9 @@ mod tests {
         let coins = fold_coins(&candidates, &prices);
         assert_eq!(coins[0].price, Some(1.5));
         assert!((coins[0].change_pct.unwrap() - 50.0).abs() < 1e-9);
-        assert_eq!(coins[0].quote_mint.as_deref(), Some("So11111111111111111111111111111111111111112"));
+        assert_eq!(
+            coins[0].quote_mint.as_deref(),
+            Some("So11111111111111111111111111111111111111112")
+        );
     }
 }
