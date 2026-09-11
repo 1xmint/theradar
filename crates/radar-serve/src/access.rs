@@ -633,6 +633,13 @@ pub fn audience_of(path: &str) -> Audience {
         || path == "/wallet"
         || path == "/ask"
         || path.starts_with("/token/")
+        // Public market data -- tier 1 of plan 0012. Facts about the chain
+        // that belong to nobody: the trade tape, candles, the coin list, a
+        // coin's header, and folded holders. No identity is ever checked
+        // against this prefix, and nothing under it may read a customer's or
+        // the operator's store -- see the module comment on
+        // `radar_serve::market`.
+        || path.starts_with("/v1/market/")
     {
         return Audience::Public;
     }
@@ -1079,6 +1086,22 @@ mod tests {
             "/token/So11111111111111111111111111111111111111112"
         ));
 
+        // Public market data: no identity, ever, for any path under the
+        // prefix -- these are facts about the chain, not about a customer.
+        assert!(is_public(
+            "/v1/market/trades/So11111111111111111111111111111111111111112"
+        ));
+        assert!(is_public(
+            "/v1/market/candles/So11111111111111111111111111111111111111112"
+        ));
+        assert!(is_public("/v1/market/coins"));
+        assert!(is_public(
+            "/v1/market/token/So11111111111111111111111111111111111111112"
+        ));
+        assert!(is_public(
+            "/v1/market/holders/So11111111111111111111111111111111111111112"
+        ));
+
         for private in [
             // The operator's screens are not shell. A direct navigation to one
             // still meets the operator check.
@@ -1158,6 +1181,24 @@ mod tests {
             ("/ask", Audience::Public),
             (
                 "/token/So11111111111111111111111111111111111111112",
+                Audience::Public,
+            ),
+            // Public market data. Facts about the chain, and nobody's.
+            (
+                "/v1/market/trades/So11111111111111111111111111111111111111112",
+                Audience::Public,
+            ),
+            (
+                "/v1/market/candles/So11111111111111111111111111111111111111112",
+                Audience::Public,
+            ),
+            ("/v1/market/coins", Audience::Public),
+            (
+                "/v1/market/token/So11111111111111111111111111111111111111112",
+                Audience::Public,
+            ),
+            (
+                "/v1/market/holders/So11111111111111111111111111111111111111112",
                 Audience::Public,
             ),
             // The operator's surface. `/v1/store` and `/v1/events` are here on

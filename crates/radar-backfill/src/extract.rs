@@ -10,11 +10,16 @@
 //! skipped and counted, never guessed at. [`Stats`] makes those gaps visible;
 //! silently dropping them would leave the store looking like a quiet market.
 
+use std::time::Duration;
+
 use radar_decode::pumpfun;
 use radar_decode::{Decoded, Discriminator, Instruction, Program, decode};
-use radar_store::{Envelope, Event, Graduation, Launch, Origin, Side, Table, Trade};
+use radar_store::{Envelope, Event, Graduation, Launch, Origin, Side, Table, Trade, from_epoch};
 use radar_types::{Address, Signature, Slot};
 use serde::Deserialize;
+use serde::de::DeserializeOwned;
+
+use crate::cryptohouse::{Client, QueryError};
 
 /// Mints that are never the subject of a pump.fun trade — they are the other
 /// side of it. Without excluding these, every trade would resolve to wrapped SOL.
@@ -471,6 +476,75 @@ pub fn query_for_window(from: &str, to: &str, scope: Scope) -> String {
          FROM ix LEFT JOIN mints ON ix.tx_signature = mints.tx_signature \
                  LEFT JOIN txs ON ix.tx_signature = txs.signature"
     )
+}
+
+/// Fetches one time window, halving it whenever the server says it was too
+/// wide, and stitching the two halves back together in order.
+///
+/// Pulled out of the backfill runner (where it lived as a private `fn` fitted
+/// to [`Row`] and [`Scope`]) and made generic, so a second caller with a
+/// different `SELECT` — the public market endpoints in `radar-serve`, among
+/// them — gets the same halving discipline rather than a second copy of it.
+/// `query` builds the SQL text for a `from .. to` pair; everything about *what*
+/// is being asked for lives in the closure, and everything about *how wide a
+/// bite the endpoint will take* lives here.
+///
+/// `depth` bottoms out at 10, matching what the extractor already accepted:
+/// past that, a window this narrow still failing means something other than
+/// "too wide", and retrying deeper would only hammer a public endpoint we are
+/// a guest on (ADR 0002).
+///
+/// # Errors
+///
+/// Returns the server's [`QueryError`] once the window cannot be narrowed any
+/// further, or once the halving depth is exhausted.
+pub fn fetch_windowed<T: DeserializeOwned>(
+    client: &Client,
+    from: i64,
+    to: i64,
+    depth: u32,
+    min_window_seconds: i64,
+    pause_between: Duration,
+    query: &dyn Fn(&str, &str) -> String,
+) -> Result<Vec<T>, QueryError> {
+    let sql = query(&from_epoch(from), &from_epoch(to));
+    match client.query::<T>(&sql) {
+        Ok(rows) => Ok(rows),
+        Err(e) if e.should_narrow() && (to - from) > min_window_seconds && depth < 10 => {
+            let mid = from + (to - from) / 2;
+            eprintln!(
+                "    window too wide ({}), halving: {} .. {}",
+                if e.to_string().contains("TOO_MANY_ROWS") {
+                    "row cap"
+                } else {
+                    "timeout"
+                },
+                from_epoch(from),
+                from_epoch(to)
+            );
+            let mut rows = fetch_windowed(
+                client,
+                from,
+                mid,
+                depth + 1,
+                min_window_seconds,
+                pause_between,
+                query,
+            )?;
+            std::thread::sleep(pause_between);
+            rows.extend(fetch_windowed(
+                client,
+                mid,
+                to,
+                depth + 1,
+                min_window_seconds,
+                pause_between,
+                query,
+            )?);
+            Ok(rows)
+        }
+        Err(e) => Err(e),
+    }
 }
 
 #[cfg(test)]

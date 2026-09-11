@@ -265,6 +265,10 @@ fn merge(into: &mut Stats, from: &Stats) {
 }
 
 /// Fetches one window, halving it on a server timeout.
+///
+/// A thin wrapper over [`radar_backfill::fetch_windowed`], which is generic so
+/// the same halving discipline is available to other callers — see its own
+/// doc comment for why this used to be a private `fn` here.
 fn fetch_window(
     client: &Client,
     from: i64,
@@ -272,28 +276,15 @@ fn fetch_window(
     depth: u32,
     scope: Scope,
 ) -> Result<Vec<Row>, QueryError> {
-    let sql = query_for_window(&from_epoch(from), &from_epoch(to), scope);
-    match client.query::<Row>(&sql) {
-        Ok(rows) => Ok(rows),
-        Err(e) if e.should_narrow() && (to - from) > MIN_WINDOW_SECONDS && depth < 10 => {
-            let mid = from + (to - from) / 2;
-            eprintln!(
-                "    window too wide ({}), halving: {} .. {}",
-                if e.to_string().contains("TOO_MANY_ROWS") {
-                    "row cap"
-                } else {
-                    "timeout"
-                },
-                from_epoch(from),
-                from_epoch(to)
-            );
-            let mut rows = fetch_window(client, from, mid, depth + 1, scope)?;
-            std::thread::sleep(PAUSE_BETWEEN_WINDOWS);
-            rows.extend(fetch_window(client, mid, to, depth + 1, scope)?);
-            Ok(rows)
-        }
-        Err(e) => Err(e),
-    }
+    radar_backfill::fetch_windowed(
+        client,
+        from,
+        to,
+        depth,
+        MIN_WINDOW_SECONDS,
+        PAUSE_BETWEEN_WINDOWS,
+        &|from, to| query_for_window(from, to, scope),
+    )
 }
 
 /// Writes one coverage record per table the scope collected into.

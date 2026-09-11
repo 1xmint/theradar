@@ -106,6 +106,7 @@ fn router(admission: Admission, keys: Keys) -> axum::Router {
         scoreboard: radar_serve::cache::Cache::new(),
         token: radar_serve::cache::Cache::new(),
         challenges: None,
+        market: radar_serve::market::Market::new(),
     }))
 }
 
