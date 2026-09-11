@@ -20,6 +20,7 @@
 //! comment is the note saying so.
 
 import { useState, type ReactNode } from "react";
+import { Link } from "wouter";
 
 import { mintShaped, summonIntent, userHref } from "../honesty";
 
@@ -120,6 +121,80 @@ export function Card({
     >
       {children}
     </div>
+  );
+}
+
+/**
+ * A titled run of prose inside a section.
+ *
+ * Lived privately in `About.tsx` until the trust pages arrived. Three more
+ * pages of the same shape would have been three more copies of the same eight
+ * lines, and the version of that which goes wrong is the ordinary one: one copy
+ * gets the spacing changed and the pages stop looking like the same site.
+ */
+export function Block({
+  title,
+  children,
+}: {
+  title: string;
+  children: ReactNode;
+}) {
+  return (
+    <div className="mb-10">
+      <h3 className="mb-3 text-lg font-semibold text-[var(--color-text)]">
+        {title}
+      </h3>
+      <div className="space-y-3 text-[var(--color-dim)]">{children}</div>
+    </div>
+  );
+}
+
+/**
+ * A link out of the site, inside a run of prose.
+ *
+ * `rel="noopener noreferrer"` is not decoration on this one: every destination
+ * here is somebody else's property, and a tab opened with `window.opener` left
+ * attached can navigate the page it came from.
+ *
+ * Takes a plain `string`, not the `string | null` [`Cta`] takes, and the
+ * difference is deliberate. `Cta` renders a URL built from a document the site
+ * did not write, so it must be able to refuse. This one renders a constant from
+ * `honesty.ts` that is in the source and cannot be absent.
+ */
+export function Out({ href, children }: { href: string; children: ReactNode }) {
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="text-[var(--color-signal)] underline underline-offset-4 hover:text-[var(--color-text)]"
+    >
+      {children}
+    </a>
+  );
+}
+
+/**
+ * A link to another page of this site, inside a run of prose.
+ *
+ * `wouter`'s `Link`, so it does not reload the application, and styled
+ * identically to [`Out`] on purpose: a reader following a reference should not
+ * have to work out whether they are about to leave.
+ */
+export function Here({
+  href,
+  children,
+}: {
+  href: string;
+  children: ReactNode;
+}) {
+  return (
+    <Link
+      href={href}
+      className="text-[var(--color-signal)] underline underline-offset-4 hover:text-[var(--color-text)]"
+    >
+      {children}
+    </Link>
   );
 }
 

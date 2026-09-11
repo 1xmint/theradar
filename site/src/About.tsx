@@ -14,18 +14,7 @@
 import { Link } from "wouter";
 
 import { useTitle } from "./title";
-import { Card, Heading, Section } from "./ui";
-
-function Block({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <div className="mb-10">
-      <h3 className="mb-3 text-lg font-semibold text-[var(--color-text)]">
-        {title}
-      </h3>
-      <div className="space-y-3 text-[var(--color-dim)]">{children}</div>
-    </div>
-  );
-}
+import { Block, Card, Heading, Section } from "./ui";
 
 export function About() {
   useTitle("About");
