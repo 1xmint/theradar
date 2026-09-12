@@ -740,20 +740,16 @@ mod narrowing {
     /// the mutant that replaces the whole guard with `true`.
     #[test]
     fn an_error_that_narrowing_cannot_fix_is_not_retried() {
-        struct Broken;
-        impl Broken {
-            fn run(&self, _sql: &str) -> Result<Vec<String>, QueryError> {
-                Err(QueryError::Server(
-                    "Code: 47 ... (UNKNOWN_IDENTIFIER)".to_owned(),
-                ))
-            }
+        fn broken(_sql: &str) -> Result<Vec<String>, QueryError> {
+            Err(QueryError::Server(
+                "Code: 47 ... (UNKNOWN_IDENTIFIER)".to_owned(),
+            ))
         }
-        let broken = Broken;
         let calls = RefCell::new(0u32);
         let err = narrowing_fetch(
             &|sql| {
                 *calls.borrow_mut() += 1;
-                broken.run(sql)
+                broken(sql)
             },
             0,
             1200,
