@@ -630,6 +630,9 @@ pub fn fold_coins(candidates: &[CoinCandidateRow], prices: &[CoinPriceRow]) -> V
 mod tests {
     use super::*;
 
+    /// Wrapped SOL, the quote asset most of these fixtures price against.
+    const WSOL: &str = "So11111111111111111111111111111111111111112";
+
     fn row(sig: &str, ts: &str, quote_mint: &str, quote_value: &str) -> TapeRow {
         TapeRow {
             ts: ts.to_owned(),
@@ -645,6 +648,134 @@ mod tests {
             quote_mint: quote_mint.to_owned(),
             quote_authority: "TRADERWALLET111111111111111111111111111111".to_owned(),
         }
+    }
+
+    /// A genuinely fractional base-unit amount is refused, not truncated.
+    ///
+    /// `parse_units` accepts `"56626.000"` because an all-zero fraction is the
+    /// same integer. It must refuse `"56626.5"`: half a base unit means this
+    /// column stopped meaning whole base units, and silently dropping the `.5`
+    /// would report a quantity nobody traded. Kills the mutant that flips the
+    /// all-zeros test to "any digit differs".
+    #[test]
+    fn a_fractional_base_unit_is_refused_rather_than_truncated() {
+        assert_eq!(parse_units("56626"), Some(56_626));
+        assert_eq!(parse_units("56626.000"), Some(56_626));
+        assert_eq!(
+            parse_units("56626.5"),
+            None,
+            "half a base unit is not 56626"
+        );
+        assert_eq!(parse_units("56626.0001"), None);
+    }
+
+    /// The pool is the account on enough legs, and a tie is refused.
+    ///
+    /// Kills the mutants that turn the leg tally into a product, and the ones
+    /// that replace the share division with a remainder or a product: each
+    /// changes which account clears [`POOL_SHARE_THRESHOLD`], and with two
+    /// accounts on every row the correct share is exactly 0.5.
+    #[test]
+    fn the_pool_is_the_account_on_half_the_legs_and_a_tie_is_refused() {
+        // Three trades, one account on every one of them: six legs, the pool
+        // on three. Exactly the threshold, which must pass.
+        let mut rows = vec![
+            row("a", "2026-09-11 00:00:01", WSOL, "10000"),
+            row("b", "2026-09-11 00:00:02", WSOL, "10000"),
+            row("c", "2026-09-11 00:00:03", WSOL, "10000"),
+        ];
+        rows[1].token_destination = "OTHER1111111111111111111111111111111111111".to_owned();
+        rows[2].token_destination = "OTHER2222222222222222222222222222222222222".to_owned();
+        assert_eq!(
+            detect_pool(&rows),
+            Some("POOL111111111111111111111111111111111111"),
+            "the account on every trade is the pool"
+        );
+
+        // One trade, two accounts, one appearance each. Nothing separates a
+        // pool from a trader, so the answer is no pool rather than a coin flip.
+        let single = vec![row("a", "2026-09-11 00:00:01", WSOL, "10000")];
+        assert_eq!(detect_pool(&single), None, "a tie names no pool");
+    }
+
+    /// A leg that starts and ends at the pool is not a trade in either
+    /// direction.
+    ///
+    /// Kills the four mutants that loosen `side_and_trader`'s guards from
+    /// `&&` to `||`: each would let one half of the condition alone decide a
+    /// side, and a row whose source *and* destination are the pool satisfies
+    /// the source half of a buy and the destination half of a sell at once.
+    #[test]
+    fn a_leg_from_the_pool_to_itself_has_no_side() {
+        let pool = "POOL111111111111111111111111111111111111";
+        let mut r = row("a", "2026-09-11 00:00:01", WSOL, "10000");
+        r.token_source = pool.to_owned();
+        r.token_destination = pool.to_owned();
+        let (side, trader) = side_and_trader(&r, Some(pool));
+        assert_eq!(side, Side::Unknown, "pool to pool is not a buy or a sell");
+        assert_eq!(trader, None);
+    }
+
+    /// A trade that moved no tokens has no price, rather than an infinite one.
+    ///
+    /// Kills the mutants that relax `token > 0.0` to `>=` or to always-true,
+    /// and the ones that turn the division into a remainder or a product.
+    /// Dividing a real quote amount by zero tokens yields `f64::INFINITY`,
+    /// which serialises as JSON `null` and would arrive on the tape looking
+    /// exactly like an honest absent price -- while every other consumer of
+    /// `price`, including the candle fold, would have taken it as a number.
+    #[test]
+    fn a_trade_of_zero_tokens_has_no_price_rather_than_an_infinite_one() {
+        let mut r = row("a", "2026-09-11 00:00:01", WSOL, "10000");
+        r.token_value = "0".to_owned();
+        let t = trade_from_row(&r, None).expect("a zero-token transfer is still a row");
+        assert!((t.token_amount - 0.0).abs() < f64::EPSILON);
+        assert_eq!(t.price, None, "no price, not an infinity");
+
+        // And the ordinary case still divides: 0.00001 wSOL for 0.056626 of
+        // the mint.
+        let ok = trade_from_row(&row("b", "2026-09-11 00:00:02", WSOL, "10000"), None)
+            .expect("converts");
+        let price = ok.price.expect("both legs present");
+        assert!(
+            (price - (0.000_01 / 0.056_626)).abs() < 1e-12,
+            "price is quote over token: {price}"
+        );
+    }
+
+    /// Two trades inside one interval sum into one bar.
+    ///
+    /// Kills the mutants that turn the bucket's volume accumulation into a
+    /// product or a subtraction, and the one that replaces the bucket-start
+    /// multiplication with an addition -- the last of which would scatter
+    /// trades across buckets that are not interval-aligned.
+    #[test]
+    fn two_trades_in_one_interval_make_one_bar_that_sums_them() {
+        let trades = vec![
+            trade_from_row(&row("a", "2026-09-11 00:00:05", WSOL, "10000"), None).expect("a"),
+            trade_from_row(&row("b", "2026-09-11 00:00:45", WSOL, "20000"), None).expect("b"),
+        ];
+        let candles = fold_candles(&trades, 60);
+        assert_eq!(candles.len(), 1, "both fall in the same minute");
+        let bar = &candles[0];
+        assert_eq!(bar.trade_count, 2);
+        assert_eq!(
+            bar.time % 60,
+            0,
+            "a bucket starts on an interval boundary, not at the first trade"
+        );
+        let expected_quote = 0.000_01 + 0.000_02;
+        assert!(
+            (bar.quote_volume - expected_quote).abs() < 1e-12,
+            "volumes add: {} vs {expected_quote}",
+            bar.quote_volume
+        );
+        let expected_token = 0.056_626 * 2.0;
+        assert!(
+            (bar.token_volume - expected_token).abs() < 1e-12,
+            "token volumes add too: {}",
+            bar.token_volume
+        );
     }
 
     #[test]
