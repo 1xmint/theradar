@@ -698,6 +698,73 @@ mod tests {
         assert_eq!(detect_pool(&single), None, "a tie names no pool");
     }
 
+    /// An account on a minority of legs is not the pool.
+    ///
+    /// **The share is a division and the tests above did not pin it.** With
+    /// one account on two of ten legs the correct share is 0.2, below
+    /// [`POOL_SHARE_THRESHOLD`] — but `count % legs` is 2 and `count * legs`
+    /// is 20, and both clear the bar. Either mutation would name an ordinary
+    /// busy trader as the pool and hand every trade in the window a side
+    /// derived from them.
+    #[test]
+    fn an_account_on_a_minority_of_legs_is_not_the_pool() {
+        let mut rows = Vec::new();
+        for i in 0..5 {
+            let mut r = row("s", "2026-09-11 00:00:01", WSOL, "10000");
+            r.token_source = format!("SRC{i:038}");
+            r.token_destination = format!("DST{i:038}");
+            rows.push(r);
+        }
+        // One account on two of the ten legs; every other account on one.
+        rows[1].token_source = rows[0].token_source.clone();
+        assert_eq!(
+            detect_pool(&rows),
+            None,
+            "two legs in ten is 20 per cent, which is not a pool"
+        );
+    }
+
+    /// Both sides of a transfer count toward the total, not just one.
+    ///
+    /// `detect_pool` tallies a leg for the source and a leg for the
+    /// destination. Dropping either tally halves the denominator and doubles
+    /// every share, which turns a minority account into the pool. Three
+    /// appearances across four trades is 3/8 = 0.375 and no pool; counting one
+    /// side only makes it 3/4 and a confident wrong one. Asserted in both
+    /// directions because the two tallies are separate statements.
+    #[test]
+    fn both_ends_of_a_transfer_count_toward_the_share() {
+        let build = |on_source: bool| {
+            let mut rows = Vec::new();
+            for i in 0..4 {
+                let mut r = row("s", "2026-09-11 00:00:01", WSOL, "10000");
+                r.token_source = format!("SRC{i:038}");
+                r.token_destination = format!("DST{i:038}");
+                rows.push(r);
+            }
+            let busy = "BUSY11111111111111111111111111111111111111".to_owned();
+            for row_ref in rows.iter_mut().take(3) {
+                if on_source {
+                    row_ref.token_source = busy.clone();
+                } else {
+                    row_ref.token_destination = busy.clone();
+                }
+            }
+            rows
+        };
+
+        assert_eq!(
+            detect_pool(&build(true)),
+            None,
+            "three source legs in eight is 37.5 per cent, not a pool"
+        );
+        assert_eq!(
+            detect_pool(&build(false)),
+            None,
+            "and the same three legs on the destination side"
+        );
+    }
+
     /// A leg that starts and ends at the pool is not a trade in either
     /// direction.
     ///

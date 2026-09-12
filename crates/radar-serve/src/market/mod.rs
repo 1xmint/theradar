@@ -705,11 +705,16 @@ mod tests {
     /// lying about its own controls, with nothing failing.
     #[test]
     fn each_sort_orders_by_its_own_column_and_an_unknown_one_falls_back() {
+        // The three orderings are deliberately all different. An earlier
+        // version of this test had the change ordering coincide with the
+        // activity ordering, so deleting the "change" arm -- which falls
+        // through to activity -- changed nothing it asserted, and the mutant
+        // survived a test written to kill it.
         let sample = || {
             vec![
-                coin(5, Some(1.0), Some(10.0)),
-                coin(1, Some(9.0), Some(-5.0)),
-                coin(9, Some(4.0), Some(50.0)),
+                coin(5, Some(1.0), Some(50.0)),
+                coin(1, Some(9.0), Some(10.0)),
+                coin(9, Some(4.0), Some(-5.0)),
             ]
         };
 
@@ -725,8 +730,8 @@ mod tests {
         sort_coins(&mut by_change, "change");
         assert_eq!(
             by_change.iter().map(|c| c.tx_count).collect::<Vec<_>>(),
-            vec![9, 5, 1],
-            "change order is 50%, 10%, -5%"
+            vec![5, 1, 9],
+            "change order is 50%, 10%, -5% -- and not the activity order"
         );
 
         let mut by_activity = sample();
