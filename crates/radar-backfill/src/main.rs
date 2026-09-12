@@ -14,6 +14,8 @@ use radar_asof::AsOf;
 use radar_backfill::checkpoints;
 use radar_backfill::coverage;
 use radar_backfill::extract::{Row, Skipped, Stats};
+use radar_backfill::market::{fold as market_fold, query as market_query};
+use radar_backfill::market_tape;
 use radar_backfill::outcomes::{self, AggregateRow, HeadRow, TimeRow};
 use radar_backfill::prices::{self, PriceRow};
 use radar_backfill::{Client, QueryError, Scope, events_from_rows, query_for_window};
@@ -69,6 +71,30 @@ const FOLLOW_RETRY_MIN: Duration = Duration::from_secs(5);
 /// (ADR 0002), so an endpoint that is already unhappy is not hammered.
 const FOLLOW_RETRY_MAX: Duration = Duration::from_secs(300);
 
+/// How wide a market-tape pass's window is, and how long it sleeps between
+/// passes. The two are the same number on purpose: two queries every
+/// [`MARKET_TAPE_PASS_INTERVAL`] is 60 queries an hour (see
+/// `radar_backfill::market_tape`'s module doc for the arithmetic), and the
+/// loop sleeps this long regardless of how long a pass itself took, so the
+/// interval can only widen under load, never narrow below what the budget
+/// assumes.
+const MARKET_TAPE_PASS_INTERVAL: Duration = Duration::from_secs(120);
+
+/// How far behind wall-clock time a market-tape pass stays, so the window it
+/// asks for has already had time to land in CryptoHouse.
+const MARKET_TAPE_LAG_SECONDS: i64 = 120;
+
+/// The narrowest window a market-tape pass's trades query will still try
+/// before giving up rather than halving further.
+const MARKET_TAPE_MIN_WINDOW_SECONDS: i64 = 4;
+
+/// How many of a window's most active mints the market tape shortlists for a
+/// batched trades query. Matches `radar-serve`'s own former
+/// `COIN_SHORTLIST` — the live coin list never showed more than this many
+/// mints either, so collecting fewer would be a real loss of coverage and
+/// collecting more would not change what any caller could see.
+const MARKET_TAPE_SHORTLIST: usize = 200;
+
 /// The smallest window follow mode will shrink to under repeated failure.
 ///
 /// Shrinking matters more than waiting. A five-minute window during a migration
@@ -121,6 +147,10 @@ fn retry_backoff(failures: u32) -> Duration {
     doubled.min(FOLLOW_RETRY_MAX)
 }
 
+#[allow(
+    clippy::struct_excessive_bools,
+    reason = "independent CLI flags, not a state machine -- --follow, --outcomes, --market-tape and --reprice each stand alone and folding them into enums would not make any of the modes below clearer"
+)]
 struct Args {
     from: String,
     to: String,
@@ -129,6 +159,10 @@ struct Args {
     scope: Scope,
     follow: bool,
     outcomes: bool,
+    /// Collect the venue-agnostic market tape `radar-serve`'s market routes
+    /// read from, rather than querying CryptoHouse live. See
+    /// `radar_backfill::market_tape`.
+    market_tape: bool,
     /// Replace recorded price paths instead of folding onto them.
     reprice: bool,
     /// The analyst's directory, when the account runs on this host.
@@ -147,6 +181,8 @@ fn usage() -> &'static str {
    radar-backfill --outcomes --store <dir> [--analyst-dir <dir>]
    radar-backfill --outcomes --reprice --store <dir>
 
+   radar-backfill --market-tape --store <dir>
+
 --analyst-dir names the account's directory, and its only effect is to give the
 mints in `replies.jsonl` a fourth measurement at seven days. Every other token
 settles at a day. Without it the daily post reports a day-old measurement, which
@@ -160,7 +196,13 @@ mint however much it scans.
 
 --follow keeps recording from where the store left off, staying five minutes
 behind the chain and sleeping when caught up. It uses the same extraction path
-as a one-off backfill, so history and live data are one code path."
+as a one-off backfill, so history and live data are one code path.
+
+--market-tape collects the venue-agnostic trade tape radar-serve's market
+routes read: two queries per two-minute pass (60/hour), so radar-serve never
+queries CryptoHouse on a request path and the shared hourly quota is not
+exhausted by traffic. Keeps its own cursor, separate from --follow's, so the
+two can run against the same store without fighting over one file."
 }
 
 fn parse_args() -> Result<Args, String> {
@@ -171,6 +213,7 @@ fn parse_args() -> Result<Args, String> {
     let mut scope = Scope::default();
     let mut follow = false;
     let mut measure_outcomes = false;
+    let mut market_tape = false;
     let mut reprice = false;
     let mut analyst_dir = None;
 
@@ -200,6 +243,7 @@ fn parse_args() -> Result<Args, String> {
             }
             "--follow" => follow = true,
             "--outcomes" => measure_outcomes = true,
+            "--market-tape" => market_tape = true,
             "--analyst-dir" => analyst_dir = Some(value()?),
             "--reprice" => reprice = true,
             "-h" | "--help" => return Err(usage().to_owned()),
@@ -215,10 +259,11 @@ fn parse_args() -> Result<Args, String> {
         )
     })?;
 
-    // Follow mode has no explicit range: it starts from the store's own cursor
-    // and runs until stopped, so requiring --from and --to would be asking for
-    // values it is going to ignore.
-    if follow || measure_outcomes {
+    // Follow mode, outcomes and the market tape have no explicit range: each
+    // starts from its own cursor or window and runs (or measures) until
+    // stopped, so requiring --from and --to would be asking for values none
+    // of them are going to use.
+    if follow || measure_outcomes || market_tape {
         return Ok(Args {
             from: String::new(),
             to: String::new(),
@@ -227,6 +272,7 @@ fn parse_args() -> Result<Args, String> {
             scope,
             follow,
             outcomes: measure_outcomes,
+            market_tape,
             reprice,
             analyst_dir,
         });
@@ -252,6 +298,7 @@ fn parse_args() -> Result<Args, String> {
         scope,
         follow,
         outcomes: measure_outcomes,
+        market_tape,
         reprice,
         analyst_dir,
     })
@@ -566,6 +613,146 @@ fn follow(args: &Args) -> Result<(), String> {
 
         cursor = window_end;
         std::thread::sleep(PAUSE_BETWEEN_WINDOWS);
+    }
+}
+
+/// Where the market tape keeps its own cursor.
+///
+/// A subdirectory under the store, not the store root: the follow cursor
+/// (`radar_store::CURSOR_FILE`) lives at the root, and two writers of one file
+/// fight over it. This collector's cursor lives beside it in its own
+/// directory instead, using the same atomic read/write.
+fn market_tape_scope(store: &str) -> std::path::PathBuf {
+    std::path::Path::new(store).join(market_tape::SCOPE_DIR)
+}
+
+/// [`MARKET_TAPE_PASS_INTERVAL`] in seconds, as the `i64` the rest of this
+/// file's time arithmetic uses. `try_from` rather than `as`: a `Duration`
+/// this large would be a caller bug, not a value to wrap silently into a
+/// negative interval.
+fn market_tape_pass_seconds() -> i64 {
+    i64::try_from(MARKET_TAPE_PASS_INTERVAL.as_secs()).unwrap_or(i64::MAX)
+}
+
+/// Collects the venue-agnostic market tape: two CryptoHouse queries per pass,
+/// one pass every [`MARKET_TAPE_PASS_INTERVAL`]. See
+/// `radar_backfill::market_tape`'s module doc for the arithmetic and the
+/// coverage caveat.
+fn market_tape(args: &Args) -> Result<(), String> {
+    let client = Client::default();
+    let scope = market_tape_scope(&args.store);
+    let pass_seconds = market_tape_pass_seconds();
+    let mut cursor = radar_store::read_cursor(&scope)
+        .unwrap_or_else(|| now_epoch() - MARKET_TAPE_LAG_SECONDS - pass_seconds);
+
+    println!(
+        "market tape: {pass_seconds}s per pass, two queries per pass ({}/hour), from {} into {}",
+        3_600 / MARKET_TAPE_PASS_INTERVAL.as_secs() * 2,
+        from_epoch(cursor),
+        args.store
+    );
+    println!("ctrl-c to stop");
+
+    let mut store_high = Reader::open(&args.store)
+        .watermark()
+        .map_err(|e| e.to_string())?;
+
+    loop {
+        let horizon = now_epoch() - MARKET_TAPE_LAG_SECONDS;
+        let window_end = (cursor + pass_seconds).min(horizon);
+        if window_end <= cursor {
+            std::thread::sleep(MARKET_TAPE_PASS_INTERVAL);
+            continue;
+        }
+        let (from_s, to_s) = (from_epoch(cursor), from_epoch(window_end));
+
+        // Query 1 of 2: which mints moved in this window.
+        let candidates: Vec<market_fold::CoinCandidateRow> = match client.query(
+            &market_query::coin_candidates_query(&from_s, &to_s, MARKET_TAPE_SHORTLIST),
+        ) {
+            Ok(rows) => rows,
+            Err(e) => {
+                eprintln!("  {from_s} .. {to_s} candidates query failed: {e}");
+                let mut writer = Writer::open(&args.store, 20_000).map_err(|e| e.to_string())?;
+                writer
+                    .append_coverage(market_tape::coverage_record(
+                        Completion::Partial,
+                        &[],
+                        coverage::established_at(None, store_high),
+                    ))
+                    .map_err(|e| e.to_string())?;
+                writer.flush().map_err(|e| e.to_string())?;
+                std::thread::sleep(MARKET_TAPE_PASS_INTERVAL);
+                continue;
+            }
+        };
+
+        // Query 2 of 2: those mints' trades, batched into one `IN (...)`.
+        // Empty candidates skip the query rather than asking for an empty
+        // `IN ()`, which is invalid SQL and would waste the round trip.
+        let trades = if candidates.is_empty() {
+            Vec::new()
+        } else {
+            let mints: Vec<String> = candidates.iter().map(|c| c.mint.clone()).collect();
+            match radar_backfill::fetch_windowed(
+                &client,
+                cursor,
+                window_end,
+                0,
+                MARKET_TAPE_MIN_WINDOW_SECONDS,
+                PAUSE_BETWEEN_WINDOWS,
+                &|f, t| market_query::trades_query(&mints, f, t),
+            ) {
+                Ok(rows) => market_tape::fold_market_trades(&rows),
+                Err(e) => {
+                    eprintln!("  {from_s} .. {to_s} trades query failed: {e}");
+                    let mut writer =
+                        Writer::open(&args.store, 20_000).map_err(|e| e.to_string())?;
+                    writer
+                        .append_coverage(market_tape::coverage_record(
+                            Completion::Partial,
+                            &[],
+                            coverage::established_at(None, store_high),
+                        ))
+                        .map_err(|e| e.to_string())?;
+                    writer.flush().map_err(|e| e.to_string())?;
+                    std::thread::sleep(MARKET_TAPE_PASS_INTERVAL);
+                    continue;
+                }
+            }
+        };
+
+        let recorded_at = coverage::established_at(market_tape::highest_slot(&trades), store_high);
+        store_high = Some(recorded_at);
+
+        {
+            let mut writer = Writer::open(&args.store, 20_000).map_err(|e| e.to_string())?;
+            let trade_count = trades.len();
+            // The coverage record is built from `trades` before they are
+            // moved into the writer, and buffered before the rows -- but
+            // `Writer::flush` still puts the coverage file down *after* the
+            // event files, so a crash mid-flush loses the record and keeps
+            // the rows rather than the other way round.
+            let coverage = market_tape::coverage_record(Completion::Complete, &trades, recorded_at);
+            for trade in trades {
+                writer
+                    .append_market_trade(trade)
+                    .map_err(|e| e.to_string())?;
+            }
+            writer
+                .append_coverage(coverage)
+                .map_err(|e| e.to_string())?;
+            writer.flush().map_err(|e| e.to_string())?;
+            println!(
+                "  {from_s} .. {to_s}  candidates {:>4}  trades {:>5}",
+                candidates.len(),
+                trade_count
+            );
+        }
+        radar_store::write_cursor(&scope, window_end)?;
+
+        cursor = window_end;
+        std::thread::sleep(MARKET_TAPE_PASS_INTERVAL);
     }
 }
 
@@ -910,6 +1097,8 @@ fn main() -> ExitCode {
     };
     let result = if args.outcomes {
         measure(&args)
+    } else if args.market_tape {
+        market_tape(&args)
     } else if args.follow {
         follow(&args)
     } else {
@@ -941,6 +1130,7 @@ mod tests {
             "--scope",
             "--follow",
             "--outcomes",
+            "--market-tape",
             "--reprice",
         ] {
             assert!(u.contains(flag), "usage() does not mention {flag}:\n{u}");

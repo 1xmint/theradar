@@ -20,6 +20,8 @@ pub mod coverage;
 pub mod cryptohouse;
 pub mod extract;
 pub mod launch_block;
+pub mod market;
+pub mod market_tape;
 pub mod outcomes;
 pub mod prices;
 
