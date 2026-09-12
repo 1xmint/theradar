@@ -471,6 +471,28 @@ exclude_re = [
     # covers the branch itself, and the `==` mutant on this line is caught, so
     # the guard is not merely untested.
     'replace < with <= in Gate::refill_to',
+
+    # `fold_holders` matches `MintTo`/`Burn` before a general `_` arm, and the
+    # general arm does the same work conditionally:
+    #
+    #     "MintTo" | "MintToChecked" if !row.destination.is_empty() => credit dest,
+    #     "Burn"   | "BurnChecked"   if !row.source.is_empty()      => debit source,
+    #     _ => { if !source.is_empty() { debit source } if !dest.is_empty() { credit dest } }
+    #
+    # A mint carries no source and a burn carries no destination, so a guard
+    # replaced with `false` sends the row to `_`, which skips the empty side and
+    # performs exactly the same single operation on the other. The balances are
+    # identical; only which arm did the arithmetic changes.
+    #
+    # Applied by hand on 2026-09-12 against
+    # `a_mint_credits_the_destination_and_a_burn_debits_the_source` and
+    # `a_mint_or_burn_with_a_blank_side_credits_nobody`: both pass either way,
+    # because both assert the resulting balances, which is the thing that
+    # matters. The complementary mutants on these lines -- replacing the guards
+    # with `true`, and deleting the `!` -- ARE caught, so the guards are not
+    # untested. Only the `false` direction is unobservable.
+    'replace match guard !row.destination.is_empty() with false in fold_holders',
+    'replace match guard !row.source.is_empty() with false in fold_holders',
 ]
 
 # A note on what does NOT belong here, learned on 2026-09-03 and worth the four

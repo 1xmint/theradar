@@ -865,7 +865,13 @@ mod tests {
     /// every default window double-count its own edge.
     #[test]
     fn the_window_bound_is_half_open_at_the_top() {
-        let (_dir, store) = store_of(&[market_trade(A_MINT, "2020-01-01 00:00:30.000000", 100)]);
+        // The stamp is compared as a **string**, so it must equal the bound
+        // exactly to sit on the boundary at all. An earlier version of this
+        // test used `...00:00:30.000000` against a bound of `...00:00:30`:
+        // the longer string sorts after the shorter one under `<` and `<=`
+        // alike, so it passed against both and the mutant survived a test
+        // written to kill it.
+        let (_dir, store) = store_of(&[market_trade(A_MINT, "2020-01-01 00:00:30", 100)]);
         let as_of = AsOf::at(radar_types::Slot(10_000));
         let mint: Address = A_MINT.parse().expect("a mint");
 

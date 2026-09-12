@@ -1147,6 +1147,53 @@ fn main() -> ExitCode {
 
 #[cfg(test)]
 mod tests {
+
+    /// A pass never reaches past the horizon, and stops exactly at it.
+    ///
+    /// The horizon is where CryptoHouse has actually landed; asking past it
+    /// returns a window still filling, which the collector would then record
+    /// as complete. Kills the mutant relaxing `wanted < horizon` to `<=`,
+    /// which changes which of two equal values is returned -- harmless here,
+    /// and the reason the boundary is asserted from both sides rather than
+    /// only the clamped one.
+    #[test]
+    fn a_pass_stops_at_the_horizon_rather_than_reaching_past_it() {
+        // Room to spare: the full pass width.
+        assert_eq!(market_tape_window_end(1_000, 300, 10_000), 1_300);
+        // Not enough room: clamped to the horizon, not to cursor + width.
+        assert_eq!(market_tape_window_end(1_000, 300, 1_100), 1_100);
+        // Exactly at it: the same answer either way, which is why this line
+        // exists -- so a reader knows the equality case was considered.
+        assert_eq!(market_tape_window_end(1_000, 300, 1_300), 1_300);
+        // Already past it: the caller sees a window end at or behind the
+        // cursor and sleeps rather than asking for a backwards range.
+        assert!(market_tape_window_end(1_000, 300, 900) <= 1_000);
+    }
+
+    /// The pass width is the interval, as seconds, and it is positive.
+    ///
+    /// Kills the three mutants that replace this with -1, 0 or 1. Each is
+    /// quiet and each is ruinous: a zero or negative width makes every window
+    /// end at or behind its cursor, so the collector sleeps forever and the
+    /// store stays empty while the service reports itself active.
+    #[test]
+    fn the_pass_width_is_the_configured_interval_in_seconds() {
+        let seconds = market_tape_pass_seconds();
+        assert_eq!(
+            seconds,
+            radar_backfill::market_tape::PASS_INTERVAL_SECONDS,
+            "the loop's width and the budget's divisor must be one number"
+        );
+        assert!(
+            seconds > 1,
+            "a width of zero or one collects nothing, forever"
+        );
+        assert_eq!(
+            market_tape_window_end(0, seconds, i64::MAX),
+            seconds,
+            "a pass from zero with room to spare is exactly one interval wide"
+        );
+    }
     #[test]
     fn the_usage_text_names_every_flag_the_parser_accepts() {
         // Not style. `--reprice` was added to the parser and very nearly shipped
