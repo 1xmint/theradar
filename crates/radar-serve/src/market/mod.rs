@@ -594,6 +594,23 @@ pub async fn coins(
 /// rather than a live `solana.tokens` query this build no longer makes. Price
 /// still comes from the collected tape, the same as [`trades`].
 ///
+/// # Why collecting it was not simply scheduled
+///
+/// **`solana.tokens` is abandoned.** Checked 2026-09-12: its newest row is
+/// dated **2026-08-10**, over a month earlier, and not one of the ten busiest
+/// mints of that moment appeared in it at all. A batched
+/// `WHERE mint IN (...)` metadata query would have cost one query a pass and
+/// fitted the budget comfortably -- it was measured for exactly that -- and it
+/// would have returned nothing for every coin a trading screen is about.
+///
+/// So a name is not available on the free lane at any price in queries. It
+/// needs the Metaplex metadata account read from chain, one RPC call per mint
+/// against an endpoint Solana's own documentation says is not for production
+/// use, or a paid provider. Until one of those is a decision somebody has
+/// made, the list shows the mint and the header says the name is absent --
+/// which is true, and is a smaller lie than a column of "unknown" where a name
+/// would go.
+///
 /// Market cap and liquidity are always `null` for the reason they always
 /// were: both need either an unbounded transfer scan or a live account-state
 /// read, neither of which this module performs.
@@ -652,7 +669,7 @@ pub async fn token(
         "symbol": Option::<String>::None,
         "creator": Option::<String>::None,
         "published_at": Option::<String>::None,
-        "metadata_reason": "token metadata is not collected by the market-tape collector; only trade data (coins, trades, candles, and a trade-derived price) is collected",
+        "metadata_reason": "token metadata is not collected: the market-tape collector gathers trade data only, and the free source's own token table stopped being updated on 2026-08-10, so a name is not available on this lane at all",
         "price": price,
         "price_reason": price_reason,
         "market_cap": Option::<f64>::None,
