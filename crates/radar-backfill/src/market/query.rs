@@ -138,6 +138,48 @@ fn quote_list() -> String {
 /// result and the other nine would appear to have stopped trading, which is a
 /// silence that looks exactly like a fact.
 ///
+/// # What this still cannot tell apart
+///
+/// **A transaction that moves the mint and a quote asset is not necessarily a
+/// swap.** A liquidity deposit, a bundled airdrop, a treasury movement paired
+/// with a fee, or an arbitrage leg all have that shape, and this query prices
+/// every one of them. Netting removed the multiple-counting; it did not add a
+/// way to ask *why* the two assets moved, and nothing in `token_transfers`
+/// carries that -- it would need the venue's own instruction decoded, which is
+/// the per-venue work this technique exists to avoid.
+///
+/// The visible consequence is that a window's first and last priced fill can
+/// be several orders of magnitude apart, so a percentage change computed from
+/// them is noisy in a way a real venue's chart is not. That is a property of a
+/// venue-agnostic tape, not a defect to be tuned away by discarding outliers:
+/// dropping the fills that look wrong would also drop the real ones, and a
+/// filtered tape presented as a complete one is the failure this module is
+/// most careful about. Callers that need a robust level should say which
+/// estimator they used.
+///
+/// # Why both legs are netted, never summed
+///
+/// **A swap moves each asset more than once.** The trader sends the quote
+/// asset to the pool, the pool sends the mint back, a fee leg moves more of
+/// the quote, and a routed swap repeats the whole shape at every hop. Summing
+/// a transaction's transfers of one asset therefore counts the same value
+/// several times, and the price -- one sum divided by the other -- is wrong by
+/// however many legs the route happened to use.
+///
+/// Worse, the quote side picked its mint and its `decimals` with two
+/// independent `any()` aggregates. A transaction touching both USDC and
+/// wrapped SOL could report the USDC mint beside wrapped SOL's nine decimals,
+/// scaling the amount by a thousand. Observed 2026-09-12 on a live store: a
+/// meme coin priced at $2,923 with a stated change of -96,101 per cent, and a
+/// chart whose axis those outliers flattened into a single spike.
+///
+/// So both sides net per account and take the largest single gain, which is
+/// the amount that actually changed hands however many legs carried it. The
+/// quote side additionally groups by mint before choosing, so `quote_mint`,
+/// `quote_value` and `quote_decimals` are guaranteed to describe **the same
+/// asset** -- they are selected together by `argMax` over the same ordering,
+/// not picked one at a time.
+///
 /// This makes the result a **recent-trades sample, not a complete window**, and
 /// the caller must record it as one. A tape showing the last hundred trades is
 /// what a trading screen wants; a window claiming completeness it does not have
@@ -181,16 +223,38 @@ pub fn trades_query(mints: &[String], from: &str, to: &str, per_mint: usize) -> 
                   argMin(authority, net) AS sender_authority \
            FROM net \
            GROUP BY mint, tx_signature\
-         ), s AS (\
-           SELECT tx_signature, sum(value) AS quote_value, any(decimals) AS quote_decimals, \
-                  any(mint) AS quote_mint, any(authority) AS quote_authority \
+         ), qflow AS (\
+           SELECT mint, tx_signature, source AS account, -value AS delta, \
+                  decimals, authority AS leg_authority \
            FROM solana.token_transfers \
            WHERE mint IN ({quotes}) AND block_timestamp >= '{from}' AND block_timestamp < '{to}' \
+             AND source != ''\
+           UNION ALL \
+           SELECT mint, tx_signature, destination AS account, value AS delta, \
+                  decimals, '' AS leg_authority \
+           FROM solana.token_transfers \
+           WHERE mint IN ({quotes}) AND block_timestamp >= '{from}' AND block_timestamp < '{to}' \
+             AND destination != ''\
+         ), qnet AS (\
+           SELECT mint, tx_signature, account, sum(delta) AS net, \
+                  any(decimals) AS dec, max(leg_authority) AS authority \
+           FROM qflow \
+           GROUP BY mint, tx_signature, account\
+         ), qmint AS (\
+           SELECT mint, tx_signature, max(net) AS gross, any(dec) AS dec, \
+                  argMin(authority, net) AS payer \
+           FROM qnet \
+           GROUP BY mint, tx_signature\
+         ), s AS (\
+           SELECT tx_signature, argMax(mint, gross) AS quote_mint, max(gross) AS quote_value, \
+                  argMax(dec, gross) AS quote_decimals, argMax(payer, gross) AS quote_authority \
+           FROM qmint \
            GROUP BY tx_signature\
          ) \
          SELECT t.mint AS mint, toString(t.block_timestamp) AS ts, toString(t.block_slot) AS slot, \
                 t.tx_signature AS sig, \
-                toString(t.token_value) AS token_value, toString(t.token_decimals) AS token_decimals, \
+                toString(greatest(ifNull(ends.max_net, 0), 0)) AS token_value, \
+                toString(t.token_decimals) AS token_decimals, \
                 if(ifNull(ends.min_net, 0) = 0 AND ifNull(ends.max_net, 0) = 0, '', ends.sender) \
                   AS token_source, \
                 if(ifNull(ends.min_net, 0) = 0 AND ifNull(ends.max_net, 0) = 0, '', ends.receiver) \
@@ -396,9 +460,12 @@ mod tests {
         );
         assert_eq!(
             sql.matches("any(authority)").count(),
-            1,
-            "the one remaining any(authority) belongs to the quote CTE, which has no \
-             multi-leg ambiguity to fix: {sql}"
+            0,
+            "no leg of either side may be picked arbitrarily. An earlier version              of this assertion allowed one, on the grounds that the quote CTE              had \"no multi-leg ambiguity to fix\" -- which was wrong. A routed              swap moves the quote asset at every hop, and picking its mint, its              decimals and its authority with three independent any() aggregates              produced a meme coin priced at $2,923 against another coin's              decimals. Both sides net now: {sql}"
+        );
+        assert!(
+            !sql.contains("any(mint)"),
+            "quote_mint, quote_value and quote_decimals must describe the same              asset, chosen together by argMax over one ordering: {sql}"
         );
         assert!(
             sql.contains("UNION ALL"),
