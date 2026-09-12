@@ -2,12 +2,12 @@
 //! Ranked holders, with the caption the contract requires: what kind of fact
 //! this list is. "Folded from transfer history over a stated window, not a
 //! read of current account state" is not a footnote here -- it is the
-//! difference between a balance and an inference, and `holdersBasisCaption`
+//! difference between a balance and an inference, and `holdersBasis as _unused_holdersBasis, holdersBasisCaption`
 //! in `honesty.ts` refuses to let a response drop it silently.
 
 import { market } from "./api";
-import { capCaption, holdersBasisCaption } from "./honesty";
-import { Address, MarketFigure } from "./Figures";
+import { capCaption, holdersBasis, holdersBasisCaption } from "./honesty";
+import { Address } from "./Figures";
 import { explorerUrl, formatCompactNumber } from "./format";
 import { useApi } from "./useApi";
 
@@ -28,8 +28,15 @@ export function HoldersPanel({ mint }: { mint: string }) {
     );
   }
 
-  const { holders, basis } = load.value;
+  // The server nests everything under `fold`, and the caption is built from
+  // three of its fields rather than one prose string. `fact` says what the
+  // list was computed from, `granularity` says what a row counts, and the
+  // window says how far back the fold could see -- which is the difference
+  // between "this coin has no holders" and "this coin is older than this fold
+  // reaches", two sentences a reader must not be left to confuse.
+  const { holders, fact, granularity, from, to } = load.value.fold;
   const cap = capCaption(holders.length, LIMIT, "holders");
+  const basis = holdersBasis(fact, granularity, from, to);
 
   return (
     <div className="flex h-full flex-col">
@@ -49,20 +56,19 @@ export function HoldersPanel({ mint }: { mint: string }) {
             <thead className="sticky top-0 bg-[var(--color-surface)] text-[10px] uppercase tracking-wide text-[var(--color-dim)]">
               <tr>
                 <th scope="col" className="py-1 pl-3 text-left font-medium">#</th>
-                <th scope="col" className="py-1 text-left font-medium">Address</th>
-                <th scope="col" className="py-1 text-right font-medium">Amount</th>
-                <th scope="col" className="py-1 pr-3 text-right font-medium">% of supply</th>
+                <th scope="col" className="py-1 text-left font-medium">Token account</th>
+                <th scope="col" className="py-1 pr-3 text-right font-medium">Balance</th>
               </tr>
             </thead>
             <tbody>
               {holders.map((holder, index) => (
-                <tr key={holder.address} className="border-b border-[var(--color-line)] hover:bg-[var(--color-ink)]">
+                <tr key={holder.account} className="border-b border-[var(--color-line)] hover:bg-[var(--color-ink)]">
                   <td className="py-1 pl-3 tabular-nums text-[var(--color-dim)]">{index + 1}</td>
                   <td className="py-1">
                     <span className="inline-flex items-center gap-1">
-                      <Address value={holder.address} />
+                      <Address value={holder.account} />
                       <a
-                        href={explorerUrl(holder.address)}
+                        href={explorerUrl(holder.account)}
                         target="_blank"
                         rel="noreferrer"
                         title="Open in explorer"
@@ -73,15 +79,13 @@ export function HoldersPanel({ mint }: { mint: string }) {
                     </span>
                   </td>
                   <td className="py-1 text-right tabular-nums text-[var(--color-dim)]">
-                    {formatCompactNumber(holder.amount)}
+                    {formatCompactNumber(holder.balance)}
                   </td>
-                  <td className="py-1 pr-3 text-right tabular-nums">
-                    <MarketFigure
-                      value={holder.pct_of_supply}
-                      reason={holder.pct_of_supply === null ? "supply unknown" : null}
-                      format={(v) => `${v.toFixed(2)}%`}
-                    />
-                  </td>
+                  {/* No "% of supply" column. Supply is not computable from a
+                      bounded transfer fold -- the server says so on its own
+                      token header -- and a percentage of an unmeasured total
+                      is the confident wrong number this panel exists not to
+                      print. */}
                 </tr>
               ))}
             </tbody>

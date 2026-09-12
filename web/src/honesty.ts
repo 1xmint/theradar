@@ -210,6 +210,46 @@ export function capCaption(
  * nothing to say. A blank caption and a stated one both make a
  * methodology claim; the difference is whether it is true.
  */
+/**
+ * The holders panel's caption, built from what the server actually states.
+ *
+ * **Three fields, not one sentence.** `/v1/market/holders/{mint}` reports
+ * `fact` (what the list was computed from), `granularity` (what one row
+ * counts) and the window it folded over. Each carries a different warning and
+ * collapsing them loses one:
+ *
+ * - `fact: "folded_transfers"` means balances were summed from transfer
+ *   history, which is **not** a read of current token-account state. They
+ *   agree only if the fold saw every transfer.
+ * - `granularity: "token_account"` means a row is an account, not a person.
+ *   One owner holding the same mint in three accounts appears three times, so
+ *   the row count **overstates** the number of holders. Printing it as "827
+ *   holders" would be a crowd size nobody measured.
+ * - The window is the one that separates two sentences a reader must not
+ *   confuse: *this coin has no holders*, and *this coin is older than this
+ *   fold reaches*.
+ *
+ * An unrecognised `fact` or `granularity` is passed through rather than
+ * dropped or silently normalised -- a server that starts reporting something
+ * new should make the caption read oddly, not read reassuringly.
+ */
+export function holdersBasis(
+  fact: string,
+  granularity: string,
+  from: string,
+  to: string,
+): string {
+  const source =
+    fact === "folded_transfers"
+      ? "Folded from transfer history, not read from current account balances"
+      : `Computed as "${fact}"`;
+  const unit =
+    granularity === "token_account"
+      ? "one row is a token account, not a person, so this over-counts holders"
+      : `one row is ${granularity}`;
+  return `${source} — ${unit}. Covers ${from} to ${to}; anything before that is outside this fold.`;
+}
+
 export function holdersBasisCaption(basis: string | null | undefined): string {
   const trimmed = basis?.trim();
   return trimmed

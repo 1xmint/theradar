@@ -61,17 +61,15 @@ export function InfoPanel({ load }: { load: Load<MarketToken> }) {
         )}
       </Row>
 
-      <Row label="Mint authority">
-        <MintAuthority state={token.mint_authority} reason={token.mint_authority_reason} />
-      </Row>
+      {/* No mint-authority row. Whether the authority is revoked is a read of
+          current account state, and this endpoint performs none -- it answers
+          from chain events alone. A row saying "unknown" on every token is a
+          row that teaches a reader to ignore it, and a latch that may only
+          close (AGENTS §4 rule 5) is exactly the fact not to guess at. It
+          returns when something actually reads the mint account.
 
-      <Row label="Decimals">
-        {token.decimals === null ? (
-          <span className="text-[var(--color-absent)]">unknown</span>
-        ) : (
-          <span className="tabular-nums">{token.decimals}</span>
-        )}
-      </Row>
+          No decimals row either: decimals travel per-trade on the tape rather
+          than on the header, which `decimals_reason` states. */}
 
       <Row label="Links">
         <div className="flex flex-wrap gap-3">
@@ -104,25 +102,6 @@ export function InfoPanel({ load }: { load: Load<MarketToken> }) {
  * and `null` gets the same "unknown" treatment as every other unmeasured
  * market fact rather than defaulting to either state.
  */
-function MintAuthority({
-  state,
-  reason,
-}: {
-  state: "revoked" | "active" | null;
-  reason: string | null;
-}) {
-  if (state === "revoked") {
-    return <span className="text-[var(--color-good)]">Revoked</span>;
-  }
-  if (state === "active") {
-    return <span className="text-[var(--color-warn)]">Not revoked — the creator can still mint more</span>;
-  }
-  return (
-    <span className="text-[var(--color-absent)]" title={reason ?? "Radar did not say why"}>
-      unknown{reason ? ` — ${reason}` : ""}
-    </span>
-  );
-}
 
 function Row({ label, children }: { label: string; children: ReactNode }) {
   return (

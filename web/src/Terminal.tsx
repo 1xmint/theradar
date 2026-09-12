@@ -186,7 +186,6 @@ const SORT_TO_QUERY: Record<SortState["key"], MarketSort> = {
   price: "price",
   change: "change",
   volume: "volume",
-  age: "age",
   txns: "txns",
 };
 

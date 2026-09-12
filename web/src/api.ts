@@ -155,28 +155,48 @@ export const market = {
     get<Holders>(`/v1/market/holders/${encodeURIComponent(mint)}${holdersSearch(query)}`, signal),
 };
 
-/** One row of the live coin list. */
+/**
+ * One row of the live coin list, exactly as `/v1/market/coins` sends it.
+ *
+ * **Rewritten 2026-09-11 to match the server rather than a guess at it.** The
+ * previous declaration was written in parallel with the endpoint and against a
+ * prose description of it, and named eight fields the server does not send --
+ * `symbol`, `name`, `age_seconds`, `volume`, and a `_reason` for four of them --
+ * while ignoring the two it does, `quote_volume` and `quote_mint`. Every one of
+ * those read back `undefined`, went through a number formatter, and rendered as
+ * `NaN` in a column header that promised a figure. A confident `NaN` is the
+ * failure this codebase exists to prevent, and TypeScript could not catch it:
+ * the type was internally consistent and simply described a different server.
+ *
+ * What is genuinely absent stays absent. The coins endpoint does not fetch
+ * metadata -- that is one query per mint against an endpoint with a hundred and
+ * twenty queries an hour -- so a row has no name or symbol, and the list shows
+ * the mint. It does not compute age either. Neither gets an invented field here.
+ */
 export interface MarketCoin {
   mint: string;
-  symbol: string | null;
-  name: string | null;
+  /** Distinct transactions moving this mint in the window. Never null. */
+  tx_count: number;
+  /** Summed mint amount, `decimals`-adjusted. Null when the server could not
+   *  adjust it, never zero. */
+  token_volume: number | null;
+  /** Which quote asset the price is denominated in. Null exactly when
+   *  `quote_volume` and `price` are. */
+  quote_mint: string | null;
+  /** Summed quote amount over the window. */
+  quote_volume: number | null;
+  /** Last priced fill in the window, in `quote_mint`. Null when no trade in
+   *  the window carried both legs. */
   price: number | null;
-  price_reason: string | null;
-  /** Percentage, not basis points -- this is a market figure, not a return. */
+  /** Percentage, not basis points -- this is a market figure, not a return.
+   *  Null when the window held fewer than two priced fills. */
   change_pct: number | null;
-  change_reason: string | null;
-  /** Quote volume over the list's own window, whatever the server states it as. */
-  volume: number | null;
-  volume_reason: string | null;
-  age_seconds: number | null;
-  tx_count: number | null;
-  tx_count_reason: string | null;
 }
 
 /** What sorts the coin list may be asked for. Purely a request hint: the
  *  list is re-sorted client-side regardless, so a value the server does not
  *  recognise degrades to "however it was returned" rather than an error. */
-export type MarketSort = "volume" | "change" | "age" | "price" | "txns";
+export type MarketSort = "volume" | "change" | "price" | "txns";
 
 export interface MarketCoinsQuery {
   limit?: number | undefined;
@@ -191,37 +211,65 @@ function marketCoinsSearch(query: MarketCoinsQuery): string {
   return search ? `?${search}` : "";
 }
 
-export interface MarketCoins {
-  as_of: number;
-  coins: MarketCoin[];
-  /** The `limit` actually applied, for the same row-cap reasoning as trades
-   *  and holders below: a full page is not the same claim as a complete list. */
-  limit: number;
+/** The window a market answer covers, in the server's own `YYYY-MM-DD HH:MM:SS`. */
+export interface MarketWindow {
+  from: string;
+  to: string;
 }
 
-/** Whether a mint's mint authority has been given up. `null` when Radar could
- *  not read the mint account, never a guess. See AGENTS.md rule 5: this latch
- *  only closes, so `"active"` here means "not observed as revoked", not "safe". */
-export type MintAuthorityState = "revoked" | "active" | null;
+export interface MarketCoins {
+  coins: MarketCoin[];
+  /**
+   * The window the list ranks activity over.
+   *
+   * Load-bearing, not decoration: "the busiest coins" is meaningless without
+   * saying busiest over what, and the server states it rather than leaving the
+   * screen to imply one.
+   */
+  window: MarketWindow;
+}
+
 
 /** The selected token's header: name, symbol, price, market cap, liquidity,
  *  age, creator -- and the info panel's contract-authority facts. */
+/**
+ * One coin's header, exactly as `/v1/market/token/{mint}` sends it.
+ *
+ * Matched to the server on 2026-09-11, for the reason on [`MarketCoin`]: the
+ * previous declaration named `decimals`, `age_seconds`, `age_reason`,
+ * `mint_authority` and `mint_authority_reason`, none of which the endpoint
+ * sends, and missed `published_at`, `decimals_reason` and `metadata_reason`,
+ * which it does. `age_seconds` rendering as `NaNd old` in the header was that
+ * mismatch, visible.
+ *
+ * The `_reason` fields are not optional decoration. Every one of them pairs
+ * with a value that is `null` **for a stated cause** — this endpoint performs
+ * no live account read and no unbounded scan, so supply and pool reserves are
+ * genuinely out of reach, and saying which is the difference between an
+ * unmeasured figure and a missing one.
+ */
 export interface MarketToken {
   mint: string;
   name: string | null;
   symbol: string | null;
-  decimals: number | null;
+  creator: string | null;
+  /** When `solana.tokens` first carried this mint. Null with a
+   *  `metadata_reason` for a token too young or too obscure to be indexed. */
+  published_at: string | null;
+  /** Why `name`, `symbol`, `creator` and `published_at` are all null, when
+   *  they are. Null when metadata was found. */
+  metadata_reason: string | null;
   price: number | null;
   price_reason: string | null;
+  /** Why the header carries no decimals. Always present: decimals travel
+   *  per-trade on the tape, not on the header. */
+  decimals_reason: string | null;
+  /** Always null today, with `market_cap_reason` saying why. */
   market_cap: number | null;
   market_cap_reason: string | null;
+  /** Always null today, with `liquidity_reason` saying why. */
   liquidity: number | null;
   liquidity_reason: string | null;
-  age_seconds: number | null;
-  age_reason: string | null;
-  creator: string | null;
-  mint_authority: MintAuthorityState;
-  mint_authority_reason: string | null;
 }
 
 export type CandleInterval = "1m" | "5m" | "15m" | "1h" | "4h" | "1d";
@@ -314,17 +362,40 @@ function holdersSearch(query: HoldersQuery): string {
   return search ? `?${search}` : "";
 }
 
-/** One ranked holder. */
+/** One ranked holder, as `/v1/market/holders/{mint}` sends it. */
 export interface Holder {
-  address: string;
-  amount: number;
-  pct_of_supply: number | null;
+  /** The **token account**, not its owner -- see `Holders.granularity`. */
+  account: string;
+  /** The folded balance, `decimals`-adjusted. */
+  balance: number;
 }
 
 /** The holders list, and -- load-bearing -- what kind of fact it is. */
 export interface Holders {
-  mint: string;
+  /** The server nests the whole answer under this key. */
+  fold: HoldersFold;
+}
+
+/** What `/v1/market/holders/{mint}` actually returns under `fold`. */
+export interface HoldersFold {
   holders: Holder[];
+  /**
+   * What the list was built from, in the server's own words -- today
+   * `"folded_transfers"`, never a claim to have read current account balances.
+   */
+  fact: string;
+  /**
+   * Whether a row is a token account or an owner. `"token_account"` **over-
+   * counts holders**, because one person can hold the same mint in several
+   * accounts, and the screen must say so rather than print a crowd size it
+   * did not measure.
+   */
+  granularity: string;
+  /** The window the fold covers. Not "since launch": a coin older than this
+   *  has balances this fold cannot see, and that is a different sentence from
+   *  "this coin has no holders". */
+  from: string;
+  to: string;
   /**
    * What the list was built from, in the server's own words -- e.g. "folded
    * from transfer history over the last 30 days", never a claim to have read

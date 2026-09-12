@@ -9,8 +9,8 @@
 //! regardless of what the server did or did not honour.
 
 import { useMemo } from "react";
-import type { MarketCoin, MarketSort } from "./api";
-import { formatAge, formatChangePct, formatCompactNumber, formatPrice } from "./format";
+import type { MarketCoin, MarketCoins, MarketSort } from "./api";
+import { formatChangePct, formatCompactNumber, formatPrice } from "./format";
 import { MarketFigure } from "./Figures";
 import type { Load } from "./useApi";
 
@@ -23,7 +23,6 @@ const COLUMNS: { key: MarketSort; label: string }[] = [
   { key: "price", label: "Price" },
   { key: "change", label: "24h" },
   { key: "volume", label: "Vol" },
-  { key: "age", label: "Age" },
   { key: "txns", label: "Txns" },
 ];
 
@@ -39,9 +38,7 @@ function sortCoins(coins: readonly MarketCoin[], sort: SortState): MarketCoin[] 
       case "change":
         return c.change_pct;
       case "volume":
-        return c.volume;
-      case "age":
-        return c.age_seconds;
+        return c.quote_volume;
       case "txns":
         return c.tx_count;
     }
@@ -66,7 +63,7 @@ export function CoinList({
   listRef,
   filter,
 }: {
-  load: Load<{ coins: MarketCoin[]; limit: number }>;
+  load: Load<MarketCoins>;
   sort: SortState;
   onSortChange: (key: MarketSort) => void;
   selectedMint: string | null;
@@ -83,12 +80,12 @@ export function CoinList({
     if (load.state !== "ready") return [];
     const needle = filter?.trim().toLowerCase();
     const matched = needle
-      ? load.value.coins.filter(
-          (c) =>
-            c.symbol?.toLowerCase().includes(needle) ||
-            c.name?.toLowerCase().includes(needle) ||
-            c.mint.toLowerCase().includes(needle),
-        )
+      // Mint only. The coins endpoint sends no name or symbol -- resolving
+      // metadata is one query per mint against a hundred-and-twenty-an-hour
+      // budget -- so there is nothing else here to match on, and a filter box
+      // that silently searched a field nobody sends would find nothing and
+      // look broken.
+      ? load.value.coins.filter((c) => c.mint.toLowerCase().includes(needle))
       : load.value.coins;
     const s = sortCoins(matched, sort);
     listRef?.(s);
@@ -200,20 +197,37 @@ function CoinRow({
         selected ? "bg-[var(--color-ink)] outline outline-1 -outline-offset-1 outline-[var(--color-warn)]" : "hover:bg-[var(--color-ink)]"
       }`}
     >
+      {/* The mint, abbreviated, because that is what this endpoint knows.
+          A name and symbol need a metadata lookup per mint, which the query
+          budget does not allow for a whole list -- so the row shows the
+          identifier it has rather than a column of "unknown" where a name
+          would go. The token header resolves the name for the selected coin. */}
       <td className="w-[38%] py-1.5 pl-2">
-        <div className="truncate font-medium text-[var(--color-text)]">
-          {coin.symbol ?? <span className="text-[var(--color-absent)]">unknown</span>}
+        <div className="truncate font-mono text-[11px] font-medium text-[var(--color-text)]">
+          {coin.mint.slice(0, 4)}…{coin.mint.slice(-4)}
         </div>
         <div className="truncate text-[10px] text-[var(--color-dim)]">
-          {coin.name ?? "name unknown"}
+          {coin.quote_mint === null
+            ? "no priced fill in window"
+            : `vs ${coin.quote_mint.slice(0, 4)}…`}
         </div>
       </td>
       <td className="py-1.5 text-right tabular-nums">
-        <MarketFigure value={coin.price} reason={coin.price_reason} format={formatPrice} />
+        <MarketFigure
+          value={coin.price}
+          reason={
+            coin.price === null ? "no trade in this window carried both legs" : null
+          }
+          format={formatPrice}
+        />
       </td>
       <td className="py-1.5 text-right tabular-nums">
         {coin.change_pct === null ? (
-          <MarketFigure value={null} reason={coin.change_reason} format={() => ""} />
+          <MarketFigure
+            value={null}
+            reason="fewer than two priced fills in this window"
+            format={() => ""}
+          />
         ) : (
           <span className={coin.change_pct >= 0 ? "text-[var(--color-gain)]" : "text-[var(--color-loss)]"}>
             {formatChangePct(coin.change_pct)}
@@ -221,17 +235,17 @@ function CoinRow({
         )}
       </td>
       <td className="py-1.5 text-right tabular-nums text-[var(--color-dim)]">
-        <MarketFigure value={coin.volume} reason={coin.volume_reason} format={formatCompactNumber} />
+        <MarketFigure
+          value={coin.quote_volume}
+          reason={coin.quote_volume === null ? "no priced fill in this window" : null}
+          format={formatCompactNumber}
+        />
       </td>
-      <td className="py-1.5 pr-1 text-right tabular-nums text-[var(--color-dim)]">
-        {coin.age_seconds === null ? (
-          <span className="text-[var(--color-absent)]">unknown</span>
-        ) : (
-          formatAge(coin.age_seconds)
-        )}
-      </td>
+      {/* No age column. The coins endpoint does not carry a launch time and
+          this screen will not compute one from a window it only partly sees.
+          An age column of "unknown" is worse than no age column. */}
       <td className="py-1.5 pr-2 text-right tabular-nums text-[var(--color-dim)]">
-        <MarketFigure value={coin.tx_count} reason={coin.tx_count_reason} format={formatCompactNumber} />
+        {formatCompactNumber(coin.tx_count)}
       </td>
     </tr>
   );

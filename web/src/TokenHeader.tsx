@@ -11,7 +11,7 @@
 import type { ReactNode } from "react";
 import type { MarketToken } from "./api";
 import { MarketFigure } from "./Figures";
-import { formatAge, formatCompactUsd, formatPrice } from "./format";
+import {formatCompactUsd, formatPrice} from "./format";
 import type { Load } from "./useApi";
 
 export function TokenHeader({ load }: { load: Load<MarketToken> }) {
@@ -47,8 +47,14 @@ function Header({ load }: { load: Load<MarketToken> }) {
         <h1 className="truncate text-lg font-semibold">
           {token.symbol ?? <span className="text-[var(--color-absent)]">unknown</span>}
         </h1>
-        <span className="text-xs text-[var(--color-dim)]">
-          {token.age_seconds === null ? "age unknown" : `${formatAge(token.age_seconds)} old`}
+        {/* First seen, not age. The endpoint reports when `solana.tokens`
+            first carried the mint, which is an indexing date and not a launch
+            time -- so the header says "first seen" rather than converting it
+            into an age the server never claimed. */}
+        <span className="text-xs text-[var(--color-dim)]" title="When this mint first appeared in the chain index. Not necessarily its launch.">
+          {token.published_at === null
+            ? "first seen unknown"
+            : `first seen ${token.published_at.slice(0, 10)}`}
         </span>
       </div>
       <p className="truncate text-xs text-[var(--color-dim)]">
@@ -75,11 +81,9 @@ function Header({ load }: { load: Load<MarketToken> }) {
           </span>
         </Field>
         <Field label="Decimals">
-          {token.decimals === null ? (
-            <span className="text-[var(--color-absent)]">unknown</span>
-          ) : (
-            <span className="tabular-nums">{token.decimals}</span>
-          )}
+          <span className="text-[var(--color-absent)]" title={token.decimals_reason ?? undefined}>
+            per trade
+          </span>
         </Field>
       </dl>
     </div>
