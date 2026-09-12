@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 //! Turning CryptoHouse rows into the shapes the market endpoints return.
 //!
-//! Split from [`super::query`] the way [`radar_backfill::extract`] is split
-//! from [`radar_backfill::cryptohouse`]: everything here is a pure function
-//! from a row to a domain type, so every honesty rule this module has to keep
-//! — a decimals-unadjusted amount never escaping, a missing quote leg never
+//! Split from [`super::query`] the way [`crate::extract`] is split from
+//! [`crate::cryptohouse`]: everything here is a pure function from a row to a
+//! domain type, so every honesty rule this module has to keep — a
+//! decimals-unadjusted amount never escaping, a missing quote leg never
 //! becoming a zero price — is a fact about a function signature, checked with
 //! a fixture, rather than a fact about a live query nobody can run in a test.
 
@@ -53,7 +53,7 @@ fn parse_units(raw: &str) -> Option<i128> {
 /// `f64` rather than a decimal string: every number this module produces goes
 /// on a trading-terminal chart, which wants a JS number either way, and this
 /// is display precision for a chart, not the ledger precision
-/// [`radar_backfill::prices::PriceRow`] needs for a replay to compare
+/// [`crate::prices::PriceRow`] needs for a replay to compare
 /// byte-for-byte. Returns `None` for a value or a decimals count that does not
 /// parse, never a guess.
 #[must_use]
@@ -94,6 +94,15 @@ pub enum Side {
 /// looks like.
 #[derive(Debug, Clone, Deserialize)]
 pub struct TapeRow {
+    /// The mint this row's token leg moved.
+    ///
+    /// Present because [`super::query::trades_query`] is batched across a
+    /// shortlist of mints in one round trip (the change that makes the
+    /// collector fit inside CryptoHouse's quota): a caller has to split the
+    /// combined result back into one row set per mint before folding, since
+    /// [`detect_pool`] assumes every row it sees belongs to a single mint's
+    /// activity.
+    pub mint: String,
     /// `block_timestamp`, `YYYY-MM-DD HH:MM:SS.ffffff`.
     pub ts: String,
     /// `block_slot`.
@@ -267,7 +276,7 @@ fn trade_from_row(row: &TapeRow, pool: Option<&str>) -> Option<Trade> {
 ///
 /// A row that fails to parse (`token_value`, `decimals` or `slot` malformed)
 /// is skipped rather than guessed at — the same discipline
-/// [`radar_backfill::extract::events_from_rows`] uses, though this is rare
+/// [`crate::extract::events_from_rows`] uses, though this is rare
 /// enough on CryptoHouse's own `toString` output that no [`Stats`]-style
 /// counter is kept for it here.
 #[must_use]
@@ -635,6 +644,7 @@ mod tests {
 
     fn row(sig: &str, ts: &str, quote_mint: &str, quote_value: &str) -> TapeRow {
         TapeRow {
+            mint: "5NfV2sy8DqXamLvYEE4LcTWzGqZc5Emv4bqqhVDWpump".to_owned(),
             ts: ts.to_owned(),
             slot: "441251921".to_owned(),
             sig: sig.to_owned(),

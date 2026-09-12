@@ -133,7 +133,9 @@ pub struct AppState {
     /// cannot bind a signature to itself, so it refuses to issue challenges
     /// rather than issuing ones that would authenticate against any site.
     pub challenges: Option<challenges::Challenges>,
-    /// The public market-data seam: a CryptoHouse client and its own caches.
+    /// The public market-data seam. Empty today -- every route under
+    /// `/v1/market/` reads [`Self::store`] directly rather than holding a
+    /// CryptoHouse client of its own; see [`market`]'s own doc comment.
     ///
     /// Tier 1, per [plan 0012](../../../docs/plans/0012-the-public-trading-panel.md)
     /// -- no identity, no `Tenant`, and it must stay that way. `/v1/market/`

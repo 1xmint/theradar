@@ -3,8 +3,8 @@
 
 use radar_asof::{AsOf, PointInTime};
 use radar_store::{
-    Completion, Coverage, Envelope, Event, Graduation, Launch, ObservedSlots, Origin, Outcome,
-    Reader, SLOTS_PER_PARTITION, Side, Table, Trade, Writer,
+    Completion, Coverage, Envelope, Event, Graduation, Launch, MarketSide, MarketTrade,
+    ObservedSlots, Origin, Outcome, Reader, SLOTS_PER_PARTITION, Side, Table, Trade, Writer,
 };
 use radar_types::{Address, Signature, Slot};
 
@@ -1442,6 +1442,152 @@ fn coverage_skips_a_partition_that_starts_after_the_watermark() {
             .len(),
         1,
         "and one starting after it is not read"
+    );
+}
+
+// --- market trades ------------------------------------------------------
+
+fn market_trade(mint_id: u8, slot: u64, priced: bool) -> MarketTrade {
+    MarketTrade {
+        mint: mint(mint_id),
+        ts: "2026-09-11 17:35:00.000000".to_owned(),
+        slot: Slot(slot),
+        signature: Signature::new([(slot % 251) as u8; 64]),
+        side: if priced {
+            MarketSide::Buy
+        } else {
+            MarketSide::Unknown
+        },
+        token_amount: 0.056_626,
+        quote_amount: priced.then_some(0.000_01),
+        quote_mint: priced.then(|| {
+            "So11111111111111111111111111111111111111112"
+                .parse()
+                .expect("quote mint")
+        }),
+        price: priced.then_some(0.176_59),
+        trader: priced.then(|| mint(8)),
+    }
+}
+
+#[test]
+fn a_market_trade_survives_a_round_trip_through_parquet() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let mut w = Writer::open(dir.path(), 1_000).expect("open");
+    let priced = market_trade(1, 500, true);
+    let unpriced = market_trade(2, 501, false);
+    w.append_market_trade(priced.clone()).expect("append");
+    w.append_market_trade(unpriced.clone()).expect("append");
+    w.flush().expect("flush");
+
+    let back = Reader::open(dir.path())
+        .read_market_trades(AsOf::at(Slot(999)))
+        .expect("read");
+    assert_eq!(back.len(), 2);
+    assert!(
+        back.contains(&priced),
+        "the priced trade must survive exactly: {back:?}"
+    );
+    assert!(
+        back.contains(&unpriced),
+        "the unpriced trade must survive exactly: {back:?}"
+    );
+}
+
+#[test]
+fn a_null_quote_leg_reads_back_as_none_never_as_a_zero_or_empty_string() {
+    // Re-applying the bug: reading an absent quote leg as `0.0` or `""` would
+    // report a trade this fold could not price as though it traded for
+    // nothing, which is rule 9's forbidden default.
+    let dir = tempfile::tempdir().expect("tempdir");
+    let mut w = Writer::open(dir.path(), 1).expect("open");
+    w.append_market_trade(market_trade(3, 700, false))
+        .expect("append");
+    w.flush().expect("flush");
+
+    let back = Reader::open(dir.path())
+        .read_market_trades(AsOf::at(Slot(999)))
+        .expect("read");
+    assert_eq!(back.len(), 1);
+    assert_eq!(back[0].side, MarketSide::Unknown);
+    assert_eq!(back[0].quote_amount, None);
+    assert_ne!(back[0].quote_amount, Some(0.0));
+    assert_eq!(back[0].quote_mint, None);
+    assert_eq!(back[0].price, None);
+    assert_ne!(back[0].price, Some(0.0));
+    assert_eq!(back[0].trader, None);
+}
+
+#[test]
+fn market_trades_are_gated_on_the_watermark_like_everything_else() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let mut w = Writer::open(dir.path(), 100).expect("open");
+    for slot in [10u64, 20, 30, 40] {
+        w.append_market_trade(market_trade(1, slot, true))
+            .expect("append");
+    }
+    w.flush().expect("flush");
+
+    let visible = Reader::open(dir.path())
+        .read_market_trades(AsOf::at(Slot(25)))
+        .expect("read");
+    assert_eq!(
+        visible.len(),
+        2,
+        "only slots 10 and 20 are admissible as of 25"
+    );
+    assert!(visible.iter().all(|t| t.slot <= Slot(25)));
+}
+
+#[test]
+fn market_trades_land_in_the_partition_named_after_their_slot() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let mut w = Writer::open(dir.path(), 1_000).expect("open");
+    w.append_market_trade(market_trade(1, 1, true))
+        .expect("append");
+    w.append_market_trade(market_trade(1, SLOTS_PER_PARTITION + 1, true))
+        .expect("append");
+    w.flush().expect("flush");
+
+    let files = Reader::open(dir.path())
+        .files(Table::MarketTrades)
+        .expect("files");
+    assert_eq!(files.len(), 2, "two partitions");
+}
+
+#[test]
+fn market_trades_count_toward_the_store_watermark() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let mut w = Writer::open(dir.path(), 1_000).expect("open");
+    w.append_market_trade(market_trade(1, 55_555, true))
+        .expect("append");
+    w.flush().expect("flush");
+    assert_eq!(
+        Reader::watermark(&Reader::open(dir.path())).expect("watermark"),
+        Some(Slot(55_555))
+    );
+}
+
+#[test]
+fn reading_market_trades_as_events_fails_with_the_reason() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let mut w = Writer::open(dir.path(), 1).expect("open");
+    w.append_market_trade(market_trade(1, 500, true))
+        .expect("append");
+    w.flush().expect("flush");
+
+    let err = Reader::open(dir.path())
+        .read(Table::MarketTrades, AsOf::at(Slot(999)))
+        .expect_err("must refuse");
+    assert!(
+        err.to_string().contains("market_trades"),
+        "the refusal must name the table: {err}"
+    );
+    assert!(
+        Reader::open(dir.path())
+            .read_market_trades(AsOf::at(Slot(999)))
+            .is_ok(),
+        "and the right reader must work"
     );
 }
 
