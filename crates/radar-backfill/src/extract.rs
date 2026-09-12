@@ -10,11 +10,16 @@
 //! skipped and counted, never guessed at. [`Stats`] makes those gaps visible;
 //! silently dropping them would leave the store looking like a quiet market.
 
+use std::time::Duration;
+
 use radar_decode::pumpfun;
 use radar_decode::{Decoded, Discriminator, Instruction, Program, decode};
-use radar_store::{Envelope, Event, Graduation, Launch, Origin, Side, Table, Trade};
+use radar_store::{Envelope, Event, Graduation, Launch, Origin, Side, Table, Trade, from_epoch};
 use radar_types::{Address, Signature, Slot};
 use serde::Deserialize;
+use serde::de::DeserializeOwned;
+
+use crate::cryptohouse::{Client, QueryError};
 
 /// Mints that are never the subject of a pump.fun trade — they are the other
 /// side of it. Without excluding these, every trade would resolve to wrapped SOL.
@@ -471,6 +476,373 @@ pub fn query_for_window(from: &str, to: &str, scope: Scope) -> String {
          FROM ix LEFT JOIN mints ON ix.tx_signature = mints.tx_signature \
                  LEFT JOIN txs ON ix.tx_signature = txs.signature"
     )
+}
+
+/// Fetches one time window, halving it whenever the server says it was too
+/// wide, and stitching the two halves back together in order.
+///
+/// Pulled out of the backfill runner (where it lived as a private `fn` fitted
+/// to [`Row`] and [`Scope`]) and made generic, so a second caller with a
+/// different `SELECT` — the public market endpoints in `radar-serve`, among
+/// them — gets the same halving discipline rather than a second copy of it.
+/// `query` builds the SQL text for a `from .. to` pair; everything about *what*
+/// is being asked for lives in the closure, and everything about *how wide a
+/// bite the endpoint will take* lives here.
+///
+/// `depth` bottoms out at 10, matching what the extractor already accepted:
+/// past that, a window this narrow still failing means something other than
+/// "too wide", and retrying deeper would only hammer a public endpoint we are
+/// a guest on (ADR 0002).
+///
+/// # Errors
+///
+/// Returns the server's [`QueryError`] once the window cannot be narrowed any
+/// further, or once the halving depth is exhausted.
+pub fn fetch_windowed<T: DeserializeOwned>(
+    client: &Client,
+    from: i64,
+    to: i64,
+    depth: u32,
+    min_window_seconds: i64,
+    pause_between: Duration,
+    query: &dyn Fn(&str, &str) -> String,
+) -> Result<Vec<T>, QueryError> {
+    narrowing_fetch(
+        &|sql| client.query::<T>(sql),
+        from,
+        to,
+        depth,
+        min_window_seconds,
+        pause_between,
+        query,
+    )
+}
+
+/// The deepest a window may be halved before the failure is reported instead.
+///
+/// Ten halvings takes a five-minute window below a third of a second, so a
+/// window still failing here is failing for a reason narrowing cannot fix.
+const MAX_NARROWING_DEPTH: u32 = 10;
+
+/// [`fetch_windowed`] with the transport supplied by the caller.
+///
+/// **Split out on 2026-09-11 because the decision this makes had no test and
+/// could not have one.** Every branch here — whether an error narrows, whether
+/// the window is still wide enough to halve, whether the depth is exhausted,
+/// and that both halves are fetched and joined in order — was fused to a live
+/// HTTP client, so exercising it meant querying a public endpoint. It was
+/// therefore never exercised, and a bug in `Client::query` that stopped
+/// `should_narrow` ever returning true went unnoticed for as long as the
+/// `trades` table stayed empty.
+///
+/// `run` takes the SQL and returns rows or the server's error. That is the
+/// whole seam: a test supplies one that fails on a wide window and succeeds on
+/// a narrow one, and every branch below becomes reachable without a network.
+///
+/// **A caller may also use `run` to bound what a narrowing fetch costs.** The
+/// halving below is unbounded in queries — a window over the row cap becomes
+/// two queries, and each of those may become two more — so a caller with a
+/// quota must count them somewhere, and `run` is the only place every one of
+/// them passes through. A `run` that starts refusing with an error whose
+/// [`QueryError::should_narrow`] is false stops the recursion at once and
+/// surfaces as an ordinary failure, which the caller then records as the
+/// partial coverage it is. `radar_backfill::market_tape::Budget` does exactly
+/// this.
+///
+/// # Errors
+///
+/// Returns whatever `run` last returned: once the window cannot be narrowed
+/// further, once the halving depth is spent, or at once for an error
+/// narrowing cannot fix.
+pub fn narrowing_fetch<T>(
+    run: &dyn Fn(&str) -> Result<Vec<T>, QueryError>,
+    from: i64,
+    to: i64,
+    depth: u32,
+    min_window_seconds: i64,
+    pause_between: Duration,
+    query: &dyn Fn(&str, &str) -> String,
+) -> Result<Vec<T>, QueryError> {
+    let sql = query(&from_epoch(from), &from_epoch(to));
+    match run(&sql) {
+        Ok(rows) => Ok(rows),
+        Err(e)
+            if e.should_narrow()
+                && (to - from) > min_window_seconds
+                && depth < MAX_NARROWING_DEPTH =>
+        {
+            let mid = from + (to - from) / 2;
+            eprintln!(
+                "    window too wide ({}), halving: {} .. {}",
+                if e.to_string().contains("TOO_MANY_ROWS") {
+                    "row cap"
+                } else {
+                    "timeout"
+                },
+                from_epoch(from),
+                from_epoch(to)
+            );
+            // The earlier half first, and its rows kept, so a partial success
+            // is still progress in chronological order. A failure in either
+            // half propagates: half a window reported as a whole one is the
+            // silent gap this project is most organised against.
+            let mut rows = narrowing_fetch(
+                run,
+                from,
+                mid,
+                depth + 1,
+                min_window_seconds,
+                pause_between,
+                query,
+            )?;
+            std::thread::sleep(pause_between);
+            rows.extend(narrowing_fetch(
+                run,
+                mid,
+                to,
+                depth + 1,
+                min_window_seconds,
+                pause_between,
+                query,
+            )?);
+            Ok(rows)
+        }
+        Err(e) => Err(e),
+    }
+}
+
+#[cfg(test)]
+mod narrowing {
+    use std::cell::RefCell;
+    use std::time::Duration;
+
+    use super::{QueryError, narrowing_fetch};
+
+    /// The query builder every test here uses: the window, verbatim, so an
+    /// assertion can read back exactly which spans were asked for.
+    fn spans(from: &str, to: &str) -> String {
+        format!("{from}..{to}")
+    }
+
+    /// A fake transport that records every window it was asked for and fails
+    /// any wider than `widest_ok` seconds with the row-cap error.
+    ///
+    /// The row-cap text matters: [`QueryError::should_narrow`] matches on it,
+    /// and a fake that returned some other server error would exercise the
+    /// give-up path while looking like it exercised narrowing.
+    struct Endpoint {
+        widest_ok: i64,
+        asked: RefCell<Vec<String>>,
+    }
+
+    impl Endpoint {
+        fn new(widest_ok: i64) -> Self {
+            Self {
+                widest_ok,
+                asked: RefCell::new(Vec::new()),
+            }
+        }
+
+        /// One row per successful window, carrying the span, so the caller's
+        /// concatenation order is observable.
+        fn run(&self, sql: &str) -> Result<Vec<String>, QueryError> {
+            self.asked.borrow_mut().push(sql.to_owned());
+            let (from, to) = sql
+                .split_once("..")
+                .expect("the fake query builder's shape");
+            let width = width_seconds(from, to);
+            if width > self.widest_ok {
+                Err(QueryError::Server(
+                    "Code: 396 ... (TOO_MANY_ROWS_OR_BYTES)".to_owned(),
+                ))
+            } else {
+                Ok(vec![sql.to_owned()])
+            }
+        }
+    }
+
+    /// Seconds between two `YYYY-MM-DD HH:MM:SS` stamps, for the fake only.
+    fn width_seconds(from: &str, to: &str) -> i64 {
+        let secs = |s: &str| {
+            let time = s.split(' ').nth(1).expect("a time part");
+            let mut parts = time.split(':').map(|p| p.parse::<i64>().expect("numeric"));
+            let h = parts.next().expect("hours");
+            let m = parts.next().expect("minutes");
+            let sec = parts.next().expect("seconds");
+            h * 3600 + m * 60 + sec
+        };
+        secs(to) - secs(from)
+    }
+
+    fn fetch(
+        endpoint: &Endpoint,
+        from: i64,
+        to: i64,
+        min_window_seconds: i64,
+    ) -> Result<Vec<String>, QueryError> {
+        narrowing_fetch(
+            &|sql| endpoint.run(sql),
+            from,
+            to,
+            0,
+            min_window_seconds,
+            Duration::ZERO,
+            &spans,
+        )
+    }
+
+    /// A window inside the cap is fetched once and never halved.
+    #[test]
+    fn a_window_that_fits_is_asked_for_exactly_once() {
+        let endpoint = Endpoint::new(600);
+        let rows = fetch(&endpoint, 0, 600, 4).expect("fits");
+        assert_eq!(rows.len(), 1);
+        assert_eq!(endpoint.asked.borrow().len(), 1, "no halving was needed");
+    }
+
+    /// A window over the cap is halved until each piece fits, and the pieces
+    /// come back joined in chronological order.
+    ///
+    /// This is the behaviour the `trades` table needed and never got. It kills
+    /// the mutants that flip the narrowing guard to a constant, that swap the
+    /// `&&`s for `||`s, and that change `from + (to - from) / 2` into anything
+    /// that is not the midpoint -- a wrong midpoint either loses a span or
+    /// repeats one, and both are visible in the joined result.
+    #[test]
+    fn a_window_over_the_cap_is_halved_until_each_piece_fits() {
+        let endpoint = Endpoint::new(300);
+        let rows = fetch(&endpoint, 0, 1200, 4).expect("narrows");
+        assert_eq!(
+            rows,
+            vec![
+                "1970-01-01 00:00:00..1970-01-01 00:05:00",
+                "1970-01-01 00:05:00..1970-01-01 00:10:00",
+                "1970-01-01 00:10:00..1970-01-01 00:15:00",
+                "1970-01-01 00:15:00..1970-01-01 00:20:00",
+            ],
+            "four contiguous five-minute pieces, earliest first, none repeated"
+        );
+    }
+
+    /// Narrowing stops at the floor and reports the failure rather than
+    /// halving forever.
+    ///
+    /// Kills the mutants that relax `(to - from) > min_window_seconds` to
+    /// `>=`, `<`, or `==`: each changes which window is the last one tried.
+    #[test]
+    fn a_window_that_cannot_fit_stops_at_the_floor_and_fails() {
+        let endpoint = Endpoint::new(0);
+        let err = fetch(&endpoint, 0, 64, 8).expect_err("nothing fits");
+        assert!(err.should_narrow(), "the failure reported is the row cap");
+        // 64 -> 32 -> 16 -> 8, and 8 is not > 8, so the last windows tried are
+        // eight seconds wide. Anything narrower means the floor was ignored.
+        let asked = endpoint.asked.borrow();
+        let narrowest = asked
+            .iter()
+            .map(|sql| {
+                let (f, t) = sql.split_once("..").expect("shape");
+                width_seconds(f, t)
+            })
+            .min()
+            .expect("at least one window");
+        assert_eq!(narrowest, 8, "the floor is the narrowest window attempted");
+    }
+
+    /// The halving stops at the depth limit rather than recursing forever.
+    ///
+    /// Kills the mutants that turn `depth + 1` into `depth * 1` -- which
+    /// leaves the depth at zero so the limit is never reached -- and the one
+    /// that relaxes `depth < MAX_NARROWING_DEPTH` to `<=`. With a floor of one
+    /// second and a wide window, the depth limit is what ends the recursion,
+    /// and ten halvings of a wide span is a bounded, countable number of
+    /// queries.
+    #[test]
+    fn the_halving_stops_at_the_depth_limit_not_at_the_floor() {
+        let calls = RefCell::new(0u32);
+        let err = narrowing_fetch(
+            &|_sql| {
+                *calls.borrow_mut() += 1;
+                Err::<Vec<String>, _>(QueryError::Server(
+                    "Code: 396 (TOO_MANY_ROWS_OR_BYTES)".to_owned(),
+                ))
+            },
+            0,
+            1 << 20,
+            0,
+            1,
+            Duration::ZERO,
+            &spans,
+        )
+        .expect_err("nothing ever fits");
+        assert!(err.should_narrow());
+        // Eleven: the original window and ten halvings, straight down the
+        // left spine. Not a full tree, because the first half's failure
+        // propagates with `?` and the right half is never asked for -- which
+        // is the property worth having. Half a window returned as a whole one
+        // is the silent gap this project is most organised against, so a
+        // failure anywhere aborts the lot rather than reporting what it got.
+        //
+        // With `depth + 1` mutated to `depth * 1` the depth never advances and
+        // this runs to the four-second floor instead, which is far more than
+        // eleven; with `<` relaxed to `<=` it is twelve.
+        let issued = *calls.borrow();
+        assert_eq!(
+            issued, 11,
+            "the first window plus ten halvings, and no right halves after a failure"
+        );
+    }
+
+    /// The midpoint is the middle, and both halves are asked for.
+    ///
+    /// Kills the mutant that turns `from + (to - from) / 2` into an addition
+    /// of the two bounds: with a non-zero `from` that lands outside the window
+    /// entirely, so one half is never asked for and the other is asked for
+    /// twice. A window starting at zero would hide it, which is why this one
+    /// does not start at zero.
+    #[test]
+    fn the_midpoint_splits_the_window_it_was_given_not_the_one_at_zero() {
+        let endpoint = Endpoint::new(300);
+        let rows = fetch(&endpoint, 3_600, 4_200, 4).expect("narrows once");
+        assert_eq!(
+            rows,
+            vec![
+                "1970-01-01 01:00:00..1970-01-01 01:05:00",
+                "1970-01-01 01:05:00..1970-01-01 01:10:00",
+            ],
+            "two contiguous halves of the window actually asked about"
+        );
+    }
+
+    /// An error that narrowing cannot fix is reported at once, not retried on
+    /// a narrower window.
+    ///
+    /// Retrying a bad identifier would hammer a public endpoint with the same
+    /// broken query, which is what `should_narrow` exists to prevent. Kills
+    /// the mutant that replaces the whole guard with `true`.
+    #[test]
+    fn an_error_that_narrowing_cannot_fix_is_not_retried() {
+        fn broken(_sql: &str) -> Result<Vec<String>, QueryError> {
+            Err(QueryError::Server(
+                "Code: 47 ... (UNKNOWN_IDENTIFIER)".to_owned(),
+            ))
+        }
+        let calls = RefCell::new(0u32);
+        let err = narrowing_fetch(
+            &|sql| {
+                *calls.borrow_mut() += 1;
+                broken(sql)
+            },
+            0,
+            1200,
+            0,
+            4,
+            Duration::ZERO,
+            &spans,
+        )
+        .expect_err("a bad query stays bad");
+        assert!(!err.should_narrow());
+        assert_eq!(*calls.borrow(), 1, "asked once, not narrowed");
+    }
 }
 
 #[cfg(test)]
