@@ -79,3 +79,41 @@ export function shortenAddress(value: string, keep = 4): string {
 export function explorerUrl(address: string): string {
   return `https://solscan.io/account/${encodeURIComponent(address)}`;
 }
+
+/**
+ * Reads the server's `YYYY-MM-DD HH:MM:SS[.ffffff]` stamp as the UTC moment it
+ * is.
+ *
+ * **Every market timestamp arrives as this string, and every one of them is
+ * UTC without saying so.** That matters twice over. Handing the string
+ * straight to `new Date` makes a browser read it as *local* time, so a reader
+ * in New York would see every trade shifted four hours with nothing on screen
+ * admitting it. And multiplying it by 1000 — which both the tape and the chart
+ * caption did until 2026-09-12, because the client's types said `number` where
+ * the server sends text — yields `NaN`, which renders as the literal words
+ * "Invalid Date" in a column headed TIME.
+ *
+ * So the space becomes a `T` and a `Z` is appended, which is the one reading
+ * that is neither a guess nor a shift. Returns `null` rather than an
+ * `Invalid Date` for anything that does not parse, because a caller must be
+ * able to tell "no time recorded" from a time, and `Invalid Date` silently
+ * formats as text that looks like an error message in the middle of a table.
+ */
+export function parseStamp(stamp: string | null | undefined): Date | null {
+  if (!stamp) return null;
+  const iso = `${stamp.trim().replace(" ", "T")}Z`;
+  const at = new Date(iso);
+  return Number.isNaN(at.getTime()) ? null : at;
+}
+
+/** A stamp as clock time, or "unknown" when there is no usable time. */
+export function formatStampTime(stamp: string | null | undefined): string {
+  const at = parseStamp(stamp);
+  return at ? at.toLocaleTimeString() : "unknown";
+}
+
+/** A stamp as date and time, or "unknown". */
+export function formatStamp(stamp: string | null | undefined): string {
+  const at = parseStamp(stamp);
+  return at ? at.toLocaleString() : "unknown";
+}

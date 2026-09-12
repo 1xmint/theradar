@@ -10,7 +10,7 @@
 import { market, type Trade } from "./api";
 import { capCaption, emptyTapeMessage } from "./honesty";
 import { Address, MarketFigure, Side } from "./Figures";
-import { explorerUrl, formatCompactNumber, formatPrice } from "./format";
+import {explorerUrl, formatCompactNumber, formatPrice, formatStampTime} from "./format";
 import { useApi } from "./useApi";
 
 const LIMIT = 60;
@@ -71,7 +71,7 @@ function TapeRow({ trade }: { trade: Trade }) {
   return (
     <tr className="border-b border-[var(--color-line)] hover:bg-[var(--color-ink)]">
       <td className="py-1 pl-3 tabular-nums text-[var(--color-dim)]">
-        {new Date(trade.ts * 1000).toLocaleTimeString()}
+        {formatStampTime(trade.ts)}
       </td>
       <td className="py-1">
         <Side side={trade.side} />

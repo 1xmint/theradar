@@ -48,17 +48,40 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use radar_asof::AsOf;
 use radar_backfill::market::fold as market_fold;
-use radar_store::{MarketSide, MarketTrade, Reader, StoreError, Table, from_epoch, now_epoch};
+// `now_epoch` is deliberately absent. **No handler in this module may end a
+// window at wall-clock time**: the collector runs behind by design, so `now()`
+// names a span it has not reached, and every such request answered with an
+// empty list marked complete. Windows end at `newest_collected` instead, and
+// the missing import is what stops that regressing quietly.
+use radar_store::{MarketSide, MarketTrade, Reader, StoreError, Table, from_epoch};
 use radar_types::Address;
 use serde::Deserialize;
 use serde_json::json;
 
 /// A single top-level window's width, when a caller does not name one — the
-/// span of trades folded into the tape and into candles by default.
+/// span of trades folded into the tape by default.
 const DEFAULT_WINDOW_SECONDS: i64 = 120;
+
+/// How far back a chart reaches when the caller names no range.
+///
+/// Wider than the tape's window because the two answer different questions: a
+/// tape shows what just happened, a chart shows a shape, and a shape needs
+/// more than two minutes of it. Bounded rather than unbounded because the
+/// response states the range it actually covered, and a caller asking for a
+/// day of a coin collected for ten minutes should be told that plainly rather
+/// than handed a day-shaped axis with ten minutes drawn on it.
+const DEFAULT_CANDLE_WINDOW_SECONDS: i64 = 60 * 60;
 
 /// The window `/v1/market/coins` ranks activity over.
 const COINS_WINDOW_SECONDS: i64 = 10 * 60;
+
+/// Said when the store holds no market trades at all.
+///
+/// Distinct from a collected-and-quiet window: this instance has never had the
+/// collector run against it, so there is nothing to be quiet about. A caller
+/// reading it knows to check the collector rather than the market.
+const NOTHING_COLLECTED: &str =
+    "this instance has collected no market trades yet; run radar-backfill --market-tape";
 
 /// The public market-data seam.
 ///
@@ -211,6 +234,37 @@ fn to_fold_trade(row: &MarketTrade) -> market_fold::Trade {
 /// # Errors
 ///
 /// Returns [`StoreError`] if the store cannot be read.
+/// The newest moment the store actually holds market trades for.
+///
+/// **The default window ends here, not at `now()`, and that is not a
+/// refinement — it is the difference between a working tape and an empty
+/// one.** The collector runs behind wall-clock by design: it lags
+/// `market_tape::PASS_INTERVAL` seconds so the window it asks for has landed
+/// in CryptoHouse, and a pass takes time on top of that. A handler that
+/// defaulted its window to the last two minutes of wall-clock time therefore
+/// asked for a span the collector had not reached yet, and answered every
+/// visitor with an empty list and `"complete": true` — a confident claim that
+/// nothing traded, when the truth was that nothing had been collected yet.
+/// Observed 2026-09-12 against a store the collector had just filled.
+///
+/// `None` when the store holds no market trades at all, which is a different
+/// answer again: not "the market is quiet", but "this instance has collected
+/// nothing", and the caller says so.
+fn newest_collected(store: &Reader, as_of: AsOf) -> Result<Option<i64>, StoreError> {
+    let newest = store
+        .read_market_trades(as_of)?
+        .iter()
+        .map(|t| t.ts.clone())
+        .max();
+    // Stored timestamps carry CryptoHouse's microseconds
+    // (`2026-09-12 16:31:52.000000`) and `to_epoch` takes whole seconds, so
+    // the fraction is trimmed rather than parsed. Truncating toward the
+    // second is the safe direction: the window ends no later than the newest
+    // row, so it can never claim to cover a moment nothing was read at.
+    let trimmed = newest.map(|ts| ts.split('.').next().unwrap_or(&ts).to_owned());
+    Ok(trimmed.and_then(|ts| radar_store::to_epoch(&ts).ok()))
+}
+
 fn tape_for(
     store: &Reader,
     as_of: AsOf,
@@ -268,7 +322,16 @@ pub async fn trades(
     }
 
     let to = match params.before.as_deref().map(parse_stamp).transpose() {
-        Ok(v) => v.unwrap_or_else(now_epoch),
+        Ok(Some(before)) => before,
+        // No cursor: end the window at what the store actually holds, never at
+        // wall-clock time. See `newest_collected` -- the collector runs behind
+        // by design, so `now()` names a span it has not reached and the answer
+        // is an empty tape presented as complete.
+        Ok(None) => match newest_collected(&state.store, as_of) {
+            Ok(Some(newest)) => newest,
+            Ok(None) => return Degradation::NotCollected(NOTHING_COLLECTED).into_response(),
+            Err(e) => return Degradation::from_store_error(&e).into_response(),
+        },
         Err(r) => return *r,
     };
     let limit = params
@@ -347,11 +410,19 @@ pub async fn candles(
     }
 
     let requested_to = match params.to.as_deref().map(parse_stamp).transpose() {
-        Ok(v) => v.unwrap_or_else(now_epoch),
+        Ok(Some(to)) => to,
+        // The store's own horizon, not wall-clock -- see `newest_collected`.
+        // A chart defaulting to the last two minutes of wall-clock time drew
+        // nothing at all, because the collector is always behind it.
+        Ok(None) => match newest_collected(&state.store, as_of) {
+            Ok(Some(newest)) => newest,
+            Ok(None) => return Degradation::NotCollected(NOTHING_COLLECTED).into_response(),
+            Err(e) => return Degradation::from_store_error(&e).into_response(),
+        },
         Err(r) => return *r,
     };
     let requested_from = match params.from.as_deref().map(parse_stamp).transpose() {
-        Ok(v) => v.unwrap_or(requested_to - DEFAULT_WINDOW_SECONDS),
+        Ok(v) => v.unwrap_or(requested_to - DEFAULT_CANDLE_WINDOW_SECONDS),
         Err(r) => return *r,
     };
     if requested_from >= requested_to {
@@ -487,7 +558,12 @@ pub async fn coins(
         Err(e) => return Degradation::from_store_error(&e).into_response(),
     }
 
-    let to = now_epoch();
+    // The store's own horizon, not wall-clock -- see `newest_collected`.
+    let to = match newest_collected(&state.store, as_of) {
+        Ok(Some(newest)) => newest,
+        Ok(None) => return Degradation::NotCollected(NOTHING_COLLECTED).into_response(),
+        Err(e) => return Degradation::from_store_error(&e).into_response(),
+    };
     let from = to - COINS_WINDOW_SECONDS;
     let (from_s, to_s) = (from_epoch(from), from_epoch(to));
 
@@ -545,7 +621,12 @@ pub async fn token(
         Err(e) => return Degradation::from_store_error(&e).into_response(),
     }
 
-    let to = now_epoch();
+    // The store's own horizon, not wall-clock -- see `newest_collected`.
+    let to = match newest_collected(&state.store, as_of) {
+        Ok(Some(newest)) => newest,
+        Ok(None) => return Degradation::NotCollected(NOTHING_COLLECTED).into_response(),
+        Err(e) => return Degradation::from_store_error(&e).into_response(),
+    };
     let from = to - DEFAULT_WINDOW_SECONDS;
     let (from_s, to_s) = (from_epoch(from), from_epoch(to));
     let recent_trades = match tape_for(&state.store, as_of, mint, &from_s, &to_s) {

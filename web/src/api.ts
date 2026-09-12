@@ -310,10 +310,17 @@ function candlesSearch(query: CandlesQuery): string {
 export interface Candles {
   mint: string;
   interval: CandleInterval;
-  /** The range actually covered -- which the contract says may be narrower
-   *  than what was asked for, e.g. a token younger than the requested window. */
-  from: number;
-  to: number;
+  /**
+   * The range actually covered, as the server's `YYYY-MM-DD HH:MM:SS` UTC
+   * stamps -- **text, not epoch seconds**. It may be narrower than what was
+   * asked for: a coin younger than the window, or one the collector has not
+   * reached. Parse with `format.parseStamp`, never `new Date(x * 1000)`,
+   * which produced the literal words "Invalid Date" under a TIME header until
+   * 2026-09-12.
+   */
+  covered: MarketWindow & { complete: boolean };
+  /** The range the caller asked for, echoed back. */
+  requested: MarketWindow;
   candles: Candle[];
 }
 
@@ -321,7 +328,9 @@ export type TradeSide = "buy" | "sell" | "unknown";
 
 /** One row of the tape. */
 export interface Trade {
-  ts: number;
+  /** `YYYY-MM-DD HH:MM:SS.ffffff` UTC. Text, not epoch seconds -- see
+   *  `Candles.covered`. */
+  ts: string;
   signature: string;
   side: TradeSide;
   token_amount: number;

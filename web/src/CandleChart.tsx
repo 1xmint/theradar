@@ -10,7 +10,7 @@
 //! a different kind of chart from a different kind of data, not a bigger
 //! version of the same one.
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import {useEffect, useRef, useState} from "react";
 import {
   CandlestickSeries,
   ColorType,
@@ -23,8 +23,8 @@ import {
   type UTCTimestamp,
 } from "lightweight-charts";
 import { CANDLE_INTERVALS, market, type Candle, type CandleInterval } from "./api";
-import { isNarrowerThanRequested } from "./honesty";
-import { formatPrice } from "./format";
+
+import {formatPrice, formatStamp} from "./format";
 import { useApi } from "./useApi";
 
 /**
@@ -58,7 +58,6 @@ const CHART_COLORS = {
   upSoft: "rgba(95, 211, 154, 0.5)",
   downSoft: "rgba(240, 138, 93, 0.5)",
 } as const;
-
 
 const INTERVAL_LABEL: Record<CandleInterval, string> = {
   "1m": "1m",
@@ -112,7 +111,13 @@ export function CandleChart({ mint }: { mint: string }) {
           <Placeholder text="No candles recorded for this interval yet." />
         )}
         {load.state === "ready" && load.value.candles.length > 0 && (
-          <Chart candles={load.value.candles} interval={load.value.interval} from={load.value.from} to={load.value.to} />
+          <Chart
+            candles={load.value.candles}
+            interval={load.value.interval}
+            from={load.value.covered.from}
+            to={load.value.covered.to}
+            complete={load.value.covered.complete}
+          />
         )}
       </div>
     </div>
@@ -134,11 +139,15 @@ function Chart({
   interval,
   from,
   to,
+  complete,
 }: {
   candles: Candle[];
   interval: CandleInterval;
-  from: number;
-  to: number;
+  /** The covered range, as the server's UTC stamps. Text, not epoch. */
+  from: string;
+  to: string;
+  /** The server's own statement about whether it covered what was asked for. */
+  complete: boolean;
 }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const chartRef = useRef<IChartApi | null>(null);
@@ -243,16 +252,12 @@ function Chart({
   const last = candles.at(-1) ?? null;
   const readout = crosshair ?? last;
 
-  const narrower = useMemo(() => {
-    const first = candles[0];
-    const lastCandle = candles.at(-1);
-    if (!first || !lastCandle) return false;
-    // What was actually asked for is the requested window; absent an explicit
-    // one the request is "everything up to now", so the only honest check
-    // available without a stored request range is whether the server's own
-    // stated `from`/`to` cover the candles it actually returned.
-    return isNarrowerThanRequested(from, to, first.time, lastCandle.time);
-  }, [candles, from, to]);
+  // The server says whether it covered the range asked for. It used to be
+  // inferred here by comparing the returned candles' edges against the
+  // window -- a guess standing in for a fact the response already carried,
+  // and one that read "complete" for any window whose first and last candle
+  // happened to sit at its edges.
+  const narrower = !complete;
 
   return (
     <div className="flex h-full flex-col">
@@ -270,8 +275,7 @@ function Chart({
       </div>
       <div ref={containerRef} className="min-h-0 flex-1" />
       <p className="border-t border-[var(--color-line)] px-3 py-1 text-[10px] text-[var(--color-dim)]">
-        {interval} candles, {new Date(from * 1000).toLocaleString()} –{" "}
-        {new Date(to * 1000).toLocaleString()}
+        {interval} candles, {formatStamp(from)} – {formatStamp(to)}
         {narrower ? " — narrower than the requested range; this is what Radar has, not the whole history." : ""}
       </p>
     </div>
