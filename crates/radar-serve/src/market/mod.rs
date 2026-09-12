@@ -721,6 +721,175 @@ pub fn is_market_path(path: &str) -> bool {
 mod tests {
     use super::*;
 
+    /// Builds a store holding exactly the trades given, and a `Reader` over it.
+    ///
+    /// **Every handler in this module is now a pure function of the store**,
+    /// which is what makes these tests possible at all. While the routes
+    /// queried CryptoHouse, the only way to reach their window arithmetic was
+    /// a live request against a rate-limited public endpoint, so none of it was
+    /// tested and the mutation shards reported every branch of it as surviving.
+    /// A fixture store costs a temporary directory.
+    fn store_of(trades: &[MarketTrade]) -> (tempfile::TempDir, Reader) {
+        let dir = tempfile::tempdir().expect("a temporary directory");
+        {
+            let mut writer =
+                radar_store::Writer::open(dir.path().to_str().expect("a utf-8 path"), 20_000)
+                    .expect("a writer");
+            for trade in trades {
+                writer
+                    .append_market_trade(trade.clone())
+                    .expect("a market trade appends");
+            }
+            writer.flush().expect("the writer flushes");
+        }
+        let reader = Reader::open(dir.path().to_str().expect("a utf-8 path"));
+        (dir, reader)
+    }
+
+    fn market_trade(mint: &str, ts: &str, slot: u64) -> MarketTrade {
+        MarketTrade {
+            mint: mint.parse().expect("a mint"),
+            ts: ts.to_owned(),
+            slot: radar_types::Slot(slot),
+            signature: radar_types::Signature::new([7u8; 64]),
+            side: MarketSide::Unknown,
+            token_amount: 1.0,
+            quote_amount: Some(2.0),
+            quote_mint: Some(WSOL.parse().expect("a mint")),
+            price: Some(2.0),
+            trader: None,
+        }
+    }
+
+    const WSOL: &str = "So11111111111111111111111111111111111111112";
+    const A_MINT: &str = "5NfV2sy8DqXamLvYEE4LcTWzGqZc5Emv4bqqhVDWpump";
+
+    /// The store's own newest moment, not the wall clock.
+    ///
+    /// **This is the defect that made every route answer empty.** The
+    /// collector runs behind wall-clock by design, so a window ending at
+    /// `now()` named a span it had not reached, and every handler returned an
+    /// empty list marked complete — a confident claim that nothing traded.
+    /// Observed against a store holding 900 trades.
+    #[test]
+    fn the_default_window_ends_where_the_store_reaches_not_at_the_clock() {
+        let (_dir, store) = store_of(&[
+            market_trade(A_MINT, "2020-01-01 00:00:01.000000", 100),
+            market_trade(A_MINT, "2020-01-01 00:00:59.000000", 200),
+        ]);
+        let as_of = AsOf::at(radar_types::Slot(10_000));
+
+        let newest = newest_collected(&store, as_of).expect("the store reads");
+        let expected = radar_store::to_epoch("2020-01-01 00:00:59").expect("a stamp");
+        assert_eq!(
+            newest,
+            Some(expected),
+            "the horizon is the newest row, whatever year the clock says"
+        );
+    }
+
+    /// Microseconds are trimmed toward the second, never rounded up.
+    ///
+    /// The window's upper bound is exclusive, so a horizon rounded *up* past
+    /// the newest row would claim to cover a moment nothing was read at.
+    #[test]
+    fn the_horizon_truncates_toward_the_second_rather_than_past_it() {
+        let (_dir, store) = store_of(&[market_trade(A_MINT, "2020-01-01 00:00:59.999999", 200)]);
+        let as_of = AsOf::at(radar_types::Slot(10_000));
+        let newest = newest_collected(&store, as_of).expect("the store reads");
+        assert_eq!(
+            newest,
+            radar_store::to_epoch("2020-01-01 00:00:59").ok(),
+            "59.999999 is not 60"
+        );
+    }
+
+    /// An empty store is not a quiet market.
+    #[test]
+    fn a_store_with_no_trades_has_no_horizon_rather_than_a_zero_one() {
+        let (_dir, store) = store_of(&[]);
+        let as_of = AsOf::at(radar_types::Slot(10_000));
+        assert_eq!(
+            newest_collected(&store, as_of).expect("the store reads"),
+            None,
+            "no rows means no horizon, never the epoch"
+        );
+    }
+
+    /// Nothing past the watermark is visible, including to the horizon.
+    ///
+    /// AGENTS §4 rule 3. A horizon read past `as_of` would let a replay see a
+    /// later moment than the replay is for, and every window derived from it
+    /// would inherit that.
+    #[test]
+    fn the_horizon_never_reaches_past_the_watermark() {
+        let (_dir, store) = store_of(&[
+            market_trade(A_MINT, "2020-01-01 00:00:01.000000", 100),
+            market_trade(A_MINT, "2020-01-01 00:09:00.000000", 900),
+        ]);
+        let as_of = AsOf::at(radar_types::Slot(500));
+        assert_eq!(
+            newest_collected(&store, as_of).expect("the store reads"),
+            radar_store::to_epoch("2020-01-01 00:00:01").ok(),
+            "the row at slot 900 is past the watermark and must not be seen"
+        );
+    }
+
+    /// The tape is one mint's, and it is newest first.
+    #[test]
+    fn the_tape_is_one_mints_own_trades_newest_first() {
+        let other = "So11111111111111111111111111111111111111112";
+        let (_dir, store) = store_of(&[
+            market_trade(A_MINT, "2020-01-01 00:00:01.000000", 100),
+            market_trade(other, "2020-01-01 00:00:02.000000", 110),
+            market_trade(A_MINT, "2020-01-01 00:00:03.000000", 120),
+        ]);
+        let as_of = AsOf::at(radar_types::Slot(10_000));
+        let tape = tape_for(
+            &store,
+            as_of,
+            A_MINT.parse().expect("a mint"),
+            "2020-01-01 00:00:00",
+            "2020-01-01 00:01:00",
+        )
+        .expect("the store reads");
+        assert_eq!(tape.len(), 2, "the other mint's trade is not this tape's");
+        assert_eq!(tape[0].ts, "2020-01-01 00:00:03.000000", "newest first");
+    }
+
+    /// A window that excludes every row returns nothing, without error.
+    ///
+    /// The bound is half-open — `>= from`, `< to` — so a row exactly at `to`
+    /// belongs to the next window, not this one. Pinned because the horizon is
+    /// derived from the newest row and an inclusive upper bound would make
+    /// every default window double-count its own edge.
+    #[test]
+    fn the_window_bound_is_half_open_at_the_top() {
+        let (_dir, store) = store_of(&[market_trade(A_MINT, "2020-01-01 00:00:30.000000", 100)]);
+        let as_of = AsOf::at(radar_types::Slot(10_000));
+        let mint: Address = A_MINT.parse().expect("a mint");
+
+        let excluded = tape_for(
+            &store,
+            as_of,
+            mint,
+            "2020-01-01 00:00:00",
+            "2020-01-01 00:00:30",
+        )
+        .expect("the store reads");
+        assert!(excluded.is_empty(), "a row at `to` is the next window's");
+
+        let included = tape_for(
+            &store,
+            as_of,
+            mint,
+            "2020-01-01 00:00:30",
+            "2020-01-01 00:00:31",
+        )
+        .expect("the store reads");
+        assert_eq!(included.len(), 1, "a row at `from` is this window's");
+    }
+
     fn coin(
         tx_count: u64,
         quote_volume: Option<f64>,
