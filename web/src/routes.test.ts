@@ -61,8 +61,14 @@ const source = readFileSync(ACCESS_RS, "utf8");
  * wrong way.
  */
 function customerBlock(): string {
-  const start = source.indexOf("let customer = ");
-  expect(start, "`let customer =` not found in access.rs").toBeGreaterThan(-1);
+  // `let customer` without the `= `, because rustfmt decides where the line
+  // breaks and it moved the `=` onto the next line on 2026-09-12 when the
+  // expression got shorter. Eleven route assertions then failed at once,
+  // reporting that every page was unreachable -- an alarming way to be told
+  // about a line break. What this check is for is the two lists agreeing, not
+  // the shape the formatter chose.
+  const start = source.indexOf("let customer");
+  expect(start, "`let customer` not found in access.rs").toBeGreaterThan(-1);
   const end = source.indexOf(";", start);
   expect(end, "the customer expression is not terminated").toBeGreaterThan(start);
   return source.slice(start, end);
