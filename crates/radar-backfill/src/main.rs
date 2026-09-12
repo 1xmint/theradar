@@ -634,6 +634,20 @@ fn market_tape_pass_seconds() -> i64 {
     i64::try_from(MARKET_TAPE_PASS_INTERVAL.as_secs()).unwrap_or(i64::MAX)
 }
 
+/// The end of the next market-tape window, given where the cursor sits, how
+/// wide a pass is, and how far the collector may reach before wall-clock lag.
+///
+/// Pulled out of the loop for the same reason [`windows`] is: the decision is
+/// arithmetic a fake transport cannot exercise, since it runs *before* either
+/// query, but a test can drive it directly with no network at all. A pass
+/// never reaches past `horizon` even if `pass_seconds` would carry it there,
+/// which is what keeps the collector from asking CryptoHouse for a window
+/// that has not landed yet.
+const fn market_tape_window_end(cursor: i64, pass_seconds: i64, horizon: i64) -> i64 {
+    let wanted = cursor + pass_seconds;
+    if wanted < horizon { wanted } else { horizon }
+}
+
 /// Collects the venue-agnostic market tape: two CryptoHouse queries per pass,
 /// one pass every [`MARKET_TAPE_PASS_INTERVAL`]. See
 /// `radar_backfill::market_tape`'s module doc for the arithmetic and the
@@ -659,7 +673,7 @@ fn market_tape(args: &Args) -> Result<(), String> {
 
     loop {
         let horizon = now_epoch() - MARKET_TAPE_LAG_SECONDS;
-        let window_end = (cursor + pass_seconds).min(horizon);
+        let window_end = market_tape_window_end(cursor, pass_seconds, horizon);
         if window_end <= cursor {
             std::thread::sleep(MARKET_TAPE_PASS_INTERVAL);
             continue;
@@ -1409,5 +1423,30 @@ mod tests {
         // `Args` clamps `window_minutes` with `.max(1)`, but the loop must not
         // depend on that: a zero step would append the same window forever.
         assert_eq!(windows(0, 3, 0).len(), 3);
+    }
+
+    #[test]
+    fn a_market_tape_pass_reaches_exactly_the_configured_width_when_the_horizon_allows_it() {
+        assert_eq!(market_tape_window_end(1_000, 120, 10_000), 1_120);
+    }
+
+    #[test]
+    fn a_market_tape_pass_never_reaches_past_the_horizon() {
+        // The horizon is wall-clock lag: asking for a window that has not
+        // landed in CryptoHouse yet would just fail, or worse, silently
+        // narrow to whatever partial data happened to exist there.
+        assert_eq!(
+            market_tape_window_end(9_950, 120, 10_000),
+            10_000,
+            "the configured width would overshoot the horizon by 70s"
+        );
+    }
+
+    #[test]
+    fn a_market_tape_pass_at_exactly_the_horizon_reaches_no_further() {
+        // The boundary the two tests above straddle: `wanted == horizon`
+        // must return the horizon itself, not overshoot by treating equality
+        // as "still room to grow".
+        assert_eq!(market_tape_window_end(9_880, 120, 10_000), 10_000);
     }
 }

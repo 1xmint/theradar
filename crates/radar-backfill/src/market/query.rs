@@ -26,6 +26,33 @@
 //! price rather than a zero one — the quote side accepts any of the three
 //! assets, and every raw amount keeps its `decimals` beside it so nothing is
 //! displayed before it is adjusted.
+//!
+//! # `any()` picked an arbitrary leg, not the trade's real ends
+//!
+//! A swap moves the target mint **several times in one transaction** — trader
+//! to pool, pool to trader, plus fee and routing legs — so
+//! `any(source)`/`any(destination)`/`any(authority)` returned whichever leg
+//! ClickHouse happened to visit first, and `token_source` and
+//! `token_destination` could come from *different* transfers entirely.
+//! [`super::fold::detect_pool`] then saw no account on a consistent side,
+//! never cleared its threshold, and every row folded to
+//! [`super::fold::Side::Unknown`]. Confirmed live on 2026-09-11: querying
+//! `solana.token_transfers` directly for one busy mint returned real
+//! `source`, `destination` and `authority` on every row, with one account
+//! appearing on every single trade — the pool, which `any()` was discarding
+//! in favour of an arbitrary sibling leg.
+//!
+//! [`trades_query`] fixes this with **net flow per account**, not an
+//! arbitrary leg: every transfer of the target mint contributes a negative
+//! delta to its source account and a positive delta to its destination, and
+//! the two accounts with the most negative and most positive net flow across
+//! the whole transaction are its real ends — deterministically, however many
+//! intermediate legs it carried. A transaction whose net flows cancel exactly
+//! (every account nets to zero) has no real ends, and is reported as `''` for
+//! both rather than an arbitrary account picked off an all-zero column —
+//! [`super::fold::TapeRow`]'s existing convention for "no leg", which
+//! `detect_pool` and `side_and_trader` already read correctly with no change
+//! to either.
 
 use crate::extract::QUOTE_MINTS;
 
@@ -67,6 +94,25 @@ fn quote_list() -> String {
 /// (measured at 16.42 billion rows for one mint's lifetime) and is refused by
 /// the endpoint outright.
 ///
+/// # The `ends` CTE
+///
+/// `flow` turns every transfer of one of `mints` into a signed, per-account
+/// delta — negative at its `source`, positive at its `destination` — with an
+/// empty `source` or `destination` excluded rather than counted as an
+/// account (an empty string is not one, the same guard
+/// [`super::fold::fold_holders`] applies to `MintTo`/`Burn`). `net` sums those
+/// deltas to one row per `(mint, tx_signature, account)`, carrying the
+/// largest authority seen on that account's own outgoing legs (`max`, not
+/// `any`, so a real address wins over the empty string a destination-only
+/// account contributes). `ends` then picks the two accounts with the most
+/// negative and most positive net flow per transaction — the trade's real
+/// ends, however many intermediate legs it carried — and reports both as `''`
+/// when they cancel exactly, so no account is invented for a column that
+/// never had a direction. `argMin`/`argMax` for `token_source`/`token_destination`
+/// and `sender_authority` share the same sort key (`net`) inside one `ends`
+/// row, so the authority reported is the one belonging to the same account
+/// named as the source.
+///
 /// # Panics
 ///
 /// Never on `mints` content — every entry reaching this function has already
@@ -86,12 +132,33 @@ pub fn trades_query(mints: &[String], from: &str, to: &str) -> String {
     format!(
         "WITH t AS (\
            SELECT mint, block_timestamp, block_slot, tx_signature, \
-                  sum(value) AS token_value, any(decimals) AS token_decimals, \
-                  any(source) AS token_source, any(destination) AS token_destination, \
-                  any(authority) AS token_authority \
+                  sum(value) AS token_value, any(decimals) AS token_decimals \
            FROM solana.token_transfers \
            WHERE mint IN ({list}) AND block_timestamp >= '{from}' AND block_timestamp < '{to}' \
            GROUP BY mint, block_timestamp, block_slot, tx_signature\
+         ), flow AS (\
+           SELECT mint, tx_signature, source AS account, -value AS delta, \
+                  authority AS leg_authority \
+           FROM solana.token_transfers \
+           WHERE mint IN ({list}) AND block_timestamp >= '{from}' AND block_timestamp < '{to}' \
+             AND source != ''\
+           UNION ALL \
+           SELECT mint, tx_signature, destination AS account, value AS delta, \
+                  '' AS leg_authority \
+           FROM solana.token_transfers \
+           WHERE mint IN ({list}) AND block_timestamp >= '{from}' AND block_timestamp < '{to}' \
+             AND destination != ''\
+         ), net AS (\
+           SELECT mint, tx_signature, account, sum(delta) AS net, \
+                  max(leg_authority) AS authority \
+           FROM flow \
+           GROUP BY mint, tx_signature, account\
+         ), ends AS (\
+           SELECT mint, tx_signature, min(net) AS min_net, max(net) AS max_net, \
+                  argMin(account, net) AS sender, argMax(account, net) AS receiver, \
+                  argMin(authority, net) AS sender_authority \
+           FROM net \
+           GROUP BY mint, tx_signature\
          ), s AS (\
            SELECT tx_signature, sum(value) AS quote_value, any(decimals) AS quote_decimals, \
                   any(mint) AS quote_mint, any(authority) AS quote_authority \
@@ -102,11 +169,17 @@ pub fn trades_query(mints: &[String], from: &str, to: &str) -> String {
          SELECT t.mint AS mint, toString(t.block_timestamp) AS ts, toString(t.block_slot) AS slot, \
                 t.tx_signature AS sig, \
                 toString(t.token_value) AS token_value, toString(t.token_decimals) AS token_decimals, \
-                t.token_source AS token_source, t.token_destination AS token_destination, \
-                t.token_authority AS token_authority, \
+                if(ifNull(ends.min_net, 0) = 0 AND ifNull(ends.max_net, 0) = 0, '', ends.sender) \
+                  AS token_source, \
+                if(ifNull(ends.min_net, 0) = 0 AND ifNull(ends.max_net, 0) = 0, '', ends.receiver) \
+                  AS token_destination, \
+                if(ifNull(ends.min_net, 0) = 0 AND ifNull(ends.max_net, 0) = 0, '', ends.sender_authority) \
+                  AS token_authority, \
                 toString(s.quote_value) AS quote_value, toString(s.quote_decimals) AS quote_decimals, \
                 s.quote_mint AS quote_mint, s.quote_authority AS quote_authority \
-         FROM t LEFT JOIN s ON t.tx_signature = s.tx_signature \
+         FROM t \
+         LEFT JOIN ends ON t.mint = ends.mint AND t.tx_signature = ends.tx_signature \
+         LEFT JOIN s ON t.tx_signature = s.tx_signature \
          ORDER BY t.mint, t.block_timestamp DESC",
         quotes = quote_list()
     )
@@ -274,6 +347,74 @@ mod tests {
         // Decimals travel with every raw amount, never assumed.
         assert!(sql.contains("token_decimals"));
         assert!(sql.contains("quote_decimals"));
+    }
+
+    /// The bug this module's own doc comment names: `any(source)` picked an
+    /// arbitrary leg of a multi-leg transaction rather than the trade's real
+    /// ends, and every row folded to `Side::Unknown` as a result. The fix
+    /// reads net flow per account instead, so the query must no longer carry
+    /// the arbitrary form at all.
+    #[test]
+    fn token_ends_come_from_net_flow_never_from_an_arbitrary_leg() {
+        let sql = trades_query(
+            &[MINT.to_owned()],
+            "2026-09-11 17:00:00",
+            "2026-09-11 17:05:00",
+        );
+        assert!(
+            !sql.contains("any(source)"),
+            "the arbitrary-leg bug must not come back: {sql}"
+        );
+        assert!(
+            !sql.contains("any(destination)"),
+            "the arbitrary-leg bug must not come back: {sql}"
+        );
+        assert_eq!(
+            sql.matches("any(authority)").count(),
+            1,
+            "the one remaining any(authority) belongs to the quote CTE, which has no \
+             multi-leg ambiguity to fix: {sql}"
+        );
+        assert!(
+            sql.contains("UNION ALL"),
+            "the signed per-account flow: {sql}"
+        );
+        assert!(
+            sql.contains("argMin(account, net)") && sql.contains("argMax(account, net)"),
+            "the two real ends are the most negative and most positive net flow: {sql}"
+        );
+    }
+
+    /// An empty `source` or `destination` is not an account, the same guard
+    /// `fold_holders` applies to a `MintTo` or a `Burn` — otherwise the
+    /// biggest "sender" in a transaction with one is the empty string.
+    #[test]
+    fn an_empty_account_is_excluded_from_the_flow_rather_than_counted() {
+        let sql = trades_query(
+            &[MINT.to_owned()],
+            "2026-09-11 17:00:00",
+            "2026-09-11 17:05:00",
+        );
+        assert!(sql.contains("AND source != ''"), "{sql}");
+        assert!(sql.contains("AND destination != ''"), "{sql}");
+    }
+
+    /// A transaction whose net flows cancel exactly has no real ends, and
+    /// must not report an arbitrary account picked off an all-zero column --
+    /// it is reported as `''`, the existing convention for "no leg", so
+    /// `detect_pool` and `side_and_trader` read it correctly with no change
+    /// to either.
+    #[test]
+    fn a_transaction_with_no_net_movement_reports_no_ends_rather_than_a_guess() {
+        let sql = trades_query(
+            &[MINT.to_owned()],
+            "2026-09-11 17:00:00",
+            "2026-09-11 17:05:00",
+        );
+        assert!(
+            sql.contains("ends.min_net, 0) = 0") && sql.contains("ends.max_net, 0) = 0"),
+            "cancellation must be checked, not assumed away: {sql}"
+        );
     }
 
     #[test]
