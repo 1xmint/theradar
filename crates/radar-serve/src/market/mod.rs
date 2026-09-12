@@ -623,8 +623,12 @@ pub fn is_market_path(path: &str) -> bool {
 mod tests {
     use super::*;
 
-    fn coin(tx_count: u64, quote_volume: Option<f64>, change_pct: Option<f64>) -> fold::Coin {
-        fold::Coin {
+    fn coin(
+        tx_count: u64,
+        quote_volume: Option<f64>,
+        change_pct: Option<f64>,
+    ) -> market_fold::Coin {
+        market_fold::Coin {
             mint: format!("MINT{tx_count}"),
             tx_count,
             token_volume: None,
@@ -688,86 +692,25 @@ mod tests {
         );
     }
 
-    fn creator(address: &str, verified: bool) -> Creator {
-        Creator {
-            address: address.to_owned(),
-            verified,
-        }
-    }
-
-    fn metadata_row(creators: Vec<Creator>) -> MetadataRow {
-        MetadataRow {
-            ts: "2026-09-11 00:00:00".to_owned(),
-            name: "Test".to_owned(),
-            symbol: "TEST".to_owned(),
-            creators,
-        }
-    }
-
-    /// A verified creator wins, an unverified one is a fallback, and an empty
-    /// address is never reported as either.
-    ///
-    /// `creators` can carry an unverified claim alongside a verified one, and
-    /// reporting the unverified address as "the creator" would put a name on a
-    /// token that nobody attested to -- untrusted content presented as a fact
-    /// (AGENTS §4 rule 4). Kills the mutants that loosen the verified test to
-    /// `||`, and the two that delete a `!` so an *empty* address is the one
-    /// selected.
-    #[test]
-    fn a_verified_creator_wins_and_an_empty_address_is_never_one() {
-        let verified = fold_metadata(&[metadata_row(vec![
-            creator("UNVERIFIED1111111111111111111111111111111", false),
-            creator("VERIFIED111111111111111111111111111111111", true),
-        ])])
-        .expect("a row folds");
-        assert_eq!(
-            verified.creator.as_deref(),
-            Some("VERIFIED111111111111111111111111111111111"),
-            "the attested creator is the one worth reporting"
-        );
-
-        let unverified_only = fold_metadata(&[metadata_row(vec![creator(
-            "UNVERIFIED1111111111111111111111111111111",
-            false,
-        )])])
-        .expect("a row folds");
-        assert_eq!(
-            unverified_only.creator.as_deref(),
-            Some("UNVERIFIED1111111111111111111111111111111"),
-            "an unverified claim is still the only claim there is"
-        );
-
-        let empty_verified = fold_metadata(&[metadata_row(vec![
-            creator("", true),
-            creator("REAL1111111111111111111111111111111111111", false),
-        ])])
-        .expect("a row folds");
-        assert_eq!(
-            empty_verified.creator.as_deref(),
-            Some("REAL1111111111111111111111111111111111111"),
-            "a verified empty string is not a creator"
-        );
-
-        let none = fold_metadata(&[metadata_row(vec![creator("", false)])]).expect("a row folds");
-        assert_eq!(none.creator, None, "no address at all is None, not empty");
-    }
-
-    /// Every degradation says something, and no two say the same thing.
+    /// Every degradation says something substantive, and no two say the same
+    /// thing.
     ///
     /// Kills the mutants that replace `message` with `""` or a constant: an
-    /// operator acts differently on "could not reach the source" than on "this
-    /// build could not read the answer", and a blank or identical message
-    /// takes that distinction away at exactly the moment it is needed.
+    /// operator acts differently on "the store could not be read" than on
+    /// "this range was never collected", and a blank or identical message
+    /// takes that distinction away at exactly the moment it is needed. The
+    /// live-query-era variants this pinned (`Unreachable`, `Malformed`,
+    /// `TimedOut`, `RowCapHit`) are gone with the queries they classified --
+    /// see the module doc comment -- and this is their replacement pinning
+    /// the two that took their place.
     #[test]
     fn every_degradation_carries_its_own_non_empty_message_and_code() {
         let all = [
-            Degradation::Unreachable,
-            Degradation::Malformed,
-            Degradation::TimedOut,
-            Degradation::RowCapHit,
+            Degradation::StoreUnreadable("boom".to_owned()),
+            Degradation::NotCollected("fixture"),
         ];
-        let mut messages: Vec<&str> = all.iter().map(|d| d.message()).collect();
-        let mut codes: Vec<&str> = all.iter().map(|d| d.code()).collect();
+        let mut messages: Vec<String> = all.iter().map(Degradation::message).collect();
+        let mut codes: Vec<&str> = all.iter().map(Degradation::code).collect();
         assert!(
             messages.iter().all(|m| m.len() > 20),
             "a message has to explain, not label"
