@@ -177,7 +177,7 @@ mod tests {
     #[test]
     fn the_key_count_is_bounded() {
         let cache: TtlCache<u32, u32> = TtlCache::new(Duration::from_secs(60));
-        for k in 0..(MAX_ENTRIES as u32 + 10) {
+        for k in 0..(u32::try_from(MAX_ENTRIES).expect("MAX_ENTRIES fits a u32") + 10) {
             cache.get_or_compute(k, || Ok::<_, ()>(k)).unwrap();
         }
         let guard = cache.entries.lock().unwrap();

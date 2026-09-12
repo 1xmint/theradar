@@ -331,12 +331,19 @@ pub fn fold_candles(trades: &[Trade], interval_seconds: i64) -> Vec<Candle> {
     if interval_seconds <= 0 {
         return Vec::new();
     }
-    let mut ascending: Vec<&Trade> = trades.iter().filter(|t| t.price.is_some()).collect();
-    ascending.sort_by(|a, b| a.ts.cmp(&b.ts).then_with(|| a.signature.cmp(&b.signature)));
+    // Carry the price alongside the trade rather than filtering on
+    // `price.is_some()` and unwrapping it later. The filter-then-expect version
+    // was correct and still obliged this function to document a panic it could
+    // not actually reach; pairing them in the collect makes the guarantee the
+    // type's rather than the reader's.
+    let mut ascending: Vec<(f64, &Trade)> = trades
+        .iter()
+        .filter_map(|t| t.price.map(|p| (p, t)))
+        .collect();
+    ascending.sort_by(|(_, a), (_, b)| a.ts.cmp(&b.ts).then_with(|| a.signature.cmp(&b.signature)));
 
     let mut candles: Vec<(i64, Candle)> = Vec::new();
-    for trade in ascending {
-        let price = trade.price.expect("filtered to priced trades above");
+    for (price, trade) in ascending {
         let Some(epoch) = ts_to_epoch(&trade.ts) else {
             continue;
         };
@@ -462,7 +469,15 @@ pub fn fold_holders(rows: &[HolderRow], from: &str, to: &str, limit: usize) -> H
         .map(|(account, raw)| Holder {
             account,
             #[expect(clippy::cast_precision_loss, reason = "display precision for a chart")]
-            balance: decimals.map_or(raw as f64, |d| raw as f64 / 10f64.powi(d as i32)),
+            // `i32::try_from` rather than `as`: a decimals count that does not
+            // fit an `i32` is not a token with very many decimal places, it is
+            // a value this fold should refuse to scale by. Falling back to the
+            // unscaled figure would be the "absent becomes a wrong number"
+            // failure, so the balance keeps its raw units and the caller is no
+            // worse off than for a mint whose decimals were never read.
+            balance: decimals
+                .and_then(|d| i32::try_from(d).ok())
+                .map_or(raw as f64, |d| raw as f64 / 10f64.powi(d)),
         })
         .collect();
     holders.sort_by(|a, b| b.balance.total_cmp(&a.balance));
@@ -636,8 +651,8 @@ mod tests {
     fn decimals_unadjusted_amounts_cannot_reach_a_trade() {
         // The bug the sketch shipped: comparing the two directly is the wrong
         // number by six orders of magnitude for this mint.
-        assert_eq!(adjust("56626", "6"), Some(0.056626));
-        assert_eq!(adjust("10000", "9"), Some(0.00001));
+        assert_eq!(adjust("56626", "6"), Some(0.056_626));
+        assert_eq!(adjust("10000", "9"), Some(0.000_01));
         // `Trade` has no raw field at all -- `trade_from_row` is the only
         // producer, and every numeric field on it comes from `adjust`.
         let t = trade_from_row(
@@ -650,8 +665,16 @@ mod tests {
             None,
         )
         .expect("converts");
-        assert_eq!(t.token_amount, 0.056626);
-        assert_eq!(t.quote_amount, Some(0.00001));
+        // Compared within a tolerance rather than exactly: these are `f64`
+        // display values, and an exact `==` on a float asserts the bit
+        // pattern of an arithmetic result rather than the number meant.
+        assert!(
+            (t.token_amount - 0.056_626).abs() < 1e-12,
+            "{}",
+            t.token_amount
+        );
+        let quote = t.quote_amount.expect("the quote leg is present here");
+        assert!((quote - 0.000_01).abs() < 1e-12, "{quote}");
     }
 
     #[test]
@@ -805,9 +828,11 @@ mod tests {
         assert_eq!(candles.len(), 1, "one priced trade makes one bucket");
         let only = &candles[0];
         assert_eq!(only.trade_count, 1);
-        assert_eq!(
-            only.open, only.close,
-            "the unpriced trade did not touch this bucket"
+        assert!(
+            (only.open - only.close).abs() < f64::EPSILON,
+            "the unpriced trade did not touch this bucket: open {} close {}",
+            only.open,
+            only.close
         );
     }
 

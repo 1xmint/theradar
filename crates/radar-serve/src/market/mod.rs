@@ -170,11 +170,12 @@ impl Degradation {
 
     const fn status(self) -> StatusCode {
         match self {
-            Self::Unreachable => StatusCode::BAD_GATEWAY,
-            // 502 as well: the upstream answered and this build could not use
-            // the answer, which is still a bad gateway and not the caller's
-            // fault. The code and message are what separate it for a reader.
-            Self::Malformed => StatusCode::BAD_GATEWAY,
+            // Both 502, deliberately: either the upstream could not be
+            // reached or it answered something this build could not use, and
+            // neither is the caller's fault. They stay separate variants
+            // because `code` and `message` must tell them apart -- the status
+            // is the one thing they legitimately share.
+            Self::Unreachable | Self::Malformed => StatusCode::BAD_GATEWAY,
             Self::TimedOut | Self::RowCapHit => StatusCode::SERVICE_UNAVAILABLE,
         }
     }
@@ -432,7 +433,8 @@ pub async fn coins(
     // One cache entry per window bucket rather than per second, so every
     // visitor inside a `CACHE_TTL` slice of time reads the same computed
     // list -- the caching this route was named to design first.
-    let key = format!("{}:{}", from / CACHE_TTL.as_secs().max(1) as i64, limit);
+    let bucket = i64::try_from(CACHE_TTL.as_secs()).unwrap_or(1).max(1);
+    let key = format!("{}:{}", from / bucket, limit);
     let result = state.market.coins.get_or_compute(key, || {
         let (from_s, to_s) = (from_epoch(from), from_epoch(to));
         let candidates: Vec<fold::CoinCandidateRow> = state

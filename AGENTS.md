@@ -295,15 +295,10 @@ decisions about a trade-off that belongs to the owner. LEARNINGS 26.
   `just hooks` installs a versioned `pre-commit` that refuses one and prints the
   staged diffstat — deletions separately, for the reason above. It fails open on
   anything else: a hook that refuses for its own reasons is worse than no hook.
-- **Production restarts through one fixed script and nothing else.** The owner
-  installed `/usr/local/sbin/radar-deploy` on 2026-09-11 with a NOPASSWD entry
-  for `guardian`: it installs `/tmp/radar-serve.new`, restarts the unit and
-  prints its state. So `scp` the artifact there and run
-  `ssh guardian-vps-tail "sudo radar-deploy"`. **Nothing else on that box is
-  passwordless**, deliberately — the script takes no arguments and touches one
-  unit, and the box also runs Cortex and Pulse. Read the artifact's
-  `BUILD-INFO.txt` hash against the file you copied before you run it, and
-  `curl https://radar.heyvera.org/health` after: its `build` field is the only
+- **Production restarts through one fixed script.** `scp` the artifact to
+  `/tmp/radar-serve.new`, then `ssh guardian-vps-tail "sudo radar-deploy"` —
+  the only passwordless sudo on a box also running Cortex and Pulse. Check
+  `BUILD-INFO.txt`'s hash before and `/health`'s `build` after; it is the only
   proof the restart took the binary you meant.
 - **Read the branch's last CI result before pushing onto it.** `just hooks` also
   installs a `pre-push` that prints it and never blocks. `mutants-shards` went
