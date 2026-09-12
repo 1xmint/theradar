@@ -538,7 +538,23 @@ const MAX_NARROWING_DEPTH: u32 = 10;
 /// `run` takes the SQL and returns rows or the server's error. That is the
 /// whole seam: a test supplies one that fails on a wide window and succeeds on
 /// a narrow one, and every branch below becomes reachable without a network.
-fn narrowing_fetch<T>(
+///
+/// **A caller may also use `run` to bound what a narrowing fetch costs.** The
+/// halving below is unbounded in queries — a window over the row cap becomes
+/// two queries, and each of those may become two more — so a caller with a
+/// quota must count them somewhere, and `run` is the only place every one of
+/// them passes through. A `run` that starts refusing with an error whose
+/// [`QueryError::should_narrow`] is false stops the recursion at once and
+/// surfaces as an ordinary failure, which the caller then records as the
+/// partial coverage it is. `radar_backfill::market_tape::Budget` does exactly
+/// this.
+///
+/// # Errors
+///
+/// Returns whatever `run` last returned: once the window cannot be narrowed
+/// further, once the halving depth is spent, or at once for an error
+/// narrowing cannot fix.
+pub fn narrowing_fetch<T>(
     run: &dyn Fn(&str) -> Result<Vec<T>, QueryError>,
     from: i64,
     to: i64,

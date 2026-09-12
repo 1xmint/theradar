@@ -121,9 +121,31 @@ fn quote_list() -> String {
 /// caller-bug guard [`coin_prices_query`] uses: an empty `IN ()` is invalid SQL
 /// and asking CryptoHouse to reject it would waste a round trip finding that
 /// out.
+///
+/// # Why it is bounded per mint
+///
+/// **Unbounded, this query cannot be collected inside the quota.** Measured
+/// 2026-09-12: two hundred mints traded 20,710 times in two minutes, and
+/// CryptoHouse returns at most a thousand rows, so
+/// [`radar_backfill::narrowing_fetch`] halved the window fifteen times in a
+/// single pass — about thirty-two queries where the collector's own comment
+/// claimed two. Narrowed to ten mints over five minutes it still exhausted a
+/// six-query budget without returning a single trade.
+///
+/// `LIMIT n BY t.mint` is ClickHouse's per-group limit: the most recent `n`
+/// trades **for each mint**, rather than the most recent `n` overall. The
+/// distinction is the point — one frantic mint would otherwise fill the whole
+/// result and the other nine would appear to have stopped trading, which is a
+/// silence that looks exactly like a fact.
+///
+/// This makes the result a **recent-trades sample, not a complete window**, and
+/// the caller must record it as one. A tape showing the last hundred trades is
+/// what a trading screen wants; a window claiming completeness it does not have
+/// is what this repository exists not to ship.
 #[must_use]
-pub fn trades_query(mints: &[String], from: &str, to: &str) -> String {
+pub fn trades_query(mints: &[String], from: &str, to: &str, per_mint: usize) -> String {
     assert!(!mints.is_empty(), "trades_query needs at least one mint");
+    assert!(per_mint > 0, "a tape of zero trades per mint is not a tape");
     let list = mints
         .iter()
         .map(|m| format!("'{m}'"))
@@ -180,7 +202,7 @@ pub fn trades_query(mints: &[String], from: &str, to: &str) -> String {
          FROM t \
          LEFT JOIN ends ON t.mint = ends.mint AND t.tx_signature = ends.tx_signature \
          LEFT JOIN s ON t.tx_signature = s.tx_signature \
-         ORDER BY t.mint, t.block_timestamp DESC",
+         ORDER BY t.mint, t.block_timestamp DESC \n         LIMIT {per_mint} BY t.mint",
         quotes = quote_list()
     )
 }
@@ -318,6 +340,7 @@ mod tests {
             &[MINT.to_owned()],
             "2026-09-11 17:00:00",
             "2026-09-11 17:05:00",
+            90,
         );
         // The bug: `LIKE 'So1111...%'` matches this real, unrelated mint too
         // -- one character longer than wrapped SOL, confirmed live.
@@ -336,6 +359,7 @@ mod tests {
             &[MINT.to_owned()],
             "2026-09-11 17:00:00",
             "2026-09-11 17:05:00",
+            90,
         );
         assert!(
             sql.contains("LEFT JOIN"),
@@ -360,6 +384,7 @@ mod tests {
             &[MINT.to_owned()],
             "2026-09-11 17:00:00",
             "2026-09-11 17:05:00",
+            90,
         );
         assert!(
             !sql.contains("any(source)"),
@@ -394,6 +419,7 @@ mod tests {
             &[MINT.to_owned()],
             "2026-09-11 17:00:00",
             "2026-09-11 17:05:00",
+            90,
         );
         assert!(sql.contains("AND source != ''"), "{sql}");
         assert!(sql.contains("AND destination != ''"), "{sql}");
@@ -410,6 +436,7 @@ mod tests {
             &[MINT.to_owned()],
             "2026-09-11 17:00:00",
             "2026-09-11 17:05:00",
+            90,
         );
         assert!(
             sql.contains("ends.min_net, 0) = 0") && sql.contains("ends.max_net, 0) = 0"),
@@ -427,6 +454,7 @@ mod tests {
             &[MINT.to_owned(), other.to_owned()],
             "2026-09-11 17:00:00",
             "2026-09-11 17:05:00",
+            90,
         );
         assert!(sql.contains(MINT), "{sql}");
         assert!(sql.contains(other), "{sql}");
@@ -439,7 +467,7 @@ mod tests {
     #[test]
     #[should_panic(expected = "at least one mint")]
     fn batching_an_empty_mint_list_is_a_caller_bug_not_a_query() {
-        let _ = trades_query(&[], "2026-09-11 17:00:00", "2026-09-11 17:05:00");
+        let _ = trades_query(&[], "2026-09-11 17:00:00", "2026-09-11 17:05:00", 90);
     }
 
     #[test]

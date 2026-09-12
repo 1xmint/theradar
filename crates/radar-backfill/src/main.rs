@@ -72,13 +72,17 @@ const FOLLOW_RETRY_MIN: Duration = Duration::from_secs(5);
 const FOLLOW_RETRY_MAX: Duration = Duration::from_secs(300);
 
 /// How wide a market-tape pass's window is, and how long it sleeps between
-/// passes. The two are the same number on purpose: two queries every
-/// [`MARKET_TAPE_PASS_INTERVAL`] is 60 queries an hour (see
-/// `radar_backfill::market_tape`'s module doc for the arithmetic), and the
-/// loop sleeps this long regardless of how long a pass itself took, so the
+/// passes. The two are the same number on purpose, and it is
+/// `market_tape::PASS_INTERVAL_SECONDS` rather than a second copy of it --
+/// `market_tape::Budget::PER_PASS` is derived by dividing that interval into
+/// the hourly quota, so a local copy that drifted would silently change the
+/// budget's meaning without changing the budget.
+///
+/// The loop sleeps this long regardless of how long a pass itself took, so the
 /// interval can only widen under load, never narrow below what the budget
 /// assumes.
-const MARKET_TAPE_PASS_INTERVAL: Duration = Duration::from_secs(120);
+const MARKET_TAPE_PASS_INTERVAL: Duration =
+    Duration::from_secs(market_tape::PASS_INTERVAL_SECONDS as u64);
 
 /// How far behind wall-clock time a market-tape pass stays, so the window it
 /// asks for has already had time to land in CryptoHouse.
@@ -87,13 +91,6 @@ const MARKET_TAPE_LAG_SECONDS: i64 = 120;
 /// The narrowest window a market-tape pass's trades query will still try
 /// before giving up rather than halving further.
 const MARKET_TAPE_MIN_WINDOW_SECONDS: i64 = 4;
-
-/// How many of a window's most active mints the market tape shortlists for a
-/// batched trades query. Matches `radar-serve`'s own former
-/// `COIN_SHORTLIST` — the live coin list never showed more than this many
-/// mints either, so collecting fewer would be a real loss of coverage and
-/// collecting more would not change what any caller could see.
-const MARKET_TAPE_SHORTLIST: usize = 200;
 
 /// The smallest window follow mode will shrink to under repeated failure.
 ///
@@ -652,6 +649,29 @@ const fn market_tape_window_end(cursor: i64, pass_seconds: i64, horizon: i64) ->
 /// one pass every [`MARKET_TAPE_PASS_INTERVAL`]. See
 /// `radar_backfill::market_tape`'s module doc for the arithmetic and the
 /// coverage caveat.
+/// Records that a market-tape pass ran and collected nothing it can attest to.
+///
+/// **Not the same as recording nothing.** A pass that failed and wrote no
+/// coverage leaves a slot range indistinguishable from a quiet market, which is
+/// the failure this project is most organised against. A `Partial` record with
+/// no slots says the window was visited and did not complete, which a reader
+/// can act on.
+///
+/// Extracted because both failure arms of `market_tape` need it and wrote it
+/// out identically -- and because a third copy is exactly how one of them
+/// eventually gets forgotten.
+fn record_partial_pass(store: &str, store_high: Option<radar_types::Slot>) -> Result<(), String> {
+    let mut writer = Writer::open(store, 20_000).map_err(|e| e.to_string())?;
+    writer
+        .append_coverage(market_tape::coverage_record(
+            Completion::Partial,
+            &[],
+            coverage::established_at(None, store_high),
+        ))
+        .map_err(|e| e.to_string())?;
+    writer.flush().map_err(|e| e.to_string())
+}
+
 fn market_tape(args: &Args) -> Result<(), String> {
     let client = Client::default();
     let scope = market_tape_scope(&args.store);
@@ -660,8 +680,10 @@ fn market_tape(args: &Args) -> Result<(), String> {
         .unwrap_or_else(|| now_epoch() - MARKET_TAPE_LAG_SECONDS - pass_seconds);
 
     println!(
-        "market tape: {pass_seconds}s per pass, two queries per pass ({}/hour), from {} into {}",
-        3_600 / MARKET_TAPE_PASS_INTERVAL.as_secs() * 2,
+        "market tape: {pass_seconds}s per pass, at most {} queries per pass ({}/hour ceiling),          top {} mints, from {} into {}",
+        market_tape::Budget::PER_PASS,
+        u64::from(market_tape::Budget::PER_PASS) * 3_600 / MARKET_TAPE_PASS_INTERVAL.as_secs(),
+        market_tape::SHORTLIST,
         from_epoch(cursor),
         args.store
     );
@@ -680,22 +702,20 @@ fn market_tape(args: &Args) -> Result<(), String> {
         }
         let (from_s, to_s) = (from_epoch(cursor), from_epoch(window_end));
 
-        // Query 1 of 2: which mints moved in this window.
-        let candidates: Vec<market_fold::CoinCandidateRow> = match client.query(
-            &market_query::coin_candidates_query(&from_s, &to_s, MARKET_TAPE_SHORTLIST),
+        // One budget per pass. Every query below goes through it, including
+        // the ones `narrowing_fetch` generates by halving -- which is the
+        // whole point, since those are the ones nothing was counting.
+        let budget = market_tape::Budget::new(market_tape::Budget::PER_PASS);
+
+        // The window's active mints.
+        let candidates: Vec<market_fold::CoinCandidateRow> = match budget.guard(
+            |sql| client.query(sql),
+            &market_query::coin_candidates_query(&from_s, &to_s, market_tape::SHORTLIST),
         ) {
             Ok(rows) => rows,
             Err(e) => {
                 eprintln!("  {from_s} .. {to_s} candidates query failed: {e}");
-                let mut writer = Writer::open(&args.store, 20_000).map_err(|e| e.to_string())?;
-                writer
-                    .append_coverage(market_tape::coverage_record(
-                        Completion::Partial,
-                        &[],
-                        coverage::established_at(None, store_high),
-                    ))
-                    .map_err(|e| e.to_string())?;
-                writer.flush().map_err(|e| e.to_string())?;
+                record_partial_pass(&args.store, store_high)?;
                 std::thread::sleep(MARKET_TAPE_PASS_INTERVAL);
                 continue;
             }
@@ -708,28 +728,26 @@ fn market_tape(args: &Args) -> Result<(), String> {
             Vec::new()
         } else {
             let mints: Vec<String> = candidates.iter().map(|c| c.mint.clone()).collect();
-            match radar_backfill::fetch_windowed(
-                &client,
+            match radar_backfill::narrowing_fetch(
+                &|sql| budget.guard(|s| client.query(s), sql),
                 cursor,
                 window_end,
                 0,
                 MARKET_TAPE_MIN_WINDOW_SECONDS,
                 PAUSE_BETWEEN_WINDOWS,
-                &|f, t| market_query::trades_query(&mints, f, t),
+                &|f, t| market_query::trades_query(&mints, f, t, market_tape::TRADES_PER_MINT),
             ) {
                 Ok(rows) => market_tape::fold_market_trades(&rows),
                 Err(e) => {
-                    eprintln!("  {from_s} .. {to_s} trades query failed: {e}");
-                    let mut writer =
-                        Writer::open(&args.store, 20_000).map_err(|e| e.to_string())?;
-                    writer
-                        .append_coverage(market_tape::coverage_record(
-                            Completion::Partial,
-                            &[],
-                            coverage::established_at(None, store_high),
-                        ))
-                        .map_err(|e| e.to_string())?;
-                    writer.flush().map_err(|e| e.to_string())?;
+                    // A spent budget is not a fault and reads differently in
+                    // the log, because an operator acts on it differently:
+                    // one means the endpoint is unwell, the other means this
+                    // window was busier than the quota can cover.
+                    eprintln!(
+                        "  {from_s} .. {to_s} trades incomplete ({} queries left): {e}",
+                        budget.remaining()
+                    );
+                    record_partial_pass(&args.store, store_high)?;
                     std::thread::sleep(MARKET_TAPE_PASS_INTERVAL);
                     continue;
                 }
