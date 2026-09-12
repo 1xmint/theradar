@@ -581,6 +581,25 @@ fn priced(
     (token > 0.0).then_some(quote / token)
 }
 
+/// The percentage move from the window's first priced fill to its last.
+///
+/// Pulled out of [`fold_coins`] so the decision has a name and a test. Two
+/// things it must not do, and both are one character away: divide by a first
+/// price of zero -- which yields an infinity that serialises as JSON `null`
+/// and so arrives looking exactly like an honest absent change -- and report a
+/// ratio where a percentage is meant.
+///
+/// `None` when either end is missing, which is a different fact from a change
+/// of zero: nothing in the window paired that mint with a quote leg, so no
+/// move was measured rather than no move having happened.
+#[must_use]
+fn change_from(first_price: Option<f64>, last_price: Option<f64>) -> Option<f64> {
+    match (first_price, last_price) {
+        (Some(first), Some(last)) if first > 0.0 => Some((last - first) / first * 100.0),
+        _ => None,
+    }
+}
+
 /// Joins the candidate list against the shortlist's prices, in Rust rather
 /// than in SQL, so a mint absent from `prices` — nothing in the window paired
 /// it with a quote leg — has an explicit, testable path to `price: None`
@@ -618,10 +637,7 @@ pub fn fold_coins(candidates: &[CoinCandidateRow], prices: &[CoinPriceRow]) -> V
                 &p.first_quote_value,
                 &p.first_quote_decimals,
             );
-            let change_pct = match (first_price, last_price) {
-                (Some(first), Some(last)) if first > 0.0 => Some((last - first) / first * 100.0),
-                _ => None,
-            };
+            let change_pct = change_from(first_price, last_price);
             Coin {
                 mint: c.mint.clone(),
                 tx_count,
@@ -773,6 +789,92 @@ mod tests {
             None,
             "and the same three legs on the destination side"
         );
+    }
+
+    /// A mint with no destination credits nobody, and a burn with no source
+    /// debits nobody.
+    ///
+    /// **An empty account is not an account.** `token_transfers` leaves the
+    /// far side blank on a mint and on a burn, and crediting `""` would build
+    /// a phantom holder that outranks every real one, because every such leg
+    /// for the mint collects into the same empty key. Kills the six mutants
+    /// that flip or delete the two emptiness guards.
+    #[test]
+    fn a_mint_or_burn_with_a_blank_side_credits_nobody() {
+        for kind in ["MintTo", "MintToChecked", "Burn", "BurnChecked"] {
+            let folded = fold_holders(
+                &[holder_row("", "", "2000000", kind)],
+                "2026-09-11 00:00:00",
+                "2026-09-11 01:00:00",
+                10,
+            )
+            .holders;
+            assert!(
+                folded.iter().all(|h| !h.account.is_empty()),
+                "{kind}: a blank side must not become a holder: {folded:?}"
+            );
+        }
+    }
+
+    /// The other half: a real mint credits its destination.
+    ///
+    /// A guard replaced with `false` makes every mint a no-op, and a test that
+    /// only asserted blanks are refused would pass against it.
+    #[test]
+    fn a_real_mint_credits_its_destination() {
+        let to = "DEST111111111111111111111111111111111111111";
+        let folded = fold_holders(
+            &[holder_row("", to, "2000000", "MintTo")],
+            "2026-09-11 00:00:00",
+            "2026-09-11 01:00:00",
+            10,
+        )
+        .holders;
+        assert_eq!(folded.len(), 1, "the destination holds the minted units");
+        assert_eq!(folded[0].account, to);
+        assert!((folded[0].balance - 2.0).abs() < 1e-12, "{folded:?}");
+    }
+
+    /// A price is quote over token, and zero tokens has no price.
+    ///
+    /// Kills the mutants that relax `token > 0.0` to `>=` -- which divides by
+    /// zero and yields an infinity that serialises as JSON `null`, looking
+    /// exactly like an honest absent price -- and the one that turns the
+    /// division into a multiplication.
+    #[test]
+    fn a_priced_pair_divides_quote_by_token_and_refuses_zero_tokens() {
+        let p = priced("2000000", "6", "4000000000", "9").expect("both legs parse");
+        assert!(
+            (p - 2.0).abs() < 1e-12,
+            "4 quote over 2 token is 2, not 8: {p}"
+        );
+        assert_eq!(
+            priced("0", "6", "4000000000", "9"),
+            None,
+            "zero tokens has no price, not an infinite one"
+        );
+    }
+
+    /// A change is measured against the earlier price, and a zero start has
+    /// none.
+    ///
+    /// Kills the mutants that relax `first > 0.0` to `>=` or to always-true --
+    /// both of which divide by zero -- and the one that turns the division
+    /// into a remainder.
+    #[test]
+    fn a_change_is_relative_to_the_first_price_and_a_zero_first_has_none() {
+        let doubled = change_from(Some(2.0), Some(3.0));
+        assert!(
+            doubled.is_some_and(|c| (c - 50.0).abs() < 1e-12),
+            "2 to 3 is +50 per cent, not +1 and not a remainder: {doubled:?}"
+        );
+        assert_eq!(
+            change_from(Some(0.0), Some(3.0)),
+            None,
+            "a change from zero is undefined, never infinite"
+        );
+        assert_eq!(change_from(None, Some(3.0)), None);
+        assert_eq!(change_from(Some(2.0), None), None);
     }
 
     /// A leg that starts and ends at the pool is not a trade in either

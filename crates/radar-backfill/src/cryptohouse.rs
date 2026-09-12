@@ -134,12 +134,25 @@ impl Client {
             .read_to_string()
             .map_err(|e| QueryError::Transport(e.to_string()))?;
 
-        if status >= 400 {
+        if is_error_status(status) {
             return Err(server_error(status, &body, sql));
         }
 
         parse_rows(&body)
     }
+}
+
+/// Whether an HTTP status means the body is an explanation rather than rows.
+///
+/// Pulled out beside [`server_error`] and for the same reason: inside
+/// [`Client::query`] the only way to exercise the boundary was a live request,
+/// so nothing checked which side of 400 each status fell on. A `<` here rather
+/// than a `>=` would feed ClickHouse's error text to `parse_rows` and report
+/// the failure as a malformed row -- a fact about this build, for something
+/// that is a fact about the query.
+#[must_use]
+const fn is_error_status(status: u16) -> bool {
+    status >= 400
 }
 
 /// Builds the error for a non-2xx response, from its status and its body.
@@ -218,6 +231,22 @@ mod tests {
                 .expect_err("must error")
                 .should_narrow()
         );
+    }
+
+    /// 400 is the boundary, and both sides of it are pinned.
+    ///
+    /// ClickHouse answers a rejected query with a non-2xx whose body carries
+    /// the explanation, and a success with rows. Reading 400 as success feeds
+    /// the explanation to `parse_rows`, which then reports a fact about this
+    /// build for something that is a fact about the query; reading 399 as a
+    /// failure throws away rows that arrived.
+    #[test]
+    fn four_hundred_is_where_a_body_stops_being_rows() {
+        assert!(!is_error_status(200));
+        assert!(!is_error_status(204));
+        assert!(!is_error_status(399), "399 is not an error status");
+        assert!(is_error_status(400), "400 is");
+        assert!(is_error_status(500));
     }
 
     /// The row cap as it actually arrives: a bare HTTP 500 with the marker in

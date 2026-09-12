@@ -748,6 +748,71 @@ mod narrowing {
         assert_eq!(narrowest, 8, "the floor is the narrowest window attempted");
     }
 
+    /// The halving stops at the depth limit rather than recursing forever.
+    ///
+    /// Kills the mutants that turn `depth + 1` into `depth * 1` -- which
+    /// leaves the depth at zero so the limit is never reached -- and the one
+    /// that relaxes `depth < MAX_NARROWING_DEPTH` to `<=`. With a floor of one
+    /// second and a wide window, the depth limit is what ends the recursion,
+    /// and ten halvings of a wide span is a bounded, countable number of
+    /// queries.
+    #[test]
+    fn the_halving_stops_at_the_depth_limit_not_at_the_floor() {
+        let calls = RefCell::new(0u32);
+        let err = narrowing_fetch(
+            &|_sql| {
+                *calls.borrow_mut() += 1;
+                Err::<Vec<String>, _>(QueryError::Server(
+                    "Code: 396 (TOO_MANY_ROWS_OR_BYTES)".to_owned(),
+                ))
+            },
+            0,
+            1 << 20,
+            0,
+            1,
+            Duration::ZERO,
+            &spans,
+        )
+        .expect_err("nothing ever fits");
+        assert!(err.should_narrow());
+        // Eleven: the original window and ten halvings, straight down the
+        // left spine. Not a full tree, because the first half's failure
+        // propagates with `?` and the right half is never asked for -- which
+        // is the property worth having. Half a window returned as a whole one
+        // is the silent gap this project is most organised against, so a
+        // failure anywhere aborts the lot rather than reporting what it got.
+        //
+        // With `depth + 1` mutated to `depth * 1` the depth never advances and
+        // this runs to the four-second floor instead, which is far more than
+        // eleven; with `<` relaxed to `<=` it is twelve.
+        let issued = *calls.borrow();
+        assert_eq!(
+            issued, 11,
+            "the first window plus ten halvings, and no right halves after a failure"
+        );
+    }
+
+    /// The midpoint is the middle, and both halves are asked for.
+    ///
+    /// Kills the mutant that turns `from + (to - from) / 2` into an addition
+    /// of the two bounds: with a non-zero `from` that lands outside the window
+    /// entirely, so one half is never asked for and the other is asked for
+    /// twice. A window starting at zero would hide it, which is why this one
+    /// does not start at zero.
+    #[test]
+    fn the_midpoint_splits_the_window_it_was_given_not_the_one_at_zero() {
+        let endpoint = Endpoint::new(300);
+        let rows = fetch(&endpoint, 3_600, 4_200, 4).expect("narrows once");
+        assert_eq!(
+            rows,
+            vec![
+                "1970-01-01 01:00:00..1970-01-01 01:05:00",
+                "1970-01-01 01:05:00..1970-01-01 01:10:00",
+            ],
+            "two contiguous halves of the window actually asked about"
+        );
+    }
+
     /// An error that narrowing cannot fix is reported at once, not retried on
     /// a narrower window.
     ///
