@@ -205,38 +205,79 @@ impl Pending {
     }
 }
 
-/// Runs the feed forever, reconnecting with backoff.
+/// How long a refused credential waits before trying again.
 ///
-/// Backoff doubles from one second to thirty and resets after a session that
-/// stayed up for a minute, so a provider restart costs a second and a
-/// misconfiguration does not hammer anybody.
+/// Five minutes, not thirty seconds. A wrong or expired token does not fix
+/// itself, and retrying it every half-minute gets the address rate-limited: on
+/// 2026-09-13 PublicNode answered a tokenless probe with `PermissionDenied`
+/// five times and then with HTTP 429.
+pub const REFUSED_DELAY: Duration = Duration::from_secs(5 * 60);
+
+/// Why a session ended.
+#[derive(Debug, PartialEq, Eq)]
+struct Ended {
+    reason: String,
+    /// The provider refused the credential, rather than the connection failing.
+    refused: bool,
+}
+
+impl Ended {
+    fn retry(reason: String) -> Self {
+        Self {
+            reason,
+            refused: false,
+        }
+    }
+}
+
+/// How long to wait before reconnecting.
+///
+/// Doubles from one second to thirty, and drops back to one second after a
+/// session that stayed up a minute, so a provider restart costs a second. A
+/// refused credential waits [`REFUSED_DELAY`].
+fn next_delay(previous: Duration, lasted: Duration, refused: bool) -> Duration {
+    if refused {
+        return REFUSED_DELAY;
+    }
+    if lasted > Duration::from_secs(60) {
+        return Duration::from_secs(1);
+    }
+    (previous * 2).clamp(Duration::from_secs(1), Duration::from_secs(30))
+}
+
+/// Runs the feed forever, reconnecting with [`next_delay`].
 pub async fn run(config: Config, live: Arc<Live>) {
-    let mut backoff = Duration::from_secs(1);
+    let mut delay = Duration::ZERO;
     loop {
         let started = Instant::now();
         let outcome = session(&config, &live).await;
         live.status.connected.store(false, Ordering::Relaxed);
-        let reason = match outcome {
-            Ok(()) => "the provider ended the stream".to_owned(),
-            Err(e) => e,
-        };
+        let ended = outcome.err().unwrap_or_else(|| Ended::retry("the provider ended the stream".to_owned()));
+        delay = next_delay(delay, started.elapsed(), ended.refused);
         // One line per session end, for journald. Never the token: the
         // reasons come from tonic's status and transport errors, which do not
         // carry request metadata.
-        eprintln!("radar-stream: session ended: {reason}; reconnecting in {}s", backoff.as_secs());
-        live.status.set_error(reason);
+        eprintln!(
+            "radar-stream: session ended: {}; reconnecting in {}s",
+            ended.reason,
+            delay.as_secs()
+        );
+        live.status.set_error(ended.reason);
         live.status.reconnects.fetch_add(1, Ordering::Relaxed);
-        if started.elapsed() > Duration::from_secs(60) {
-            backoff = Duration::from_secs(1);
-        }
-        tokio::time::sleep(backoff).await;
-        backoff = (backoff * 2).min(Duration::from_secs(30));
+        tokio::time::sleep(delay).await;
     }
 }
 
-async fn session(config: &Config, live: &Live) -> Result<(), String> {
+/// The open subscription: updates in, requests (pongs) out.
+type Subscription = (
+    tonic::Streaming<SubscribeUpdate>,
+    tokio::sync::mpsc::Sender<SubscribeRequest>,
+);
+
+/// Connects and subscribes.
+async fn subscribe(config: &Config) -> Result<Subscription, Ended> {
     let mut endpoint = Endpoint::from_shared(config.endpoint.clone())
-        .map_err(|e| format!("bad endpoint: {e}"))?
+        .map_err(|e| Ended::retry(format!("bad endpoint: {e}")))?
         .connect_timeout(Duration::from_secs(10))
         .tcp_keepalive(Some(Duration::from_secs(30)))
         .http2_keep_alive_interval(Duration::from_secs(15))
@@ -244,42 +285,91 @@ async fn session(config: &Config, live: &Live) -> Result<(), String> {
     if config.endpoint.starts_with("https://") {
         endpoint = endpoint
             .tls_config(ClientTlsConfig::new().with_webpki_roots())
-            .map_err(|e| format!("tls: {e}"))?;
+            .map_err(|e| Ended::retry(format!("tls: {e}")))?;
     }
     let channel = endpoint
         .connect()
         .await
-        .map_err(|e| format!("connect: {e}"))?;
+        .map_err(|e| Ended::retry(format!("connect: {e}")))?;
 
     let mut grpc = tonic::client::Grpc::new(channel)
         .accept_compressed(CompressionEncoding::Zstd)
         .max_decoding_message_size(MAX_MESSAGE_BYTES);
-    grpc.ready().await.map_err(|e| format!("not ready: {e}"))?;
+    grpc.ready()
+        .await
+        .map_err(|e| Ended::retry(format!("not ready: {e}")))?;
 
     let (outbound, requests) = tokio::sync::mpsc::channel::<SubscribeRequest>(8);
     outbound
         .send(subscribe_request(config))
         .await
-        .map_err(|_| "request channel closed".to_owned())?;
+        .map_err(|_| Ended::retry("request channel closed".to_owned()))?;
     let requests = futures_util::stream::unfold(requests, |mut rx| async move {
         rx.recv().await.map(|m| (m, rx))
     });
     let mut request = tonic::Request::new(requests);
     if let Some(token) = &config.token {
-        let value = token
-            .parse()
-            .map_err(|_| format!("{TOKEN_VAR} is not a valid header value"))?;
+        let value = token.parse().map_err(|_| Ended {
+            reason: format!("{TOKEN_VAR} is not a valid header value"),
+            refused: true,
+        })?;
         request.metadata_mut().insert("x-token", value);
     }
 
     let codec = tonic_prost::ProstCodec::<SubscribeRequest, SubscribeUpdate>::default();
     let path = http::uri::PathAndQuery::from_static("/geyser.Geyser/Subscribe");
-    let mut updates = grpc
+    let updates = grpc
         .streaming(request, path, codec)
         .await
-        .map_err(|e| format!("subscribe refused: {} {}", e.code(), e.message()))?
+        .map_err(|e| Ended {
+            reason: format!("subscribe refused: {} {}", e.code(), e.message()),
+            refused: matches!(
+                e.code(),
+                tonic::Code::PermissionDenied | tonic::Code::Unauthenticated
+            ),
+        })?
         .into_inner();
+    Ok((updates, outbound))
+}
 
+/// What one update asks of the session.
+#[derive(Debug, PartialEq)]
+enum Step {
+    /// Transactions now stamped and ready for the tape. Possibly none.
+    Apply(Vec<(u64, Signature, i64, Decoded)>),
+    /// The provider pinged; answer it.
+    Pong,
+}
+
+/// Folds one update into the waiting set. Synchronous and network-free, so
+/// the order-independence of transactions and block times is testable.
+fn step(update: SubscribeUpdate, pending: &mut Pending, live: &Live) -> Step {
+    match update.update_oneof {
+        Some(UpdateOneof::Transaction(tx_update)) => {
+            let Ok(tx) = Tx::try_from(&tx_update) else {
+                live.tape().note_unreadable();
+                return Step::Apply(Vec::new());
+            };
+            let decoded = decode(&tx);
+            Step::Apply(
+                pending
+                    .transaction(tx.slot, tx.signature, decoded)
+                    .into_iter()
+                    .collect(),
+            )
+        }
+        Some(UpdateOneof::BlockMeta(meta)) => Step::Apply(
+            meta.block_time
+                .map(|time| pending.block_time(meta.slot, time.timestamp))
+                .unwrap_or_default(),
+        ),
+        Some(UpdateOneof::Ping(_)) => Step::Pong,
+        Some(UpdateOneof::Pong(_)) | None => Step::Apply(Vec::new()),
+    }
+}
+
+async fn session(config: &Config, live: &Live) -> Result<(), Ended> {
+    let (mut updates, outbound) = subscribe(config).await?;
     live.status.connected.store(true, Ordering::Relaxed);
     live.status.connected_since.store(now(), Ordering::Relaxed);
 
@@ -288,31 +378,16 @@ async fn session(config: &Config, live: &Live) -> Result<(), String> {
     while let Some(update) = updates
         .message()
         .await
-        .map_err(|e| format!("stream: {} {}", e.code(), e.message()))?
+        .map_err(|e| Ended::retry(format!("stream: {} {}", e.code(), e.message())))?
     {
         live.status.last_message.store(now(), Ordering::Relaxed);
         live.status
             .bytes
             .fetch_add(update.encoded_len() as u64, Ordering::Relaxed);
 
-        let ready: Vec<(u64, Signature, i64, Decoded)> = match update.update_oneof {
-            Some(UpdateOneof::Transaction(tx_update)) => {
-                if let Ok(tx) = Tx::try_from(&tx_update) {
-                    let decoded = decode(&tx);
-                    pending
-                        .transaction(tx.slot, tx.signature, decoded)
-                        .into_iter()
-                        .collect()
-                } else {
-                    live.tape().note_unreadable();
-                    Vec::new()
-                }
-            }
-            Some(UpdateOneof::BlockMeta(meta)) => match meta.block_time {
-                Some(time) => pending.block_time(meta.slot, time.timestamp),
-                None => Vec::new(),
-            },
-            Some(UpdateOneof::Ping(_)) => {
+        let ready = match step(update, &mut pending, live) {
+            Step::Apply(ready) => ready,
+            Step::Pong => {
                 // Providers close a connection that stops answering pings. A
                 // ping-only request leaves the filters as they are.
                 let pong = SubscribeRequest {
@@ -322,10 +397,9 @@ async fn session(config: &Config, live: &Live) -> Result<(), String> {
                 outbound
                     .send(pong)
                     .await
-                    .map_err(|_| "request channel closed".to_owned())?;
+                    .map_err(|_| Ended::retry("request channel closed".to_owned()))?;
                 Vec::new()
             }
-            Some(UpdateOneof::Pong(_)) | None => Vec::new(),
         };
 
         let prune = last_prune.elapsed() > Duration::from_secs(5);
@@ -424,6 +498,74 @@ mod tests {
         assert_eq!(filter.account_include, config.programs);
         assert!(request.blocks_meta.contains_key("radar"));
         assert_eq!(request.commitment, Some(CommitmentLevel::Confirmed as i32));
+    }
+
+    #[test]
+    fn reconnecting_doubles_from_one_second_to_thirty() {
+        let lasted = Duration::from_secs(2);
+        let mut delay = Duration::ZERO;
+        let mut seen = Vec::new();
+        for _ in 0..7 {
+            delay = next_delay(delay, lasted, false);
+            seen.push(delay.as_secs());
+        }
+        assert_eq!(seen, vec![1, 2, 4, 8, 16, 30, 30]);
+    }
+
+    #[test]
+    fn a_session_that_stayed_up_a_minute_reconnects_after_a_second() {
+        let long = Duration::from_secs(61);
+        assert_eq!(next_delay(Duration::from_secs(30), long, false), Duration::from_secs(1));
+        assert_eq!(
+            next_delay(Duration::from_secs(30), Duration::from_secs(60), false),
+            Duration::from_secs(30),
+            "exactly a minute is not long enough to reset"
+        );
+    }
+
+    #[test]
+    fn a_refused_credential_waits_five_minutes_however_long_the_session_lasted() {
+        assert_eq!(next_delay(Duration::ZERO, Duration::ZERO, true), REFUSED_DELAY);
+        assert_eq!(next_delay(Duration::ZERO, Duration::from_secs(600), true), REFUSED_DELAY);
+    }
+
+    fn block_meta(slot: u64, time: i64) -> SubscribeUpdate {
+        SubscribeUpdate {
+            filters: vec![],
+            update_oneof: Some(UpdateOneof::BlockMeta(crate::proto::SubscribeUpdateBlockMeta {
+                slot,
+                block_time: Some(crate::proto::UnixTimestamp { timestamp: time }),
+            })),
+        }
+    }
+
+    #[test]
+    fn a_ping_asks_for_a_pong_and_a_block_time_releases_nothing_on_its_own() {
+        let live = Live::new(usize::MAX);
+        let mut pending = Pending::default();
+        let ping = SubscribeUpdate {
+            filters: vec![],
+            update_oneof: Some(UpdateOneof::Ping(crate::proto::SubscribeUpdatePing {})),
+        };
+        assert_eq!(step(ping, &mut pending, &live), Step::Pong);
+        assert_eq!(step(block_meta(5, 1_700_000_000), &mut pending, &live), Step::Apply(vec![]));
+        assert_eq!(pending.times.get(&5), Some(&1_700_000_000));
+    }
+
+    #[test]
+    fn an_unreadable_transaction_is_counted_not_applied() {
+        let live = Live::new(usize::MAX);
+        let mut pending = Pending::default();
+        let broken = SubscribeUpdate {
+            filters: vec![],
+            update_oneof: Some(UpdateOneof::Transaction(crate::proto::SubscribeUpdateTransaction {
+                transaction: None,
+                slot: 9,
+            })),
+        };
+        assert_eq!(step(broken, &mut pending, &live), Step::Apply(vec![]));
+        assert_eq!(live.tape().counts().unreadable, 1);
+        assert!(pending.waiting.is_empty());
     }
 
     #[test]
