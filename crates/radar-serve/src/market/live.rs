@@ -308,6 +308,7 @@ mod tests {
         assert_eq!((c.open, c.high, c.low, c.close), (1.0, 5.0, 0.5, 4.0));
         assert_eq!(c.trade_count, 4);
         assert!((c.quote_volume - 2.0).abs() < f64::EPSILON);
+        assert!((c.token_volume - 20.0).abs() < f64::EPSILON);
         assert_eq!(candles[1].time, t0 + 300);
     }
 

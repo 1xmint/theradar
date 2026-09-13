@@ -133,6 +133,18 @@ impl Coin {
             bytes: MINT_BYTES,
         }
     }
+
+    /// What this coin is charged against the budget, from what it holds.
+    ///
+    /// Recomputed after every change rather than adjusted up and down, so the
+    /// charge cannot drift from the contents: one test holds the tape's total
+    /// to the sum of these.
+    fn charge(&self) -> usize {
+        MINT_BYTES
+            + self.trades.len() * TRADE_BYTES
+            + self.minutes.len() * MINUTE_BYTES
+            + self.holders.len() * HOLDER_BYTES
+    }
 }
 
 /// Counts of what the feed has done, for the probe and for `/health`.
@@ -296,11 +308,11 @@ impl Tape {
                 slot.insert(Coin::new(at))
             }
         };
-        if at > coin.last_active {
-            self.by_activity.remove(&(coin.last_active, mint));
-            coin.last_active = at;
-            self.by_activity.insert((at, mint));
-        }
+        // Never moves backwards: a late block must not make a busy coin look
+        // idle and get it evicted first.
+        self.by_activity.remove(&(coin.last_active, mint));
+        coin.last_active = coin.last_active.max(at);
+        self.by_activity.insert((coin.last_active, mint));
         coin
     }
 
@@ -318,7 +330,6 @@ impl Tape {
     }
 
     fn fill(&mut self, fill: &Fill, slot: u64, signature: Signature, stamp: &str, at: i64) {
-        let (mut added, mut removed) = (0usize, 0usize);
         let coin = self.coin(fill.mint, at);
 
         if !coin.pools.contains(&fill.pool) {
@@ -340,10 +351,8 @@ impl Tape {
             price: Some(fill.price),
             trader: Some(fill.trader),
         });
-        added += TRADE_BYTES;
-        if coin.trades.len() > TRADES_PER_MINT {
+        while coin.trades.len() > TRADES_PER_MINT {
             coin.trades.pop_front();
-            removed += TRADE_BYTES;
         }
 
         let quote = *coin.quote.get_or_insert(fill.quote_mint);
@@ -361,10 +370,8 @@ impl Tape {
                     token_volume: fill.token_amount,
                     trades: 1,
                 });
-                added += MINUTE_BYTES;
-                if coin.minutes.len() > CANDLE_MINUTES {
+                while coin.minutes.len() > CANDLE_MINUTES {
                     coin.minutes.pop_front();
-                    removed += MINUTE_BYTES;
                 }
             } else if let Some(m) = coin.minutes.iter_mut().rev().find(|m| m.start == start) {
                 // The newest minute, or an earlier one: the feed delivers slots
@@ -382,27 +389,31 @@ impl Tape {
                 m.trades += 1;
             }
         }
-        coin.bytes = (coin.bytes + added).saturating_sub(removed);
-        self.used_bytes = (self.used_bytes + added).saturating_sub(removed);
+        self.recharge(&fill.mint);
+    }
+
+    /// Brings a coin's charge, and the tape's total, up to date with what the
+    /// coin now holds.
+    fn recharge(&mut self, mint: &Address) {
+        if let Some(coin) = self.coins.get_mut(mint) {
+            let before = coin.bytes;
+            coin.bytes = coin.charge();
+            self.used_bytes = self.used_bytes - before + coin.bytes;
+        }
     }
 
     fn holding(&mut self, holding: &Holding, at: i64) {
-        let (mut added, mut removed) = (0usize, 0usize);
         let coin = self.coin(holding.mint, at);
         coin.decimals = Some(holding.decimals);
         if holding.amount == 0 {
-            if coin.holders.remove(&holding.account).is_some() {
-                removed += HOLDER_BYTES;
-            }
+            coin.holders.remove(&holding.account);
         } else {
             let balance = HeldBalance {
                 owner: holding.owner,
                 amount: holding.amount,
             };
-            if coin.holders.insert(holding.account, balance).is_none() {
-                added += HOLDER_BYTES;
-            }
-            if coin.holders.len() > HOLDER_ACCOUNTS {
+            coin.holders.insert(holding.account, balance);
+            while coin.holders.len() > HOLDER_ACCOUNTS {
                 if let Some(smallest) = coin
                     .holders
                     .iter()
@@ -410,13 +421,11 @@ impl Tape {
                     .map(|(account, _)| *account)
                 {
                     coin.holders.remove(&smallest);
-                    removed += HOLDER_BYTES;
                 }
                 coin.holders_truncated = true;
             }
         }
-        coin.bytes = (coin.bytes + added).saturating_sub(removed);
-        self.used_bytes = (self.used_bytes + added).saturating_sub(removed);
+        self.recharge(&holding.mint);
     }
 
     /// Drops whole coins, least recently active first, until inside budget.
@@ -427,7 +436,7 @@ impl Tape {
             };
             self.by_activity.remove(&(at, mint));
             if let Some(coin) = self.coins.remove(&mint) {
-                self.used_bytes = self.used_bytes.saturating_sub(coin.bytes);
+                self.used_bytes -= coin.bytes;
                 self.counts.evicted += 1;
             }
         }
@@ -817,6 +826,411 @@ mod tests {
             tape.holders(&addr(1), 10).map(|h| h.since_launch),
             None,
             "no balances yet"
+        );
+    }
+
+    /// The tape's running total is exactly what its coins hold, after
+    /// trades, a trade dropped past the cap, holders added and closed, and an
+    /// eviction. A total that drifts is a budget that stops meaning anything.
+    fn assert_charged_exactly(tape: &Tape) {
+        let from_scratch: usize = tape.coins.values().map(Coin::charge).sum();
+        assert_eq!(tape.used_bytes(), from_scratch);
+        for coin in tape.coins.values() {
+            assert_eq!(coin.bytes, coin.charge());
+        }
+    }
+
+    fn holding(mint: u8, account: u8, amount: u64) -> Holding {
+        Holding {
+            mint: addr(mint),
+            account: addr(account),
+            owner: Some(addr(account)),
+            amount,
+            decimals: 0,
+        }
+    }
+
+    #[test]
+    fn the_running_total_is_exactly_what_the_coins_hold() {
+        let mut tape = Tape::new(usize::MAX);
+        let mut t = T0;
+        for _ in 0..=TRADES_PER_MINT {
+            tape.apply(1, Signature::new([1; 64]), t, tx(vec![fill(1, 1.0, true)]));
+            t += 61;
+        }
+        assert_charged_exactly(&tape);
+        let mut held = tx(vec![fill(2, 1.0, true)]);
+        held.holdings = vec![holding(2, 10, 5), holding(2, 11, 6)];
+        tape.apply(2, Signature::new([2; 64]), t, held);
+        assert_charged_exactly(&tape);
+        let mut closed = tx(vec![]);
+        closed.holdings = vec![holding(2, 10, 0)];
+        tape.apply(3, Signature::new([3; 64]), t + 1, closed);
+        assert_charged_exactly(&tape);
+
+        let budget = tape.used_bytes() - 1;
+        let mut small = Tape::new(budget);
+        small.coins = std::mem::take(&mut tape.coins);
+        small.by_activity = std::mem::take(&mut tape.by_activity);
+        small.used_bytes = tape.used_bytes;
+        small.apply(4, Signature::new([4; 64]), t + 2, tx(vec![]));
+        assert_eq!(small.counts().evicted, 1);
+        assert_charged_exactly(&small);
+    }
+
+    #[test]
+    fn a_tape_exactly_at_its_budget_drops_nothing() {
+        let mut probe = Tape::new(usize::MAX);
+        probe.apply(1, Signature::new([1; 64]), T0, tx(vec![fill(1, 1.0, true)]));
+        let mut tape = Tape::new(probe.used_bytes());
+        tape.apply(1, Signature::new([1; 64]), T0, tx(vec![fill(1, 1.0, true)]));
+        assert_eq!(tape.counts().evicted, 0);
+        assert_eq!(tape.coins(), 1);
+    }
+
+    #[test]
+    fn trades_in_one_minute_sum_their_volumes() {
+        let mut tape = Tape::new(usize::MAX);
+        tape.apply(
+            1,
+            Signature::new([1; 64]),
+            T0 + 1,
+            tx(vec![fill(1, 2.0, true)]),
+        );
+        tape.apply(
+            2,
+            Signature::new([2; 64]),
+            T0 + 2,
+            tx(vec![fill(1, 3.0, true)]),
+        );
+        tape.apply(
+            3,
+            Signature::new([3; 64]),
+            T0 + 3,
+            tx(vec![fill(1, 4.0, true)]),
+        );
+        let (minutes, _) = tape.minutes(&addr(1), T0, T0 + 60);
+        // Each fill trades 10 of the coin at `price`.
+        assert!(
+            (minutes[0].token_volume - 30.0).abs() < 1e-9,
+            "{:?}",
+            minutes[0]
+        );
+        assert!(
+            (minutes[0].quote_volume - 90.0).abs() < 1e-9,
+            "{:?}",
+            minutes[0]
+        );
+        assert_eq!(minutes[0].trades, 3);
+    }
+
+    #[test]
+    fn a_late_trade_folds_into_its_own_minute_without_moving_that_minutes_close() {
+        let mut tape = Tape::new(usize::MAX);
+        tape.apply(
+            1,
+            Signature::new([1; 64]),
+            T0 + 1,
+            tx(vec![fill(1, 2.0, true)]),
+        );
+        tape.apply(
+            2,
+            Signature::new([2; 64]),
+            T0 + 61,
+            tx(vec![fill(1, 5.0, true)]),
+        );
+        tape.apply(
+            3,
+            Signature::new([3; 64]),
+            T0 + 30,
+            tx(vec![fill(1, 9.0, true)]),
+        );
+        let (minutes, _) = tape.minutes(&addr(1), T0, T0 + 120);
+        assert_eq!(minutes.len(), 2);
+        assert_eq!((minutes[0].high, minutes[0].close), (9.0, 2.0));
+        assert!((minutes[0].token_volume - 20.0).abs() < 1e-9);
+        assert_eq!(minutes[0].trades, 2);
+        assert!((minutes[1].close - 5.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn holders_stop_at_the_cap_by_dropping_the_smallest() {
+        let mut tape = Tape::new(usize::MAX);
+        let mut exactly = tx(vec![]);
+        exactly.holdings = (0..HOLDER_ACCOUNTS)
+            .map(|i| Holding {
+                mint: addr(1),
+                account: Address::new(
+                    u64::try_from(i)
+                        .unwrap()
+                        .to_le_bytes()
+                        .repeat(4)
+                        .try_into()
+                        .unwrap(),
+                ),
+                owner: None,
+                amount: 1_000 + u64::try_from(i).unwrap(),
+                decimals: 0,
+            })
+            .collect();
+        tape.apply(1, Signature::new([1; 64]), T0, exactly);
+        let at_cap = tape.holders(&addr(1), HOLDER_ACCOUNTS).unwrap();
+        assert_eq!(at_cap.rows.len(), HOLDER_ACCOUNTS);
+        assert!(!at_cap.truncated, "exactly the cap drops nobody");
+
+        let mut one_more = tx(vec![]);
+        one_more.holdings = vec![holding(1, 250, 999_999)];
+        tape.apply(2, Signature::new([2; 64]), T0 + 1, one_more);
+        let over = tape.holders(&addr(1), HOLDER_ACCOUNTS + 1).unwrap();
+        assert_eq!(over.rows.len(), HOLDER_ACCOUNTS);
+        assert!(over.truncated);
+        assert!(
+            (over.rows[0].balance - 999_999.0).abs() < 1e-9,
+            "the newcomer is richest"
+        );
+        assert!(
+            over.rows.iter().all(|r| r.balance > 1_000.0),
+            "the smallest balance, 1000, was the one dropped"
+        );
+        assert_charged_exactly(&tape);
+    }
+
+    #[test]
+    fn a_full_tape_whose_oldest_trade_sits_on_the_window_start_is_complete() {
+        let mut tape = Tape::new(usize::MAX);
+        for i in 0..i64::try_from(TRADES_PER_MINT).unwrap() {
+            tape.apply(
+                1,
+                Signature::new([1; 64]),
+                T0 + i,
+                tx(vec![fill(1, 2.0, true)]),
+            );
+        }
+        assert!(
+            tape.trades(&addr(1), T0, T0 + 10_000).1,
+            "nothing before T0 was dropped"
+        );
+        assert!(
+            !tape.trades(&addr(1), T0 - 1, T0 + 10_000).1,
+            "but T0-1 was never watched"
+        );
+    }
+
+    #[test]
+    fn minute_windows_are_half_open_and_say_when_they_are_short() {
+        let mut tape = Tape::new(usize::MAX);
+        tape.apply(
+            1,
+            Signature::new([1; 64]),
+            T0 + 5,
+            tx(vec![fill(1, 2.0, true)]),
+        );
+        tape.apply(
+            2,
+            Signature::new([2; 64]),
+            T0 + 65,
+            tx(vec![fill(1, 2.0, true)]),
+        );
+
+        let (minutes, complete) = tape.minutes(&addr(1), T0 + 5, T0 + 60);
+        assert!(
+            minutes.is_empty(),
+            "the minute starting at T0 begins before the window"
+        );
+        assert!(complete, "watching began at T0+5");
+        assert_eq!(
+            tape.minutes(&addr(1), T0, T0 + 60).0.len(),
+            1,
+            "start included"
+        );
+        assert_eq!(
+            tape.minutes(&addr(1), T0, T0 + 61).0.len(),
+            2,
+            "T0+60 is inside"
+        );
+        assert!(
+            !tape.minutes(&addr(1), T0, T0 + 60).1,
+            "T0 is before watching began"
+        );
+        assert!(tape.minutes(&addr(9), T0, T0 + 60).0.is_empty());
+        assert!(
+            !tape.minutes(&addr(9), T0, T0 + 60).1,
+            "an unknown coin is not complete"
+        );
+    }
+
+    #[test]
+    fn a_full_day_of_minutes_is_complete_only_from_its_first_kept_minute() {
+        let mut tape = Tape::new(usize::MAX);
+        let n = i64::try_from(CANDLE_MINUTES).unwrap();
+        let mut launch = tx(vec![]);
+        launch.launches = vec![LaunchSeen {
+            mint: addr(1),
+            name: String::new(),
+            symbol: String::new(),
+            uri: String::new(),
+            creator: addr(9),
+        }];
+        tape.apply(0, Signature::new([1; 64]), T0, launch);
+        for i in 0..=n {
+            tape.apply(
+                1,
+                Signature::new([1; 64]),
+                T0 + i * 60,
+                tx(vec![fill(1, 2.0, true)]),
+            );
+        }
+        let first_kept = T0 + 60;
+        let (minutes, complete) = tape.minutes(&addr(1), first_kept, T0 + (n + 1) * 60);
+        assert_eq!(minutes.len(), CANDLE_MINUTES);
+        assert!(complete, "the window starts on the first minute still kept");
+        assert!(
+            !tape.minutes(&addr(1), T0, T0 + (n + 1) * 60).1,
+            "the first minute was dropped"
+        );
+    }
+
+    #[test]
+    fn the_coin_list_excludes_a_minute_starting_at_the_window_end() {
+        let mut tape = Tape::new(usize::MAX);
+        tape.apply(
+            1,
+            Signature::new([1; 64]),
+            T0 + 60,
+            tx(vec![fill(1, 1.0, true)]),
+        );
+        assert!(tape.active(T0, T0 + 60).is_empty());
+        assert_eq!(tape.active(T0, T0 + 61).len(), 1);
+    }
+
+    #[test]
+    fn the_header_price_is_in_the_candle_quote_even_when_a_later_trade_is_not() {
+        let mut tape = Tape::new(usize::MAX);
+        tape.apply(1, Signature::new([1; 64]), T0, tx(vec![fill(1, 2.0, true)]));
+        let mut usdc = fill(1, 500.0, true);
+        usdc.quote_mint = crate::decode::USDC.parse().unwrap();
+        tape.apply(2, Signature::new([2; 64]), T0 + 1, tx(vec![usdc]));
+        assert_eq!(tape.last_price(&addr(1)), Some((2.0, crate::decode::WSOL)));
+    }
+
+    #[test]
+    fn the_caps_are_what_their_names_promise() {
+        // A day of minute candles backs the widest chart the API draws
+        // (`MAX_CANDLE_WINDOW_SECONDS` in radar-serve is 86 400).
+        assert_eq!(CANDLE_MINUTES * 60, 86_400);
+        assert_eq!(TRADES_PER_MINT, 500, "the most /v1/market/trades returns");
+    }
+
+    #[test]
+    fn every_estimate_covers_the_value_it_charges_for_without_being_absurd() {
+        // Under-charging is the outage the budget exists to prevent, so each
+        // estimate is at least the value itself (a trade also owns its
+        // 26-byte timestamp string). Over-charging only evicts early, but an
+        // estimate several times the value would make the budget meaningless.
+        let trade = std::mem::size_of::<MarketTrade>() + 26;
+        assert!(
+            TRADE_BYTES >= trade && TRADE_BYTES <= 2 * trade,
+            "{TRADE_BYTES}"
+        );
+        let minute = std::mem::size_of::<Minute>();
+        assert!(
+            MINUTE_BYTES >= minute && MINUTE_BYTES <= 2 * minute,
+            "{MINUTE_BYTES}"
+        );
+        let holder = 32 + std::mem::size_of::<HeldBalance>();
+        assert!(
+            HOLDER_BYTES >= holder && HOLDER_BYTES <= 3 * holder,
+            "{HOLDER_BYTES}"
+        );
+    }
+
+    #[test]
+    fn counts_newest_and_size_follow_what_was_applied() {
+        let mut tape = Tape::new(usize::MAX);
+        assert_eq!(
+            (tape.newest(), tape.coins(), tape.used_bytes()),
+            (None, 0, 0)
+        );
+        let mut first = tx(vec![fill(1, 1.0, true), fill(2, 1.0, false)]);
+        first.unpriced = 2;
+        first.launches = vec![LaunchSeen {
+            mint: addr(3),
+            name: String::new(),
+            symbol: String::new(),
+            uri: String::new(),
+            creator: addr(9),
+        }];
+        tape.apply(1, Signature::new([1; 64]), T0 + 50, first);
+        let mut second = tx(vec![fill(1, 1.0, true)]);
+        second.unpriced = 1;
+        // An earlier block arriving late does not move `newest` back.
+        tape.apply(2, Signature::new([2; 64]), T0 + 10, second);
+        tape.note_untimed(4);
+        tape.note_untimed(3);
+        tape.note_unreadable();
+        tape.note_unreadable();
+
+        assert_eq!(tape.newest(), Some(T0 + 50));
+        assert_eq!(tape.coins(), 3);
+        assert!(tape.used_bytes() >= 3 * MINT_BYTES);
+        assert_eq!(
+            tape.counts(),
+            Counts {
+                transactions: 2,
+                fills: 3,
+                unpriced: 3,
+                unreadable: 2,
+                untimed: 7,
+                evicted: 0,
+                launches: 1,
+            }
+        );
+    }
+
+    #[test]
+    fn a_late_block_does_not_make_a_busy_coin_look_idle() {
+        // Coin 1 trades at T0+100, then a late block from T0+1 arrives for it.
+        // Coin 2 last traded at T0+50. Coin 2 is the idler and goes first.
+        let one_trade = MINT_BYTES + TRADE_BYTES + MINUTE_BYTES;
+        let mut tape = Tape::new(3 * one_trade + 2 * TRADE_BYTES - 1);
+        tape.apply(
+            1,
+            Signature::new([1; 64]),
+            T0 + 100,
+            tx(vec![fill(1, 1.0, true)]),
+        );
+        tape.apply(
+            2,
+            Signature::new([2; 64]),
+            T0 + 50,
+            tx(vec![fill(2, 1.0, true)]),
+        );
+        tape.apply(
+            3,
+            Signature::new([3; 64]),
+            T0 + 1,
+            tx(vec![fill(1, 1.0, true)]),
+        );
+        tape.apply(
+            4,
+            Signature::new([4; 64]),
+            T0 + 101,
+            tx(vec![fill(3, 1.0, true)]),
+        );
+        tape.apply(
+            5,
+            Signature::new([5; 64]),
+            T0 + 102,
+            tx(vec![fill(3, 1.0, true)]),
+        );
+        assert!(tape.counts().evicted >= 1);
+        assert!(
+            !tape.trades(&addr(1), T0, T0 + 200).0.is_empty(),
+            "coin 1 kept"
+        );
+        assert!(
+            tape.trades(&addr(2), T0, T0 + 200).0.is_empty(),
+            "coin 2 evicted"
         );
     }
 

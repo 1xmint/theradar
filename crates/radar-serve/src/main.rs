@@ -156,15 +156,16 @@ fn customer_lane() -> Result<
 /// # Errors
 ///
 /// The message to print when the feed's configuration cannot be read.
-fn market_feed() -> Result<(radar_serve::market::Market, String), String> {
-    let env = |k: &str| std::env::var(k).ok();
-    let Some(config) = radar_stream::feed::Config::from_vars(&env)? else {
+fn market_feed(
+    env: &impl Fn(&str) -> Option<String>,
+) -> Result<(radar_serve::market::Market, String), String> {
+    let Some(config) = radar_stream::feed::Config::from_vars(env)? else {
         return Ok((
             radar_serve::market::Market::new(),
             "off (set RADAR_STREAM_ENDPOINT to stream; market routes read the store)".to_owned(),
         ));
     };
-    let budget = radar_stream::budget_from_vars(&env)?;
+    let budget = radar_stream::budget_from_vars(env)?;
     let live = Arc::new(radar_stream::Live::new(budget));
     let note = format!(
         "streaming from {} ({} programs, token {}, {} MiB budget)",
@@ -267,7 +268,7 @@ async fn main() -> ExitCode {
     let admission_note = admission.describe();
     let share_note = shares.describe();
 
-    let (market, feed_note) = match market_feed() {
+    let (market, feed_note) = match market_feed(&|k| std::env::var(k).ok()) {
         Ok(feed) => feed,
         Err(why) => return refused(&why),
     };
@@ -357,7 +358,51 @@ async fn main() -> ExitCode {
 
 #[cfg(test)]
 mod tests {
-    use super::bind_address;
+    use super::{bind_address, market_feed};
+
+    fn vars(pairs: &[(&'static str, &'static str)]) -> impl Fn(&str) -> Option<String> {
+        let owned = pairs.to_vec();
+        move |k| {
+            owned
+                .iter()
+                .find(|(key, _)| *key == k)
+                .map(|(_, v)| (*v).to_owned())
+        }
+    }
+
+    #[tokio::test]
+    async fn no_stream_endpoint_reads_the_store_and_says_so() {
+        let (market, note) = market_feed(&vars(&[])).expect("no feed is a valid state");
+        assert!(market.live().is_none());
+        assert!(note.starts_with("off"), "{note}");
+    }
+
+    #[tokio::test]
+    async fn a_stream_endpoint_reads_the_feed_and_never_prints_the_token() {
+        let (market, note) = market_feed(&vars(&[
+            ("RADAR_STREAM_ENDPOINT", "https://127.0.0.1:9"),
+            ("RADAR_STREAM_TOKEN", "very-secret-token"),
+            ("RADAR_STREAM_MEMORY_MB", "64"),
+        ]))
+        .expect("a valid feed configuration");
+        assert!(market.live().is_some());
+        assert!(note.contains("https://127.0.0.1:9"), "{note}");
+        assert!(note.contains("64 MiB"), "{note}");
+        assert!(note.contains("token set"), "{note}");
+        assert!(!note.contains("very-secret-token"), "{note}");
+    }
+
+    #[tokio::test]
+    async fn a_malformed_stream_setting_refuses_to_start() {
+        assert!(market_feed(&vars(&[("RADAR_STREAM_ENDPOINT", "grpc.example.com")])).is_err());
+        assert!(
+            market_feed(&vars(&[
+                ("RADAR_STREAM_ENDPOINT", "https://grpc.example.com"),
+                ("RADAR_STREAM_MEMORY_MB", "0"),
+            ]))
+            .is_err()
+        );
+    }
 
     #[test]
     fn an_absent_variable_uses_the_documented_default() {

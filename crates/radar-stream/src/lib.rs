@@ -115,3 +115,48 @@ pub fn budget_from_vars(get: &impl Fn(&str) -> Option<String>) -> Result<usize, 
         },
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn vars(pairs: &[(&'static str, &'static str)]) -> impl Fn(&str) -> Option<String> {
+        let owned = pairs.to_vec();
+        move |k| {
+            owned
+                .iter()
+                .find(|(key, _)| *key == k)
+                .map(|(_, v)| (*v).to_owned())
+        }
+    }
+
+    #[test]
+    fn the_budget_defaults_to_512_mib() {
+        assert_eq!(DEFAULT_BUDGET_BYTES, 536_870_912);
+        assert_eq!(budget_from_vars(&vars(&[])), Ok(536_870_912));
+        assert_eq!(
+            budget_from_vars(&vars(&[(MEMORY_VAR, " ")])),
+            Ok(536_870_912)
+        );
+    }
+
+    #[test]
+    fn the_budget_is_read_in_mebibytes_and_zero_is_refused() {
+        assert_eq!(
+            budget_from_vars(&vars(&[(MEMORY_VAR, "300")])),
+            Ok(314_572_800)
+        );
+        assert_eq!(budget_from_vars(&vars(&[(MEMORY_VAR, "1")])), Ok(1_048_576));
+        assert!(budget_from_vars(&vars(&[(MEMORY_VAR, "0")])).is_err());
+        assert!(budget_from_vars(&vars(&[(MEMORY_VAR, "lots")])).is_err());
+    }
+
+    #[test]
+    fn the_last_error_is_whatever_was_set_last() {
+        let status = Status::default();
+        assert_eq!(status.last_error(), None);
+        status.set_error("first".into());
+        status.set_error("second".into());
+        assert_eq!(status.last_error().as_deref(), Some("second"));
+    }
+}

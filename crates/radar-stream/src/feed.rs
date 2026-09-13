@@ -378,6 +378,28 @@ fn step(update: SubscribeUpdate, pending: &mut Pending, live: &Live) -> Step {
     }
 }
 
+/// How often transactions still waiting for a block time are checked.
+const PRUNE_EVERY: Duration = Duration::from_secs(5);
+
+/// Applies what is ready and, every [`PRUNE_EVERY`], drops what waited too
+/// long. Returns whether it pruned, so the caller restarts its clock.
+fn settle(
+    live: &Live,
+    pending: &mut Pending,
+    ready: Vec<(u64, Signature, i64, Decoded)>,
+    since_prune: Duration,
+) -> bool {
+    let prune = since_prune > PRUNE_EVERY;
+    let mut tape = live.tape();
+    for (slot, signature, time, decoded) in ready {
+        tape.apply(slot, signature, time, decoded);
+    }
+    if prune {
+        tape.note_untimed(pending.prune());
+    }
+    prune
+}
+
 async fn session(config: &Config, live: &Live) -> Result<(), Ended> {
     let (mut updates, outbound) = subscribe(config).await?;
     live.status.connected.store(true, Ordering::Relaxed);
@@ -412,16 +434,8 @@ async fn session(config: &Config, live: &Live) -> Result<(), Ended> {
             }
         };
 
-        let prune = last_prune.elapsed() > Duration::from_secs(5);
-        if !ready.is_empty() || prune {
-            let mut tape = live.tape();
-            for (slot, signature, time, decoded) in ready {
-                tape.apply(slot, signature, time, decoded);
-            }
-            if prune {
-                tape.note_untimed(pending.prune());
-                last_prune = Instant::now();
-            }
+        if settle(live, &mut pending, ready, last_prune.elapsed()) {
+            last_prune = Instant::now();
         }
     }
     Ok(())
@@ -516,6 +530,70 @@ mod tests {
         assert_eq!(filter.account_include, config.programs);
         assert!(request.blocks_meta.contains_key("radar"));
         assert_eq!(request.commitment, Some(CommitmentLevel::Confirmed as i32));
+    }
+
+    #[test]
+    fn the_limits_are_the_documented_numbers() {
+        assert_eq!(
+            MAX_MESSAGE_BYTES,
+            64 << 20,
+            "Yellowstone providers document 64 MB"
+        );
+        assert_eq!(REFUSED_DELAY, Duration::from_secs(300));
+        assert_eq!(PRUNE_EVERY, Duration::from_secs(5));
+    }
+
+    #[test]
+    fn now_is_the_wall_clock() {
+        let n = now();
+        assert!(n > 1_780_000_000 && n < 4_000_000_000, "{n}");
+    }
+
+    #[test]
+    fn settling_applies_what_is_ready_and_prunes_only_after_five_seconds() {
+        let live = Live::new(usize::MAX);
+        let mut pending = Pending::default();
+        let sig = Signature::new([1; 64]);
+        assert!(pending.transaction(10, sig, Decoded::default()).is_none());
+        pending.newest_slot = 10 + MAX_WAIT_SLOTS + 1;
+
+        let ready = vec![(11, sig, 1_700_000_000, Decoded::default())];
+        assert!(!settle(&live, &mut pending, ready, Duration::from_secs(5)));
+        assert_eq!(
+            live.tape().counts().transactions,
+            1,
+            "applied without pruning"
+        );
+        assert_eq!(live.tape().counts().untimed, 0);
+
+        assert!(settle(
+            &live,
+            &mut pending,
+            vec![],
+            Duration::from_millis(5_001)
+        ));
+        assert_eq!(live.tape().counts().untimed, 1, "slot 10 waited too long");
+    }
+
+    #[test]
+    fn an_empty_token_or_program_list_is_the_same_as_none() {
+        let config = Config::from_vars(&vars(&[
+            (ENDPOINT_VAR, "https://grpc.example.com"),
+            (TOKEN_VAR, "  "),
+            (PROGRAMS_VAR, " "),
+        ]))
+        .unwrap()
+        .unwrap();
+        assert_eq!(config.token, None);
+        assert_eq!(config.programs.len(), DEFAULT_PROGRAMS.len());
+
+        let config = Config::from_vars(&vars(&[
+            (ENDPOINT_VAR, "https://grpc.example.com"),
+            (TOKEN_VAR, " abc "),
+        ]))
+        .unwrap()
+        .unwrap();
+        assert_eq!(config.token.as_deref(), Some("abc"));
     }
 
     #[test]

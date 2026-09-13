@@ -207,6 +207,13 @@ fn adjusted(raw: i128, decimals: u8) -> f64 {
     raw.unsigned_abs() as f64 / 10f64.powi(i32::from(decimals))
 }
 
+/// Whether a balance change went the given way: up when `up`, down otherwise.
+/// Zero goes neither way, so a balance the transaction merely touched is never
+/// a payment and never a pool.
+const fn moved_the_way(delta: i128, up: bool) -> bool {
+    if up { delta > 0 } else { delta < 0 }
+}
+
 /// The payment leg a pool moved against `mint`, in the direction given.
 ///
 /// A known quote asset wins, ranked SOL, USDC, USDT, so a pool that also
@@ -221,7 +228,7 @@ fn payment(
     mint: &Address,
     received: bool,
 ) -> Option<(Address, i128)> {
-    let direction_ok = |d: i128| d != 0 && (d > 0) == received;
+    let direction_ok = |d: i128| moved_the_way(d, received);
     let mut legs: Vec<(Address, i128)> = Vec::new();
     let sol = sol_delta(tx, deltas, pool);
     if direction_ok(sol) {
@@ -267,10 +274,11 @@ pub fn decode(tx: &Tx) -> Decoded {
 
     for mint in coins {
         let moved = deltas.token(&trader, &mint);
-        if moved == 0 {
-            continue;
-        }
-        let bought = moved > 0;
+        let bought = match moved.cmp(&0) {
+            std::cmp::Ordering::Greater => true,
+            std::cmp::Ordering::Less => false,
+            std::cmp::Ordering::Equal => continue,
+        };
         let decimals = deltas.decimals.get(&mint).copied().unwrap_or(0);
 
         // Owners whose balance of the coin went the other way, largest first.
@@ -278,9 +286,7 @@ pub fn decode(tx: &Tx) -> Decoded {
         let mut pools: Vec<(i128, Address)> = deltas
             .tokens
             .iter()
-            .filter(|((owner, m), d)| {
-                *m == mint && *owner != trader && **d != 0 && (**d > 0) != bought
-            })
+            .filter(|((owner, m), d)| *m == mint && *owner != trader && moved_the_way(**d, !bought))
             .map(|((owner, _), d)| (d.abs(), *owner))
             .collect();
         pools.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
@@ -399,6 +405,148 @@ fn launches(tx: &Tx) -> Vec<LaunchSeen> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    use crate::tx::TokenBalance;
+
+    const COIN: Address = Address::new([1; 32]);
+    const OTHER: Address = Address::new([2; 32]);
+    const TRADER: Address = Address::new([10; 32]);
+    const POOL: Address = Address::new([11; 32]);
+    const BYSTANDER: Address = Address::new([12; 32]);
+    const SOL: u64 = 1_000_000_000;
+
+    /// `(token account index, mint, owner, pre, post)`.
+    type Balance = (usize, Address, Address, Option<u64>, Option<u64>);
+
+    /// Accounts are the three owners, then three token accounts. Lamports are
+    /// `(pre, post)` for the three owners; balances are `(token account index,
+    /// mint, owner, pre, post)`, and `None` leaves that side absent.
+    fn tx(lamports: [(u64, u64); 3], balances: &[Balance]) -> Tx {
+        let balance = |i: usize, mint: Address, owner: Address, amount: u64| TokenBalance {
+            account_index: i,
+            mint,
+            owner: Some(owner),
+            amount,
+            decimals: 0,
+        };
+        Tx {
+            slot: 1,
+            signature: radar_types::Signature::new([0; 64]),
+            accounts: vec![
+                TRADER,
+                POOL,
+                BYSTANDER,
+                Address::new([20; 32]),
+                Address::new([21; 32]),
+                Address::new([22; 32]),
+            ],
+            fee: 5_000,
+            pre_lamports: lamports.iter().map(|l| l.0).chain([2_039_280; 3]).collect(),
+            post_lamports: lamports.iter().map(|l| l.1).chain([2_039_280; 3]).collect(),
+            pre_tokens: balances
+                .iter()
+                .filter_map(|b| b.3.map(|a| balance(b.0, b.1, b.2, a)))
+                .collect(),
+            post_tokens: balances
+                .iter()
+                .filter_map(|b| b.4.map(|a| balance(b.0, b.1, b.2, a)))
+                .collect(),
+            instructions: vec![],
+        }
+    }
+
+    #[test]
+    fn a_change_of_zero_moves_neither_way() {
+        assert!(moved_the_way(1, true));
+        assert!(!moved_the_way(0, true));
+        assert!(!moved_the_way(-1, true));
+        assert!(moved_the_way(-1, false));
+        assert!(!moved_the_way(0, false));
+        assert!(!moved_the_way(1, false));
+    }
+
+    #[test]
+    fn the_pool_is_whoever_moved_this_coin_the_other_way_not_a_bigger_mover_of_another() {
+        // The trader buys 100 COIN. The pool sends it and takes 1 SOL. A
+        // bystander moves ten times as much of a different coin and takes 9
+        // SOL -- larger on every axis, and nothing to do with this trade.
+        let d = decode(&tx(
+            [(10 * SOL, 9 * SOL), (5 * SOL, 6 * SOL), (5 * SOL, 14 * SOL)],
+            &[
+                (3, COIN, TRADER, Some(0), Some(100)),
+                (4, COIN, POOL, Some(500), Some(400)),
+                (5, OTHER, BYSTANDER, Some(5_000), Some(4_000)),
+            ],
+        ));
+        assert_eq!(d.fills.len(), 1, "{d:?}");
+        let f = &d.fills[0];
+        assert_eq!((f.mint, f.pool, f.side), (COIN, POOL, MarketSide::Buy));
+        assert!((f.quote_amount - 1.0).abs() < 1e-12, "{f:?}");
+        assert!((f.price - 0.01).abs() < 1e-12, "{f:?}");
+    }
+
+    #[test]
+    fn a_pool_whose_other_balances_did_not_change_leaves_the_trade_unpriced() {
+        // Buy and sell both: the pool's SOL and its OTHER balance are present
+        // and unchanged. Zero is not a payment, so there is no price -- never a
+        // price of zero.
+        for (trader, pool) in [((0, 100), (500, 400)), ((100, 0), (400, 500))] {
+            let d = decode(&tx(
+                [(10 * SOL, 10 * SOL), (5 * SOL, 5 * SOL), (SOL, SOL)],
+                &[
+                    (3, COIN, TRADER, Some(trader.0), Some(trader.1)),
+                    (4, COIN, POOL, Some(pool.0), Some(pool.1)),
+                    (5, OTHER, POOL, Some(7), Some(7)),
+                ],
+            ));
+            assert!(d.fills.is_empty(), "{d:?}");
+            assert_eq!(d.unpriced, 1);
+        }
+    }
+
+    #[test]
+    fn a_coin_the_trader_holds_but_did_not_move_is_not_a_trade() {
+        let d = decode(&tx(
+            [(10 * SOL, 10 * SOL), (5 * SOL, 6 * SOL), (SOL, SOL)],
+            &[
+                (3, COIN, TRADER, Some(100), Some(100)),
+                (4, COIN, POOL, Some(500), Some(400)),
+            ],
+        ));
+        assert!(d.fills.is_empty());
+        assert_eq!(d.unpriced, 0);
+    }
+
+    #[test]
+    fn only_an_account_closed_by_the_transaction_is_reported_as_holding_nothing() {
+        let d = decode(&tx(
+            [(SOL, SOL); 3],
+            &[
+                // Closed: present before, absent after.
+                (3, COIN, TRADER, Some(100), None),
+                // Unchanged and still open.
+                (4, COIN, POOL, Some(500), Some(500)),
+                // Same account index, different mint: does not keep index 3's
+                // COIN balance alive.
+                (3, OTHER, TRADER, None, Some(9)),
+                // A quote asset is never a holding, closed or not.
+                (5, WSOL, BYSTANDER, Some(1), None),
+            ],
+        ));
+        let mut got: Vec<(Address, Address, u64)> = d
+            .holdings
+            .iter()
+            .map(|h| (h.mint, h.account, h.amount))
+            .collect();
+        got.sort();
+        let mut want = vec![
+            (COIN, Address::new([20; 32]), 0),
+            (COIN, Address::new([21; 32]), 500),
+            (OTHER, Address::new([20; 32]), 9),
+        ];
+        want.sort();
+        assert_eq!(got, want);
+    }
 
     #[test]
     fn the_wrapped_sol_constant_is_the_wrapped_sol_mint() {

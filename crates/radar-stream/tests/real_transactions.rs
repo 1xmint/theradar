@@ -317,6 +317,26 @@ fn a_failed_transaction_is_refused_not_folded() {
 }
 
 #[test]
+fn lamports_that_do_not_line_up_with_the_accounts_refuse_the_transaction() {
+    for side in ["pre", "post"] {
+        let mut u = update("pumpfun_buy_in_sol");
+        let meta = u.transaction.as_mut().unwrap().meta.as_mut().unwrap();
+        if side == "pre" {
+            meta.pre_balances.pop();
+        } else {
+            meta.post_balances.pop();
+        }
+        assert!(
+            matches!(
+                Tx::try_from(&u),
+                Err(radar_stream::tx::Unreadable::Malformed(_))
+            ),
+            "{side} balances one short"
+        );
+    }
+}
+
+#[test]
 fn an_unreadable_balance_refuses_the_whole_transaction() {
     let mut u = update("pumpfun_buy_in_sol");
     u.transaction
