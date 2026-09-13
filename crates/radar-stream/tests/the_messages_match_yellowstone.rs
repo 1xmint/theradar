@@ -149,6 +149,10 @@ fn fields(mut buf: &[u8]) -> Vec<(u32, u8, u64, Vec<u8>)> {
 }
 
 #[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one message tree written field by field; split up, a failure stops saying which field"
+)]
 fn a_transaction_update_written_from_the_proto_reads_back_whole() {
     let n = Numbers(numbers());
     let key_a = [1u8; 32];

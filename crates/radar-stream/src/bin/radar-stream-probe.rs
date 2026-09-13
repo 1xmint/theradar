@@ -98,6 +98,11 @@ async fn main() -> ExitCode {
         last = (counts.transactions, counts.fills, bytes);
     }
 
+    summary(&live)
+}
+
+/// The busiest coins and the totals, and whether anything arrived at all.
+fn summary(live: &Live) -> ExitCode {
     let tape = live.tape();
     let counts = tape.counts();
     let newest = tape.newest().unwrap_or(0);
