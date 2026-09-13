@@ -191,6 +191,11 @@ export interface MarketCoin {
   /** Percentage, not basis points -- this is a market figure, not a return.
    *  Null when the window held fewer than two priced fills. */
   change_pct: number | null;
+  /** Creator-supplied, untrusted. Sent only by the live feed, and only for a
+   *  coin whose launch it saw; absent or null otherwise, never a guess. */
+  name?: string | null;
+  /** Creator-supplied, untrusted. Same rules as `name`. */
+  symbol?: string | null;
 }
 
 /** What sorts the coin list may be asked for. Purely a request hint: the
@@ -373,10 +378,13 @@ function holdersSearch(query: HoldersQuery): string {
 
 /** One ranked holder, as `/v1/market/holders/{mint}` sends it. */
 export interface Holder {
-  /** The **token account**, not its owner -- see `Holders.granularity`. */
+  /** A token account or a wallet, as `Holders.granularity` says. */
   account: string;
-  /** The folded balance, `decimals`-adjusted. */
+  /** The balance, `decimals`-adjusted. */
   balance: number;
+  /** Whether this holder acted as a pool in a trade the live feed saw. Only
+   *  the live feed sends it. */
+  pool?: boolean;
 }
 
 /** The holders list, and -- load-bearing -- what kind of fact it is. */

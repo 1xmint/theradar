@@ -20,6 +20,7 @@ import {
   capCaption,
   clearedCost,
   emptyTapeMessage,
+  holdersBasis,
   holdersBasisCaption,
   isNarrowerThanRequested,
   isPossiblyCapped,
@@ -232,6 +233,27 @@ describe("isPossiblyCapped / capCaption", () => {
     // Defensive: this should not happen, and if it does, it is not proof the
     // list is whole.
     expect(isPossiblyCapped(51, 50)).toBe(true);
+  });
+});
+
+describe("holdersBasis", () => {
+  it("says a list seen since launch is every wallet", () => {
+    const caption = holdersBasis("balances_since_launch", "wallet", "2026-09-13 10:00:00", "x");
+    expect(caption).toContain("since launch");
+    expect(caption).toContain("2026-09-13 10:00:00");
+  });
+
+  it("says a list seen only while watching is missing older holders", () => {
+    // The dangerous reading is "these are the holders". For a coin the feed
+    // did not see launch, a holder who bought last week and never moved is
+    // not in this list, and the caption has to say so.
+    const caption = holdersBasis("balances_seen_while_watching", "wallet", "2026-09-13 10:00:00", "x");
+    expect(caption).toContain("not everyone");
+    expect(caption).toContain("2026-09-13 10:00:00");
+  });
+
+  it("still explains the transfer fold the store-backed route sends", () => {
+    expect(holdersBasis("folded_transfers", "token_account", "a", "b")).toContain("over-counts");
   });
 });
 

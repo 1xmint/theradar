@@ -1,0 +1,33 @@
+[package]
+name = "radar-stream"
+description = "The live market feed: a Yellowstone gRPC subscription folded into a bounded in-memory tape."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+
+[dependencies]
+# Hand-written message types rather than `yellowstone-grpc-proto`. That crate
+# builds its types at compile time with a bundled `protoc` binary and pulls in
+# `solana-pubkey`; this crate reads a handful of messages and none of Solana's SDK.
+# `tests/the_messages_match_yellowstone.rs` holds the field numbers to the
+# vendored `.proto` files, so writing them by hand is not trusting them by hand.
+prost = { version = "0.14", default-features = false, features = ["derive", "std"] }
+tonic = { version = "0.14", default-features = false, features = ["channel", "tls-ring", "tls-webpki-roots", "zstd"] }
+tonic-prost = "0.14"
+http = "1"
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
+tokio = { version = "1", default-features = false, features = ["rt-multi-thread", "macros", "sync", "time"] }
+radar-decode.workspace = true
+radar-store.workspace = true
+radar-types.workspace = true
+
+[dev-dependencies]
+bs58.workspace = true
+serde_json.workspace = true
+
+[lints]
+workspace = true
