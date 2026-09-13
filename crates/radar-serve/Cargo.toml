@@ -31,6 +31,9 @@ ring = { version = "0.17", default-features = false }
 thiserror.workspace = true
 rust-embed = { version = "8", default-features = false }
 radar-store.workspace = true
+# The live market feed, when RADAR_STREAM_ENDPOINT is set. Public chain data
+# into a bounded in-memory tape; it holds no key and reaches no signer.
+radar-stream.workspace = true
 # The reply log's type and its fold. Read-only here: this server does not run
 # the analyst, it shows what the analyst wrote.
 radar-analyst.workspace = true

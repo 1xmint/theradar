@@ -76,6 +76,20 @@ export function shortenAddress(value: string, keep = 4): string {
  *  rest of this interface's operator tooling already assumes for a Solana
  *  address, and picking a second explorer would be a second thing to keep
  *  consistent for no reader benefit. */
+/** The three quote assets by name, anything else abbreviated. */
+export function quoteLabel(mint: string): string {
+  switch (mint) {
+    case "So11111111111111111111111111111111111111112":
+      return "SOL";
+    case "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v":
+      return "USDC";
+    case "Es9vMFrzaCERmJfrF4H2FYD4KConky2wcgqDfLpRsXsn":
+      return "USDT";
+    default:
+      return `${mint.slice(0, 4)}…`;
+  }
+}
+
 export function explorerUrl(address: string): string {
   return `https://solscan.io/account/${encodeURIComponent(address)}`;
 }

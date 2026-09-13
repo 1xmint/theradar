@@ -1687,6 +1687,7 @@ dependencies = [
  "radar-risk",
  "radar-roast",
  "radar-store",
+ "radar-stream",
  "radar-types",
  "ring",
  "rust-embed",

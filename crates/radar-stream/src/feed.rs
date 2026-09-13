@@ -220,6 +220,10 @@ pub async fn run(config: Config, live: Arc<Live>) {
             Ok(()) => "the provider ended the stream".to_owned(),
             Err(e) => e,
         };
+        // One line per session end, for journald. Never the token: the
+        // reasons come from tonic's status and transport errors, which do not
+        // carry request metadata.
+        eprintln!("radar-stream: session ended: {reason}; reconnecting in {}s", backoff.as_secs());
         live.status.set_error(reason);
         live.status.reconnects.fetch_add(1, Ordering::Relaxed);
         if started.elapsed() > Duration::from_secs(60) {
