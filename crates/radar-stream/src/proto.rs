@@ -27,6 +27,10 @@ pub enum CommitmentLevel {
 }
 
 #[derive(Clone, PartialEq, prost::Message)]
+#[expect(
+    clippy::zero_sized_map_values,
+    reason = "the wire format is a map of named filters, and blocks_meta's filter has no fields"
+)]
 pub struct SubscribeRequest {
     #[prost(map = "string, message", tag = "3")]
     pub transactions: HashMap<String, SubscribeRequestFilterTransactions>,
@@ -72,6 +76,10 @@ pub struct SubscribeUpdate {
 /// and be ignored, which is the right thing to do with a message nobody asked
 /// for.
 #[derive(Clone, PartialEq, prost::Oneof)]
+#[expect(
+    clippy::large_enum_variant,
+    reason = "one update is decoded, folded and dropped at a time; boxing buys nothing"
+)]
 pub enum UpdateOneof {
     #[prost(message, tag = "4")]
     Transaction(SubscribeUpdateTransaction),

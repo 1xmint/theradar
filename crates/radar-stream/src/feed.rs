@@ -292,19 +292,18 @@ async fn session(config: &Config, live: &Live) -> Result<(), String> {
             .fetch_add(update.encoded_len() as u64, Ordering::Relaxed);
 
         let ready: Vec<(u64, Signature, i64, Decoded)> = match update.update_oneof {
-            Some(UpdateOneof::Transaction(tx_update)) => match Tx::try_from(&tx_update) {
-                Ok(tx) => {
+            Some(UpdateOneof::Transaction(tx_update)) => {
+                if let Ok(tx) = Tx::try_from(&tx_update) {
                     let decoded = decode(&tx);
                     pending
                         .transaction(tx.slot, tx.signature, decoded)
                         .into_iter()
                         .collect()
-                }
-                Err(_) => {
+                } else {
                     live.tape().note_unreadable();
                     Vec::new()
                 }
-            },
+            }
             Some(UpdateOneof::BlockMeta(meta)) => match meta.block_time {
                 Some(time) => pending.block_time(meta.slot, time.timestamp),
                 None => Vec::new(),

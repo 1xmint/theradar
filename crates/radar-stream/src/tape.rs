@@ -26,6 +26,7 @@
 //! candles keep [`CANDLE_MINUTES`] (a day, the widest chart), and holders keep
 //! [`HOLDER_ACCOUNTS`] accounts, dropping the smallest.
 
+use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 
 use radar_store::MarketTrade;
@@ -278,21 +279,23 @@ impl Tape {
         }
         for fill in decoded.fills {
             self.counts.fills += 1;
-            self.fill(fill, slot, signature, &stamp, block_time);
+            self.fill(&fill, slot, signature, &stamp, block_time);
         }
         for holding in decoded.holdings {
-            self.holding(holding, block_time);
+            self.holding(&holding, block_time);
         }
         self.evict();
     }
 
     fn coin(&mut self, mint: Address, at: i64) -> &mut Coin {
-        if !self.coins.contains_key(&mint) {
-            self.coins.insert(mint, Coin::new(at));
-            self.by_activity.insert((at, mint));
-            self.used_bytes += MINT_BYTES;
-        }
-        let coin = self.coins.get_mut(&mint).expect("inserted above");
+        let coin = match self.coins.entry(mint) {
+            Entry::Occupied(existing) => existing.into_mut(),
+            Entry::Vacant(slot) => {
+                self.by_activity.insert((at, mint));
+                self.used_bytes += MINT_BYTES;
+                slot.insert(Coin::new(at))
+            }
+        };
         if at > coin.last_active {
             self.by_activity.remove(&(coin.last_active, mint));
             coin.last_active = at;
@@ -314,8 +317,8 @@ impl Tape {
         coin.first_seen = coin.first_seen.min(at);
     }
 
-    fn fill(&mut self, fill: Fill, slot: u64, signature: Signature, stamp: &str, at: i64) {
-        let mut charged: isize = 0;
+    fn fill(&mut self, fill: &Fill, slot: u64, signature: Signature, stamp: &str, at: i64) {
+        let (mut added, mut removed) = (0usize, 0usize);
         let coin = self.coin(fill.mint, at);
 
         if !coin.pools.contains(&fill.pool) {
@@ -337,10 +340,10 @@ impl Tape {
             price: Some(fill.price),
             trader: Some(fill.trader),
         });
-        charged += TRADE_BYTES as isize;
+        added += TRADE_BYTES;
         if coin.trades.len() > TRADES_PER_MINT {
             coin.trades.pop_front();
-            charged -= TRADE_BYTES as isize;
+            removed += TRADE_BYTES;
         }
 
         let quote = *coin.quote.get_or_insert(fill.quote_mint);
@@ -358,10 +361,10 @@ impl Tape {
                     token_volume: fill.token_amount,
                     trades: 1,
                 });
-                charged += MINUTE_BYTES as isize;
+                added += MINUTE_BYTES;
                 if coin.minutes.len() > CANDLE_MINUTES {
                     coin.minutes.pop_front();
-                    charged -= MINUTE_BYTES as isize;
+                    removed += MINUTE_BYTES;
                 }
             } else if let Some(m) = coin.minutes.iter_mut().rev().find(|m| m.start == start) {
                 // The newest minute, or an earlier one: the feed delivers slots
@@ -379,17 +382,17 @@ impl Tape {
                 m.trades += 1;
             }
         }
-        coin.bytes = coin.bytes.saturating_add_signed(charged);
-        self.used_bytes = self.used_bytes.saturating_add_signed(charged);
+        coin.bytes = (coin.bytes + added).saturating_sub(removed);
+        self.used_bytes = (self.used_bytes + added).saturating_sub(removed);
     }
 
-    fn holding(&mut self, holding: Holding, at: i64) {
-        let mut charged: isize = 0;
+    fn holding(&mut self, holding: &Holding, at: i64) {
+        let (mut added, mut removed) = (0usize, 0usize);
         let coin = self.coin(holding.mint, at);
         coin.decimals = Some(holding.decimals);
         if holding.amount == 0 {
             if coin.holders.remove(&holding.account).is_some() {
-                charged -= HOLDER_BYTES as isize;
+                removed += HOLDER_BYTES;
             }
         } else {
             let balance = HeldBalance {
@@ -397,7 +400,7 @@ impl Tape {
                 amount: holding.amount,
             };
             if coin.holders.insert(holding.account, balance).is_none() {
-                charged += HOLDER_BYTES as isize;
+                added += HOLDER_BYTES;
             }
             if coin.holders.len() > HOLDER_ACCOUNTS {
                 if let Some(smallest) = coin
@@ -407,13 +410,13 @@ impl Tape {
                     .map(|(account, _)| *account)
                 {
                     coin.holders.remove(&smallest);
-                    charged -= HOLDER_BYTES as isize;
+                    removed += HOLDER_BYTES;
                 }
                 coin.holders_truncated = true;
             }
         }
-        coin.bytes = coin.bytes.saturating_add_signed(charged);
-        self.used_bytes = self.used_bytes.saturating_add_signed(charged);
+        coin.bytes = (coin.bytes + added).saturating_sub(removed);
+        self.used_bytes = (self.used_bytes + added).saturating_sub(removed);
     }
 
     /// Drops whole coins, least recently active first, until inside budget.
@@ -601,7 +604,8 @@ mod tests {
         }
     }
 
-    const T0: i64 = 1_800_000_000 - (1_800_000_000 % 60);
+    /// A whole minute, so minute arithmetic in these tests reads plainly.
+    const T0: i64 = 1_800_000_000;
 
     #[test]
     fn a_trade_lands_on_the_tape_and_in_its_minute() {
@@ -643,7 +647,7 @@ mod tests {
     #[test]
     fn a_window_whose_oldest_trades_were_dropped_is_not_complete() {
         let mut tape = Tape::new(usize::MAX);
-        for i in 0..=TRADES_PER_MINT as i64 {
+        for i in 0..=i64::try_from(TRADES_PER_MINT).unwrap() {
             tape.apply(1, Signature::new([1; 64]), T0 + i, tx(vec![fill(1, 2.0, true)]));
         }
         let (trades, complete) = tape.trades(&addr(1), T0, T0 + 10_000);
@@ -660,7 +664,7 @@ mod tests {
         tape.apply(2, Signature::new([2; 64]), T0 + 1, tx(vec![usdc]));
         assert_eq!(tape.trades(&addr(1), T0, T0 + 60).0.len(), 2);
         let (minutes, _) = tape.minutes(&addr(1), T0, T0 + 60);
-        assert_eq!(minutes[0].high, 2.0, "a USDC price never enters a SOL candle");
+        assert!((minutes[0].high - 2.0).abs() < f64::EPSILON, "a USDC price never enters a SOL candle");
     }
 
     #[test]
