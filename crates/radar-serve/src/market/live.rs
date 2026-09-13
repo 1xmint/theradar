@@ -27,8 +27,7 @@ use serde_json::json;
 use super::{
     COINS_WINDOW_SECONDS, DEFAULT_CANDLE_WINDOW_SECONDS, DEFAULT_TRADE_LIMIT,
     DEFAULT_WINDOW_SECONDS, Degradation, MAX_CANDLE_WINDOW_SECONDS, MAX_COINS_LIMIT,
-    MAX_TRADE_LIMIT, clamped_start, is_a_backwards_range, reaching_back, sort_coins,
-    to_fold_trade,
+    MAX_TRADE_LIMIT, clamped_start, is_a_backwards_range, reaching_back, sort_coins, to_fold_trade,
 };
 
 /// Holders returned when the caller names no limit.
@@ -37,7 +36,8 @@ const DEFAULT_HOLDERS_LIMIT: usize = 20;
 const MAX_HOLDERS_LIMIT: usize = 100;
 
 /// Said while the feed is configured and nothing has arrived yet.
-const NOTHING_YET: &str = "the live market feed has not delivered a block yet; it may still be connecting";
+const NOTHING_YET: &str =
+    "the live market feed has not delivered a block yet; it may still be connecting";
 
 /// The exclusive end of a default window: one past the newest block's second.
 const fn window_end(newest: i64) -> i64 {
@@ -59,7 +59,9 @@ pub fn trades(live: &Live, mint: Address, limit: Option<usize>, before: Option<i
     let (rows, complete) = tape.trades(&mint, from, to);
     drop(tape);
 
-    let limit = limit.unwrap_or(DEFAULT_TRADE_LIMIT).clamp(1, MAX_TRADE_LIMIT);
+    let limit = limit
+        .unwrap_or(DEFAULT_TRADE_LIMIT)
+        .clamp(1, MAX_TRADE_LIMIT);
     let trades: Vec<market_fold::Trade> = rows.iter().take(limit).map(to_fold_trade).collect();
     Json(json!({
         "mint": mint.to_string(),
@@ -209,7 +211,10 @@ pub fn token(live: &Live, mint: Address) -> Response {
 
     let (price_value, price_reason) = match price {
         Some((p, _)) => (Some(p), None),
-        None if seen => (None, Some("no priced trade for this coin since the live feed began watching it")),
+        None if seen => (
+            None,
+            Some("no priced trade for this coin since the live feed began watching it"),
+        ),
         None => (None, Some(NOTHING_YET)),
     };
     let metadata_reason = launch.is_none().then_some(
@@ -240,7 +245,9 @@ pub fn holders(live: &Live, mint: Address, limit: Option<usize>) -> Response {
     let Some(newest) = tape.newest() else {
         return nothing_yet();
     };
-    let limit = limit.unwrap_or(DEFAULT_HOLDERS_LIMIT).clamp(1, MAX_HOLDERS_LIMIT);
+    let limit = limit
+        .unwrap_or(DEFAULT_HOLDERS_LIMIT)
+        .clamp(1, MAX_HOLDERS_LIMIT);
     let Some(held) = tape.holders(&mint, limit) else {
         return Degradation::NotCollected(
             "the live feed has seen no balance of this coin since it began watching",
@@ -307,7 +314,10 @@ mod tests {
     #[test]
     fn a_one_minute_roll_up_is_the_minutes_themselves() {
         let t0 = 1_800_000_000;
-        let minutes = [minute(t0, 1.0, 2.0, 1.0, 2.0), minute(t0 + 60, 2.0, 2.0, 1.0, 1.0)];
+        let minutes = [
+            minute(t0, 1.0, 2.0, 1.0, 2.0),
+            minute(t0 + 60, 2.0, 2.0, 1.0, 1.0),
+        ];
         assert_eq!(roll_up(&minutes, 60).len(), 2);
         assert!(roll_up(&minutes, 0).is_empty());
     }

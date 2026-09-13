@@ -49,7 +49,11 @@ async fn main() -> ExitCode {
         "connecting to {} for {seconds}s, {} programs, token {}",
         config.endpoint,
         config.programs.len(),
-        if config.token.is_some() { "set" } else { "not set" }
+        if config.token.is_some() {
+            "set"
+        } else {
+            "not set"
+        }
     );
     let live = Arc::new(Live::new(budget));
     tokio::spawn(feed::run(config, Arc::clone(&live)));
@@ -62,7 +66,12 @@ async fn main() -> ExitCode {
         ticker.tick().await;
         let (counts, coins, used, newest) = {
             let tape = live.tape();
-            (tape.counts(), tape.coins(), tape.used_bytes(), tape.newest())
+            (
+                tape.counts(),
+                tape.coins(),
+                tape.used_bytes(),
+                tape.newest(),
+            )
         };
         let bytes = live.status.bytes.load(Ordering::Relaxed);
         let lag = newest.map(|n| now() - n);

@@ -69,7 +69,9 @@ fn numbers() -> HashMap<String, HashMap<String, u32>> {
             }) else {
                 continue;
             };
-            out.entry(message).or_default().insert(name.to_owned(), number);
+            out.entry(message)
+                .or_default()
+                .insert(name.to_owned(), number);
         }
     }
     out
@@ -160,17 +162,33 @@ fn a_transaction_update_written_from_the_proto_reads_back_whole() {
     bytes(n.of("UiTokenAmount", "amount"), b"123456", &mut ui);
     let mut balance = Vec::new();
     int(n.of("TokenBalance", "account_index"), 1, &mut balance);
-    bytes(n.of("TokenBalance", "mint"), b"So11111111111111111111111111111111111111112", &mut balance);
+    bytes(
+        n.of("TokenBalance", "mint"),
+        b"So11111111111111111111111111111111111111112",
+        &mut balance,
+    );
     bytes(n.of("TokenBalance", "ui_token_amount"), &ui, &mut balance);
-    bytes(n.of("TokenBalance", "owner"), b"11111111111111111111111111111111", &mut balance);
+    bytes(
+        n.of("TokenBalance", "owner"),
+        b"11111111111111111111111111111111",
+        &mut balance,
+    );
 
     let mut inner_ix = Vec::new();
-    int(n.of("InnerInstruction", "program_id_index"), 1, &mut inner_ix);
+    int(
+        n.of("InnerInstruction", "program_id_index"),
+        1,
+        &mut inner_ix,
+    );
     bytes(n.of("InnerInstruction", "accounts"), &[0, 2], &mut inner_ix);
     bytes(n.of("InnerInstruction", "data"), &[7, 7], &mut inner_ix);
     let mut inner = Vec::new();
     int(n.of("InnerInstructions", "index"), 0, &mut inner);
-    bytes(n.of("InnerInstructions", "instructions"), &inner_ix, &mut inner);
+    bytes(
+        n.of("InnerInstructions", "instructions"),
+        &inner_ix,
+        &mut inner,
+    );
 
     let mut err = Vec::new();
     bytes(n.of("TransactionError", "err"), &[5], &mut err);
@@ -184,11 +202,31 @@ fn a_transaction_update_written_from_the_proto_reads_back_whole() {
     for v in [11u64, 21, 31, 41] {
         int(n.of("TransactionStatusMeta", "post_balances"), v, &mut meta);
     }
-    bytes(n.of("TransactionStatusMeta", "inner_instructions"), &inner, &mut meta);
-    bytes(n.of("TransactionStatusMeta", "pre_token_balances"), &balance, &mut meta);
-    bytes(n.of("TransactionStatusMeta", "post_token_balances"), &balance, &mut meta);
-    bytes(n.of("TransactionStatusMeta", "loaded_writable_addresses"), &loaded_w, &mut meta);
-    bytes(n.of("TransactionStatusMeta", "loaded_readonly_addresses"), &loaded_r, &mut meta);
+    bytes(
+        n.of("TransactionStatusMeta", "inner_instructions"),
+        &inner,
+        &mut meta,
+    );
+    bytes(
+        n.of("TransactionStatusMeta", "pre_token_balances"),
+        &balance,
+        &mut meta,
+    );
+    bytes(
+        n.of("TransactionStatusMeta", "post_token_balances"),
+        &balance,
+        &mut meta,
+    );
+    bytes(
+        n.of("TransactionStatusMeta", "loaded_writable_addresses"),
+        &loaded_w,
+        &mut meta,
+    );
+    bytes(
+        n.of("TransactionStatusMeta", "loaded_readonly_addresses"),
+        &loaded_r,
+        &mut meta,
+    );
 
     let mut ix = Vec::new();
     int(n.of("CompiledInstruction", "program_id_index"), 1, &mut ix);
@@ -199,22 +237,58 @@ fn a_transaction_update_written_from_the_proto_reads_back_whole() {
     bytes(n.of("Message", "account_keys"), &key_b, &mut message);
     bytes(n.of("Message", "instructions"), &ix, &mut message);
     let mut transaction = Vec::new();
-    bytes(n.of("Transaction", "signatures"), &signature, &mut transaction);
+    bytes(
+        n.of("Transaction", "signatures"),
+        &signature,
+        &mut transaction,
+    );
     bytes(n.of("Transaction", "message"), &message, &mut transaction);
 
     let mut info = Vec::new();
-    bytes(n.of("SubscribeUpdateTransactionInfo", "signature"), &signature, &mut info);
-    int(n.of("SubscribeUpdateTransactionInfo", "is_vote"), 1, &mut info);
-    bytes(n.of("SubscribeUpdateTransactionInfo", "transaction"), &transaction, &mut info);
-    bytes(n.of("SubscribeUpdateTransactionInfo", "meta"), &meta, &mut info);
-    int(n.of("SubscribeUpdateTransactionInfo", "index"), 42, &mut info);
+    bytes(
+        n.of("SubscribeUpdateTransactionInfo", "signature"),
+        &signature,
+        &mut info,
+    );
+    int(
+        n.of("SubscribeUpdateTransactionInfo", "is_vote"),
+        1,
+        &mut info,
+    );
+    bytes(
+        n.of("SubscribeUpdateTransactionInfo", "transaction"),
+        &transaction,
+        &mut info,
+    );
+    bytes(
+        n.of("SubscribeUpdateTransactionInfo", "meta"),
+        &meta,
+        &mut info,
+    );
+    int(
+        n.of("SubscribeUpdateTransactionInfo", "index"),
+        42,
+        &mut info,
+    );
     let mut tx_update = Vec::new();
-    bytes(n.of("SubscribeUpdateTransaction", "transaction"), &info, &mut tx_update);
-    int(n.of("SubscribeUpdateTransaction", "slot"), 777, &mut tx_update);
+    bytes(
+        n.of("SubscribeUpdateTransaction", "transaction"),
+        &info,
+        &mut tx_update,
+    );
+    int(
+        n.of("SubscribeUpdateTransaction", "slot"),
+        777,
+        &mut tx_update,
+    );
 
     let mut update = Vec::new();
     bytes(n.of("SubscribeUpdate", "filters"), b"radar", &mut update);
-    bytes(n.of("SubscribeUpdate", "transaction"), &tx_update, &mut update);
+    bytes(
+        n.of("SubscribeUpdate", "transaction"),
+        &tx_update,
+        &mut update,
+    );
 
     let read = proto::SubscribeUpdate::decode(update.as_slice()).expect("decodes");
     assert_eq!(read.filters, vec!["radar"]);
@@ -223,26 +297,39 @@ fn a_transaction_update_written_from_the_proto_reads_back_whole() {
     };
     assert_eq!(t.slot, 777);
     let info = t.transaction.unwrap();
-    assert_eq!((info.signature.as_slice(), info.is_vote, info.index), (&signature[..], true, 42));
+    assert_eq!(
+        (info.signature.as_slice(), info.is_vote, info.index),
+        (&signature[..], true, 42)
+    );
     let transaction = info.transaction.unwrap();
     assert_eq!(transaction.signatures, vec![signature.to_vec()]);
     let message = transaction.message.unwrap();
     assert_eq!(message.account_keys, vec![key_a.to_vec(), key_b.to_vec()]);
     assert_eq!(
         message.instructions,
-        vec![proto::CompiledInstruction { program_id_index: 1, accounts: vec![0], data: vec![1, 2, 3] }]
+        vec![proto::CompiledInstruction {
+            program_id_index: 1,
+            accounts: vec![0],
+            data: vec![1, 2, 3]
+        }]
     );
     let meta = info.meta.unwrap();
     assert_eq!(meta.err, Some(proto::TransactionError { err: vec![5] }));
     assert_eq!(meta.fee, 5_000);
     assert_eq!(meta.pre_balances, vec![10, 20, 30, 40]);
     assert_eq!(meta.post_balances, vec![11, 21, 31, 41]);
-    assert_eq!(meta.inner_instructions[0].instructions[0].accounts, vec![0, 2]);
+    assert_eq!(
+        meta.inner_instructions[0].instructions[0].accounts,
+        vec![0, 2]
+    );
     assert_eq!(meta.inner_instructions[0].instructions[0].data, vec![7, 7]);
     let expected_balance = proto::TokenBalance {
         account_index: 1,
         mint: "So11111111111111111111111111111111111111112".into(),
-        ui_token_amount: Some(proto::UiTokenAmount { decimals: 6, amount: "123456".into() }),
+        ui_token_amount: Some(proto::UiTokenAmount {
+            decimals: 6,
+            amount: "123456".into(),
+        }),
         owner: "11111111111111111111111111111111".into(),
     };
     assert_eq!(meta.pre_token_balances, vec![expected_balance.clone()]);
@@ -258,22 +345,38 @@ fn block_time_ping_and_pong_written_from_the_proto_read_back() {
     let mut time = Vec::new();
     int(n.of("UnixTimestamp", "timestamp"), 1_789_305_976, &mut time);
     let mut meta = Vec::new();
-    int(n.of("SubscribeUpdateBlockMeta", "slot"), 446_713_943, &mut meta);
-    bytes(n.of("SubscribeUpdateBlockMeta", "block_time"), &time, &mut meta);
+    int(
+        n.of("SubscribeUpdateBlockMeta", "slot"),
+        446_713_943,
+        &mut meta,
+    );
+    bytes(
+        n.of("SubscribeUpdateBlockMeta", "block_time"),
+        &time,
+        &mut meta,
+    );
     let mut update = Vec::new();
     bytes(n.of("SubscribeUpdate", "block_meta"), &meta, &mut update);
     assert_eq!(
-        proto::SubscribeUpdate::decode(update.as_slice()).unwrap().update_oneof,
-        Some(proto::UpdateOneof::BlockMeta(proto::SubscribeUpdateBlockMeta {
-            slot: 446_713_943,
-            block_time: Some(proto::UnixTimestamp { timestamp: 1_789_305_976 }),
-        }))
+        proto::SubscribeUpdate::decode(update.as_slice())
+            .unwrap()
+            .update_oneof,
+        Some(proto::UpdateOneof::BlockMeta(
+            proto::SubscribeUpdateBlockMeta {
+                slot: 446_713_943,
+                block_time: Some(proto::UnixTimestamp {
+                    timestamp: 1_789_305_976
+                }),
+            }
+        ))
     );
 
     let mut update = Vec::new();
     bytes(n.of("SubscribeUpdate", "ping"), &[], &mut update);
     assert_eq!(
-        proto::SubscribeUpdate::decode(update.as_slice()).unwrap().update_oneof,
+        proto::SubscribeUpdate::decode(update.as_slice())
+            .unwrap()
+            .update_oneof,
         Some(proto::UpdateOneof::Ping(proto::SubscribeUpdatePing {}))
     );
 
@@ -282,8 +385,12 @@ fn block_time_ping_and_pong_written_from_the_proto_read_back() {
     let mut update = Vec::new();
     bytes(n.of("SubscribeUpdate", "pong"), &pong, &mut update);
     assert_eq!(
-        proto::SubscribeUpdate::decode(update.as_slice()).unwrap().update_oneof,
-        Some(proto::UpdateOneof::Pong(proto::SubscribeUpdatePong { id: 3 }))
+        proto::SubscribeUpdate::decode(update.as_slice())
+            .unwrap()
+            .update_oneof,
+        Some(proto::UpdateOneof::Pong(proto::SubscribeUpdatePong {
+            id: 3
+        }))
     );
 }
 
@@ -329,8 +436,14 @@ fn the_subscription_request_encodes_with_the_protos_numbers() {
     };
     assert_eq!(by_number("vote").2, 0, "vote = false");
     assert_eq!(by_number("failed").2, 0, "failed = false");
-    assert_eq!(by_number("account_include").3, config.programs[0].as_bytes());
+    assert_eq!(
+        by_number("account_include").3,
+        config.programs[0].as_bytes()
+    );
 
-    let ping = top.iter().find(|f| f.0 == n.of("SubscribeRequest", "ping")).unwrap();
+    let ping = top
+        .iter()
+        .find(|f| f.0 == n.of("SubscribeRequest", "ping"))
+        .unwrap();
     assert_eq!(fields(&ping.3)[0].0, n.of("SubscribeRequestPing", "id"));
 }

@@ -160,9 +160,10 @@ impl TryFrom<&proto::SubscribeUpdateTransaction> for Tx {
             .chain(&meta.loaded_readonly_addresses)
             .map(|k| address(k, "account key"))
             .collect::<Result<Vec<_>, _>>()?;
-        if meta.pre_balances.len() != accounts.len() || meta.post_balances.len() != accounts.len()
-        {
-            return Err(Unreadable::Malformed("balances do not line up with accounts"));
+        if meta.pre_balances.len() != accounts.len() || meta.post_balances.len() != accounts.len() {
+            return Err(Unreadable::Malformed(
+                "balances do not line up with accounts",
+            ));
         }
 
         let mut instructions: Vec<Instruction> = message

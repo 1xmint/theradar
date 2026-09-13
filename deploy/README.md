@@ -1321,6 +1321,65 @@ It shares the 120/hour quota with `radar-follow` and the hourly `--outcomes`
 cron. The split is arithmetic in `radar_backfill::market_tape`, not
 configuration, so that the pair cannot be widened past the quota by a flag.
 
+### The live feed
+
+A paid Yellowstone gRPC feed replaces the market tape for the screen: every
+trade on the venues in `radar_stream::feed::DEFAULT_PROGRAMS`, a second or two
+behind the chain, with names for pump.fun launches and holders by wallet. It
+runs inside `radar-serve` (no new unit) and holds the recent market in memory,
+512 MiB by default. Off unless `RADAR_STREAM_ENDPOINT` is set.
+
+**1. Prove the credential before touching the site.** `radar-stream-probe` is in
+the release artifact. It connects, folds for the seconds given, prints rates,
+lag and memory every five seconds, and exits non-zero if no trade arrived.
+`read -s` keeps the token out of shell history:
+
+```bash
+read -rs RADAR_STREAM_TOKEN && export RADAR_STREAM_TOKEN
+RADAR_STREAM_ENDPOINT=https://grpc.solanatracker.io ~/bin/radar-stream-probe 120
+```
+
+A healthy line has `connected=true`, `trades/s` in the tens or more, and
+`behind=` of a few seconds. Read `MB/s` too: it is the bandwidth the box will
+carry all day. `subscribe refused: ... PermissionDenied` is the token;
+`connect:` is the endpoint or the network.
+
+**2. Configure the server.** Add to `/etc/radar/radar.env`:
+
+```
+RADAR_STREAM_ENDPOINT=https://grpc.solanatracker.io
+RADAR_STREAM_TOKEN=<the token>
+# Optional. The box has 3.8 GB; the default leaves room for everything else.
+# RADAR_STREAM_MEMORY_MB=512
+```
+
+A malformed endpoint or program list stops `radar-serve` at start with the
+reason, rather than silently serving the store.
+
+**3. Restart and confirm.**
+
+```bash
+sudo systemctl restart radar-serve
+journalctl -u radar-serve -n 30 | grep "market feed"
+curl -s http://127.0.0.1:8402/v1/market/coins | head -c 600
+```
+
+The start line reads `market feed: streaming from ...`. A session that ends
+logs `radar-stream: session ended: <reason>; reconnecting in <n>s`; a refused
+token waits five minutes between tries so it does not get the address
+rate-limited.
+
+**4. Stop the market tape.** The screen no longer reads it, and it spends
+CryptoHouse quota `radar-follow` needs:
+
+```bash
+sudo systemctl disable --now radar-market-tape
+```
+
+**Rolling back** is the reverse: delete the `RADAR_STREAM_*` lines, restart
+`radar-serve`, and `sudo systemctl enable --now radar-market-tape`. The store
+still holds what the tape collected before the feed.
+
 ## Disk
 
 Recorded events run about 1 GiB a month. The box had 48 GiB free at the time of

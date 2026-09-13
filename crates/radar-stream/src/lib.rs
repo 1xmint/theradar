@@ -91,7 +91,10 @@ impl Status {
     }
 
     fn set_error(&self, reason: String) {
-        *self.last_error.lock().unwrap_or_else(PoisonError::into_inner) = Some(reason);
+        *self
+            .last_error
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = Some(reason);
     }
 }
 
@@ -106,7 +109,9 @@ pub fn budget_from_vars(get: &impl Fn(&str) -> Option<String>) -> Result<usize, 
         Some(v) if v.is_empty() => Ok(DEFAULT_BUDGET_BYTES),
         Some(v) => match v.parse::<usize>() {
             Ok(mb) if mb > 0 => Ok(mb.saturating_mul(1024 * 1024)),
-            _ => Err(format!("{MEMORY_VAR} must be a positive whole number of MiB, got '{v}'")),
+            _ => Err(format!(
+                "{MEMORY_VAR} must be a positive whole number of MiB, got '{v}'"
+            )),
         },
     }
 }

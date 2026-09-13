@@ -121,8 +121,13 @@ impl Config {
                 .collect(),
             _ => DEFAULT_PROGRAMS.iter().map(|p| (*p).to_owned()).collect(),
         };
-        if let Some(bad) = programs.iter().find(|p| p.parse::<radar_types::Address>().is_err()) {
-            return Err(format!("{PROGRAMS_VAR} contains '{bad}', which is not an address"));
+        if let Some(bad) = programs
+            .iter()
+            .find(|p| p.parse::<radar_types::Address>().is_err())
+        {
+            return Err(format!(
+                "{PROGRAMS_VAR} contains '{bad}', which is not an address"
+            ));
         }
         Ok(Some(Self {
             endpoint,
@@ -178,7 +183,10 @@ impl Pending {
         if let Some(&time) = self.times.get(&slot) {
             return Some((slot, signature, time, decoded));
         }
-        self.waiting.entry(slot).or_default().push((signature, decoded));
+        self.waiting
+            .entry(slot)
+            .or_default()
+            .push((signature, decoded));
         None
     }
 
@@ -252,7 +260,9 @@ pub async fn run(config: Config, live: Arc<Live>) {
         let started = Instant::now();
         let outcome = session(&config, &live).await;
         live.status.connected.store(false, Ordering::Relaxed);
-        let ended = outcome.err().unwrap_or_else(|| Ended::retry("the provider ended the stream".to_owned()));
+        let ended = outcome
+            .err()
+            .unwrap_or_else(|| Ended::retry("the provider ended the stream".to_owned()));
         delay = next_delay(delay, started.elapsed(), ended.refused);
         // One line per session end, for journald. Never the token: the
         // reasons come from tonic's status and transport errors, which do not
@@ -426,7 +436,12 @@ mod tests {
             .iter()
             .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
             .collect();
-        move |k| owned.iter().find(|(key, _)| key == k).map(|(_, v)| v.clone())
+        move |k| {
+            owned
+                .iter()
+                .find(|(key, _)| key == k)
+                .map(|(_, v)| v.clone())
+        }
     }
 
     #[test]
@@ -454,7 +469,10 @@ mod tests {
         ]))
         .unwrap()
         .unwrap();
-        assert_eq!(config.programs, vec!["6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P"]);
+        assert_eq!(
+            config.programs,
+            vec!["6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P"]
+        );
     }
 
     #[test]
@@ -515,7 +533,10 @@ mod tests {
     #[test]
     fn a_session_that_stayed_up_a_minute_reconnects_after_a_second() {
         let long = Duration::from_secs(61);
-        assert_eq!(next_delay(Duration::from_secs(30), long, false), Duration::from_secs(1));
+        assert_eq!(
+            next_delay(Duration::from_secs(30), long, false),
+            Duration::from_secs(1)
+        );
         assert_eq!(
             next_delay(Duration::from_secs(30), Duration::from_secs(60), false),
             Duration::from_secs(30),
@@ -525,17 +546,25 @@ mod tests {
 
     #[test]
     fn a_refused_credential_waits_five_minutes_however_long_the_session_lasted() {
-        assert_eq!(next_delay(Duration::ZERO, Duration::ZERO, true), REFUSED_DELAY);
-        assert_eq!(next_delay(Duration::ZERO, Duration::from_secs(600), true), REFUSED_DELAY);
+        assert_eq!(
+            next_delay(Duration::ZERO, Duration::ZERO, true),
+            REFUSED_DELAY
+        );
+        assert_eq!(
+            next_delay(Duration::ZERO, Duration::from_secs(600), true),
+            REFUSED_DELAY
+        );
     }
 
     fn block_meta(slot: u64, time: i64) -> SubscribeUpdate {
         SubscribeUpdate {
             filters: vec![],
-            update_oneof: Some(UpdateOneof::BlockMeta(crate::proto::SubscribeUpdateBlockMeta {
-                slot,
-                block_time: Some(crate::proto::UnixTimestamp { timestamp: time }),
-            })),
+            update_oneof: Some(UpdateOneof::BlockMeta(
+                crate::proto::SubscribeUpdateBlockMeta {
+                    slot,
+                    block_time: Some(crate::proto::UnixTimestamp { timestamp: time }),
+                },
+            )),
         }
     }
 
@@ -548,7 +577,10 @@ mod tests {
             update_oneof: Some(UpdateOneof::Ping(crate::proto::SubscribeUpdatePing {})),
         };
         assert_eq!(step(ping, &mut pending, &live), Step::Pong);
-        assert_eq!(step(block_meta(5, 1_700_000_000), &mut pending, &live), Step::Apply(vec![]));
+        assert_eq!(
+            step(block_meta(5, 1_700_000_000), &mut pending, &live),
+            Step::Apply(vec![])
+        );
         assert_eq!(pending.times.get(&5), Some(&1_700_000_000));
     }
 
@@ -558,10 +590,12 @@ mod tests {
         let mut pending = Pending::default();
         let broken = SubscribeUpdate {
             filters: vec![],
-            update_oneof: Some(UpdateOneof::Transaction(crate::proto::SubscribeUpdateTransaction {
-                transaction: None,
-                slot: 9,
-            })),
+            update_oneof: Some(UpdateOneof::Transaction(
+                crate::proto::SubscribeUpdateTransaction {
+                    transaction: None,
+                    slot: 9,
+                },
+            )),
         };
         assert_eq!(step(broken, &mut pending, &live), Step::Apply(vec![]));
         assert_eq!(live.tape().counts().unreadable, 1);
@@ -578,7 +612,11 @@ mod tests {
         assert_eq!(released[0].2, 1_700_000_000);
 
         let ready = pending.transaction(10, sig, Decoded::default());
-        assert_eq!(ready.map(|r| r.2), Some(1_700_000_000), "time already known");
+        assert_eq!(
+            ready.map(|r| r.2),
+            Some(1_700_000_000),
+            "time already known"
+        );
     }
 
     #[test]
@@ -588,7 +626,11 @@ mod tests {
         assert!(pending.transaction(10, sig, Decoded::default()).is_none());
         assert!(pending.transaction(11, sig, Decoded::default()).is_none());
         pending.block_time(10 + MAX_WAIT_SLOTS + 1, 1_700_000_000);
-        assert_eq!(pending.prune(), 1, "slot 10 waited too long; slot 11 is at the edge");
+        assert_eq!(
+            pending.prune(),
+            1,
+            "slot 10 waited too long; slot 11 is at the edge"
+        );
         assert_eq!(pending.prune(), 0, "dropped once, not twice");
     }
 }

@@ -44,8 +44,7 @@ fn balances(v: &Value) -> Vec<proto::TokenBalance> {
             account_index: u32::try_from(b["accountIndex"].as_u64().unwrap()).unwrap(),
             mint: b["mint"].as_str().unwrap().to_owned(),
             ui_token_amount: Some(proto::UiTokenAmount {
-                decimals: u32::try_from(b["uiTokenAmount"]["decimals"].as_u64().unwrap())
-                    .unwrap(),
+                decimals: u32::try_from(b["uiTokenAmount"]["decimals"].as_u64().unwrap()).unwrap(),
                 amount: b["uiTokenAmount"]["amount"].as_str().unwrap().to_owned(),
             }),
             owner: b["owner"].as_str().unwrap_or_default().to_owned(),
@@ -62,7 +61,11 @@ fn keys(v: &Value) -> Vec<Vec<u8>> {
 }
 
 fn u64s(v: &Value) -> Vec<u64> {
-    v.as_array().unwrap().iter().map(|n| n.as_u64().unwrap()).collect()
+    v.as_array()
+        .unwrap()
+        .iter()
+        .map(|n| n.as_u64().unwrap())
+        .collect()
 }
 
 /// The fixture as the protobuf update a Yellowstone provider would send,
@@ -141,7 +144,11 @@ fn decoded(name: &str) -> Decoded {
 
 /// Base units back from an adjusted amount, for an exact comparison.
 fn units(amount: f64, decimals: i32) -> u64 {
-    #[expect(clippy::cast_possible_truncation, clippy::cast_sign_loss, reason = "test rounding")]
+    #[expect(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        reason = "test rounding"
+    )]
     let raw = (amount * 10f64.powi(decimals)).round() as u64;
     raw
 }
@@ -151,14 +158,23 @@ fn a_pumpfun_buy_in_sol_matches_the_programs_own_trade_event() {
     let d = decoded("pumpfun_buy_in_sol");
     assert_eq!(d.fills.len(), 1, "{d:?}");
     let f = &d.fills[0];
-    assert_eq!(f.mint.to_string(), "7dX2JNn1osPpSboYC45tS4SMUDtDmNkPznnkjotmpump");
+    assert_eq!(
+        f.mint.to_string(),
+        "7dX2JNn1osPpSboYC45tS4SMUDtDmNkPznnkjotmpump"
+    );
     assert_eq!(f.side, MarketSide::Buy);
-    assert_eq!(f.trader.to_string(), "E3rU6xViiPQpFUsZsJT2En4RL95F66M8ANnn1X9zzPUg");
+    assert_eq!(
+        f.trader.to_string(),
+        "E3rU6xViiPQpFUsZsJT2En4RL95F66M8ANnn1X9zzPUg"
+    );
     assert_eq!(f.quote_mint, WSOL);
     // TradeEvent: sol_amount 195555555, token_amount 2521151447491.
     assert_eq!(units(f.quote_amount, 9), 195_555_555);
     assert_eq!(units(f.token_amount, 6), 2_521_151_447_491);
-    assert_eq!(f.pool.to_string(), "GCcg6xQoxBcTu44uMDPQXDAep8JczC2gteiFEUw6JZeT");
+    assert_eq!(
+        f.pool.to_string(),
+        "GCcg6xQoxBcTu44uMDPQXDAep8JczC2gteiFEUw6JZeT"
+    );
 }
 
 #[test]
@@ -166,9 +182,15 @@ fn a_pumpfun_sell_in_sol_matches_the_programs_own_trade_event() {
     let d = decoded("pumpfun_sell_in_sol");
     assert_eq!(d.fills.len(), 1, "{d:?}");
     let f = &d.fills[0];
-    assert_eq!(f.mint.to_string(), "AV5bZdnUrSLKjD6nwryCxBPrkdNqsDwjPYQfKcwtpump");
+    assert_eq!(
+        f.mint.to_string(),
+        "AV5bZdnUrSLKjD6nwryCxBPrkdNqsDwjPYQfKcwtpump"
+    );
     assert_eq!(f.side, MarketSide::Sell);
-    assert_eq!(f.trader.to_string(), "CqYJEAT7DstadD8ePZCeDDAZMLrWAz7EKsMPMgH4Zwpa");
+    assert_eq!(
+        f.trader.to_string(),
+        "CqYJEAT7DstadD8ePZCeDDAZMLrWAz7EKsMPMgH4Zwpa"
+    );
     // TradeEvent: sol_amount 1098417567, token_amount 9178065107511.
     assert_eq!(units(f.quote_amount, 9), 1_098_417_567);
     assert_eq!(units(f.token_amount, 6), 9_178_065_107_511);
@@ -183,9 +205,15 @@ fn a_coin_quoted_in_another_token_is_priced_in_that_token() {
     let d = decoded("pumpfun_buy_in_pump");
     assert_eq!(d.fills.len(), 1, "{d:?}");
     let f = &d.fills[0];
-    assert_eq!(f.mint.to_string(), "HP5s4uxwb4dAmLcMnoyzgFreMLSDXgFDthbXh7uTpump");
+    assert_eq!(
+        f.mint.to_string(),
+        "HP5s4uxwb4dAmLcMnoyzgFreMLSDXgFDthbXh7uTpump"
+    );
     assert_eq!(f.side, MarketSide::Buy);
-    assert_eq!(f.quote_mint.to_string(), "pumpCmXqMfrsAkQ5r49WcJnRayYRqmXz6ae8H7H9Dfn");
+    assert_eq!(
+        f.quote_mint.to_string(),
+        "pumpCmXqMfrsAkQ5r49WcJnRayYRqmXz6ae8H7H9Dfn"
+    );
     assert_eq!(units(f.quote_amount, 6), 16_650_322_136);
     assert_eq!(units(f.token_amount, 6), 9_378_107_052_613);
 }
@@ -195,16 +223,27 @@ fn a_launch_is_named_and_its_dev_buy_is_left_unpriced_rather_than_priced_with_re
     let d = decoded("pumpfun_launch_with_dev_buy");
     assert_eq!(d.launches.len(), 1, "{d:?}");
     let launch = &d.launches[0];
-    assert_eq!(launch.mint.to_string(), "3wtSZ7gVriBieLKj3XrSn96dv4XDgQ8fEFwA66qSpump");
+    assert_eq!(
+        launch.mint.to_string(),
+        "3wtSZ7gVriBieLKj3XrSn96dv4XDgQ8fEFwA66qSpump"
+    );
     assert_eq!(launch.symbol, "NABU");
     assert_eq!(launch.name.trim(), "Nabuchodonosor");
-    assert!(launch.uri.starts_with("https://ipfs.io/ipfs/"), "{}", launch.uri);
+    assert!(
+        launch.uri.starts_with("https://ipfs.io/ipfs/"),
+        "{}",
+        launch.uri
+    );
     // The curve account is created in this transaction, so its lamport change
     // is rent plus payment. No price is better than a wrong one.
     assert!(d.fills.is_empty(), "{:?}", d.fills);
     assert_eq!(d.unpriced, 1);
     // The new coin's balances are still recorded: the creator and the curve.
-    assert!(d.holdings.iter().any(|h| h.mint == launch.mint && h.amount > 0));
+    assert!(
+        d.holdings
+            .iter()
+            .any(|h| h.mint == launch.mint && h.amount > 0)
+    );
 }
 
 #[test]
@@ -212,7 +251,10 @@ fn a_pumpswap_sell_is_read_the_same_way() {
     let d = decoded("pumpswap_sell");
     assert_eq!(d.fills.len(), 1, "{d:?}");
     let f = &d.fills[0];
-    assert_eq!(f.mint.to_string(), "Ai8uA5mWG43jKVoxHrRfzGwifSCQsybSj243PYZupump");
+    assert_eq!(
+        f.mint.to_string(),
+        "Ai8uA5mWG43jKVoxHrRfzGwifSCQsybSj243PYZupump"
+    );
     assert_eq!(f.side, MarketSide::Sell);
     assert_eq!(f.quote_mint, WSOL);
     assert_eq!(units(f.quote_amount, 9), 17_547_099);
@@ -252,7 +294,10 @@ fn lookup_table_addresses_extend_the_account_list_in_order() {
         .unwrap()
         .account_keys
         .len();
-    assert!(!meta.loaded_writable_addresses.is_empty(), "the fixture uses a lookup table");
+    assert!(
+        !meta.loaded_writable_addresses.is_empty(),
+        "the fixture uses a lookup table"
+    );
     assert_eq!(
         tx.accounts.len(),
         message_keys + meta.loaded_writable_addresses.len() + meta.loaded_readonly_addresses.len()
@@ -274,7 +319,13 @@ fn a_failed_transaction_is_refused_not_folded() {
 #[test]
 fn an_unreadable_balance_refuses_the_whole_transaction() {
     let mut u = update("pumpfun_buy_in_sol");
-    u.transaction.as_mut().unwrap().meta.as_mut().unwrap().post_token_balances[0]
+    u.transaction
+        .as_mut()
+        .unwrap()
+        .meta
+        .as_mut()
+        .unwrap()
+        .post_token_balances[0]
         .ui_token_amount
         .as_mut()
         .unwrap()

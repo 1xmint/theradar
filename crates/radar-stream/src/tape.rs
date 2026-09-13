@@ -544,7 +544,11 @@ impl Tape {
                 pool: pools.contains(&owner),
             })
             .collect();
-        rows.sort_by(|a, b| b.balance.total_cmp(&a.balance).then_with(|| a.owner.cmp(&b.owner)));
+        rows.sort_by(|a, b| {
+            b.balance
+                .total_cmp(&a.balance)
+                .then_with(|| a.owner.cmp(&b.owner))
+        });
         rows.truncate(limit);
         Some(Holders {
             rows,
@@ -558,7 +562,9 @@ impl Tape {
 /// When watching a coin began: its launch if the feed saw it, else its first
 /// sighting.
 fn watched_from(coin: &Coin) -> i64 {
-    coin.launch.as_ref().map_or(coin.first_seen, |l| l.at.min(coin.first_seen))
+    coin.launch
+        .as_ref()
+        .map_or(coin.first_seen, |l| l.at.min(coin.first_seen))
 }
 
 /// The earliest window start this coin's record is complete from.
@@ -587,7 +593,11 @@ mod tests {
     fn fill(mint: u8, price: f64, buy: bool) -> Fill {
         Fill {
             mint: addr(mint),
-            side: if buy { MarketSide::Buy } else { MarketSide::Sell },
+            side: if buy {
+                MarketSide::Buy
+            } else {
+                MarketSide::Sell
+            },
             token_amount: 10.0,
             quote_amount: 10.0 * price,
             quote_mint: crate::decode::WSOL,
@@ -610,9 +620,24 @@ mod tests {
     #[test]
     fn a_trade_lands_on_the_tape_and_in_its_minute() {
         let mut tape = Tape::new(usize::MAX);
-        tape.apply(1, Signature::new([1; 64]), T0 + 5, tx(vec![fill(1, 2.0, true)]));
-        tape.apply(2, Signature::new([2; 64]), T0 + 30, tx(vec![fill(1, 3.0, false)]));
-        tape.apply(3, Signature::new([3; 64]), T0 + 61, tx(vec![fill(1, 1.0, true)]));
+        tape.apply(
+            1,
+            Signature::new([1; 64]),
+            T0 + 5,
+            tx(vec![fill(1, 2.0, true)]),
+        );
+        tape.apply(
+            2,
+            Signature::new([2; 64]),
+            T0 + 30,
+            tx(vec![fill(1, 3.0, false)]),
+        );
+        tape.apply(
+            3,
+            Signature::new([3; 64]),
+            T0 + 61,
+            tx(vec![fill(1, 1.0, true)]),
+        );
 
         let (trades, _) = tape.trades(&addr(1), T0, T0 + 120);
         assert_eq!(trades.len(), 3);
@@ -621,7 +646,12 @@ mod tests {
         let (minutes, _) = tape.minutes(&addr(1), T0, T0 + 120);
         assert_eq!(minutes.len(), 2);
         assert_eq!(
-            (minutes[0].open, minutes[0].high, minutes[0].low, minutes[0].close),
+            (
+                minutes[0].open,
+                minutes[0].high,
+                minutes[0].low,
+                minutes[0].close
+            ),
             (2.0, 3.0, 2.0, 3.0)
         );
         assert_eq!(minutes[0].trades, 2);
@@ -632,14 +662,23 @@ mod tests {
     fn the_window_is_half_open() {
         let mut tape = Tape::new(usize::MAX);
         tape.apply(1, Signature::new([1; 64]), T0, tx(vec![fill(1, 2.0, true)]));
-        assert_eq!(tape.trades(&addr(1), T0, T0 + 1).0.len(), 1, "start included");
+        assert_eq!(
+            tape.trades(&addr(1), T0, T0 + 1).0.len(),
+            1,
+            "start included"
+        );
         assert_eq!(tape.trades(&addr(1), T0 - 1, T0).0.len(), 0, "end excluded");
     }
 
     #[test]
     fn a_window_reaching_before_watching_began_is_not_complete() {
         let mut tape = Tape::new(usize::MAX);
-        tape.apply(1, Signature::new([1; 64]), T0 + 10, tx(vec![fill(1, 2.0, true)]));
+        tape.apply(
+            1,
+            Signature::new([1; 64]),
+            T0 + 10,
+            tx(vec![fill(1, 2.0, true)]),
+        );
         assert!(!tape.trades(&addr(1), T0, T0 + 60).1);
         assert!(tape.trades(&addr(1), T0 + 10, T0 + 60).1);
     }
@@ -648,11 +687,19 @@ mod tests {
     fn a_window_whose_oldest_trades_were_dropped_is_not_complete() {
         let mut tape = Tape::new(usize::MAX);
         for i in 0..=i64::try_from(TRADES_PER_MINT).unwrap() {
-            tape.apply(1, Signature::new([1; 64]), T0 + i, tx(vec![fill(1, 2.0, true)]));
+            tape.apply(
+                1,
+                Signature::new([1; 64]),
+                T0 + i,
+                tx(vec![fill(1, 2.0, true)]),
+            );
         }
         let (trades, complete) = tape.trades(&addr(1), T0, T0 + 10_000);
         assert_eq!(trades.len(), TRADES_PER_MINT);
-        assert!(!complete, "the first trade was dropped, so the window is short");
+        assert!(
+            !complete,
+            "the first trade was dropped, so the window is short"
+        );
     }
 
     #[test]
@@ -664,7 +711,10 @@ mod tests {
         tape.apply(2, Signature::new([2; 64]), T0 + 1, tx(vec![usdc]));
         assert_eq!(tape.trades(&addr(1), T0, T0 + 60).0.len(), 2);
         let (minutes, _) = tape.minutes(&addr(1), T0, T0 + 60);
-        assert!((minutes[0].high - 2.0).abs() < f64::EPSILON, "a USDC price never enters a SOL candle");
+        assert!(
+            (minutes[0].high - 2.0).abs() < f64::EPSILON,
+            "a USDC price never enters a SOL candle"
+        );
     }
 
     #[test]
@@ -673,14 +723,35 @@ mod tests {
         let budget = 2 * (MINT_BYTES + TRADE_BYTES + MINUTE_BYTES) + TRADE_BYTES + 1;
         let mut tape = Tape::new(budget);
         tape.apply(1, Signature::new([1; 64]), T0, tx(vec![fill(1, 1.0, true)]));
-        tape.apply(2, Signature::new([2; 64]), T0 + 1, tx(vec![fill(2, 1.0, true)]));
-        tape.apply(3, Signature::new([3; 64]), T0 + 2, tx(vec![fill(1, 1.0, true)]));
-        tape.apply(4, Signature::new([4; 64]), T0 + 3, tx(vec![fill(3, 1.0, true)]));
+        tape.apply(
+            2,
+            Signature::new([2; 64]),
+            T0 + 1,
+            tx(vec![fill(2, 1.0, true)]),
+        );
+        tape.apply(
+            3,
+            Signature::new([3; 64]),
+            T0 + 2,
+            tx(vec![fill(1, 1.0, true)]),
+        );
+        tape.apply(
+            4,
+            Signature::new([4; 64]),
+            T0 + 3,
+            tx(vec![fill(3, 1.0, true)]),
+        );
 
         assert!(tape.used_bytes() <= budget);
         assert_eq!(tape.counts().evicted, 1);
-        assert!(tape.trades(&addr(2), T0, T0 + 60).0.is_empty(), "coin 2 was idlest");
-        assert!(!tape.trades(&addr(1), T0, T0 + 60).0.is_empty(), "coin 1 traded again");
+        assert!(
+            tape.trades(&addr(2), T0, T0 + 60).0.is_empty(),
+            "coin 2 was idlest"
+        );
+        assert!(
+            !tape.trades(&addr(1), T0, T0 + 60).0.is_empty(),
+            "coin 1 traded again"
+        );
         assert!(!tape.trades(&addr(3), T0, T0 + 60).0.is_empty());
     }
 
@@ -707,8 +778,11 @@ mod tests {
         tape.apply(2, Signature::new([2; 64]), T0 + 1, second);
 
         let holders = tape.holders(&addr(1), 10).unwrap();
-        let rows: Vec<(Address, f64, bool)> =
-            holders.rows.iter().map(|r| (r.owner, r.balance, r.pool)).collect();
+        let rows: Vec<(Address, f64, bool)> = holders
+            .rows
+            .iter()
+            .map(|r| (r.owner, r.balance, r.pool))
+            .collect();
         assert_eq!(rows, vec![(addr(201), 9.0, true), (addr(200), 3.0, false)]);
         assert!(!holders.since_launch);
     }
@@ -725,21 +799,43 @@ mod tests {
             creator: addr(9),
         }];
         tape.apply(1, Signature::new([1; 64]), T0 + 30, launch);
-        tape.apply(2, Signature::new([2; 64]), T0 + 40, tx(vec![fill(1, 1.0, true)]));
+        tape.apply(
+            2,
+            Signature::new([2; 64]),
+            T0 + 40,
+            tx(vec![fill(1, 1.0, true)]),
+        );
 
-        assert_eq!(tape.launch_of(&addr(1)).map(|l| l.symbol.as_str()), Some("SYM"));
+        assert_eq!(
+            tape.launch_of(&addr(1)).map(|l| l.symbol.as_str()),
+            Some("SYM")
+        );
         // A window reaching back before the launch is still complete: there was
         // nothing to miss.
         assert!(tape.trades(&addr(1), T0, T0 + 60).1);
-        assert_eq!(tape.holders(&addr(1), 10).map(|h| h.since_launch), None, "no balances yet");
+        assert_eq!(
+            tape.holders(&addr(1), 10).map(|h| h.since_launch),
+            None,
+            "no balances yet"
+        );
     }
 
     #[test]
     fn the_coin_list_sums_a_window_of_minutes() {
         let mut tape = Tape::new(usize::MAX);
         tape.apply(1, Signature::new([1; 64]), T0, tx(vec![fill(1, 1.0, true)]));
-        tape.apply(2, Signature::new([2; 64]), T0 + 70, tx(vec![fill(1, 4.0, true)]));
-        tape.apply(3, Signature::new([3; 64]), T0 + 5, tx(vec![fill(2, 1.0, true)]));
+        tape.apply(
+            2,
+            Signature::new([2; 64]),
+            T0 + 70,
+            tx(vec![fill(1, 4.0, true)]),
+        );
+        tape.apply(
+            3,
+            Signature::new([3; 64]),
+            T0 + 5,
+            tx(vec![fill(2, 1.0, true)]),
+        );
         let mut active = tape.active(T0 + 60, T0 + 120);
         active.sort_by_key(|a| a.mint);
         assert_eq!(active.len(), 1, "coin 2 did not trade in the window");

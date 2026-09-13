@@ -88,15 +88,51 @@ fn filled() -> Arc<Live> {
             Decoded {
                 fills: vec![fill(COIN, 0.001, MarketSide::Buy)],
                 holdings: vec![
-                    Holding { mint: COIN, account: Address::new([10; 32]), owner: Some(TRADER), amount: 1_000_000_000, decimals: 6 },
-                    Holding { mint: COIN, account: Address::new([11; 32]), owner: Some(POOL), amount: 9_000_000_000, decimals: 6 },
+                    Holding {
+                        mint: COIN,
+                        account: Address::new([10; 32]),
+                        owner: Some(TRADER),
+                        amount: 1_000_000_000,
+                        decimals: 6,
+                    },
+                    Holding {
+                        mint: COIN,
+                        account: Address::new([11; 32]),
+                        owner: Some(POOL),
+                        amount: 9_000_000_000,
+                        decimals: 6,
+                    },
                 ],
                 ..Decoded::default()
             },
         );
-        tape.apply(3, Signature::new([3; 64]), T0 + 20, Decoded { fills: vec![fill(COIN, 0.003, MarketSide::Buy)], ..Decoded::default() });
-        tape.apply(4, Signature::new([4; 64]), T0 + 70, Decoded { fills: vec![fill(COIN, 0.002, MarketSide::Sell)], ..Decoded::default() });
-        tape.apply(5, Signature::new([5; 64]), T0 + 75, Decoded { fills: vec![fill(QUIET, 5.0, MarketSide::Buy)], ..Decoded::default() });
+        tape.apply(
+            3,
+            Signature::new([3; 64]),
+            T0 + 20,
+            Decoded {
+                fills: vec![fill(COIN, 0.003, MarketSide::Buy)],
+                ..Decoded::default()
+            },
+        );
+        tape.apply(
+            4,
+            Signature::new([4; 64]),
+            T0 + 70,
+            Decoded {
+                fills: vec![fill(COIN, 0.002, MarketSide::Sell)],
+                ..Decoded::default()
+            },
+        );
+        tape.apply(
+            5,
+            Signature::new([5; 64]),
+            T0 + 75,
+            Decoded {
+                fills: vec![fill(QUIET, 5.0, MarketSide::Buy)],
+                ..Decoded::default()
+            },
+        );
     }
     live
 }
@@ -107,8 +143,13 @@ async fn get(live: Arc<Live>, path: &str) -> (StatusCode, Value) {
         .await
         .unwrap();
     let status = response.status();
-    let bytes = axum::body::to_bytes(response.into_body(), 1 << 20).await.unwrap();
-    (status, serde_json::from_slice(&bytes).unwrap_or(Value::Null))
+    let bytes = axum::body::to_bytes(response.into_body(), 1 << 20)
+        .await
+        .unwrap();
+    (
+        status,
+        serde_json::from_slice(&bytes).unwrap_or(Value::Null),
+    )
 }
 
 #[tokio::test]
@@ -120,18 +161,28 @@ async fn the_tape_reads_the_feed_newest_first_including_the_newest_second() {
     assert_eq!(trades[0]["side"], "sell");
     assert_eq!(trades[0]["price"], 0.002);
     assert_eq!(trades[0]["trader"], TRADER.to_string());
-    assert_eq!(body["window"]["complete"], true, "the feed saw this coin launch");
+    assert_eq!(
+        body["window"]["complete"], true,
+        "the feed saw this coin launch"
+    );
 }
 
 #[tokio::test]
 async fn candles_roll_minutes_up_to_the_interval_asked_for() {
     let live = filled();
-    let (status, body) = get(Arc::clone(&live), &format!("/v1/market/candles/{COIN}?interval=1m")).await;
+    let (status, body) = get(
+        Arc::clone(&live),
+        &format!("/v1/market/candles/{COIN}?interval=1m"),
+    )
+    .await;
     assert_eq!(status, StatusCode::OK, "{body}");
     let candles = body["candles"].as_array().unwrap();
     assert_eq!(candles.len(), 2, "{body}");
     assert_eq!(candles[0]["time"], T0);
-    assert_eq!((candles[0]["open"].as_f64(), candles[0]["close"].as_f64()), (Some(0.001), Some(0.003)));
+    assert_eq!(
+        (candles[0]["open"].as_f64(), candles[0]["close"].as_f64()),
+        (Some(0.001), Some(0.003))
+    );
     assert_eq!(candles[0]["trade_count"], 2);
 
     let (_, body) = get(live, &format!("/v1/market/candles/{COIN}?interval=5m")).await;
@@ -153,7 +204,11 @@ async fn the_coin_list_carries_names_for_launches_the_feed_saw() {
     assert_eq!(coins[0]["name"], "Radar Test", "creator whitespace trimmed");
     assert_eq!(coins[0]["tx_count"], 3);
     assert_eq!(coins[0]["price"], 0.002);
-    assert_eq!(coins[1]["name"], Value::Null, "an unseen launch has no name, not a guess");
+    assert_eq!(
+        coins[1]["name"],
+        Value::Null,
+        "an unseen launch has no name, not a guess"
+    );
 }
 
 #[tokio::test]
@@ -167,7 +222,12 @@ async fn the_header_names_the_coin_and_prices_it_from_the_newest_trade() {
 
     let (_, body) = get(filled(), &format!("/v1/market/token/{QUIET}")).await;
     assert_eq!(body["name"], Value::Null);
-    assert!(body["metadata_reason"].as_str().unwrap().contains("did not see this coin launch"));
+    assert!(
+        body["metadata_reason"]
+            .as_str()
+            .unwrap()
+            .contains("did not see this coin launch")
+    );
 }
 
 #[tokio::test]

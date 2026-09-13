@@ -30,9 +30,10 @@
 //! a sell) in another asset.
 //!
 //! Checked against pump.fun's own `TradeEvent` log on eleven real mainnet
-//! trades fetched 2026-09-13: every priced trade matched the event's SOL and
-//! token amounts to the base unit, and every side matched. See
-//! `tests/real_transactions.rs`.
+//! trades fetched 2026-09-13: every side and every token amount matched the
+//! event to the base unit, and so did the SOL payment on all four that were
+//! paid in SOL (the other seven were quoted in PUMP, which the event does not
+//! carry as a SOL amount). `tests/real_transactions.rs` pins a sample.
 //!
 //! # What is left out, on purpose
 //!
@@ -277,7 +278,9 @@ pub fn decode(tx: &Tx) -> Decoded {
         let mut pools: Vec<(i128, Address)> = deltas
             .tokens
             .iter()
-            .filter(|((owner, m), d)| *m == mint && *owner != trader && **d != 0 && (**d > 0) != bought)
+            .filter(|((owner, m), d)| {
+                *m == mint && *owner != trader && **d != 0 && (**d > 0) != bought
+            })
             .map(|((owner, _), d)| (d.abs(), *owner))
             .collect();
         pools.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
@@ -299,7 +302,11 @@ pub fn decode(tx: &Tx) -> Decoded {
         let price = quote_amount / adjusted(pool_moved, decimals);
         out.fills.push(Fill {
             mint,
-            side: if bought { MarketSide::Buy } else { MarketSide::Sell },
+            side: if bought {
+                MarketSide::Buy
+            } else {
+                MarketSide::Sell
+            },
             token_amount: adjusted(moved, decimals),
             quote_amount,
             quote_mint,
@@ -407,7 +414,11 @@ mod tests {
         assert_eq!(quote_rank(&USDC.parse().unwrap()), Some(1));
         assert_eq!(quote_rank(&USDT.parse().unwrap()), Some(2));
         assert_eq!(
-            quote_rank(&"pumpCmXqMfrsAkQ5r49WcJnRayYRqmXz6ae8H7H9Dfn".parse().unwrap()),
+            quote_rank(
+                &"pumpCmXqMfrsAkQ5r49WcJnRayYRqmXz6ae8H7H9Dfn"
+                    .parse()
+                    .unwrap()
+            ),
             None
         );
     }

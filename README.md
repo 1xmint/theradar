@@ -105,6 +105,7 @@ again. This needs nothing from any vendor and it is the largest saving available
 | `radar-model` | Reaching a model provider: the vendor CLI as a subprocess that owns its own credential, or a metered API key. The impure edge `radar-agent` deliberately does not have. |
 | `radar-decode` | Solana program decoders. Matches Anchor discriminator bytes, never logged instruction names; an unrecognised discriminator is a recorded value, never a guess. |
 | `radar-store` | Append-only, slot-partitioned Parquet event log. Nulls mean "not recoverable", never zero; the watermark reaches onto disk. |
+| `radar-stream` | The live market feed: a Yellowstone gRPC subscription read as balance changes, so one fold covers every venue, held in a bounded in-memory tape the market routes read. Off unless `RADAR_STREAM_ENDPOINT` is set. |
 | `radar-backfill` | Bulk historical extraction from CryptoHouse, decoded by the same decoder the live recorder uses. |
 | `radar-instruments` | The instrument registry. One declaration; internal, HTTP, x402 and MCP surfaces derived from it, and every invocation recorded. |
 | `radar-serve` | Ops page, JSON API, stateless MCP (2026-07-28), the x402-priced public surface, and the public site's three documents — stats, leaderboard, pool — served by exact path from published files, never the store. |

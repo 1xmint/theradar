@@ -13,7 +13,10 @@
 //! Everything is `pub` because the probe binary and those tests build and read
 //! these directly; nothing outside this crate should need to.
 
-#![allow(missing_docs, reason = "wire types; each field is named for its .proto field")]
+#![allow(
+    missing_docs,
+    reason = "wire types; each field is named for its .proto field"
+)]
 
 use std::collections::HashMap;
 

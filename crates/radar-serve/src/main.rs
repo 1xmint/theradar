@@ -170,7 +170,11 @@ fn market_feed() -> Result<(radar_serve::market::Market, String), String> {
         "streaming from {} ({} programs, token {}, {} MiB budget)",
         config.endpoint,
         config.programs.len(),
-        if config.token.is_some() { "set" } else { "not set" },
+        if config.token.is_some() {
+            "set"
+        } else {
+            "not set"
+        },
         budget / (1024 * 1024),
     );
     tokio::spawn(radar_stream::feed::run(config, Arc::clone(&live)));
