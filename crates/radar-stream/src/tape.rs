@@ -351,7 +351,7 @@ impl Tape {
             price: Some(fill.price),
             trader: Some(fill.trader),
         });
-        while coin.trades.len() > TRADES_PER_MINT {
+        if coin.trades.len() > TRADES_PER_MINT {
             coin.trades.pop_front();
         }
 
@@ -370,7 +370,7 @@ impl Tape {
                     token_volume: fill.token_amount,
                     trades: 1,
                 });
-                while coin.minutes.len() > CANDLE_MINUTES {
+                if coin.minutes.len() > CANDLE_MINUTES {
                     coin.minutes.pop_front();
                 }
             } else if let Some(m) = coin.minutes.iter_mut().rev().find(|m| m.start == start) {
@@ -413,7 +413,7 @@ impl Tape {
                 amount: holding.amount,
             };
             coin.holders.insert(holding.account, balance);
-            while coin.holders.len() > HOLDER_ACCOUNTS {
+            if coin.holders.len() > HOLDER_ACCOUNTS {
                 if let Some(smallest) = coin
                     .holders
                     .iter()
@@ -876,6 +876,30 @@ mod tests {
         small.apply(4, Signature::new([4; 64]), t + 2, tx(vec![]));
         assert_eq!(small.counts().evicted, 1);
         assert_charged_exactly(&small);
+    }
+
+    #[test]
+    fn a_coin_is_charged_for_each_thing_it_holds() {
+        let mut tape = Tape::new(usize::MAX);
+        let mut t = tx(vec![fill(1, 1.0, true)]);
+        t.holdings = (10..13).map(|a| holding(1, a, 5)).collect();
+        tape.apply(1, Signature::new([1; 64]), T0, t);
+        tape.apply(
+            2,
+            Signature::new([2; 64]),
+            T0 + 1,
+            tx(vec![fill(1, 1.0, true)]),
+        );
+        tape.apply(
+            3,
+            Signature::new([3; 64]),
+            T0 + 61,
+            tx(vec![fill(1, 1.0, true)]),
+        );
+        assert_eq!(
+            tape.used_bytes(),
+            MINT_BYTES + 3 * TRADE_BYTES + 2 * MINUTE_BYTES + 3 * HOLDER_BYTES
+        );
     }
 
     #[test]
