@@ -371,6 +371,36 @@ never hears back holds its claim until a person resolves it. That is the safe
 direction and it is a real cost: an unattended loop can starve itself of capital
 this way, and it cannot lose it.
 
+**As of 2026-09-10 a `consider` run can be read back the morning after.**
+[ADR 0023](adr/0023-a-session-record-is-what-a-replay-would-need.md).
+`radar consider --record` keeps one JSON record per run under
+`<store>/sessions`, and `radar report --store <dir>` renders the newest as a
+page: what the recorder attests it collected, every stage of the funnel
+including the ones that produced nothing, every refusal by reason, every call
+including the ones that bought nothing, the fill clocks, and what the account is
+worth. The command printed a funnel and exited before this.
+
+**What the report refuses to say, which is the point of it.** A run over slots
+no completed collection covers prints *unknown* rather than a candidate count,
+and says so before the first figure —
+[`Coverage`](../crates/radar-store/src/coverage.rs) has held *ran and observed
+nothing* apart from *never ran* since 2026-09-07 and nothing read it until now. A
+holding nobody could price removes the equity total rather than shrinking it, and
+an account nobody could read prints no rows at all. The money cost is
+**unmeasured**, not zero: design 0018 §11 leaves provider and model selection
+unset, so no rate table exists to price a call with. **No earliest eligible entry
+slot is named**, because under the shipped policy there was no eligible slot and
+under an open one there is still no measured build-and-land latency here.
+
+Be exact about the reach. **This is not a replay.** `radar audit replay` is still
+deliberately absent for the reason
+[`audit.rs`](../crates/radar-cli/src/audit.rs) gives: it needs the recorded
+*inputs* to a decision, and this records the run-level half of them — the
+watermark, the versions, the coverage, the spend, the clocks — not the
+per-candidate fact snapshot. It is also not a cohort, an arm or a comparison;
+plan 0011 P5 and [design 0018](design/0018-the-frozen-experiment-manifest.md)
+own those. And a run without `--record` still keeps nothing, deliberately.
+
 **The customer lane also composes, as of 2026-09-01**, in
 [`the_customer_lane_composes.rs`](../crates/radar-exec/tests/the_customer_lane_composes.rs),
 and its shape differs from the local one in the way that matters: **no process in
