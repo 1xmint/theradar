@@ -10,6 +10,10 @@
 (2026-09-07): entry is an explicit quote nomination of a published receipt, not
 every mention. Constraint 4's substance — entry is free and never requires
 holding the token — is unchanged, and so is constraint 3.
+**Venue, fee currency, payout and "When" amended by
+[ADR 0023](0023-realorrug-lives-on-robinhood-chain-and-the-bot-moves-with-it.md)**
+(2026-09-13): the token is realorrug, on Robinhood Chain, with an ETH creator fee;
+the demand gate is dropped. The six constraints stand.
 **Decides:** whether a token is launched at all, what the operator may hold,
 where the money goes, and what the analyst may say about it.
 
