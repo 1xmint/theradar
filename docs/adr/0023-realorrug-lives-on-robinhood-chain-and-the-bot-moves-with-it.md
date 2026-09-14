@@ -31,7 +31,7 @@ chain. Data costs $0 on either chain at our volume, so it decided nothing.
 
 | # | decision | whose |
 |---|---|---|
-| 1 | The token is named **realorrug**. The meme is the brand. The bot still never calls a specific project a rug: [`forbidden.rs`](../../crates/radar-roast/src/forbidden.rs) keeps "rug", and gains an own-name mask | Josh (name); the rule is unchanged |
+| 1 | The token is named **realorrug**. The meme is the brand. The bot still never calls a specific project a rug: [`realorrug:crates/realorrug-roast/src/forbidden.rs`](https://github.com/1xmint/realorrug/blob/main/crates/realorrug-roast/src/forbidden.rs) keeps "rug", and gains an own-name mask | Josh (name); the rule is unchanged |
 | 2 | **Robinhood Chain is the token's permanent home.** It is bridged to Solana later as the same token, never launched twice | Josh, applying "if cost is negligible, Robinhood"; my recommendation agreed |
 | 3 | It launches through a **full-supply bonding curve whose creator fee is paid in ETH**, so ADR 0013 constraints 1 and 2 hold. **If no launcher on the chain does this, the home reverts to pump.fun** | my recommendation, agreed |
 | 4 | ADR 0013's **30-day demand gate is dropped** | Josh |

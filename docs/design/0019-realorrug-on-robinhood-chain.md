@@ -121,9 +121,9 @@ tooling. Research 0035 §2.
 |---|---|---|
 | 1 | no dev buy, no allocation | **holds** if the launcher mints full supply to the curve; Bankr's default 15% vesting must be off, so Bankr is not the route as-is. Must be proven from the launch transaction |
 | 2 | operator holds zero tokens | **holds only with an ETH-denominated creator fee.** A fee paid in the token puts it in the operator's wallet every week. This is the constraint that picks the launcher |
-| 3 | 100% of the creator fee is the weekly prize | **survives in principle, and the code does not.** [`radar-payout`](../../crates/radar-payout/src/lib.rs) is pump.fun's `collect_creator_fee` plus a SOL transfer. [`radar-contest`](../../crates/radar-contest/src/ledger.rs)'s rule has no chain in it, but its ledger does: the claim is "The Solana address, as text" and amounts are `lamports`. **Correction:** during the discussion I called the contest crate chain-agnostic. The rule is; the ledger's money types are not |
+| 3 | 100% of the creator fee is the weekly prize | **survives in principle, and the code does not.** [`radar-payout`](https://github.com/1xmint/realorrug/blob/main/crates/realorrug-payout/src/lib.rs) is pump.fun's `collect_creator_fee` plus a SOL transfer. [`radar-contest`](https://github.com/1xmint/realorrug/blob/main/crates/realorrug-contest/src/ledger.rs)'s rule has no chain in it, but its ledger does: the claim is "The Solana address, as text" and amounts are `lamports`. **Correction:** during the discussion I called the contest crate chain-agnostic. The rule is; the ledger's money types are not |
 | 4 | entry is free, never requires holding | **unchanged**, and ADR 0015's nomination mechanism with it. A winner now claims with an EVM address |
-| 5 | never states the token's price | **holds, with one change.** `RADAR_SELF_MINT` is parsed as a Solana address ([`daemon.rs`](../../crates/radar-analyst/src/daemon.rs)); it has to accept the token's EVM address, and a bridged Solana version's mint as well |
+| 5 | never states the token's price | **holds, with one change.** `RADAR_SELF_MINT` is parsed as a Solana address ([`realorrug:crates/realorrug-analyst/src/daemon.rs`](https://github.com/1xmint/realorrug/blob/main/crates/realorrug-analyst/src/daemon.rs)); it has to accept the token's EVM address, and a bridged Solana version's mint as well |
 | 6 | roasted like anything else | **not met until the bot can read the token.** A narrow own-token reader first; general Robinhood Chain roasting later |
 
 ### 4.5 Recommendation
@@ -189,7 +189,7 @@ as open, not solved.
 ### 5.4 Things the move must fix
 
 - **The banned-words check refuses the bot's own name.**
-  [`forbidden.rs`](../../crates/radar-roast/src/forbidden.rs) line 314 matches
+  [`realorrug:crates/realorrug-roast/src/forbidden.rs`](https://github.com/1xmint/realorrug/blob/main/crates/realorrug-roast/src/forbidden.rs) line 314 matches
   by substring, so "rug" (line 60) fires on "realorrug", and on "drug" or
   "struggle". Line 311 already masks `OWN_DOMAIN`, which is still
   `cabalhunter.org` (line 289). The own-name mask follows that pattern.
