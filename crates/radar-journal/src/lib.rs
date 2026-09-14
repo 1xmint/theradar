@@ -3,8 +3,8 @@
 //!
 //! # Why this exists rather than another log
 //!
-//! [`radar_analyst::log`] already records what was asked, what was measured and
-//! what was said, and its reason is exactly right: the log is what turns a
+//! The reply log (`realorrug_analyst::log`, in the realorrug repository)
+//! records what was asked, what was measured and what was said, and its reason is exactly right: the log is what turns a
 //! public mistake into a **correction** rather than an argument. This does not
 //! replace it and does not change it.
 //!

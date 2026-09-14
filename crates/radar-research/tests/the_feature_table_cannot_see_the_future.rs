@@ -579,8 +579,9 @@ fn the_table_a_store_produces_feeds_the_protocol() {
     features::write(&table, &path).expect("written");
     let read_back = features::read(&path).expect("read");
 
-    let rates = radar_roast::BaseRates::load("../../docs/research/data/0024-base-rates.json")
-        .expect("the repository's own snapshot");
+    let rates =
+        radar_research::baserates::BaseRates::load("../../docs/research/data/0024-base-rates.json")
+            .expect("the repository's own snapshot");
     // A fixture this small is refused for being too small, which is the right
     // answer and is still a join: the table crossed a file and reached the
     // protocol as the protocol's own type.

@@ -40,18 +40,23 @@ Expected, and true on 2026-09-06:
 | `radar-serve.service` | enabled, active |
 | `radar-follow.service` | enabled, active |
 | `radar-market-tape.service` | **not installed** — without it the public terminal's market routes report "not collected", correctly and forever |
-| `radar-analyst.service` | enabled, active — **the X account is live** |
 | `radar-brief.timer` | enabled, active |
 | `radar-brief.service` | static — the timer starts it |
 | `radar-creator-index.timer` | enabled, active |
 | `radar-seven-days.timer` | **not installed** — the daily post cannot run without it |
-| `radar-payout.timer` | **not installed**, and correct: there is no token, so there is no vault |
 | `/etc/systemd/system/radar-hosted.service` | disabled, and **not Radar** — see below |
 
-The two absences are different states and the table says which. The payout
-timer is absent because the thing it pays out of does not exist. The
-seven-days timer is absent because nobody has installed it, and until somebody
-does, the first "seven days later" post finds no file and posts nothing.
+The public analyst and its payout are no longer units this repository installs
+— they deploy from
+[`1xmint/realorrug`'s own `deploy/`](https://github.com/1xmint/realorrug/blob/main/deploy/README.md)
+since the bot moved into that repository (that repository's "the bot stands
+alone" decision, ADR-0024), and that doc has its own verification section.
+Checking radar-analyst.service or radar-payout.timer against this table is
+checking the wrong repository's units.
+
+The seven-days timer is absent because nobody has installed it, and until
+somebody does, the first "seven days later" post finds no file and posts
+nothing.
 
 `radar-serve` should be in the system slice with its sandbox applied:
 
@@ -665,12 +670,9 @@ ssh guardian-vps-tail "curl -s localhost:8402/health | grep -o '\"build\":\"[0-9
 ```
 
 `"unknown"` means the binary was not built by release CI — a local `cargo build`
-sets no `RADAR_BUILD_SHA` and says so rather than inventing one. The analyst
-prints the same commit on start, beside how many accounts the contest excludes:
-
-```bash
-ssh guardian-vps-tail 'journalctl -u radar-analyst -n 40 | grep "^.*build "'
-```
+sets no `RADAR_BUILD_SHA` and says so rather than inventing one. (The public
+analyst printed its own commit the same way; since ADR-0024 that binary and its
+unit live in realorrug, and the same check runs against realorrug's own deploy.)
 
 **This `sudo` prompts for a password.** `guardian`'s NOPASSWD sudoers list
 covers `claw-net-node`, Caddy, Cortex and Pulse — it has no radar entry, so the
@@ -806,373 +808,39 @@ output rather than a placeholder.
 
 ## The public analyst
 
-`radar-analyst` answers mentions with what Radar measured. It is the one service
-here that talks to a third party on a stranger's schedule, so it is a separate
-unit: a crash, a rate limit or a revoked token must not touch the recorder.
+The public analyst, its contest and its payout no longer deploy from this
+repository. They build, deploy and run from
+[`1xmint/realorrug`'s own `deploy/`](https://github.com/1xmint/realorrug/blob/main/deploy/README.md)
+— its units, its X and Telegram credentials, and its payout key — since the
+bot moved into that repository (that repository's "the bot stands alone"
+decision, ADR-0024). That doc is where to look for anything about running the
+bot itself.
 
-**It does not read the store.** Per-mint facts come from RPC on demand and the
-population figures come from a snapshot file, so this unit and the recorder
-share nothing but a disk.
+Three things are still true on this box, reading the same files the bot reads
+and writes rather than importing its crates:
 
-```bash
-sudo install -D -m644 deploy/radar-analyst.service /etc/systemd/system/radar-analyst.service
-sudo install -m 0640 -o root -g guardian deploy/analyst.env.example /etc/radar/analyst.env
-install -m755 dist/radar-analyst ~/bin/radar-analyst
-mkdir -p ~/radar/data/analyst
-sudo systemctl daemon-reload
-sudo systemctl enable --now radar-analyst
-```
-
-**Set `RADAR_RPC` in `/etc/radar/analyst.env` before enabling the unit.** The
-variable is `RADAR_RPC`, not `RADAR_RPC_URL` — the payout uses the second name
-and the analyst reads the first (`RpcClient::from_vars`), so a name copied from
-the payout section silently leaves the analyst on the free public endpoint.
-That is not theoretical: measured on 2026-09-06, **7 of 10 reads came back 429**
-against the public node, and 10 of 10 succeeded against a Helius free-tier
-endpoint. A 429 is a reply the bot does not send.
-
-The unit prints what it is on start — the posture, the commit it was built
-from, and how many accounts the contest excludes:
-
-```bash
-ssh guardian-vps-tail 'journalctl -u radar-analyst -n 40 --no-pager | head -20'
-```
-
-### The two files it reads, and what happens without them
-
-The analyst reads two published measurements from disk. Neither is optional in
-the sense that matters: without them the bot still answers, and says less.
-
-| file | without it |
-|---|---|
-| `docs/research/data/0024-base-rates.json` | replies carry no population context — a recipient count with no distribution to quote it against |
-| `docs/research/data/creator-index.json` | **every reply about a fresh launch says the same thing**, and the venue's own graduation rates go stale with the snapshot |
-| `docs/research/data/population.json` | written beside the index by the same job; without it `/v1/public/stats` answers 404 and the site shows its dated fixture |
-
-Both are read relative to the working directory, which the unit sets to
-`/home/guardian/radar`, so they live at
-`/home/guardian/radar/docs/research/data/`.
-
-The second one is the difference between an account worth following and one that
-gets mentioned once. Measured on 2026-09-04: three real launches produced three
-**identical** replies without it, because the cost figure is a constant and most
-launches sit in the same recipient band. With it, the same command said *"150
-tokens launched by this creator, none of which ever filled its curve"* — which
-is specific, checkable, and said by nobody else.
-
-Build it, and put it on the timer that keeps it current:
+- **`radar brief`** (`deploy/radar-brief.service`/`deploy/radar-brief.timer`)
+  still monitors the reply log and the contest ledger, and still gains its
+  `analyst` and `contest`/`vault` lines from them.
+- **`radar seven-days-later`**
+  (`deploy/radar-seven-days.service`/`deploy/radar-seven-days.timer`) still
+  builds the daily digest the bot's "seven days later" post reads, from that
+  same reply log.
+- **`radar creator-index`**
+  (`deploy/radar-creator-index.service`/`deploy/radar-creator-index.timer`)
+  still builds and publishes ADR-0024's data contract: the creator index with
+  its population summary, and (alongside it, as its own committed research
+  snapshot) the base-rate file at `docs/research/data/0024-base-rates.json`.
+  Those are the two files the bot reads back from this box's disk.
 
 ```bash
 sudo install -D -m644 deploy/radar-creator-index.service /etc/systemd/system/radar-creator-index.service
 sudo install -D -m644 deploy/radar-creator-index.timer   /etc/systemd/system/radar-creator-index.timer
+sudo install -D -m644 deploy/radar-seven-days.service    /etc/systemd/system/radar-seven-days.service
+sudo install -D -m644 deploy/radar-seven-days.timer      /etc/systemd/system/radar-seven-days.timer
 sudo systemctl daemon-reload
-sudo systemctl enable --now radar-creator-index.timer
-
-# And once now, rather than waiting six hours for the first run.
-sudo systemctl start radar-creator-index
-journalctl -u radar-creator-index -n 5 --no-pager
+sudo systemctl enable --now radar-creator-index.timer radar-seven-days.timer
 ```
-
-It took about a minute over 506,821 launches and produced 116,405 creators in a
-13MB file. **Check the count, not the exit status**: a store that cannot be read
-produces an empty index rather than an error, and an empty index makes every
-reply say "this creator has no record here".
-
-**It ships with `main`.** The count in the file is a measurement, so the file is
-not committed — like the store itself, it is built where the data is.
-
-The same pass also measures **the venue's own graduation rates** — how many of
-every launch Radar has recorded and measured ever filled their curve, over time
-or inside their own block — and writes them into the file as `population`. Those
-two figures also exist in `0024-base-rates.json`, where they came from a public
-RPC walking 45 slots; here they are counted over the whole recorded population
-instead, and refreshed every six hours by this timer rather than by hand.
-
-`radar brief` gains an `index` line reporting the creator count, the population
-the replies quote, and how long ago it was rebuilt. **It fails when the rebuild
-is more than twelve hours old** — two missed runs. That is the state nothing else
-would catch: this unit is a `oneshot` with no `Restart=`, so a build that starts
-failing leaves the last good file exactly where it is, and every reply keeps
-quoting a frozen population, confidently. On a host with no index at all the line
-says so and passes, because that is every workstation checkout.
-
-An index written before this existed has no `population` key and still loads:
-absent means *not measured*, and a reply says nothing rather than quoting five
-zeroes. So the first run after upgrading is what starts the figures flowing.
-
-**It starts safely with an empty env file, and that is the point.** Every switch
-is deny-by-default, and each absence is reported rather than assumed:
-
-| absent | what happens |
-|---|---|
-| `RADAR_X_BEARER` / `RADAR_X_USER_ID` | **nothing is read and nothing is posted** — the publisher is the dry run |
-| the four prices | nothing is answered: an unpriced call cannot be metered |
-| `RADAR_ANALYST_DAILY_USD` / `_PER_CALL_USD` | the budget is closed and every call is refused |
-| the limits | the admission gate refuses every mention |
-| `RADAR_MODEL_*` | the deterministic template ships instead of a voice |
-| the base-rate snapshot | replies carry no population context |
-| `RADAR_SELF_MINT` | **no token is the analyst's own** and every coin is answered on the same rule — the right state until the token exists. Set to the mint, a price or market-cap fact about it is dropped before the model sees the sheet (ADR 0013 constraint 5). **Set to something that is not an address, the daemon idles and says so**: a misspelt mint must not switch the rule off for the real token |
-
-A daemon that exits on a missing variable looks like a broken deploy. One that
-runs and says `unfunded` on every tick is legible, and `radar brief` can see it.
-
-**`RADAR_X_BEARER` and `RADAR_X_USER_ID` make the account read. `RADAR_X_PUBLISH=on`
-makes it speak.** They are two switches on purpose.
-
-With the credential alone, the daemon polls real mentions, answers them, and
-writes every answer to the log beside the fact sheet it was built from — saying
-nothing in public. That is the state to spend the first day in, and the state the
-launch gate is read in.
-
-Until 2026-09-05 it was one switch, and pasting a token went straight to a live
-account. There was no way to satisfy the gate — a hundred replies read with their
-evidence — without publishing the hundred. Two wrong figures were found in the
-reply path on 2026-09-04 alone, both by reading real output, so the first hundred
-are exactly where the next one turns up.
-
-The daemon prints which of its three states it is in on every start:
-
-```
-radar-analyst: no credential, so nothing is read and nothing is posted.
-radar-analyst: reading mentions and answering them to the log ONLY -- set RADAR_X_PUBLISH=on to speak in public.
-radar-analyst: RADAR_X_PUBLISH=on but there is no signing credential, so every reply will be answered and none delivered. ...
-radar-analyst: LIVE -- replies are being posted publicly.
-```
-
-### Telegram: the free lane, on a second bot
-
-Design 0009 L5: X is the public record and the contest; Telegram is where the
-same question costs nothing to answer, so it is where the volume goes. The
-daemon runs both lanes from one process and one env file, with the same parser,
-the same gate shape and the same fact path — only the transport differs.
-
-Three things are deliberately separate. **The token** is a different bot from
-the alert channel's (`RADAR_TELEGRAM_BOT_TOKEN`; make it in BotFather and never
-reuse the alert bot's, or a stranger's message can land in the alert chat).
-**The caps** are `RADAR_TELEGRAM_PER_SUMMONER_DAILY`, `RADAR_TELEGRAM_GLOBAL_DAILY`
-and `RADAR_TELEGRAM_DEDUPE_SECONDS`, unset meaning zero meaning refuse. **The
-log** is `telegram.jsonl` beside `replies.jsonl`, and nothing that scores the
-contest reads it — a Telegram answer is kept out of the record by being in a
-different file, not by a flag.
-
-The lane has the same two switches as X: the token makes it read and answer
-into `telegram.jsonl`; `RADAR_TELEGRAM_PUBLISH=on` makes it reply in the chat.
-The daemon prints which state the lane is in on every start, on the line after
-the X posture, and `radar brief`'s `analyst` line gains a telegram count once
-the file exists.
-
-### The two appointments: the week's result and "seven days later"
-
-Design 0009 §7. Both are posts the account makes on its own, and both are
-priced as a top-level post — `RADAR_X_PRICE_POST`, the fifth required price;
-with it unset the daemon answers nothing, as with the other four.
-
-**The week closes** on the first tick after Monday 00:00 UTC. The daemon reads
-the closed week's published replies from `replies.jsonl`, their public metrics
-and the entrants' account ages from X, the week's refusals from
-`refusals.jsonl` (which the gate writes), and the earlier records for the
-cooldown; applies the published rule; writes `data/contest/<week>.json` and
-`hunter-<week>.json` beside it. Then it posts the result — counts, the top
-reply's score and URL, the pool in SOL, never a price or a handle — with the
-winning coin's fact sheet as the reply. Every post is recorded in `posts.jsonl`
-before it is said and again after, like a reply. A week with entries and no X
-client is **not** closed; the daemon says so and tries next tick.
-
-**"Seven days later"** posts at 12:00 UTC from `data/analyst/daily/<date>.json`,
-which `radar seven-days-later` writes at 11:30 on a timer — the one join the
-analyst is not allowed to make, because it reads the store:
-
-```bash
-sudo install -D -m644 deploy/radar-seven-days.service /etc/systemd/system/radar-seven-days.service
-sudo install -D -m644 deploy/radar-seven-days.timer   /etc/systemd/system/radar-seven-days.timer
-sudo systemctl daemon-reload
-sudo systemctl enable --now radar-seven-days.timer
-```
-
-No file, no post. No replies seven days ago, no post and a line in the journal.
-A `<date>.posted` marker stops a day being posted twice. With
-`RADAR_TELEGRAM_CHANNEL` set, both posts also go to that chat.
-
-### The claim: a reply to one specific post
-
-Design 0007 §6.2, built 2026-09-06. After the week closes the account posts a
-**claim prompt** as a reply under its own winning reply, so it lands in the
-thread the winner is already in — the summary names the winner by reply URL,
-which reaches nobody's notifications. The prompt's id is written back into the
-week's record as `claim_prompt`.
-
-**A claim is a reply to that post and nothing else is a claim.** Before this,
-any mention by the winner inside the claim window that contained a base58
-address was read as their claim — and a coin's mint address is such an address,
-so a winner who summoned the bot about a coin during their own claim week would
-have had that mint recorded as their payout address, and the payout would have
-approved it.
-
-What to check on the box:
-
-```bash
-# The prompt's id, once it has posted. `null` means it has not.
-grep -o '"claim_prompt":[^,]*' ~/radar/data/contest/<week>.json
-# The prompt in the post log, whether or not it was published.
-grep '"mention_id":"claim:' ~/radar/data/analyst/posts.jsonl
-```
-
-`claim_prompt: null` means **no claim can be made yet**, deliberately. The
-daemon retries the prompt on every tick while the claim window is open, so a
-post refused by the budget or by a 5xx costs a delay rather than the week. In a
-dry run it is never published, stays `null`, and no claim can land — correct,
-since no winning reply was published either.
-
-An unclaimed week rolls into the next one. That is recoverable; a prize paid to
-a mint account is not, which is why the strict reading is the one that shipped.
-
-### The payout: its own key, unit and user
-
-Design 0007 C4 and ADR 0013. `radar-payout` pays each claimed, unpaid week
-from the creator vault to the claimed address in one transaction —
-`collect_creator_fee`, then a system transfer of everything above the vault's
-rent reserve — and reads that transaction back before the week's record says
-paid. It is **not** the trading signer: a different key, a different user, a
-different unit, and it cannot sign a trade.
-
-```bash
-sudo useradd --system --no-create-home --shell /usr/sbin/nologin radar-payout
-sudo install -m 0400 -o radar-payout -g radar-payout <creator-keypair.json> /etc/radar/payout.json
-sudo install -m 0640 -o root -g radar-payout deploy/payout.env.example /etc/radar/payout.env
-sudo setfacl -m u:radar-payout:rwx /home/guardian/radar/data/contest
-sudo install -m755 dist/radar-payout /usr/local/bin/radar-payout
-sudo install -D -m644 deploy/radar-payout.service /etc/systemd/system/radar-payout.service
-sudo install -D -m644 deploy/radar-payout.timer   /etc/systemd/system/radar-payout.timer
-sudo systemctl daemon-reload
-sudo systemctl enable --now radar-payout.timer
-```
-
-The key is the wallet that launched the token and nothing else: it holds no
-tokens (ADR 0013 constraint 2) and enough SOL for a transaction fee. Its blast
-radius is one week of creator fees. `RADAR_RPC_URL` unset means nothing is paid.
-
-**Stop the timer before paying by hand.** The timer and `record-payout` race
-(finding S29): the timer sees a claimed, unpaid week and pays it while you are
-signing your own transaction for the same week, and the vault funds whichever
-lands first. `sudo systemctl stop radar-payout.timer` before you start, and
-start it again after `record-payout` has written the record.
-
-**The fallback, when the unit cannot run:** `radar contest pay --week N
---creator <wallet> --rpc <url> --dry-run` prints the exact unsigned transaction,
-base64; sign and send it elsewhere; then `radar contest record-payout --week N
---creator <wallet> --rpc <url> --signature <sig>` reads it back through the same
-check the unit uses and records it. A transaction that paid anyone else, or a
-different amount, is refused by the same three lines.
-
-**Two weeks due at once pay in week order, earliest first.** Each payment is
-everything the vault holds above its reserve, so the earliest due week takes the
-vault and the later one waits for the next fees. Before 2026-09-06 the order was
-the contest directory's, which is the filesystem's opinion rather than the
-contest's (finding S18).
-
-**`RADAR_PAYOUT_FLOOR_LAMPORTS` is the smallest prize worth paying.** A week
-that collected less stays unpaid and its prize rolls into the next week; the
-history page says so. Unset means no floor, and the process prints which it is
-using on every run.
-
-### The token: the launch checklist
-
-Design 0007 C7 and ADR 0013. In order, and none skippable. Everything before
-step 6 is Josh's; everything after it is a command that already exists.
-
-1. **The gate is met, in numbers written down before launch** (design 0007 J12):
-   30 days of the bot live on X; 200 distinct summoners; 10% of replies with
-   any engagement. Read them off `radar brief`'s `analyst` line and the reply
-   log. Miss it and the token waits — that is the plan working.
-2. **The legal read** (design 0007 J4; design 0009 §8 lists what to hand over).
-3. **A fresh wallet, for the token and nothing else.** It will hold zero tokens
-   (ADR 0013 constraint 2) and enough SOL for a weekly transaction fee. Its
-   keypair file goes to the box as the payout key — see *The payout* above —
-   and nowhere else.
-4. **Create the token on pump.fun from that wallet with no dev buy.** No
-   allocation, no team or treasury tokens: the launch block's only recipient is
-   the bonding curve (ADR 0013 constraint 1), and that is the first fact the
-   bot will state about it.
-5. **Set `RADAR_SELF_MINT`** to the mint in `/etc/radar/analyst.env` and
-   restart the analyst. A price or market-cap fact about this mint is dropped
-   from the sheet before the model sees it (ADR 0013 constraint 5); a value that
-   does not parse idles the daemon and says so.
-6. **Ask the bot about its own token, from any account.** The reply is the
-   token's fact sheet on the same rule as any other coin — one recipient in the
-   launch block, no history, the venue's base rates. That reply is the first
-   public statement about the token, and it is a measurement.
-7. **Point the site at the endpoints.** `RADAR_SITE_ORIGIN` on `radar-serve`,
-   `RADAR_CONTEST_DIR` set so the `contest` and `vault` checks are armed, the
-   pool page reading `pool.json` once the payout has run once (it writes the
-   reading on every run, dry or not: `radar-payout --week <n> --dry-run`).
-8. **Read `radar brief`.** It gains two lines: `contest` — the latest closed
-   week and where its prize stands — and `vault` — the creator vault as last
-   read, `????` when the reading is missing or more than two days old. Both
-   alarm on absence only once `RADAR_CONTEST_DIR` says a contest runs here.
-9. **The first week.** The record is written on the first tick after Monday
-   00:00 UTC; the summary and the teardown post; the account then posts a
-   **claim prompt** under its own winning reply, and the winner claims by
-   replying **to that post** with an address within seven days; the payout timer
-   pays the next morning and reads the transaction back. Read
-   `data/contest/<week>.json` after each step — it is the evidence, and the
-   leaderboard is built from it.
-
-### Two credentials, because the platform needs two
-
-Reading mentions and posting replies do **not** take the same credential.
-`POST /2/tweets` refuses an app-only bearer token and requires user context —
-checked against `docs.x.com` on 2026-09-05, after the client had already shipped
-sending a bearer to it. Reading would have worked; the first real reply would
-have been refused.
-
-| what | credential | portal name |
-|---|---|---|
-| read mentions | `RADAR_X_BEARER` | Bearer Token |
-| identify the account | `RADAR_X_USER_ID` | the numeric id, not the handle |
-| keep the operator out of their own contest | `RADAR_CONTEST_OPERATORS` | comma-separated numeric ids of **every** account you control, e.g. the one you manage the bot from. `RADAR_X_USER_ID` is always excluded whether or not it is listed, so forgetting this cannot make the bot itself eligible — but it *can* leave your personal account able to enter and win a pool the public is told is theirs. |
-| post a reply | `RADAR_X_API_KEY` + `RADAR_X_API_SECRET` | API Key, API Key Secret |
-| | `RADAR_X_ACCESS_TOKEN` + `RADAR_X_ACCESS_SECRET` | Access Token, Access Token Secret |
-
-OAuth 1.0a rather than OAuth 2.0, deliberately: four static values, no browser
-redirect, no two-hour expiry, and no refresh loop whose failure would leave a bot
-that has quietly stopped talking.
-
-**Set App permissions to "Read and write" before generating the access token.**
-A token minted under "Read" keeps those permissions for life and fails to post
-with a 403 that does not say why.
-
-The numeric user id, which `/2/users/me` will not give you from a bearer:
-
-```bash
-curl -s -H "Authorization: Bearer $RADAR_X_BEARER" \
-  "https://api.x.com/2/users/by/username/thecabalhunter"
-```
-
-```bash
-journalctl -u radar-analyst -f
-tail -f ~/radar/data/analyst/replies.jsonl
-```
-
-The three files it owns live under `RADAR_ANALYST_DIR`, and the unit grants
-write access to that path and nothing else: `replies.jsonl` is the reply log,
-`cursor` is the last mention answered, and `ledger.json` is the day's spend. The
-ledger is what stops a service under `Restart=always` spending the day's budget
-as many times as it can crash, so **do not delete it to "reset" anything**.
-
-`radar brief` gains an `analyst` line reporting how many replies were answered
-and how many were actually published. The gap between those two numbers is the
-one worth watching: a publisher that is down all night fills the log and answers
-nobody.
-
-**That line only *alarms* on a host where `RADAR_ANALYST_DIR` is set.** Setting
-it is the claim that the analyst runs here, and the unit above sets it, so
-installing the analyst is what arms the check. Everywhere else a missing reply
-log is reported in words and graded `ok`, because on a host without the daemon
-it is absent forever and a check that fires every fifteen minutes for weeks
-would teach you to ignore the channel that carries the recorder's death.
-
-So: if you run `radar brief` by hand and want the analyst held to account, run
-it the way the timer does — with the environment file — rather than bare.
 
 ## Knowing when it stopped
 

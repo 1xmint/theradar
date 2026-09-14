@@ -89,7 +89,7 @@ the `verified` column is new.
 | design | row | verified 2026-09-05 | blocked on |
 |---|---|---|---|
 | 0007 A | fix what bites | done except A3: `/etc/radar/alert.env` is absent (read on the box) | one root command |
-| 0007 B | the bot goes public | code complete on the tip. **Not installed**: no unit, no env file, binary predates the stack. **B4 is priced and not built**: `Cost::PostRead` exists in `crates/radar-analyst/src/spend.rs`, and nothing in `crates/radar-analyst/src/x.rs` fetches a post by id — `mentions`, `metrics` and the two posting calls are the whole client. A mention that names no mint and is a reply to one that does is answered "nothing" today | the X credential; the five prices; a root session for the unit and the env file |
+| 0007 B | the bot goes public | code complete on the tip. **Not installed**: no unit, no env file, binary predates the stack. **B4 is priced and not built**: `Cost::PostRead` exists in `realorrug:crates/realorrug-analyst/src/spend.rs`, and nothing in `realorrug:crates/realorrug-analyst/src/x.rs` fetches a post by id — `mentions`, `metrics` and the two posting calls are the whole client. A mention that names no mint and is a reply to one that does is answered "nothing" today | the X credential; the five prices; a root session for the unit and the env file |
 | 0007 C | the token and the contest | C1–C5, C7, C8 on the tip; nothing has touched a chain | the credential; J12; the wallet; the devnet week |
 | 0007 D | trading for humans | nothing built: no `/v1/tokens/{mint}/pretrade`, no `build` route, `web/src/Token.tsx` renders recorded decisions and measurements only | an audience |
 | 0007 E | the learning loop | E2 done. **E1, E3, E4, E5 not built and nothing blocks them**: `radar-research` holds six modules — basis, control, creator index, exits, selection, study — and no features pass, no walk-forward, no research 0026 or 0027 | — |
@@ -114,7 +114,7 @@ follows. Section 8.4 has the full list with what to do; these three matter.
 2. **The price count and the switch count disagree inside two documents.**
    `docs/STATE.md` says "the four prices have no defaults" and, sixty lines
    later, "the fifth required price"; `deploy/README.md` does the same. Five
-   is right (`Cost` in `crates/radar-analyst/src/spend.rs` has five
+   is right (`Cost` in `realorrug:crates/realorrug-analyst/src/spend.rs` has five
    variants). STATE.md also still describes one switch — the credential
    alone — where #141 made it two (`RADAR_X_PUBLISH=on` speaks).
 3. **`crates/radar-graph/src/lib.rs` carries "68% … against 5%" beside
@@ -388,8 +388,8 @@ What needs no root, and can be done the day the stack merges: the three
 `~/bin` binaries from the merged build, so `population.json` starts flowing on
 the next creator-index run and `/v1/public/stats` stops answering 404. What
 needs one root session, in one sitting, with the exact commands already in
-`deploy/README.md`: `radar-analyst.service` and `/etc/radar/analyst.env`;
-`radar-seven-days.timer`; `radar-payout.service` when the wallet exists;
+`deploy/README.md`: `realorrug:deploy/realorrug-analyst.service` and `/etc/radar/analyst.env`;
+`radar-seven-days.timer`; `realorrug:deploy/realorrug-payout.service` when the wallet exists;
 `/etc/radar/alert.env`; the second `ExecStart` from A-2; the deploy timer from
 A-4; the NOPASSWD line for the three restarts. Then the 24-hour dry run, which
 needs the credential.
@@ -569,7 +569,7 @@ Radar's intelligence", made checkable.
 5. It has been an E1 feature first, so the base-rate note was written from
    the same pass that feeds E3.
 
-The boundary is `FactSheet::build` in `crates/radar-roast/src/sheet.rs`. A new
+The boundary is `FactSheet::build` in `realorrug:crates/realorrug-roast/src/sheet.rs`. A new
 fact is a `push_*` there, tagged `About::Measurement`, and nothing else in the
 reply path changes.
 

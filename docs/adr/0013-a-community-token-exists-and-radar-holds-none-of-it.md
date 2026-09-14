@@ -103,9 +103,12 @@ own economics is the thing the analyst exists to expose.
 ## What this commits to
 
 - The constraints above, in code where code can hold them: constraint 5 in
-  [`crates/radar-roast/src/forbidden.rs`](../../crates/radar-roast/src/forbidden.rs)
-  and [`sheet.rs`](../../crates/radar-roast/src/sheet.rs); constraints 3 and 4
-  in the contest crate and its payout policy.
+  [`realorrug:crates/realorrug-roast/src/forbidden.rs`](https://github.com/1xmint/realorrug/blob/main/crates/realorrug-roast/src/forbidden.rs)
+  and [`realorrug:crates/realorrug-roast/src/sheet.rs`](https://github.com/1xmint/realorrug/blob/main/crates/realorrug-roast/src/sheet.rs)
+  (both now in `realorrug-roast`; the bot moved to
+  [1xmint/realorrug](https://github.com/1xmint/realorrug) on 2026-09-14);
+  constraints 3 and 4 in the contest crate and its payout policy, likewise
+  moved.
 - The payout key is **not** the trading signer, does not touch
   [`crates/radar-risk`](../../crates/radar-risk), and never holds customer
   funds. Its blast radius is one week of creator fees.

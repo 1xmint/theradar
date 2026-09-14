@@ -110,8 +110,10 @@ pub fn wilson_bounds(hits: u64, n: u64) -> Option<(f64, f64)> {
     ))
 }
 
+pub mod baserates;
 pub mod basis;
 pub mod control;
+pub mod creator;
 pub mod creator_index;
 pub mod edge;
 pub mod exits;

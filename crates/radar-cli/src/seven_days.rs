@@ -9,15 +9,104 @@
 //!
 //! The rows are for the day **seven days before** the run: what the bot was
 //! asked about a week ago, and what the chain has done since.
+//!
+//! # The bot moved; this file's shape did not
+//!
+//! Until 2026-09-14 the reply log's [`Entry`](radar_backfill::analyst_log::Entry)
+//! and the [`Row`]/[`Rows`] shape below both lived in `radar-analyst`, whose
+//! own daemon read the file this command writes and posted from it. That bot
+//! now lives in its own repository
+//! ([ADR 0024](https://github.com/1xmint/theradar/blob/main/docs/adr/0024-the-bot-stands-alone.md)),
+//! and this command still runs on the box on the same timer -- so the
+//! `daily/<date>.json` file it writes keeps the exact field names its reader
+//! expects, even though nothing in this repository parses it back.
 
 use std::collections::BTreeMap;
 
-use radar_analyst::daily::{Graduation, Row, Rows};
 use radar_asof::AsOf;
+use radar_backfill::analyst_log::Entry;
 use radar_store::{GraduationMode, Outcome};
+use serde::{Deserialize, Serialize};
 
 /// Seconds in a day.
 const DAY: u64 = 86_400;
+
+/// How a coin graduated, as the store measured it.
+///
+/// The exact shape `radar_analyst::daily::Graduation` used, kept unchanged: a
+/// reader of `daily/<date>.json` depends on the field names, not on which
+/// crate wrote them.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Graduation {
+    /// The curve completed within a few slots of the launch.
+    Instant,
+    /// The curve filled over time.
+    Organic,
+}
+
+/// One coin the bot was asked about, seven days on.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Row {
+    /// The coin.
+    pub mint: String,
+    /// When the bot answered, seconds since the epoch.
+    pub asked_at: u64,
+    /// The published reply, when there was one.
+    pub reply_id: Option<String>,
+    /// How it graduated, or `None` for not (as far as the store has seen).
+    pub graduation: Option<Graduation>,
+    /// Whether no transfer has been seen since the slot the reply was read
+    /// at. `None` when the store has no transfer slot for it at all.
+    pub quiet_since_reply: Option<bool>,
+    /// Held from first fill to last observed price, in basis points, when
+    /// both were measured.
+    pub held_bps: Option<i64>,
+}
+
+/// The day's rows, as this command writes them.
+#[expect(
+    clippy::struct_field_names,
+    reason = "the field is `rows`, matching the on-disk shape a reader still expects"
+)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Rows {
+    /// The day the replies were made, `YYYY-MM-DD`.
+    pub asked_on: String,
+    /// When the job ran, seconds since the epoch.
+    pub built_at: u64,
+    /// The store's watermark the outcomes were read at.
+    pub watermark_slot: u64,
+    /// The coins.
+    pub rows: Vec<Row>,
+}
+
+impl Rows {
+    /// Writes a day's file, via a sibling and a rename.
+    ///
+    /// # Errors
+    ///
+    /// The I/O error.
+    pub fn write(&self, path: &str) -> std::io::Result<()> {
+        let text = serde_json::to_string_pretty(self).map_err(std::io::Error::other)?;
+        let tmp = format!("{path}.tmp");
+        std::fs::write(&tmp, text)?;
+        std::fs::rename(&tmp, path)
+    }
+}
+
+/// The `YYYY-MM-DD` of a moment.
+#[must_use]
+pub fn date_of(secs: u64) -> String {
+    radar_types::civil::date_from_days(i64::try_from(secs / DAY).unwrap_or(i64::MAX))
+}
+
+/// Where a day's rows live. The same path
+/// `radar_analyst::daily::paths_for` derived.
+#[must_use]
+fn rows_path(daily_dir: &str, date: &str) -> String {
+    format!("{daily_dir}/{date}.json")
+}
 
 /// Runs the command.
 ///
@@ -38,8 +127,8 @@ pub fn run(args: &[String]) -> Result<(), String> {
             .map_or(0, |d| d.as_secs()),
     };
 
-    let log =
-        radar_analyst::log::latest(&format!("{analyst_dir}/replies.jsonl")).unwrap_or_default();
+    let log = radar_backfill::analyst_log::latest(&format!("{analyst_dir}/replies.jsonl"))
+        .unwrap_or_default();
     let watermark = reader
         .watermark()
         .map_err(|e| format!("cannot read the watermark: {e}"))?
@@ -51,8 +140,7 @@ pub fn run(args: &[String]) -> Result<(), String> {
     let rows = build(&log, &outcomes, today, watermark.get());
     let daily_dir = format!("{analyst_dir}/daily");
     std::fs::create_dir_all(&daily_dir).map_err(|e| format!("cannot create {daily_dir}: {e}"))?;
-    let (path, _) =
-        radar_analyst::daily::paths_for(&daily_dir, &radar_analyst::daily::date_of(today));
+    let path = rows_path(&daily_dir, &date_of(today));
     rows.write(&path)
         .map_err(|e| format!("cannot write {path}: {e}"))?;
     println!(
@@ -72,12 +160,7 @@ pub fn run(args: &[String]) -> Result<(), String> {
 /// a mint the store has not measured gets a row with every field unknown,
 /// which the post counts as a coin asked about and nothing else.
 #[must_use]
-pub fn build(
-    log: &[radar_analyst::Entry],
-    outcomes: &[Outcome],
-    today: u64,
-    watermark_slot: u64,
-) -> Rows {
+pub fn build(log: &[Entry], outcomes: &[Outcome], today: u64, watermark_slot: u64) -> Rows {
     let asked_day = (today / DAY).saturating_sub(7);
     let (from, to) = (asked_day * DAY, (asked_day + 1) * DAY);
 
@@ -133,7 +216,7 @@ pub fn build(
         .collect();
 
     Rows {
-        asked_on: radar_analyst::daily::date_of(from),
+        asked_on: date_of(from),
         built_at: today,
         watermark_slot,
         rows,
@@ -145,24 +228,13 @@ mod tests {
     use super::*;
     use radar_types::{Address, Slot};
 
-    fn entry(
-        mint: [u8; 32],
-        at: u64,
-        reply: Option<&str>,
-        slot: Option<u64>,
-    ) -> radar_analyst::Entry {
-        radar_analyst::Entry {
+    fn entry(mint: [u8; 32], at: u64, reply: Option<&str>, slot: Option<u64>) -> Entry {
+        Entry {
             at,
             mention_id: format!("m-{}", mint[0]),
-            summoner: "s".to_owned(),
             mint: Some(Address::new(mint).to_string()),
             read_at_slot: slot,
-            fact_sheet: String::new(),
-            reply: "measured".to_owned(),
-            fellback: None,
             reply_id: reply.map(str::to_owned),
-            signals: None,
-            pointed_at: None,
         }
     }
 
@@ -312,6 +384,40 @@ mod tests {
         assert_eq!(
             build(&log, &moved, today, 800_000).rows[0].quiet_since_reply,
             Some(false)
+        );
+    }
+
+    #[test]
+    fn rows_write_via_a_sibling_and_a_rename_and_the_path_matches_the_old_layout() {
+        let dir = std::env::temp_dir().join(format!("radar-seven-days-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("mkdir");
+        let dir_str = dir.to_string_lossy().into_owned();
+
+        assert_eq!(date_of(20_701 * DAY + 12 * 3_600), "2026-09-05");
+        let path = rows_path(&dir_str, "2026-09-05");
+        assert_eq!(path, format!("{dir_str}/2026-09-05.json"));
+
+        let rows = Rows {
+            asked_on: "2026-08-29".to_owned(),
+            built_at: 1_788_600_000,
+            watermark_slot: 444_505_805,
+            rows: vec![Row {
+                mint: "M".to_owned(),
+                asked_at: 1,
+                reply_id: Some("r".to_owned()),
+                graduation: None,
+                quiet_since_reply: None,
+                held_bps: None,
+            }],
+        };
+        rows.write(&path).expect("write");
+        let text = std::fs::read_to_string(&path).expect("read back");
+        let back: Rows = serde_json::from_str(&text).expect("parses");
+        assert_eq!(back, rows);
+        assert!(
+            !std::path::Path::new(&format!("{path}.tmp")).exists(),
+            "the temporary file must not survive"
         );
     }
 }

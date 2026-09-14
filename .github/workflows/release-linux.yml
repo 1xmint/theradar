@@ -69,7 +69,7 @@ jobs:
       - name: Build release binaries
         env:
           RADAR_BUILD_SHA: ${{ github.sha }}
-        run: cargo build --release --locked -p radar-serve -p radar-cli -p radar-backfill -p radar-signer -p radar-analyst
+        run: cargo build --release --locked -p radar-serve -p radar-cli -p radar-backfill -p radar-signer
 
       - name: Record what was built
         run: |
@@ -77,7 +77,7 @@ jobs:
             echo "commit: ${GITHUB_SHA}"
             echo "built:  $(date -u +%Y-%m-%dT%H:%M:%SZ)"
             echo
-            for b in radar-serve radar radar-backfill radar-signer radar-analyst; do
+            for b in radar-serve radar radar-backfill radar-signer; do
               printf '%s  %s\n' "$(sha256sum "target/release/$b" | cut -d' ' -f1)" "$b"
             done
           } > target/release/BUILD-INFO.txt
@@ -93,5 +93,4 @@ jobs:
             target/release/radar
             target/release/radar-backfill
             target/release/radar-signer
-            target/release/radar-analyst
             target/release/BUILD-INFO.txt
