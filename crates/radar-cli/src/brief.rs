@@ -1264,19 +1264,6 @@ fn build_field(body: &str) -> Option<&str> {
     (!value.is_empty() && value != "unknown").then_some(value)
 }
 
-/// What the trading lane is doing, which is nothing.
-///
-/// Stated every run rather than only when it changes. An operator reading a
-/// brief should never have to remember whether capital is armed, and a line that
-/// appears only on change is a line whose absence means two different things.
-/// The contest: which week last closed, and where its prize stands.
-///
-/// Design 0007 C7. Reads the week records the analyst writes at close and
-/// reports the latest: winner or none, claimed or not, paid or not. Absent is
-/// `Unknown` once `RADAR_CONTEST_DIR` says a contest runs here -- a week that
-/// closed with no record is the week-close job not running -- and `Ok`
-/// otherwise, for the reason the analyst check gives: every host without the
-/// account is legitimately without records.
 /// One contest week's record, as much of it as `radar brief` reads.
 ///
 /// The shape `radar_contest::ledger::Record` wrote, kept unchanged: this
@@ -1354,6 +1341,19 @@ fn contest_records_in(dir: &std::path::Path) -> Vec<ContestRecord> {
         .collect()
 }
 
+/// What the trading lane is doing, which is nothing.
+///
+/// Stated every run rather than only when it changes. An operator reading a
+/// brief should never have to remember whether capital is armed, and a line that
+/// appears only on change is a line whose absence means two different things.
+/// The contest: which week last closed, and where its prize stands.
+///
+/// Design 0007 C7. Reads the week records the analyst writes at close and
+/// reports the latest: winner or none, claimed or not, paid or not. Absent is
+/// `Unknown` once `RADAR_CONTEST_DIR` says a contest runs here -- a week that
+/// closed with no record is the week-close job not running -- and `Ok`
+/// otherwise, for the reason the analyst check gives: every host without the
+/// account is legitimately without records.
 fn contest(dir: &str, declared: bool) -> Check {
     let missing = if declared {
         Status::Unknown
@@ -2857,6 +2857,13 @@ mod tests {
         // last. Re-applied by taking the first record found: on a directory
         // that lists 2957 before 2956 this still passes, so the assertion is on
         // the week and on the claim window, which only the latest has open.
+        // A copy of a record under any name but `<week>.json` is not a record:
+        // a backup beside the ledger must not count as a week that closed.
+        // Re-applied by joining the two name tests with `||`: `copy.json`
+        // parses as a record and the count below reads 3.
+        std::fs::copy(format!("{dir}/2956.json"), format!("{dir}/copy.json")).expect("copy");
+        std::fs::copy(format!("{dir}/2956.json"), format!("{dir}/2958.json.bak")).expect("copy");
+
         let check = contest(dir, true);
         assert_eq!(check.status, Status::Ok, "{}", check.detail);
         assert!(
@@ -2864,8 +2871,15 @@ mod tests {
             "{}",
             check.detail
         );
+        // Seven days to claim, written as a number so the arithmetic is what
+        // is pinned: CI's mutants turned the constant's `*` and the window's
+        // `+` into other operators, and "window closes" alone passed them all.
+        assert_eq!(CLAIM_WINDOW_SECONDS, 604_800);
+        let window_closes = from_epoch(i64::try_from(closes_at(2957) + 604_800).expect("fits"));
         assert!(
-            check.detail.contains("winner unclaimed, window closes"),
+            check
+                .detail
+                .contains(&format!("winner unclaimed, window closes {window_closes}")),
             "{}",
             check.detail
         );

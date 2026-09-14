@@ -184,4 +184,27 @@ mod tests {
         assert_eq!(entries.len(), 1, "the two lines fold to one reply");
         assert_eq!(entries[0].reply_id.as_deref(), Some("r1"));
     }
+
+    #[test]
+    fn latest_keeps_a_reply_logged_once_in_order_of_first_appearance() {
+        // A reply refused before publishing is logged once. Re-applied by
+        // deleting the `!` in `latest`: an id is then only listed on its
+        // second line, so m1 and m3 vanish and m2 comes first.
+        let dir = std::env::temp_dir().join(format!("radar-alog-order-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("mkdir");
+        let path = dir.join("replies.jsonl");
+        let text = format!(
+            "{}\n{}\n{}\n{}\n",
+            line("m1", 100, Some("MINT1"), None),
+            line("m2", 101, Some("MINT2"), None),
+            line("m2", 101, Some("MINT2"), Some("r2")),
+            line("m3", 102, None, None),
+        );
+        std::fs::write(&path, text).expect("write");
+
+        let entries = latest(path.to_str().expect("a path")).expect("latest");
+        let ids: Vec<&str> = entries.iter().map(|e| e.mention_id.as_str()).collect();
+        assert_eq!(ids, ["m1", "m2", "m3"]);
+        assert_eq!(entries[1].reply_id.as_deref(), Some("r2"));
+    }
 }
