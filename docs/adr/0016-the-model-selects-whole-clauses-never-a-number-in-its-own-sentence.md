@@ -2,8 +2,10 @@
 # ADR 0016 — The model selects whole clauses, never a number in its own sentence
 
 **Date:** 2026-09-07
-**Status:** accepted, and **implemented 2026-09-08** in
-[`crates/radar-roast/src/clause.rs`](../../crates/radar-roast/src/clause.rs).
+**Status:** accepted, and **implemented 2026-09-08** in what was then
+crates/radar-roast/src/clause.rs; that crate moved to
+[1xmint/realorrug](https://github.com/1xmint/realorrug) on 2026-09-14 as
+[`realorrug:crates/realorrug-roast/src/clause.rs`](https://github.com/1xmint/realorrug/blob/main/crates/realorrug-roast/src/clause.rs).
 Commitments 1 and 2 are done in the narrow form described below; commitment 1's
 *metadata* half — typed scope, measurement time, watermark, source references,
 completeness, schema version — is item 5b, the receipt, and is **not** in the
@@ -16,8 +18,8 @@ there is no longer a file for a link to reach. The first draft of this ADR was
 wrong about its own consequence: once the model selects whole clauses it writes
 no prose, so there is no text for a tag to sit in and no digit for the refusal to
 catch. Keeping the module would have left 475 lines that nothing could reach. Its
-argument is kept verbatim in `clause.rs`'s header, which is where it is now
-answered rather than merely cited.
+argument is kept verbatim in `realorrug:crates/realorrug-roast/src/clause.rs`'s
+header, which is where it is now answered rather than merely cited.
 
 ## Context
 
@@ -28,7 +30,8 @@ published sentence is therefore always a number Radar wrote. That property is
 worth keeping and this ADR does not weaken it.
 
 **It is not the property the account's credibility rests on.** A
-[`Fact`](../../crates/radar-roast/src/sheet.rs) binds a `label` and a `rendered`
+[`Fact`](https://github.com/1xmint/realorrug/blob/main/crates/realorrug-roast/src/sheet.rs)
+binds a `label` and a `rendered`
 string. The substitution binds the *value*. Nothing binds the **subject**, the
 **window**, the **unit**, the **comparison** or the **negation** in the prose
 around the tag. The model writes that prose freely, and a sentence of the form

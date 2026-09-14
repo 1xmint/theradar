@@ -55,7 +55,7 @@ cargo := env("RADAR_CARGO", "cargo")
 # the same drift the note above describes. Raising it is part of adding tests.
 # This branch contributes the gate restore, the hourly bucket, the cursor drop,
 # the ticker reply, the pointer and the metered week close.
-export MIN_TESTS := "2089"
+export MIN_TESTS := "1979"
 
 _default:
     @just --list --unsorted

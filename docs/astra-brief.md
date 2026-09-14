@@ -168,7 +168,7 @@ The coin does not exist. You have a blank slate inside ADR 0013 and design 0009.
   regulated, and design 0010 §7.5 flags legal exposure as *"flagged, not
   answered"*. Answer it, or say precisely what a lawyer must answer.
 - **Legally** is not a footnote. Naming coins and creators in public is
-  defamation-adjacent; that is why `forbidden.rs` exists and why the account
+  defamation-adjacent; that is why `realorrug:crates/realorrug-roast/src/forbidden.rs` exists and why the account
   states measurements and never verdicts. Any growth idea that requires calling
   someone a scammer is out. Find the ideas that do not.
 
@@ -225,7 +225,7 @@ And these product-level refusals, each already argued in a document:
   (`F1.plain`), and anything else in its output discards the reply. It still
   chooses which facts land, in what order, and in what tone. Any voice work is
   authoring those sentences, not loosening the grammar. See ADR 0016 and
-  `crates/radar-roast/src/clause.rs`.
+  `realorrug:crates/realorrug-roast/src/clause.rs`.
 
 ---
 

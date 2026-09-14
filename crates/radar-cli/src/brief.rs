@@ -429,7 +429,8 @@ fn set_to_something(value: Option<String>) -> Option<String> {
 /// still override, and still carry their second meaning — that somebody has
 /// *claimed* the analyst or the contest runs on this host.
 ///
-/// The layout mirrors `radar_analyst::daemon::Paths::under`: the analyst's
+/// The layout mirrors the one the bot's own `daemon::Paths::under` derived
+/// before it moved into its own repository (ADR 0024): the analyst's
 /// directory and the contest's are siblings under `data/`, and the creator
 /// index sits in the checkout beside them.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -469,8 +470,8 @@ impl Tree {
             contest: under(data, "contest", "data/contest"),
             creator_index: under(
                 checkout,
-                radar_roast::creator::DEFAULT_PATH,
-                radar_roast::creator::DEFAULT_PATH,
+                radar_research::creator::DEFAULT_PATH,
+                radar_research::creator::DEFAULT_PATH,
             ),
         }
     }
@@ -529,7 +530,7 @@ const _: () = assert!(
 /// Pure over the loaded index so both directions are testable without a store.
 ///
 /// [LEARNINGS]: https://github.com/hey-vera/radar/blob/main/LEARNINGS.md
-fn grade_index(index: &radar_roast::CreatorIndex, now: i64) -> Check {
+fn grade_index(index: &radar_research::creator::CreatorIndex, now: i64) -> Check {
     let built = i64::try_from(index.built_at).unwrap_or(i64::MAX);
     let age = now.saturating_sub(built);
     let creators = index.len();
@@ -568,7 +569,7 @@ fn grade_index(index: &radar_roast::CreatorIndex, now: i64) -> Check {
 /// unreadable is `Unknown`: something wrote a file there and it is not an index,
 /// which is a different situation from nobody having written one.
 fn creator_index(path: &str, now: i64) -> Check {
-    match radar_roast::CreatorIndex::read(path) {
+    match radar_research::creator::CreatorIndex::read(path) {
         Ok(index) => grade_index(&index, now),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Check::new(
             Status::Ok,
@@ -617,7 +618,7 @@ fn analyst(dir: &str, declared: bool) -> Check {
     } else {
         Status::Ok
     };
-    let entries = match radar_analyst::log::read(&log) {
+    let entries = match radar_backfill::analyst_log::read(&log) {
         Ok(entries) => entries,
         Err(e) => {
             return Check::new(
@@ -639,8 +640,8 @@ fn analyst(dir: &str, declared: bool) -> Check {
     // Counted over the folded view, because `publish` writes twice per reply --
     // once before it says anything and once after. Counting raw lines would
     // report double.
-    let answered = radar_analyst::log::latest(&log).map_or(entries.len(), |v| v.len());
-    let published = radar_analyst::log::latest(&log)
+    let answered = radar_backfill::analyst_log::latest(&log).map_or(entries.len(), |v| v.len());
+    let published = radar_backfill::analyst_log::latest(&log)
         .map_or(0, |v| v.iter().filter(|e| e.reply_id.is_some()).count());
 
     // No threshold on the age, and no age computed. A quiet account is a quiet
@@ -660,7 +661,7 @@ fn analyst(dir: &str, declared: bool) -> Check {
     // is the ordinary state of every host without a bot token and is not
     // reported; its presence is a count, never an alarm, for the same reason
     // the X count is not one.
-    if let Ok(telegram) = radar_analyst::log::latest(&format!("{dir}/telegram.jsonl")) {
+    if let Ok(telegram) = radar_backfill::analyst_log::latest(&format!("{dir}/telegram.jsonl")) {
         use std::fmt::Write as _;
         let sent = telegram.iter().filter(|e| e.reply_id.is_some()).count();
         let _ = write!(
@@ -1263,6 +1264,83 @@ fn build_field(body: &str) -> Option<&str> {
     (!value.is_empty() && value != "unknown").then_some(value)
 }
 
+/// One contest week's record, as much of it as `radar brief` reads.
+///
+/// The shape `radar_contest::ledger::Record` wrote, kept unchanged: this
+/// crate does not write these files -- the week-close job does, and since
+/// 2026-09-14 that job runs in `realorrug-analyst`, not here (ADR 0024). This
+/// reads the same on-disk file, only the fields this check reports.
+#[derive(Clone, serde::Deserialize)]
+struct ContestRecord {
+    /// The week number. `Week` serialised as its bare number, so this reads
+    /// it the same way.
+    week: u64,
+    /// When it closed, seconds since the epoch.
+    closed_at: u64,
+    /// Counted, not read: only the lengths matter here.
+    #[serde(default)]
+    ranking: ContestRanking,
+    /// Present (possibly `null`) whenever anything counted; absent only on a
+    /// record from before the field existed.
+    #[serde(default)]
+    winner: Option<serde_json::Value>,
+    /// Whether -- and by whom -- the winner claimed.
+    #[serde(default)]
+    claim: Option<serde_json::Value>,
+    /// The payment, once made.
+    #[serde(default)]
+    payout: Option<ContestPayout>,
+}
+
+/// The counted and excluded entries -- their lengths are all `radar brief`
+/// reports.
+#[derive(Clone, Default, serde::Deserialize)]
+struct ContestRanking {
+    ranked: Vec<serde_json::Value>,
+    excluded: Vec<serde_json::Value>,
+}
+
+/// A payment that was made, as much of it as this check prints.
+#[derive(Clone, serde::Deserialize)]
+struct ContestPayout {
+    lamports: u64,
+    signature: String,
+}
+
+/// How long a winner has to claim before the prize rolls into the next week.
+/// Design 0007 section 6.2: seven days. The same constant
+/// `radar_contest::ledger::CLAIM_WINDOW_SECONDS` was.
+const CLAIM_WINDOW_SECONDS: u64 = 7 * 86_400;
+
+impl ContestRecord {
+    /// The last moment a claim is accepted.
+    const fn claim_window_closes_at(&self) -> u64 {
+        self.closed_at + CLAIM_WINDOW_SECONDS
+    }
+}
+
+/// Every week record in a directory, in no particular order.
+///
+/// A record is a file named `<week>.json` where `<week>` is the week number;
+/// both halves of the name are required, so a backup copy or a notes file is
+/// not a record. A file that does not parse is skipped rather than failing
+/// the read -- the same rule `radar_contest::records_in` applied.
+fn contest_records_in(dir: &std::path::Path) -> Vec<ContestRecord> {
+    let Ok(listing) = std::fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    listing
+        .flatten()
+        .filter(|entry| {
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            name.ends_with(".json") && name.trim_end_matches(".json").parse::<u64>().is_ok()
+        })
+        .filter_map(|entry| std::fs::read_to_string(entry.path()).ok())
+        .filter_map(|text| serde_json::from_str(&text).ok())
+        .collect()
+}
+
 /// What the trading lane is doing, which is nothing.
 ///
 /// Stated every run rather than only when it changes. An operator reading a
@@ -1313,8 +1391,8 @@ fn contest(dir: &str, declared: bool) -> Check {
         );
     }
 
-    let mut records = radar_contest::records_in(std::path::Path::new(dir));
-    let Some(latest) = records.iter().max_by_key(|r| r.week.0).cloned() else {
+    let mut records = contest_records_in(std::path::Path::new(dir));
+    let Some(latest) = records.iter().max_by_key(|r| r.week).cloned() else {
         return Check::new(
             missing,
             "contest",
@@ -1323,7 +1401,7 @@ fn contest(dir: &str, declared: bool) -> Check {
             ),
         );
     };
-    records.sort_by_key(|r| r.week.0);
+    records.sort_by_key(|r| r.week);
 
     let standing = match (&latest.winner, &latest.claim, &latest.payout) {
         (None, _, _) => "no winner, the pool rolls over".to_owned(),
@@ -1339,7 +1417,7 @@ fn contest(dir: &str, declared: bool) -> Check {
         "contest",
         format!(
             "week {} closed {}; {} counted, {} excluded; {standing}; {} records",
-            latest.week.0,
+            latest.week,
             from_epoch(i64::try_from(latest.closed_at).unwrap_or(0)),
             latest.ranking.ranked.len(),
             latest.ranking.excluded.len(),
@@ -1350,6 +1428,15 @@ fn contest(dir: &str, declared: bool) -> Check {
 
 /// Two days: a vault reading older than this is not a reading of the vault.
 const VAULT_READING_STALE_AFTER: u64 = 2 * 86_400;
+
+/// The creator vault's balance, as last read. The shape
+/// `radar_contest::ledger::Vault` wrote.
+#[derive(serde::Deserialize)]
+struct Vault {
+    address: String,
+    lamports: u64,
+    measured_at: u64,
+}
 
 /// The creator vault, as last read.
 ///
@@ -1372,7 +1459,7 @@ fn vault(dir: &str, declared: bool, now: u64) -> Check {
             format!("no vault reading at {path} — no token yet, or the payout has never run here"),
         );
     };
-    let Ok(reading) = radar_contest::Vault::from_json(&text) else {
+    let Ok(reading) = serde_json::from_str::<Vault>(&text) else {
         return Check::new(
             Status::Unknown,
             "vault",
@@ -1670,12 +1757,17 @@ mod tests {
         std::fs::create_dir_all(&dir).expect("mkdir");
         let path = dir.to_string_lossy().into_owned();
 
-        let record = radar_contest::Record::close(
-            radar_contest::Week(2957),
-            radar_contest::Ranking::default(),
-            &radar_contest::Rules::published(["op"]),
-        );
-        std::fs::write(dir.join("2957.json"), record.to_json().expect("json")).expect("write");
+        let record = serde_json::json!({
+            "week": 2957,
+            "opened_at": 0,
+            "closed_at": 0,
+            "ranking": { "ranked": [], "excluded": [] },
+            "winner": null,
+            "claim_prompt": null,
+            "claim": null,
+            "payout": null,
+        });
+        std::fs::write(dir.join("2957.json"), record.to_string()).expect("write");
 
         // Writable: the ordinary line.
         let fine = contest(&path, true);
@@ -2568,11 +2660,11 @@ mod tests {
     /// An index with one creator, built at a given time.
     fn index_built_at(
         built_at: u64,
-        population: Option<radar_roast::Population>,
-    ) -> radar_roast::CreatorIndex {
+        population: Option<radar_research::creator::Population>,
+    ) -> radar_research::creator::CreatorIndex {
         let mut creators = std::collections::BTreeMap::new();
-        creators.insert("aaa".to_owned(), radar_roast::creator::Record::default());
-        radar_roast::CreatorIndex {
+        creators.insert("aaa".to_owned(), radar_research::creator::Record::default());
+        radar_research::creator::CreatorIndex {
             watermark_slot: 444_363_233,
             built_at,
             population,
@@ -2580,10 +2672,10 @@ mod tests {
         }
     }
 
-    fn a_population() -> radar_roast::Population {
+    fn a_population() -> radar_research::creator::Population {
         // The shape of the real one on 2026-09-04, rounded: 505,506 measured,
         // 2.807% graduated.
-        radar_roast::Population {
+        radar_research::creator::Population {
             launches: 507_486,
             measured: 505_506,
             organic: 8_973,
@@ -2722,54 +2814,56 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).expect("a temp dir");
         let dir = dir.to_str().expect("a path");
-        let write = |record: &radar_contest::Record| {
-            std::fs::write(
-                format!("{dir}/{}.json", record.week.0),
-                record.to_json().expect("json"),
-            )
-            .expect("write");
+        // The week-close job's own on-disk shape, written directly: this
+        // crate no longer imports the type that used to build it (ADR 0024).
+        let closes_at = |week: u64| (((week + 1) * 7).saturating_sub(3)) * 86_400;
+        let write = |week: u64,
+                     winner: Option<serde_json::Value>,
+                     claim: Option<serde_json::Value>,
+                     payout: Option<serde_json::Value>| {
+            let record = serde_json::json!({
+                "week": week,
+                "opened_at": closes_at(week.saturating_sub(1)),
+                "closed_at": closes_at(week),
+                "ranking": { "ranked": [], "excluded": [] },
+                "winner": winner,
+                "claim_prompt": null,
+                "claim": claim,
+                "payout": payout,
+            });
+            std::fs::write(format!("{dir}/{week}.json"), record.to_string()).expect("write");
         };
         // An older week, paid; the latest, with a winner and no claim yet.
-        let mut old = radar_contest::Record::close(
-            radar_contest::Week(2956),
-            radar_contest::Ranking::default(),
-            &radar_contest::Rules::published(["op"]),
+        write(
+            2956,
+            Some(serde_json::json!({
+                "summoner": "a", "reply_id": "r", "score": 1, "handle": null,
+            })),
+            Some(serde_json::json!({ "address": "ADDR", "reply_id": "c", "at": 1 })),
+            Some(serde_json::json!({
+                "recipient": "ADDR", "lamports": 500, "signature": "SIG", "at": 2,
+            })),
         );
-        old.winner = Some(radar_contest::Winner {
-            summoner: "a".to_owned(),
-            reply_id: "r".to_owned(),
-            score: 1,
-            handle: None,
-        });
-        old.claim = Some(radar_contest::Claim {
-            address: "ADDR".to_owned(),
-            reply_id: "c".to_owned(),
-            at: 1,
-        });
-        old.payout = Some(radar_contest::Payout {
-            recipient: "ADDR".to_owned(),
-            lamports: 500,
-            signature: "SIG".to_owned(),
-            at: 2,
-        });
-        write(&old);
-        let mut latest = radar_contest::Record::close(
-            radar_contest::Week(2957),
-            radar_contest::Ranking::default(),
-            &radar_contest::Rules::published(["op"]),
+        write(
+            2957,
+            Some(serde_json::json!({
+                "summoner": "b", "reply_id": "r2", "score": 4, "handle": null,
+            })),
+            None,
+            None,
         );
-        latest.winner = Some(radar_contest::Winner {
-            summoner: "b".to_owned(),
-            reply_id: "r2".to_owned(),
-            score: 4,
-            handle: None,
-        });
-        write(&latest);
 
         // The latest by week number, not by file order or by which was written
         // last. Re-applied by taking the first record found: on a directory
         // that lists 2957 before 2956 this still passes, so the assertion is on
         // the week and on the claim window, which only the latest has open.
+        // A copy of a record under any name but `<week>.json` is not a record:
+        // a backup beside the ledger must not count as a week that closed.
+        // Re-applied by joining the two name tests with `||`: `copy.json`
+        // parses as a record and the count below reads 3.
+        std::fs::copy(format!("{dir}/2956.json"), format!("{dir}/copy.json")).expect("copy");
+        std::fs::copy(format!("{dir}/2956.json"), format!("{dir}/2958.json.bak")).expect("copy");
+
         let check = contest(dir, true);
         assert_eq!(check.status, Status::Ok, "{}", check.detail);
         assert!(
@@ -2777,8 +2871,15 @@ mod tests {
             "{}",
             check.detail
         );
+        // Seven days to claim, written as a number so the arithmetic is what
+        // is pinned: CI's mutants turned the constant's `*` and the window's
+        // `+` into other operators, and "window closes" alone passed them all.
+        assert_eq!(CLAIM_WINDOW_SECONDS, 604_800);
+        let window_closes = from_epoch(i64::try_from(closes_at(2957) + 604_800).expect("fits"));
         assert!(
-            check.detail.contains("winner unclaimed, window closes"),
+            check
+                .detail
+                .contains(&format!("winner unclaimed, window closes {window_closes}")),
             "{}",
             check.detail
         );
@@ -2801,13 +2902,12 @@ mod tests {
         std::fs::create_dir_all(&dir).expect("a temp dir");
         let dir = dir.to_str().expect("a path");
         let measured = 1_788_000_000;
-        let reading = radar_contest::Vault {
-            address: "VAULT".to_owned(),
-            lamports: 2_500_000,
-            measured_at: measured,
-        };
-        std::fs::write(format!("{dir}/pool.json"), reading.to_json().expect("json"))
-            .expect("write");
+        let reading = serde_json::json!({
+            "address": "VAULT",
+            "lamports": 2_500_000,
+            "measured_at": measured,
+        });
+        std::fs::write(format!("{dir}/pool.json"), reading.to_string()).expect("write");
 
         let fresh = vault(dir, true, measured + 172_800);
         assert_eq!(fresh.status, Status::Ok, "{}", fresh.detail);
@@ -2869,16 +2969,17 @@ mod tests {
     }
 
     #[test]
-    fn the_derived_layout_is_the_one_the_daemon_writes() {
-        // Not "the same strings", which would be two literals agreeing by
-        // coincidence: the same *derivation*. `Paths::under` puts the contest
-        // directory beside the analyst's rather than inside it, and a brief
-        // that folded it inside would report every week as unwritten.
+    fn the_derived_layout_puts_the_contest_directory_beside_the_analyst_ones() {
+        // Not "the same strings", which would be a literal agreeing with
+        // itself: the contest directory has to be a *sibling* of the
+        // analyst's rather than a child of it -- the same layout the bot's
+        // own `daemon::Paths::under` derived before it moved into its own
+        // repository (ADR 0024) -- and a brief that folded it inside would
+        // report every week as unwritten.
         let store = "/srv/radar/data/store";
         let tree = Tree::around(Path::new(store));
-        let paths = radar_analyst::daemon::Paths::under(&tree.analyst);
-        assert_eq!(paths.contest_dir, tree.contest);
-        assert_eq!(paths.log, format!("{}/replies.jsonl", tree.analyst));
+        assert_eq!(tree.analyst, "/srv/radar/data/analyst");
+        assert_eq!(tree.contest, "/srv/radar/data/contest");
     }
 
     #[test]
@@ -2891,12 +2992,12 @@ mod tests {
         let tree = Tree::around(Path::new("data/store"));
         assert_eq!(tree.analyst, "data/analyst");
         assert_eq!(tree.contest, "data/contest");
-        assert_eq!(tree.creator_index, radar_roast::creator::DEFAULT_PATH);
+        assert_eq!(tree.creator_index, radar_research::creator::DEFAULT_PATH);
 
         // And a store path with no parent at all.
         let bare = Tree::around(Path::new("store"));
         assert_eq!(bare.analyst, "data/analyst");
-        assert_eq!(bare.creator_index, radar_roast::creator::DEFAULT_PATH);
+        assert_eq!(bare.creator_index, radar_research::creator::DEFAULT_PATH);
     }
 
     /// A health body carrying a build, in the shape `radar-serve` emits.
@@ -3060,6 +3161,34 @@ mod tests {
         );
     }
 
+    /// Appends one line to a reply log, in the shape the bot still writes.
+    ///
+    /// Written directly rather than through a shared `append`: nothing in
+    /// Radar writes this file any more (ADR 0024), only reads it, so there is
+    /// no production code this could reuse -- and one line of JSON is not
+    /// worth a write-side twin of `radar_backfill::analyst_log`.
+    fn append_reply(path: &str, mention_id: &str, at: u64, reply_id: Option<&str>) {
+        use std::io::Write as _;
+        let line = serde_json::json!({
+            "at": at,
+            "mention_id": mention_id,
+            "summoner": "a",
+            "mint": null,
+            "read_at_slot": null,
+            "fact_sheet": "",
+            "reply": "text",
+            "fellback": null,
+            "reply_id": reply_id,
+        })
+        .to_string();
+        let mut file = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(path)
+            .expect("open");
+        writeln!(file, "{line}").expect("write");
+    }
+
     #[test]
     fn the_analyst_check_counts_replies_rather_than_log_lines() {
         // `publish` writes twice per reply -- once before it says anything and
@@ -3073,23 +3202,9 @@ mod tests {
         let _ = std::fs::remove_file(&log);
 
         for id in ["m1", "m2", "m3"] {
-            let mut entry = radar_analyst::Entry {
-                at: 1_788_000_000,
-                mention_id: id.to_owned(),
-                summoner: "a".to_owned(),
-                mint: None,
-                read_at_slot: None,
-                fact_sheet: String::new(),
-                reply: "text".to_owned(),
-                fellback: None,
-                signals: None,
-                pointed_at: None,
-                reply_id: None,
-            };
             // The intent, then the outcome, exactly as `publish` writes them.
-            radar_analyst::log::append(&log, &entry).expect("intent");
-            entry.reply_id = Some(format!("r-{id}"));
-            radar_analyst::log::append(&log, &entry).expect("outcome");
+            append_reply(&log, id, 1_788_000_000, None);
+            append_reply(&log, id, 1_788_000_000, Some(&format!("r-{id}")));
         }
 
         let check = analyst(dir.to_str().expect("a path"), true);
@@ -3113,21 +3228,8 @@ mod tests {
         let log = log.to_str().expect("a path").to_owned();
         let _ = std::fs::remove_file(&log);
 
-        let entry = radar_analyst::Entry {
-            at: 1_788_000_000,
-            mention_id: "m1".to_owned(),
-            summoner: "a".to_owned(),
-            mint: None,
-            read_at_slot: None,
-            fact_sheet: String::new(),
-            reply: "text".to_owned(),
-            fellback: Some("not published: no credential".to_owned()),
-            signals: None,
-            pointed_at: None,
-            reply_id: None,
-        };
-        radar_analyst::log::append(&log, &entry).expect("intent");
-        radar_analyst::log::append(&log, &entry).expect("outcome");
+        append_reply(&log, "m1", 1_788_000_000, None);
+        append_reply(&log, "m1", 1_788_000_000, None);
 
         let check = analyst(dir.to_str().expect("a path"), true);
         assert!(

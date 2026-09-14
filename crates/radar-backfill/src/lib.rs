@@ -14,6 +14,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod analyst_log;
 pub mod checkpoints;
 pub mod cost;
 pub mod coverage;

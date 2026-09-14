@@ -918,8 +918,10 @@ fn answered_about(analyst_dir: Option<&str>) -> std::collections::BTreeSet<radar
     let Some(dir) = analyst_dir else {
         return std::collections::BTreeSet::new();
     };
-    let paths = radar_analyst::daemon::Paths::under(dir);
-    radar_analyst::log::read(&paths.log)
+    // The same path the bot's own `daemon::Paths::under` derived: the reply
+    // log, directly under the analyst directory. See `analyst_log`.
+    let log = format!("{dir}/replies.jsonl");
+    radar_backfill::analyst_log::read(&log)
         .unwrap_or_default()
         .iter()
         // Published only. A dry-run answer was never a public call and has

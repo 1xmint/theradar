@@ -46,7 +46,7 @@ usually because no token exists.
 | S7 | the CORS origin is echoed from config verbatim | none | **stands.** It is operator configuration, set to one origin and never `*`, and unset means the header is absent |
 | S8 | the site builds hrefs from API fields | low | **fixed.** Every outbound link goes through `safeHref`, `userHref` or `solscanTx`, each of which returns `null` rather than a link it cannot vouch for |
 | S9 | digits inside base58 addresses are blanked before the fidelity check | verified | **stands.** `blank_addresses` runs first in `fidelity`, so an address's digits cannot be read as a fabricated figure |
-| S10 | mention text never reaches the model and metadata is fenced | verified | **stands**, and is pinned end to end by `an_adversarial_mention_cannot_change_the_reply.rs` |
+| S10 | mention text never reaches the model and metadata is fenced | verified | **stands**, and is pinned end to end by `realorrug:crates/realorrug-roast/tests/an_adversarial_mention_cannot_change_the_reply.rs` |
 | S11 | `records_in` skips a file that does not parse, so a schema change without a default silently drops weeks | medium, latent | **mitigated, not closed.** Every field added since carries `serde(default)` and the doc comment on the function names the hazard. The skip is still silent, and that is the residual: a torn write is not evidence and the weeks either side still are |
 | S12 | week records are world-readable and will carry engager ids | none | **stands, and is now load-bearing.** The verified scan reads engager ids and writes **counts**; no id reaches the record or the public JSON |
 | S13 | with no API base the site silently shows its fixture | low | **fixed.** `Sourced.stale` travels with every figure and the page says which it is showing |
@@ -72,7 +72,7 @@ usually because no token exists.
 | S26 | the public leaderboard folds the whole reply log per request; the edge cache is per URL, so a query string busts it | low | **recorded, not fixed.** The fold is a file read, not a store scan, and the endpoint is edge-cached for sixty seconds. The query-string hole is a Cloudflare cache rule and is Josh's. Worth doing before the first link goes wide; not worth code |
 | S27 | the leaderboard links by handle, which can be reassigned | low | **fixed.** The link is always `userHref(id)`; the handle is only ever the label |
 | S28 | the claim prompt may be refused by X's reply rule, and it does not mention the winner | high until tested | **fixed by construction, still untested live.** The prompt now goes under the winner's own summons, which is the one reply X guarantees, with the bot's winning reply as the fallback for the single week closed before mention ids were recorded. **Nothing has posted one yet**, because no week has had a winner |
-| S29 | the payout timer and a hand payment can both send | low | **fixed in the runbook.** Stop `radar-payout.timer` before a hand payment. A code fix would be a lock, and the operator is one person |
+| S29 | the payout timer and a hand payment can both send | low | **fixed in the runbook.** Stop `realorrug:deploy/realorrug-payout.timer` before a hand payment. A code fix would be a lock, and the operator is one person |
 | S30 | AI reply bots may need X's written approval | unknown | **open, and only Josh can close it.** The rules page returned 403 to the session that found this, so it is a report and not a verified fact — and it stopped being hypothetical the moment a model provider was configured. Design 0014 |
 
 ---

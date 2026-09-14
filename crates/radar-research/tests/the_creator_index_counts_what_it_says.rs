@@ -97,7 +97,7 @@ fn stillborn(mint: u8, measured: u64, launch_slot: u64) -> Outcome {
 }
 
 /// Builds a store and returns the index over it.
-fn index_over(events: Vec<Event>, outcomes: Vec<Outcome>) -> radar_roast::CreatorIndex {
+fn index_over(events: Vec<Event>, outcomes: Vec<Outcome>) -> radar_research::creator::CreatorIndex {
     let dir = tempfile::tempdir().expect("tempdir");
     let mut writer = Writer::open(dir.path(), 1_000).expect("open");
     for event in events {

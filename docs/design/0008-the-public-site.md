@@ -233,7 +233,11 @@ the endpoint exists. This is the thing Josh asked to see.
 `Audience::Public` **by exact path, never by prefix** — `access.rs` already warns
 in its own comments that a prefix rule is how `/v1/store` ends up in front of the
 wrong reader. CORS for the site's origin only. **Built 2026-09-05** as plan
-0006 item 2, in [`crates/radar-serve/src/public.rs`](../../crates/radar-serve/src/public.rs).
+0006 item 2, in what was then `realorrug:crates/realorrug-serve/src/public.rs`. That route
+set moved to `realorrug-serve` on 2026-09-14 when the public analyst's site
+moved to [1xmint/realorrug](https://github.com/1xmint/realorrug); the same file
+is now
+[`realorrug:crates/realorrug-serve/src/public.rs`](https://github.com/1xmint/realorrug/blob/main/crates/realorrug-serve/src/public.rs).
 Two things it needed: the stats document reads a small `population.json` the
 creator-index job now writes beside the index rather than parsing 116,000
 records per request, and research 0011's aftermath figure now travels in the

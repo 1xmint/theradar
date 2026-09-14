@@ -83,16 +83,22 @@ marketing document:
   no price feed by design. That fails closed and cannot size a real trade. The
   fix is a lamport-denominated `Policy`, which is a decision about what the
   operator's limit means and belongs in an ADR.
-- **There is no rate limit in `radar-serve`.** The analyst's gate limits what the
-  X account answers; nothing limits what the HTTP surface serves, and the edge
-  cache in front of it is not applying (research 0030, H9).
+- **There is no rate limit in `radar-serve`.** Nothing limits what the HTTP
+  surface serves, and the edge cache in front of it is not applying (research
+  0030, H9). The public reply bot's own admission gate, which limited what the
+  X account answered, moved with the bot to
+  [1xmint/realorrug](https://github.com/1xmint/realorrug) on 2026-09-14 and no
+  longer runs behind this server at all; `radar-serve`'s remaining public
+  surface is `/v1/market/*`.
 
 Three claims that used to stand here were true when written and are not now, and
 they are listed rather than quietly deleted:
 
-- *"There is no spend meter in the running system."* There is.
-  `radar_analyst::spend::Spend` meters every mention read, model call, reply and
-  post; `radar-agent` carries its own ledger; both persist across a restart.
+- *"There is no spend meter in the running system."* There is, though as of
+  2026-09-14 only one half of it lives in this repository: the public reply
+  bot's own meter (formerly `radar_analyst::spend::Spend`) moved with it to
+  [1xmint/realorrug](https://github.com/1xmint/realorrug); `radar-agent` carries
+  its own ledger here and persists across a restart.
 - *"Property and fuzz testing are absent."* Half true, and corrected above.
 - *"The public server has no authentication."* `radar_serve::access` decides an
   audience per exact path, and the operator surface is behind Cloudflare Access.

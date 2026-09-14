@@ -54,7 +54,7 @@ cannot know yet.
 - [ ] 11. The 1200×630 OG image
       next: it is the first thing anybody sees of this product on X
 - [x] 10. Phase 1 — the three public endpoints, by exact path, with CORS
-      done: 2026-09-05, as plan 0006 item 2 — `crates/radar-serve/src/public.rs`,
+      done: 2026-09-05, as plan 0006 item 2 — `realorrug:crates/realorrug-serve/src/public.rs`,
       with the evidence recorded there. The stats document needs a
       `population.json` the creator-index job now writes; until the box runs
       that binary the endpoint answers 404 and the site shows its dated fixture

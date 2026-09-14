@@ -36,7 +36,7 @@ damage. Refusing to pay them afterwards is a private correction to a public
 error — and worse, it is invisible: an unpaid week and an unclaimed week look
 identical from outside.
 
-The existing machinery already agrees. [`rank`](../../crates/radar-contest/src/score.rs)
+The existing machinery already agrees. [`rank`](https://github.com/1xmint/realorrug/blob/main/crates/realorrug-contest/src/score.rs)
 excludes entries with a stated reason today — the operator, accounts under 30
 days, anyone the gate refused, anyone inside the cooldown — and design 0007
 §6.2's principle is that **an entry that does not count is returned beside the
@@ -71,7 +71,7 @@ This is the change I feel strongest about, and it is a genuine disagreement with
 "it would say why, live for everyone to see" — not with the intent, with the
 wording.
 
-`forbidden.rs` refuses to let this account call a **coin** a scam, a rug or a
+`realorrug:crates/realorrug-roast/src/forbidden.rs` refuses to let this account call a **coin** a scam, a rug or a
 fraud. Publishing *"excluded: bought engagement"* beside a named person's handle
 is a materially stronger claim than any of those: it is an accusation of conduct,
 about a person, on evidence that is statistical.

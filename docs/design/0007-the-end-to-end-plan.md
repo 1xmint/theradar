@@ -252,9 +252,12 @@ exposure are not mine to decide.
 everything else Josh wants depends on its reach.
 **What exists:** the whole reply pipeline. `radar-onchain` builds a `Dossier`
 from RPC in bounded calls; `radar-roast` builds a `FactSheet`, a rule-based
-`Verdict`, a voice pass, and two post-checks (`fidelity.rs`: every numeral is
-on the sheet; `forbidden.rs`: no verdict words); `radar-analyst` has the strict
-mention parser (`mention.rs` — only a base58 mint or `$TICKER` survives), the
+`Verdict`, a voice pass, and two post-checks
+(`realorrug:crates/realorrug-roast/src/fidelity.rs`: every numeral is
+on the sheet; `realorrug:crates/realorrug-roast/src/forbidden.rs`: no verdict
+words); `radar-analyst` has the strict mention parser
+(`realorrug:crates/realorrug-analyst/src/mention.rs` — only a base58 mint or
+`$TICKER` survives), the
 admission `Gate`, the reply `log`, and the `Publisher` trait with one
 implementation, `DryRun`. **Everything below is the thin part.**
 
@@ -266,17 +269,17 @@ with `MemoryMax=`, beside `radar-follow.service`. A binary's caller is systemd.
 | B1 | **X client** — `struct X { bearer, user_id }` implementing `Publisher` (POST `/2/tweets` with `reply.in_reply_to_tweet_id`) plus `fn mentions(since_id)` (GET `/2/users/:id/mentions`, `tweet.fields=author_id,public_metrics,conversation_id,referenced_tweets`). `ureq`, like every other client here. Credential from `RADAR_X_BEARER`; unset ⇒ `DryRun` (rule 8). **Backoff on 429/5xx doubles to 15 min and never retries a 4xx**; that is the whole of what J9 deleted, written where it is used | `new:crates/radar-analyst/src/x.rs` |
 | B2 | **The poll loop** — adaptive: 60 s while the last poll returned a mention, doubling to 300 s idle (J5). `since_id` persisted to `~/radar/data/analyst/cursor` so a restart does not re-answer. Each mention → `mention::read` → `Gate::admit` → dossier → roast → `log::append` → `publish`. **The log entry is written before the publish call**, so a crash between them is a logged-but-unposted reply, never an unlogged post | `new:crates/radar-analyst/src/main.rs`, `new:loop.rs` |
 | B3 | **Spend meter.** Every X call and every model call reserves against `radar_provider::Meter` with a daily USD budget from env; the ledger persists like `radar-serve/src/ledger.rs`. No budget ⇒ the loop starts, logs "unfunded", answers nothing (rule 8) | `new:crates/radar-analyst/src/spend.rs` |
-| B4 | **Parent-post read for the address.** When the mention has no mint but is a reply, read the parent once ($0.005), same strict parse. Cap: one parent read per mention | `mention.rs`, `new:x.rs` |
-| B5 | **Homoglyph/RTL-safe rendering** for the token name in the reply — `radar-cli/src/main.rs:284` and `roast.rs:98` escape for a *terminal*; a public reply needs a different rule (strip RTL overrides and zero-width characters, cap length) because X renders them | `crates/radar-roast/src/voice.rs` |
+| B4 | **Parent-post read for the address.** When the mention has no mint but is a reply, read the parent once ($0.005), same strict parse. Cap: one parent read per mention | `realorrug:crates/realorrug-analyst/src/mention.rs`, `new:x.rs` |
+| B5 | **Homoglyph/RTL-safe rendering** for the token name in the reply — `radar-cli/src/main.rs:284` and `roast.rs:98` escape for a *terminal*; a public reply needs a different rule (strip RTL overrides and zero-width characters, cap length) because X renders them | `realorrug:crates/realorrug-roast/src/voice.rs` |
 | B6 | **The weekly measured post** — a top-level post ($0.015) from the refreshed base rates (E2): launches this week, share in the 1–3 band, median round trip at $50. Cron-shaped, in the same binary | `new:crates/radar-analyst/src/weekly.rs` |
 | B7 | **Disclosure** — bio says automated + who runs it (X policy requires it); a `/about` route on the web app: what it measures, what it will never say, the correction policy, "not financial advice", who operates it. Served static | `web/src/About.tsx`, `routes.ts`, `access::audience_of` (Public) |
 | B8 | **Unit + runbook.** `new:radar-analyst.service` (Restart=always, `MemoryMax=256M`, `EnvironmentFile=/etc/radar/analyst.env`); a section in `deploy/README.md`; `radar brief` gains an `analyst` check: cursor age and last-reply age, Unknown when unreachable | `new:deploy/radar-analyst.service`, `deploy/README.md`, `crates/radar-cli/src/brief.rs` |
 | B9 | **Reply-log viewer** — `/v1/analyst/replies` (Operator) and a page listing what was asked, the sheet, what was posted. Reads the analyst log file, never the store | `crates/radar-serve/src/api.rs`, `web/src/Replies.tsx` |
 
-**Gate to go live (all of them):** Josh's price answers are in `publish.rs`'s
+**Gate to go live (all of them):** Josh's price answers are in `realorrug:crates/realorrug-analyst/src/publish.rs`'s
 doc comment with the date; 100 dry-run replies read by Josh with the fact
 sheets beside them; the adversarial fixture
-(`an_adversarial_mention_cannot_change_the_reply.rs`) extended with three X-shaped
+(`realorrug:crates/realorrug-roast/tests/an_adversarial_mention_cannot_change_the_reply.rs`) extended with three X-shaped
 cases — a mention whose text is an instruction, a reply chain whose parent
 holds an LP mint, a 30-mention burst from one account — all producing a
 fact sheet or a refusal; the meter proven by exhausting it (the bot answers
@@ -365,12 +368,12 @@ real case appears, and record the change.
 |---|---|---|---|
 | C1 | **`radar-contest` crate, pure.** Week boundaries (UTC, Monday 00:00), `Entry`, `Score`, the scoring rule as one function, `Winner`, `Claim`, and a JSON ledger type. No network, no clock (the slot/time is an argument, like `radar-risk`) | `crates/radar-contest/` |
 | C2 | **Scoring read** in the analyst binary at week close: `GET /2/tweets?ids=…&tweet.fields=public_metrics` over the week's reply ids from the log; writes `~/radar/data/contest/<week>.json` | `new:crates/radar-analyst/src/contest.rs` |
-| C3 | **Claim parse** — the winner's reply, same `mention::read`, author check, address recorded in the ledger | `new:contest.rs`, `radar-analyst/src/mention.rs` |
+| C3 | **Claim parse** — the winner's reply, same `mention::read`, author check, address recorded in the ledger | `new:contest.rs`, `realorrug:crates/realorrug-analyst/src/mention.rs` |
 | C4 | **`radar-payout` binary.** Reads the ledger, builds `collect_creator_fee` (discriminator already in `radar-decode/src/pumpfun.rs`; add the instruction builder to `radar-pumpfun/src/instruction.rs`) + a system transfer; checks the three policy lines; signs with the key at `RADAR_PAYOUT_KEY`; submits via direct RPC (rule 7); appends the signature to the ledger. **Its own unit and user**, modelled on `radar-signer@.service` (no network except RPC; key readable by nobody else). It is *not* the trading signer and does not touch `radar-risk` | `crates/radar-payout/`, `new:deploy/radar-payout.service`, `deploy/payout.env.example` |
 | C5 | **Manual fallback, tested.** `radar contest pay --week N --dry-run` prints the exact transaction for Josh to sign elsewhere; the bot's verification step (read the tx, check recipient and amount, post the sig) is identical in both paths, so the fallback is exercised by the automated path's own test | `new:crates/radar-cli/src/contest.rs` |
 | C6 | **The page.** `/contest`: live vault balance (one RPC call, cached 60 s, `Entry::bytes(as_of)`-style), this week's ranked entries, past winners with tx signatures, the rule in full, the disclosure. Reads the contest JSON, **never the store**. This is design 0001's "Wall" with the leaderboard folded in | `web/src/Contest.tsx`, `routes.ts`, `crates/radar-serve/src/api.rs` |
 | C7 | **Launch checklist** in `deploy/README.md` §Token: fresh wallet → key to VPS → create on pump.fun **with no dev buy** → the bot's first post about it is its own fact sheet (one recipient) → page live → `radar brief` gains `contest` and `vault` checks | `deploy/README.md`, `brief.rs` |
-| C8 | **Bot rule:** the token's mint is in `RADAR_SELF_MINT`; a roast of it is answered like any other; the weekly post reports vault, prize and winner and **never a price**. `forbidden.rs` gains a check: if the sheet's mint equals `RADAR_SELF_MINT`, any price or market-cap fact is dropped from the sheet before the model sees it | `crates/radar-roast/src/forbidden.rs`, `sheet.rs` |
+| C8 | **Bot rule:** the token's mint is in `RADAR_SELF_MINT`; a roast of it is answered like any other; the weekly post reports vault, prize and winner and **never a price**. `realorrug:crates/realorrug-roast/src/forbidden.rs` gains a check: if the sheet's mint equals `RADAR_SELF_MINT`, any price or market-cap fact is dropped from the sheet before the model sees it | `realorrug:crates/realorrug-roast/src/forbidden.rs`, `realorrug:crates/realorrug-roast/src/sheet.rs` |
 
 **Gate to launch:** B's 30-day gate met (J12); ADR 0013 merged; C4's policy
 proven by re-applying the bug (wrong recipient refused; second payout for the
@@ -440,7 +443,7 @@ everything else from day one.
 | # | Item | Design | Files |
 |---|---|---|---|
 | E1 | **`radar features`** — one deterministic, watermark-gated pass over the store to a Parquet feature table, one row per mint at decision time T (launch + 40 min, matching `creator_edge`; a `--at 5m` variant). Features: launch-block recipient count (recorded going forward per ADR 0012 — **only launches after 2026-09-03 have it**; say so), dev-buy lamports, creator prior launches / organic graduations / cadence, curve progress at T, buyers and volume in the first N slots, repeated-metadata flag (`0013`). Labels: forward return T→6h and T→24h, **net of the round trip for the band the position would sit in** | `new:crates/radar-research/src/features.rs`, `radar-cli` |
-| E2 | **DONE 2026-09-04, and smaller than this row asked for** (#135, #136). The plan wanted a new `radar baserates` command on a base-rates timer of its own. It is not needed: the creator-index pass already visits every succeeded launch and every outcome every six hours, so the population is five additions per row inside a timer that exists — `CreatorIndex.population`, and the fact sheet prefers it over `0024`'s sampled figures. The half of the alarm that bites is built: `radar brief`'s `index` check **fails when the rebuild is over twelve hours old**, which is LEARNINGS 5 — a `oneshot` with no `Restart=` leaves the last good file in place and the replies keep quoting a frozen population. **What is NOT built** is drift *over time*: comparing successive measurements needs a history file, and nothing keeps one yet. Verified live: 506,991 measured, 2.81% graduated, against the snapshot's sampled 3.001% over 17,497 | `crates/radar-roast/src/creator.rs`, `crates/radar-research/src/creator_index.rs`, `crates/radar-cli/src/brief.rs` |
+| E2 | **DONE 2026-09-04, and smaller than this row asked for** (#135, #136). The plan wanted a new `radar baserates` command on a base-rates timer of its own. It is not needed: the creator-index pass already visits every succeeded launch and every outcome every six hours, so the population is five additions per row inside a timer that exists — `CreatorIndex.population`, and the fact sheet prefers it over `0024`'s sampled figures. The half of the alarm that bites is built: `radar brief`'s `index` check **fails when the rebuild is over twelve hours old**, which is LEARNINGS 5 — a `oneshot` with no `Restart=` leaves the last good file in place and the replies keep quoting a frozen population. **What is NOT built** is drift *over time*: comparing successive measurements needs a history file, and nothing keeps one yet. Verified live: 506,991 measured, 2.81% graduated, against the snapshot's sampled 3.001% over 17,497 | `crates/radar-research/src/creator.rs`, `crates/radar-research/src/creator_index.rs`, `crates/radar-cli/src/brief.rs` |
 | E3 | **`radar edge` — the walk-forward protocol.** Time-ordered folds; fit on `[t0,t1)`, test on `[t1,t2)`; report the top-decile stratum's edge in bps with a Wilson interval per fold; **a stratum counts only if it holds on two non-overlapping test folds.** The modelling itself is a pinned Python script under `scripts/probe/` (where every research number already comes from) reading E1's Parquet; the promotion of any rule into `radar-strategy` is Rust and tested | `new:crates/radar-cli/src/edge.rs`, `scripts/probe/edge.py`, `docs/research/0026-…md` |
 | E4 | **The organic-cohort study** `0011` asked for: organic graduations, first 24 h after graduation on the AMM, priced both sides the same way (`0016`'s lesson). It is the one cohort that clears costs twice as often and is not structurally spoken for | `docs/research/0027-…md`, `docs/research/queries/0027-….sql` |
 | E5 | **Re-run `0007` weekly** as `0007` itself asks, watching the prior-coverage line. E2 did not create a timer of its own, so this needs one — or a second `ExecStart` on the creator-index unit, which is where the store is already being read | `deploy/radar-creator-index.service` |
@@ -560,7 +563,7 @@ Said plainly, because a plan that only argues for itself is not worth much.
   the diff. `cargo mutants -f <file>` when a file is finished, never wider
   locally (AGENTS.md §8).
 - **Re-apply the bug** for every policy: C4's three refusals, B3's meter,
-  `forbidden.rs`'s self-mint rule, E3's planted leak.
+  `realorrug:crates/realorrug-roast/src/forbidden.rs`'s self-mint rule, E3's planted leak.
 - **Two instruments compared** wherever a number is produced: D1 against
   `radar cost`; E2 against the committed `0024` snapshot; the contest score
   against a hand count of one week's replies.

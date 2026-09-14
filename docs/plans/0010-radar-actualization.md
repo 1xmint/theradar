@@ -86,7 +86,7 @@ Fill in the commit, named checks, observed outcomes, and deployment state for ea
       register, and writes no subject, number, unit, window, negation,
       comparison or verdict. The `tags` module is deleted, because a model that emits
       only a selection has no prose position for a tag to sit in; its argument
-      is answered in `clause.rs`'s header, and `forbidden`/`fidelity` now read
+      is answered in `realorrug:crates/realorrug-roast/src/clause.rs`'s header, and `forbidden`/`fidelity` now read
       Radar's own clauses, which is a real and different job. A fact with an
       empty clause list is shown as context and given no number, so a
       measurement cannot be published before its wording is reviewed. Three
