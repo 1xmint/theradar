@@ -31,10 +31,7 @@ radar-strategy.workspace = true
 radar-research.workspace = true
 radar-store.workspace = true
 radar-types.workspace = true
-# The local mirrors of the bot's on-disk shapes `brief` and `seven-days-later`
-# read and write (ADR 0024): small structs of their own, not a dependency on
-# the bot's crates.
-serde.workspace = true
+# `audit`, `replay` and the brief's serving check read and write JSON.
 serde_json.workspace = true
 
 # The brief's serving check asks the public surface how it is. Already in the

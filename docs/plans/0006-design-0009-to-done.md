@@ -118,7 +118,7 @@ time.
       result under 280 characters with every numeral authorised and the
       winner's coin torn down as the reply; `realorrug:crates/realorrug-analyst/src/daily.rs` renders and posts the
       rows `radar seven-days-later` (new, in `radar-cli`, on
-      `deploy/radar-seven-days.timer`) writes from the store — the join the
+      `theradar:deploy/radar-seven-days.timer`) writes from the store — the join the
       analyst may not make. `Publisher::post` on every publisher, priced as
       `RADAR_X_PRICE_POST`. Both posts pass the two checks in tests that
       re-apply a dropped authorisation; a post that fails is recorded and not

@@ -26,7 +26,6 @@ mod model_prices;
 mod replay;
 mod route;
 mod selection;
-mod seven_days;
 mod study;
 
 use radar_sim::{JupiterQuoter, RpcClient};
@@ -827,7 +826,6 @@ fn main() -> ExitCode {
         "edge" => edge::run(&args),
         "study" => event_study(&args),
         "creator-index" => creator_index(&args),
-        "seven-days-later" => seven_days::run(&args),
         "dossier" => dossier::run(&args),
         "audit" => audit::run(&args),
         "model-prices" => model_prices::run(&args),

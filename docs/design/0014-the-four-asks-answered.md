@@ -113,7 +113,7 @@ and one of them has never run.
   run. Since plan 0009 item 8 it is a three-post thread: the summary, the
   winner's coin torn down, and the week's best hunters.
 - The **daily** "seven days later" starts 2026-09-13 — but only once
-  `radar-seven-days.timer` is installed. It is not, and without it the first
+  `theradar:deploy/radar-seven-days.timer` is installed. It is not, and without it the first
   one finds no file and posts nothing. That is plan 0009 phase 0.4, and it is a
   root command that is Josh's.
 

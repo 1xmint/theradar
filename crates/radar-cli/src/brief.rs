@@ -136,24 +136,10 @@ pub fn run(store: &Path, serve_url: Option<&str>) -> bool {
         manifest.as_deref(),
     ));
     checks.push(serving(probe));
-    // The getter is read twice and it says two different things: where the log
-    // is, and whether anybody has claimed the analyst runs on this host.
+    // The analyst, contest and vault checks read realorrug's files and left
+    // with ADR 0026 of realorrug's record: Radar reads nothing of the bot's.
     let get = |k: &str| set_to_something(std::env::var(k).ok());
     let tree = Tree::around(store);
-    checks.push(analyst(
-        &analyst_dir(&get, &tree),
-        get("RADAR_ANALYST_DIR").is_some(),
-    ));
-    // The contest and the vault, on the same claim rule as the analyst: the
-    // variable that says where the records are is the claim that a contest
-    // runs here, and without it absence is a fact rather than an alarm.
-    let contest_dir = get("RADAR_CONTEST_DIR").unwrap_or_else(|| tree.contest.clone());
-    checks.push(contest(&contest_dir, get("RADAR_CONTEST_DIR").is_some()));
-    checks.push(vault(
-        &contest_dir,
-        get("RADAR_CONTEST_DIR").is_some(),
-        u64::try_from(now).unwrap_or(0),
-    ));
     checks.push(creator_index(
         &get("RADAR_CREATOR_INDEX").unwrap_or_else(|| tree.creator_index.clone()),
         now,
@@ -373,25 +359,11 @@ fn ingestion(store: &Path, now: i64) -> Check {
     Check::new(status, "ingestion", detail)
 }
 
-/// Where the analyst keeps its files.
-///
-/// The same default the daemon uses, and the same environment variable, so an
-/// operator who moved the directory does not have to tell the brief twice.
-///
-/// Takes a getter for the reason the daemon's config readers do: the rule is
-/// then testable without setting a process-wide variable that parallel tests
-/// would fight over.
-fn analyst_dir(get: &impl Fn(&str) -> Option<String>, tree: &Tree) -> String {
-    get("RADAR_ANALYST_DIR").unwrap_or_else(|| tree.analyst.clone())
-}
-
 /// An environment value, or `None` if it is blank.
 ///
-/// An empty value is **unset**, not a path of `""`. `RADAR_ANALYST_DIR=` in an
-/// EnvironmentFile is how a variable gets commented out badly, and it would
-/// otherwise be wrong twice at once: every path derived from it collapses to
-/// `/replies.jsonl`, *and* the variable still reads as the claim that the
-/// analyst runs on this host, which turns a legitimate absence into an alarm.
+/// An empty value is **unset**, not a path of `""`. `RADAR_CREATOR_INDEX=` in
+/// an EnvironmentFile is how a variable gets commented out badly, and a blank
+/// path would otherwise be read as a file nobody wrote.
 ///
 /// The signer's key reader already reads its environment this way; this is the
 /// same rule where the consequence is a monitor rather than a signature.
@@ -425,18 +397,10 @@ fn set_to_something(value: Option<String>) -> Option<String> {
 ///
 /// The store path is the one thing the brief is never wrong about: it is passed
 /// explicitly and every store check already reads through it. So the rest hang
-/// off it. `RADAR_ANALYST_DIR`, `RADAR_CONTEST_DIR` and `RADAR_CREATOR_INDEX`
-/// still override, and still carry their second meaning — that somebody has
-/// *claimed* the analyst or the contest runs on this host.
-///
-/// The layout mirrors the one the bot's own `daemon::Paths::under` derived
-/// before it moved into its own repository (ADR 0024): the analyst's
-/// directory and the contest's are siblings under `data/`, and the creator
-/// index sits in the checkout beside them.
+/// off it. `RADAR_CREATOR_INDEX` still overrides. The analyst and contest
+/// directories it once derived too went with the bot (realorrug ADR 0026).
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Tree {
-    analyst: String,
-    contest: String,
     creator_index: String,
 }
 
@@ -449,8 +413,7 @@ impl Tree {
     /// default is right there and wrong on the box; the difference is that on
     /// the box the store path is absolute, so the derivation always fires.
     fn around(store: &Path) -> Self {
-        let data = store.parent();
-        let checkout = data.and_then(Path::parent);
+        let checkout = store.parent().and_then(Path::parent);
         let under = |base: Option<&Path>, name: &str, fallback: &str| -> String {
             match base {
                 // An empty parent is `data/store`'s grandparent: joining onto it
@@ -466,8 +429,6 @@ impl Tree {
             }
         };
         Self {
-            analyst: under(data, "analyst", "data/analyst"),
-            contest: under(data, "contest", "data/contest"),
             creator_index: under(
                 checkout,
                 radar_research::creator::DEFAULT_PATH,
@@ -509,12 +470,10 @@ const _: () = assert!(
 
 /// Whether the creator index is being rebuilt.
 ///
-/// # Why absence is fine here and was not for the analyst
+/// # Why absence is fine here
 ///
-/// The reply log is absent in two different situations -- the daemon was never
-/// installed, and the daemon is installed and has answered nobody -- so
-/// [`analyst`] has to be told which host it is on.
-///
+/// Some files are absent in two different situations -- never installed, and
+/// installed but idle -- so a check on them has to be told which host it is on.
 /// This file has no such ambiguity. The **first** timer run writes it and every
 /// later run rewrites it, so on a host that builds the index it is never
 /// missing. Absent means the timer was never installed here, which is true of
@@ -582,95 +541,6 @@ fn creator_index(path: &str, now: i64) -> Check {
             format!("creator index at {path} cannot be read: {e}"),
         ),
     }
-}
-
-/// Whether the public analyst is answering, and when it last did.
-///
-/// # Why absence is Unknown only once somebody has claimed it runs here
-///
-/// An analyst that has never run and an analyst that stopped look identical from
-/// a directory listing, and reporting absence the same way as success is the
-/// failure LEARNINGS 5 records. This account's whole product is answering in
-/// public, so a silent one is the outage -- **once there is an account**.
-///
-/// Before that there is not. On every host where the daemon is not installed the
-/// log is legitimately absent forever, and a check that alarms every fifteen
-/// minutes for the weeks before launch is a check that fires on ordinary
-/// weather, which section 5 of `AGENTS.md` says is worse than no check: it
-/// spends the credibility of the alert channel the recorder depends on. That
-/// alert channel is the one that was missing when the recorder died silently for
-/// thirteen hours.
-///
-/// So `declared` decides which of the two this is, and `RADAR_ANALYST_DIR` is
-/// where the claim is made -- the unit file sets it, so installing the analyst
-/// is what arms the check. It is deny-by-default read the right way round: what
-/// is denied without configuration is the *alarm*, not the reporting, and the
-/// state is still printed either way.
-///
-/// It reads the reply log rather than a process list, for the reason the
-/// ingestion check reads the cursor: a daemon that is running and answering
-/// nobody is the state worth catching, and only the log can tell.
-fn analyst(dir: &str, declared: bool) -> Check {
-    let log = format!("{dir}/replies.jsonl");
-    // Absent and not claimed: a fact about this host, printed and not alarmed.
-    let missing = if declared {
-        Status::Unknown
-    } else {
-        Status::Ok
-    };
-    let entries = match radar_backfill::analyst_log::read(&log) {
-        Ok(entries) => entries,
-        Err(e) => {
-            return Check::new(
-                missing,
-                "analyst",
-                format!("no reply log at {log} — it has never run, or cannot write ({e})"),
-            );
-        }
-    };
-
-    let Some(last) = entries.iter().map(|e| e.at).max() else {
-        return Check::new(
-            missing,
-            "analyst",
-            format!("{log} is empty — it has started and answered nothing"),
-        );
-    };
-
-    // Counted over the folded view, because `publish` writes twice per reply --
-    // once before it says anything and once after. Counting raw lines would
-    // report double.
-    let answered = radar_backfill::analyst_log::latest(&log).map_or(entries.len(), |v| v.len());
-    let published = radar_backfill::analyst_log::latest(&log)
-        .map_or(0, |v| v.iter().filter(|e| e.reply_id.is_some()).count());
-
-    // No threshold on the age, and no age computed. A quiet account is a quiet
-    // day, not an outage -- this thing answers when it is asked, and nobody
-    // asking is a fact about the world rather than a fault. Alarming on it would
-    // be a check that fires on ordinary weather, which AGENTS.md section 5 says
-    // is worse than no check.
-    //
-    // An earlier version computed the age and then discarded it, which mutation
-    // testing found by replacing the subtraction with an addition and nothing
-    // failing. A number nothing reads is not a number.
-    let mut detail = format!(
-        "{answered} answered, {published} published; last at {}",
-        from_epoch(i64::try_from(last).unwrap_or(0))
-    );
-    // The free lane, when it has ever answered. Its own file, so its absence
-    // is the ordinary state of every host without a bot token and is not
-    // reported; its presence is a count, never an alarm, for the same reason
-    // the X count is not one.
-    if let Ok(telegram) = radar_backfill::analyst_log::latest(&format!("{dir}/telegram.jsonl")) {
-        use std::fmt::Write as _;
-        let sent = telegram.iter().filter(|e| e.reply_id.is_some()).count();
-        let _ = write!(
-            detail,
-            "; telegram {} answered, {sent} sent",
-            telegram.len()
-        );
-    }
-    Check::new(Status::Ok, "analyst", detail)
 }
 
 /// The highest slot the store holds.
@@ -1264,231 +1134,11 @@ fn build_field(body: &str) -> Option<&str> {
     (!value.is_empty() && value != "unknown").then_some(value)
 }
 
-/// One contest week's record, as much of it as `radar brief` reads.
-///
-/// The shape `radar_contest::ledger::Record` wrote, kept unchanged: this
-/// crate does not write these files -- the week-close job does, and since
-/// 2026-09-14 that job runs in `realorrug-analyst`, not here (ADR 0024). This
-/// reads the same on-disk file, only the fields this check reports.
-#[derive(Clone, serde::Deserialize)]
-struct ContestRecord {
-    /// The week number. `Week` serialised as its bare number, so this reads
-    /// it the same way.
-    week: u64,
-    /// When it closed, seconds since the epoch.
-    closed_at: u64,
-    /// Counted, not read: only the lengths matter here.
-    #[serde(default)]
-    ranking: ContestRanking,
-    /// Present (possibly `null`) whenever anything counted; absent only on a
-    /// record from before the field existed.
-    #[serde(default)]
-    winner: Option<serde_json::Value>,
-    /// Whether -- and by whom -- the winner claimed.
-    #[serde(default)]
-    claim: Option<serde_json::Value>,
-    /// The payment, once made.
-    #[serde(default)]
-    payout: Option<ContestPayout>,
-}
-
-/// The counted and excluded entries -- their lengths are all `radar brief`
-/// reports.
-#[derive(Clone, Default, serde::Deserialize)]
-struct ContestRanking {
-    ranked: Vec<serde_json::Value>,
-    excluded: Vec<serde_json::Value>,
-}
-
-/// A payment that was made, as much of it as this check prints.
-#[derive(Clone, serde::Deserialize)]
-struct ContestPayout {
-    lamports: u64,
-    signature: String,
-}
-
-/// How long a winner has to claim before the prize rolls into the next week.
-/// Design 0007 section 6.2: seven days. The same constant
-/// `radar_contest::ledger::CLAIM_WINDOW_SECONDS` was.
-const CLAIM_WINDOW_SECONDS: u64 = 7 * 86_400;
-
-impl ContestRecord {
-    /// The last moment a claim is accepted.
-    const fn claim_window_closes_at(&self) -> u64 {
-        self.closed_at + CLAIM_WINDOW_SECONDS
-    }
-}
-
-/// Every week record in a directory, in no particular order.
-///
-/// A record is a file named `<week>.json` where `<week>` is the week number;
-/// both halves of the name are required, so a backup copy or a notes file is
-/// not a record. A file that does not parse is skipped rather than failing
-/// the read -- the same rule `radar_contest::records_in` applied.
-fn contest_records_in(dir: &std::path::Path) -> Vec<ContestRecord> {
-    let Ok(listing) = std::fs::read_dir(dir) else {
-        return Vec::new();
-    };
-    listing
-        .flatten()
-        .filter(|entry| {
-            let name = entry.file_name();
-            let name = name.to_string_lossy();
-            name.ends_with(".json") && name.trim_end_matches(".json").parse::<u64>().is_ok()
-        })
-        .filter_map(|entry| std::fs::read_to_string(entry.path()).ok())
-        .filter_map(|text| serde_json::from_str(&text).ok())
-        .collect()
-}
-
 /// What the trading lane is doing, which is nothing.
 ///
 /// Stated every run rather than only when it changes. An operator reading a
 /// brief should never have to remember whether capital is armed, and a line that
 /// appears only on change is a line whose absence means two different things.
-/// The contest: which week last closed, and where its prize stands.
-///
-/// Design 0007 C7. Reads the week records the analyst writes at close and
-/// reports the latest: winner or none, claimed or not, paid or not. Absent is
-/// `Unknown` once `RADAR_CONTEST_DIR` says a contest runs here -- a week that
-/// closed with no record is the week-close job not running -- and `Ok`
-/// otherwise, for the reason the analyst check gives: every host without the
-/// account is legitimately without records.
-fn contest(dir: &str, declared: bool) -> Check {
-    let missing = if declared {
-        Status::Unknown
-    } else {
-        Status::Ok
-    };
-    // **A week that closed is not a week that can close, and this is checked
-    // first.** The analyst writes here once a week, so a directory it cannot
-    // write looks identical to a healthy one for six days -- and on 2026-09-07
-    // that is exactly what happened: `deploy/radar-analyst.service` granted
-    // `ReadWritePaths` for the analyst's directory and not the contest's,
-    // which is a *sibling*, and the close said `Read-only file system` every
-    // five minutes into a journal nobody was reading.
-    //
-    // Before the records are read, and deliberately. "No week has closed here"
-    // is a true sentence about an unwritable directory and it is the wrong
-    // one: it sends the operator to look at the analyst instead of the unit
-    // file. The worse fact wins.
-    //
-    // Checked here as well as at the analyst's start because a start-up line
-    // scrolls away and this is the thing that runs on a timer.
-    let probe = std::path::Path::new(dir).join(".radar-write-probe");
-    let writable = std::fs::create_dir_all(dir)
-        .and_then(|()| std::fs::write(&probe, b""))
-        .is_ok();
-    if writable {
-        let _ = std::fs::remove_file(&probe);
-    } else {
-        return Check::new(
-            Status::Fail,
-            "contest",
-            format!(
-                "{dir} cannot be written, so no week can close whatever is already in it.                  If the analyst runs under systemd, add this directory to ReadWritePaths --                  it is a sibling of the analyst's directory, not a child"
-            ),
-        );
-    }
-
-    let mut records = contest_records_in(std::path::Path::new(dir));
-    let Some(latest) = records.iter().max_by_key(|r| r.week).cloned() else {
-        return Check::new(
-            missing,
-            "contest",
-            format!(
-                "no week records at {dir} — no week has closed here, or nothing is closing them"
-            ),
-        );
-    };
-    records.sort_by_key(|r| r.week);
-
-    let standing = match (&latest.winner, &latest.claim, &latest.payout) {
-        (None, _, _) => "no winner, the pool rolls over".to_owned(),
-        (Some(_), None, _) => format!(
-            "winner unclaimed, window closes {}",
-            from_epoch(i64::try_from(latest.claim_window_closes_at()).unwrap_or(0))
-        ),
-        (Some(_), Some(_), None) => "winner claimed, unpaid".to_owned(),
-        (Some(_), Some(_), Some(p)) => format!("paid {} lamports, {}", p.lamports, p.signature),
-    };
-    Check::new(
-        Status::Ok,
-        "contest",
-        format!(
-            "week {} closed {}; {} counted, {} excluded; {standing}; {} records",
-            latest.week,
-            from_epoch(i64::try_from(latest.closed_at).unwrap_or(0)),
-            latest.ranking.ranked.len(),
-            latest.ranking.excluded.len(),
-            records.len()
-        ),
-    )
-}
-
-/// Two days: a vault reading older than this is not a reading of the vault.
-const VAULT_READING_STALE_AFTER: u64 = 2 * 86_400;
-
-/// The creator vault's balance, as last read. The shape
-/// `radar_contest::ledger::Vault` wrote.
-#[derive(serde::Deserialize)]
-struct Vault {
-    address: String,
-    lamports: u64,
-    measured_at: u64,
-}
-
-/// The creator vault, as last read.
-///
-/// The payout process writes `pool.json` on every run, so a reading is at most
-/// a day old when the timer runs. Absent is `Unknown` once a contest is
-/// declared here and `Ok` -- "no token yet" -- otherwise. A reading older
-/// than two days is `Unknown` too: a stale figure served to the pool page is
-/// the thing that page exists to refuse.
-fn vault(dir: &str, declared: bool, now: u64) -> Check {
-    let path = format!("{dir}/pool.json");
-    let missing = if declared {
-        Status::Unknown
-    } else {
-        Status::Ok
-    };
-    let Ok(text) = std::fs::read_to_string(&path) else {
-        return Check::new(
-            missing,
-            "vault",
-            format!("no vault reading at {path} — no token yet, or the payout has never run here"),
-        );
-    };
-    let Ok(reading) = serde_json::from_str::<Vault>(&text) else {
-        return Check::new(
-            Status::Unknown,
-            "vault",
-            format!("{path} does not parse as a vault reading"),
-        );
-    };
-    let age = now.saturating_sub(reading.measured_at);
-    let status = if age > VAULT_READING_STALE_AFTER {
-        Status::Unknown
-    } else {
-        Status::Ok
-    };
-    Check::new(
-        status,
-        "vault",
-        format!(
-            "{} holds {} lamports, measured {}{}",
-            reading.address,
-            reading.lamports,
-            from_epoch(i64::try_from(reading.measured_at).unwrap_or(0)),
-            if status == Status::Unknown {
-                " — stale, more than two days old"
-            } else {
-                ""
-            }
-        ),
-    )
-}
-
 fn trading_lane() -> Check {
     // Derived, not asserted. This read `Policy::CLOSED` and hardcoded both
     // `Status::Ok` and the words "no proposal can become an authorization" — so
@@ -1743,64 +1393,6 @@ mod tests {
         assert!(empty.detail.contains("no sha256"), "{}", empty.detail);
     }
 
-    #[test]
-    fn a_contest_directory_that_cannot_be_written_fails_rather_than_reading_healthy() {
-        // The failure that ran for ninety minutes on 2026-09-07: the analyst
-        // writes here once a week, so a directory it cannot write is
-        // indistinguishable from a healthy one for six days. The brief was
-        // reporting a five-day-old record as fine.
-        //
-        // Re-apply by deleting the probe: this reads `ok` with a record on
-        // disk and a directory nothing can write.
-        let dir = std::env::temp_dir().join(format!("radar-brief-c{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).expect("mkdir");
-        let path = dir.to_string_lossy().into_owned();
-
-        let record = serde_json::json!({
-            "week": 2957,
-            "opened_at": 0,
-            "closed_at": 0,
-            "ranking": { "ranked": [], "excluded": [] },
-            "winner": null,
-            "claim_prompt": null,
-            "claim": null,
-            "payout": null,
-        });
-        std::fs::write(dir.join("2957.json"), record.to_string()).expect("write");
-
-        // Writable: the ordinary line.
-        let fine = contest(&path, true);
-        assert!(matches!(fine.status, Status::Ok), "{}", fine.detail);
-        assert!(fine.detail.contains("week 2957"), "{}", fine.detail);
-        // And the probe leaves nothing behind for `records_in` to skip.
-        assert!(!dir.join(".radar-write-probe").exists());
-
-        // Not writable: a FAIL that names the directive, not the symptom.
-        // A path under a file is the closest a test gets to a read-only mount.
-        let blocked = dir.join("2957.json").to_string_lossy().into_owned();
-        let under = format!("{blocked}/nope");
-        let broken = contest(&under, true);
-        assert!(matches!(broken.status, Status::Fail), "{}", broken.detail);
-        assert!(
-            broken.detail.contains("cannot be written"),
-            "{}",
-            broken.detail
-        );
-        // The directive, not the symptom, and not "no week has closed here" --
-        // which is true of an unwritable directory and sends the operator to
-        // look at the analyst instead of the unit file.
-        assert!(
-            broken.detail.contains("ReadWritePaths"),
-            "{}",
-            broken.detail
-        );
-        assert!(
-            !broken.detail.contains("no week records"),
-            "{}",
-            broken.detail
-        );
-    }
     use super::*;
 
     #[test]
@@ -2776,163 +2368,6 @@ mod tests {
     }
 
     #[test]
-    fn the_contest_and_vault_checks_alarm_on_absence_only_once_a_contest_is_declared() {
-        // The analyst check's rule, applied twice. Re-applied by passing `true`
-        // as `declared` in the undeclared half: the status assertions fail
-        // while the text ones still pass, which is the shape of the mistake.
-        let dir =
-            std::env::temp_dir().join(format!("radar-brief-contest-none-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).expect("a temp dir");
-        let dir = dir.to_str().expect("a path");
-        let now = 1_788_000_000;
-
-        let undeclared = contest(dir, false);
-        assert_eq!(undeclared.status, Status::Ok, "{}", undeclared.detail);
-        assert!(
-            undeclared.detail.contains("no week records"),
-            "{}",
-            undeclared.detail
-        );
-        let declared = contest(dir, true);
-        assert_eq!(declared.status, Status::Unknown, "{}", declared.detail);
-
-        let undeclared = vault(dir, false, now);
-        assert_eq!(undeclared.status, Status::Ok, "{}", undeclared.detail);
-        assert!(
-            undeclared.detail.contains("no token yet"),
-            "{}",
-            undeclared.detail
-        );
-        let declared = vault(dir, true, now);
-        assert_eq!(declared.status, Status::Unknown, "{}", declared.detail);
-    }
-
-    #[test]
-    fn the_contest_check_reports_the_latest_week_and_where_its_prize_stands() {
-        let dir = std::env::temp_dir().join(format!("radar-brief-contest-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).expect("a temp dir");
-        let dir = dir.to_str().expect("a path");
-        // The week-close job's own on-disk shape, written directly: this
-        // crate no longer imports the type that used to build it (ADR 0024).
-        let closes_at = |week: u64| (((week + 1) * 7).saturating_sub(3)) * 86_400;
-        let write = |week: u64,
-                     winner: Option<serde_json::Value>,
-                     claim: Option<serde_json::Value>,
-                     payout: Option<serde_json::Value>| {
-            let record = serde_json::json!({
-                "week": week,
-                "opened_at": closes_at(week.saturating_sub(1)),
-                "closed_at": closes_at(week),
-                "ranking": { "ranked": [], "excluded": [] },
-                "winner": winner,
-                "claim_prompt": null,
-                "claim": claim,
-                "payout": payout,
-            });
-            std::fs::write(format!("{dir}/{week}.json"), record.to_string()).expect("write");
-        };
-        // An older week, paid; the latest, with a winner and no claim yet.
-        write(
-            2956,
-            Some(serde_json::json!({
-                "summoner": "a", "reply_id": "r", "score": 1, "handle": null,
-            })),
-            Some(serde_json::json!({ "address": "ADDR", "reply_id": "c", "at": 1 })),
-            Some(serde_json::json!({
-                "recipient": "ADDR", "lamports": 500, "signature": "SIG", "at": 2,
-            })),
-        );
-        write(
-            2957,
-            Some(serde_json::json!({
-                "summoner": "b", "reply_id": "r2", "score": 4, "handle": null,
-            })),
-            None,
-            None,
-        );
-
-        // The latest by week number, not by file order or by which was written
-        // last. Re-applied by taking the first record found: on a directory
-        // that lists 2957 before 2956 this still passes, so the assertion is on
-        // the week and on the claim window, which only the latest has open.
-        // A copy of a record under any name but `<week>.json` is not a record:
-        // a backup beside the ledger must not count as a week that closed.
-        // Re-applied by joining the two name tests with `||`: `copy.json`
-        // parses as a record and the count below reads 3.
-        std::fs::copy(format!("{dir}/2956.json"), format!("{dir}/copy.json")).expect("copy");
-        std::fs::copy(format!("{dir}/2956.json"), format!("{dir}/2958.json.bak")).expect("copy");
-
-        let check = contest(dir, true);
-        assert_eq!(check.status, Status::Ok, "{}", check.detail);
-        assert!(
-            check.detail.starts_with("week 2957 closed"),
-            "{}",
-            check.detail
-        );
-        // Seven days to claim, written as a number so the arithmetic is what
-        // is pinned: CI's mutants turned the constant's `*` and the window's
-        // `+` into other operators, and "window closes" alone passed them all.
-        assert_eq!(CLAIM_WINDOW_SECONDS, 604_800);
-        let window_closes = from_epoch(i64::try_from(closes_at(2957) + 604_800).expect("fits"));
-        assert!(
-            check
-                .detail
-                .contains(&format!("winner unclaimed, window closes {window_closes}")),
-            "{}",
-            check.detail
-        );
-        assert!(check.detail.contains("2 records"), "{}", check.detail);
-
-        // Paid reads as paid, with the signature a reader can check.
-        std::fs::remove_file(format!("{dir}/2957.json")).expect("rm");
-        let check = contest(dir, true);
-        assert!(
-            check.detail.contains("paid 500 lamports, SIG"),
-            "{}",
-            check.detail
-        );
-    }
-
-    #[test]
-    fn a_vault_reading_is_ok_when_fresh_and_unknown_when_stale_or_unreadable() {
-        let dir = std::env::temp_dir().join(format!("radar-brief-vault-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).expect("a temp dir");
-        let dir = dir.to_str().expect("a path");
-        let measured = 1_788_000_000;
-        let reading = serde_json::json!({
-            "address": "VAULT",
-            "lamports": 2_500_000,
-            "measured_at": measured,
-        });
-        std::fs::write(format!("{dir}/pool.json"), reading.to_string()).expect("write");
-
-        let fresh = vault(dir, true, measured + 172_800);
-        assert_eq!(fresh.status, Status::Ok, "{}", fresh.detail);
-        assert!(
-            fresh.detail.contains("VAULT holds 2500000 lamports"),
-            "{}",
-            fresh.detail
-        );
-        // Two days is 172,800 seconds, written as a number here so the constant's
-        // arithmetic is what the test pins: CI's mutants turned its `*` into `+`
-        // and `/` and a test written in terms of the constant passed either way.
-        assert_eq!(VAULT_READING_STALE_AFTER, 172_800);
-        // One second past two days is stale. Re-applied by comparing with
-        // `>=`: the reading at exactly two days reads stale and the first
-        // assertion fails.
-        let stale = vault(dir, true, measured + 172_801);
-        assert_eq!(stale.status, Status::Unknown, "{}", stale.detail);
-        assert!(stale.detail.contains("stale"), "{}", stale.detail);
-
-        std::fs::write(format!("{dir}/pool.json"), "{not json").expect("write");
-        let broken = vault(dir, false, measured);
-        assert_eq!(broken.status, Status::Unknown, "{}", broken.detail);
-    }
-
-    #[test]
     fn a_blank_override_is_unset_rather_than_a_path_of_nothing() {
         // Found by running the brief from `/` with `RADAR_ANALYST_DIR=` set,
         // which is what a badly commented-out line in an EnvironmentFile looks
@@ -2960,26 +2395,10 @@ mod tests {
         //
         // The box's real layout, from `deploy/alert.env.example`.
         let tree = Tree::around(Path::new("/home/guardian/radar/data/store"));
-        assert_eq!(tree.analyst, "/home/guardian/radar/data/analyst");
-        assert_eq!(tree.contest, "/home/guardian/radar/data/contest");
         assert_eq!(
             tree.creator_index,
             "/home/guardian/radar/docs/research/data/creator-index.json"
         );
-    }
-
-    #[test]
-    fn the_derived_layout_puts_the_contest_directory_beside_the_analyst_ones() {
-        // Not "the same strings", which would be a literal agreeing with
-        // itself: the contest directory has to be a *sibling* of the
-        // analyst's rather than a child of it -- the same layout the bot's
-        // own `daemon::Paths::under` derived before it moved into its own
-        // repository (ADR 0024) -- and a brief that folded it inside would
-        // report every week as unwritten.
-        let store = "/srv/radar/data/store";
-        let tree = Tree::around(Path::new(store));
-        assert_eq!(tree.analyst, "/srv/radar/data/analyst");
-        assert_eq!(tree.contest, "/srv/radar/data/contest");
     }
 
     #[test]
@@ -2990,13 +2409,10 @@ mod tests {
         // absolute on Unix and names a tree nobody has. The literal is right
         // there.
         let tree = Tree::around(Path::new("data/store"));
-        assert_eq!(tree.analyst, "data/analyst");
-        assert_eq!(tree.contest, "data/contest");
         assert_eq!(tree.creator_index, radar_research::creator::DEFAULT_PATH);
 
         // And a store path with no parent at all.
         let bare = Tree::around(Path::new("store"));
-        assert_eq!(bare.analyst, "data/analyst");
         assert_eq!(bare.creator_index, radar_research::creator::DEFAULT_PATH);
     }
 
@@ -3091,151 +2507,5 @@ mod tests {
         assert_eq!(build_field("{\"build\":\"\"}"), None);
         assert_eq!(build_field("{\"build\":\"unknown\"}"), None);
         assert_eq!(build_field("{\"build\":\"634d384\"}"), Some("634d384"));
-    }
-
-    #[test]
-    fn the_analyst_directory_falls_back_to_the_daemons_own_default() {
-        // The same default and the same variable the daemon uses. A brief
-        // looking somewhere else reports a healthy analyst as never having run.
-        let tree = Tree::around(Path::new("data/store"));
-        assert_eq!(analyst_dir(&|_| None, &tree), "data/analyst");
-
-        assert_eq!(
-            analyst_dir(
-                &|k| (k == "RADAR_ANALYST_DIR").then(|| "/srv/a".to_owned()),
-                &tree
-            ),
-            "/srv/a"
-        );
-    }
-
-    #[test]
-    fn an_analyst_that_never_ran_is_unknown_once_somebody_says_it_runs_here() {
-        // The failure LEARNINGS 5 records: a check reporting absence the same
-        // way it reports success. This account's product is answering in
-        // public, so a silent one is the outage -- and `Unknown` alarms.
-        let dir = std::env::temp_dir().join(format!("radar-brief-none-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).expect("a temp dir");
-        let check = analyst(dir.to_str().expect("a path"), true);
-        assert_eq!(check.status, Status::Unknown, "{}", check.detail);
-        assert!(check.detail.contains("never run"), "{}", check.detail);
-    }
-
-    #[test]
-    fn an_analyst_nobody_installed_is_reported_and_not_alarmed() {
-        // The other half, and the reason the parameter exists. The daemon was
-        // not installed on this host for weeks before there was an account to
-        // run it, and for all of those weeks the log was legitimately absent.
-        //
-        // Alarming on it would have fired every fifteen minutes down the same
-        // channel that carries the recorder's death -- teaching the operator to
-        // ignore the alert that matters, which is a worse outcome than having no
-        // analyst check at all.
-        //
-        // The state is still *said*: only the status changes, so nothing is
-        // hidden. Re-apply the bug by passing `true` here and the assertion on
-        // the status fails while the one on the text still passes, which is
-        // exactly the shape of the mistake.
-        let dir = std::env::temp_dir().join(format!("radar-brief-undec-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).expect("a temp dir");
-        let check = analyst(dir.to_str().expect("a path"), false);
-        assert_eq!(check.status, Status::Ok, "{}", check.detail);
-        assert!(
-            check.detail.contains("never run"),
-            "reported, not hidden: {}",
-            check.detail
-        );
-    }
-
-    #[test]
-    fn an_empty_reply_log_is_unknown_too() {
-        let dir = std::env::temp_dir().join(format!("radar-brief-empty-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).expect("a temp dir");
-        std::fs::write(dir.join("replies.jsonl"), "").expect("written");
-        let check = analyst(dir.to_str().expect("a path"), true);
-        assert_eq!(check.status, Status::Unknown, "{}", check.detail);
-        // Started and answered nothing is a real state on a host that has one.
-        assert_eq!(
-            analyst(dir.to_str().expect("a path"), false).status,
-            Status::Ok
-        );
-    }
-
-    /// Appends one line to a reply log, in the shape the bot still writes.
-    ///
-    /// Written directly rather than through a shared `append`: nothing in
-    /// Radar writes this file any more (ADR 0024), only reads it, so there is
-    /// no production code this could reuse -- and one line of JSON is not
-    /// worth a write-side twin of `radar_backfill::analyst_log`.
-    fn append_reply(path: &str, mention_id: &str, at: u64, reply_id: Option<&str>) {
-        use std::io::Write as _;
-        let line = serde_json::json!({
-            "at": at,
-            "mention_id": mention_id,
-            "summoner": "a",
-            "mint": null,
-            "read_at_slot": null,
-            "fact_sheet": "",
-            "reply": "text",
-            "fellback": null,
-            "reply_id": reply_id,
-        })
-        .to_string();
-        let mut file = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(path)
-            .expect("open");
-        writeln!(file, "{line}").expect("write");
-    }
-
-    #[test]
-    fn the_analyst_check_counts_replies_rather_than_log_lines() {
-        // `publish` writes twice per reply -- once before it says anything and
-        // once after -- so counting raw lines reports double, and an operator
-        // reading "6 answered" when three people asked would be reading a
-        // number that means nothing.
-        let dir = std::env::temp_dir().join(format!("radar-brief-count-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).expect("a temp dir");
-        let log = dir.join("replies.jsonl");
-        let log = log.to_str().expect("a path").to_owned();
-        let _ = std::fs::remove_file(&log);
-
-        for id in ["m1", "m2", "m3"] {
-            // The intent, then the outcome, exactly as `publish` writes them.
-            append_reply(&log, id, 1_788_000_000, None);
-            append_reply(&log, id, 1_788_000_000, Some(&format!("r-{id}")));
-        }
-
-        let check = analyst(dir.to_str().expect("a path"), true);
-        assert_eq!(check.status, Status::Ok, "{}", check.detail);
-        assert!(
-            check.detail.starts_with("3 answered, 3 published"),
-            "six lines are three replies: {}",
-            check.detail
-        );
-    }
-
-    #[test]
-    fn a_reply_that_was_never_published_is_counted_separately() {
-        // The difference between "we decided this" and "we said this" is the
-        // whole reason the log records both, and an operator needs to see when
-        // the gap opens -- a publisher that is down all night answers nobody
-        // while the log fills up.
-        let dir = std::env::temp_dir().join(format!("radar-brief-dry-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).expect("a temp dir");
-        let log = dir.join("replies.jsonl");
-        let log = log.to_str().expect("a path").to_owned();
-        let _ = std::fs::remove_file(&log);
-
-        append_reply(&log, "m1", 1_788_000_000, None);
-        append_reply(&log, "m1", 1_788_000_000, None);
-
-        let check = analyst(dir.to_str().expect("a path"), true);
-        assert!(
-            check.detail.starts_with("1 answered, 0 published"),
-            "{}",
-            check.detail
-        );
     }
 }

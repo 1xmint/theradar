@@ -105,7 +105,7 @@ again. This needs nothing from any vendor and it is the largest saving available
 | `radar-model` | Reaching a model provider: the vendor CLI as a subprocess that owns its own credential, or a metered API key. The impure edge `radar-agent` deliberately does not have. |
 | `radar-decode` | Solana program decoders. Matches Anchor discriminator bytes, never logged instruction names; an unrecognised discriminator is a recorded value, never a guess. |
 | `radar-store` | Append-only, slot-partitioned Parquet event log. Nulls mean "not recoverable", never zero; the watermark reaches onto disk. |
-| `radar-backfill` | Bulk historical extraction from CryptoHouse, decoded by the same decoder the live recorder uses. Also the one place the public reply bot's log and the contest ledger are still read as files — `analyst_log` — since the bot itself moved to [1xmint/realorrug](https://github.com/1xmint/realorrug) (that repository's "the bot stands alone" decision, ADR-0024). |
+| `radar-backfill` | Bulk historical extraction from CryptoHouse, decoded by the same decoder the live recorder uses. |
 | `radar-instruments` | The instrument registry. One declaration; internal, HTTP, x402 and MCP surfaces derived from it, and every invocation recorded. |
 | `radar-serve` | Ops page, JSON API, and stateless MCP (2026-07-28). The public analyst's site moved to realorrug-serve with the bot (ADR-0024); this crate's public surface is now `/v1/market/*` only. |
 | `radar-sim` | Exit analysis. Structural disqualification from the mint account, then a measured sell curve — never a single liquidity number. |
