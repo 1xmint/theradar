@@ -516,6 +516,14 @@ it as history, and read realorrug's own `docs/STATE.md` for what is current
 there. Two files stayed behind: `creator.rs` and `baserates.rs`, now under
 `crates/radar-research/src/`.
 
+**Radar stopped reading the bot's files on 2026-09-15** (1xmint/realorrug's
+ADR-0026: neither repository reads the other's files). Gone from here: the
+brief's `analyst`, `contest` and `vault` lines, `radar seven-days-later` and
+its timer, and `radar-backfill --analyst-dir` with its seven-day checkpoint for
+the bot's mints, which now settle at a day like every other token. The
+reply-log reader those three shared went with them. The history below still
+names them.
+
 **Live, at the time.** `radar-analyst` ran on the box under
 `realorrug:deploy/realorrug-analyst.service`,
 polls mentions, answers them, meters what it spends and logs every reply beside

@@ -43,7 +43,6 @@ Expected, and true on 2026-09-06:
 | `radar-brief.timer` | enabled, active |
 | `radar-brief.service` | static — the timer starts it |
 | `radar-creator-index.timer` | enabled, active |
-| `radar-seven-days.timer` | **not installed** — the daily post cannot run without it |
 | `/etc/systemd/system/radar-hosted.service` | disabled, and **not Radar** — see below |
 
 The public analyst and its payout are no longer units this repository installs
@@ -53,10 +52,6 @@ since the bot moved into that repository (that repository's "the bot stands
 alone" decision, ADR-0024), and that doc has its own verification section.
 Checking radar-analyst.service or radar-payout.timer against this table is
 checking the wrong repository's units.
-
-The seven-days timer is absent because nobody has installed it, and until
-somebody does, the first "seven days later" post finds no file and posts
-nothing.
 
 `radar-serve` should be in the system slice with its sandbox applied:
 
@@ -708,29 +703,22 @@ thousand queries and several hours. It paces itself deliberately — Radar is a
 guest on a free public endpoint (ADR 0002) — so run it under `tmux` or `nohup`
 rather than a session that will disconnect.
 
-## Measuring outcomes, and the coins the account has answered about
+## Measuring outcomes
 
 `--outcomes` measures what became of every token already in the store. It is the
 pass every signal is validated against, and it runs on its own schedule rather
-than under one of the units in this directory.
-
-**Add `--analyst-dir` on the box that runs the account.** Its only effect is to
-give the mints in `replies.jsonl` a fourth measurement at seven days; every
-other token still settles at a day, which is what keeps the pass bounded by
-launch rate rather than by history.
+than under one of the units in this directory. Every token settles a day after
+launch, which is what keeps the pass bounded by launch rate rather than by
+history.
 
 ```bash
-ssh guardian-vps-tail '
-  ~/bin/radar-backfill --outcomes \
-      --store ~/radar/data/store \
-      --analyst-dir ~/radar/data/analyst'
+ssh guardian-vps-tail '~/bin/radar-backfill --outcomes --store ~/radar/data/store'
 ```
 
-Without the flag the pass behaves exactly as it did, and the daily post reports
-the store's last checkpoint — up to a day after launch — which it now says out
-loud instead of calling it a week. With the flag, that post can say something
-about a week for the coins it is actually about. The set is a few mints a day
-against roughly 35,000 daily launches, so the extra cost is not measurable.
+It once took `--analyst-dir`, to give the mints the public bot had answered
+about a fourth measurement at seven days. That flag left with the bot
+(1xmint/realorrug's ADR-0026: Radar reads none of the bot's files), and a
+command line that still passes it is refused as an unknown flag.
 
 ## Running without the units — and why not to
 
@@ -816,30 +804,32 @@ bot moved into that repository (that repository's "the bot stands alone"
 decision, ADR-0024). That doc is where to look for anything about running the
 bot itself.
 
-Three things are still true on this box, reading the same files the bot reads
-and writes rather than importing its crates:
+Radar reads none of the bot's files and the bot reads none of Radar's
+(1xmint/realorrug's ADR-0026). The brief's `analyst`, `contest` and `vault`
+lines, `radar seven-days-later` and its timer, and the backfill's
+`--analyst-dir` all read the bot's reply log or contest ledger, and all of them
+are gone.
 
-- **`radar brief`** (`deploy/radar-brief.service`/`deploy/radar-brief.timer`)
-  still monitors the reply log and the contest ledger, and still gains its
-  `analyst` and `contest`/`vault` lines from them.
-- **`radar seven-days-later`**
-  (`deploy/radar-seven-days.service`/`deploy/radar-seven-days.timer`) still
-  builds the daily digest the bot's "seven days later" post reads, from that
-  same reply log.
-- **`radar creator-index`**
-  (`deploy/radar-creator-index.service`/`deploy/radar-creator-index.timer`)
-  still builds and publishes ADR-0024's data contract: the creator index with
-  its population summary, and (alongside it, as its own committed research
-  snapshot) the base-rate file at `docs/research/data/0024-base-rates.json`.
-  Those are the two files the bot reads back from this box's disk.
+A box that installed the seven-days timer removes it:
+
+```bash
+sudo systemctl disable --now radar-seven-days.timer
+sudo rm -f /etc/systemd/system/radar-seven-days.service /etc/systemd/system/radar-seven-days.timer
+sudo systemctl daemon-reload
+```
+
+**`radar creator-index`**
+(`deploy/radar-creator-index.service`/`deploy/radar-creator-index.timer`) still
+runs, as Radar's own research: the creator index with its population summary,
+and the base-rate snapshot at `docs/research/data/0024-base-rates.json`. The bot
+kept dated copies of the last two when it moved to its own folders and reads
+nothing from here.
 
 ```bash
 sudo install -D -m644 deploy/radar-creator-index.service /etc/systemd/system/radar-creator-index.service
 sudo install -D -m644 deploy/radar-creator-index.timer   /etc/systemd/system/radar-creator-index.timer
-sudo install -D -m644 deploy/radar-seven-days.service    /etc/systemd/system/radar-seven-days.service
-sudo install -D -m644 deploy/radar-seven-days.timer      /etc/systemd/system/radar-seven-days.timer
 sudo systemctl daemon-reload
-sudo systemctl enable --now radar-creator-index.timer radar-seven-days.timer
+sudo systemctl enable --now radar-creator-index.timer
 ```
 
 ## Knowing when it stopped

@@ -17,7 +17,7 @@ This plan is the review he asked for and the plan that follows from it. It is wr
 
 | what | state |
 |---|---|
-| units | `radar-analyst`, `radar-serve`, `radar-follow` active; `radar-brief.timer`, `radar-creator-index.timer` active. **Not installed:** `radar-seven-days.timer` (the daily post cannot start on 2026-09-13), `radar-payout` (no token, correct) |
+| units | `radar-analyst`, `radar-serve`, `radar-follow` active; `radar-brief.timer`, `radar-creator-index.timer` active. **Not installed:** `theradar:deploy/radar-seven-days.timer` (the daily post cannot start on 2026-09-13), `radar-payout` (no token, correct) |
 | binaries | `~/bin/radar-analyst` built 17:16 today, `~/bin/radar` 15:48, `/usr/local/bin/radar-serve` 15:42 — all post-#162; every running process holds the installed file (no `(deleted)`) |
 | `/etc/radar/analyst.env` | X credential and prices set; `RADAR_X_PUBLISH=on`; **no `RADAR_RPC`** (the analyst reads the chain through the free public node); **no `RADAR_MODEL_*`** (every reply is the template); `RADAR_CONTEST_OPERATORS` **appears twice** (systemd takes the last line; nothing prints which set is in force) |
 | `/etc/radar/alert.env` | absent. No alarm channel for a public bot (LEARNINGS 8) |
@@ -65,7 +65,7 @@ The 429 claim behind 0.2 is worth stating exactly rather than repeating: over th
       proof: `journalctl -u radar-analyst -n 200 | grep -c 'http status: 429'` before and after; a `radar dossier` on the box against a busy mint.
 - [x] 0.3 **One `RADAR_CONTEST_OPERATORS` line** (Josh, root). Two lines are in the file; systemd keeps the last. Delete one, keep the one with both ids. Item 9 makes the daemon print the set it holds so this cannot be silent again.
       proof: `grep -c '^RADAR_CONTEST_OPERATORS=' /etc/radar/analyst.env` prints 1; after item 9, the journal's start line names two ids.
-- [ ] 0.4 **`radar-seven-days.timer`** (Josh, root; the commands are in `deploy/README.md` "The two appointments"). Without it the first "seven days later" on 2026-09-13 finds no file and posts nothing.
+- [ ] 0.4 **`theradar:deploy/radar-seven-days.timer`** (Josh, root; the commands are in `deploy/README.md` "The two appointments"). Without it the first "seven days later" on 2026-09-13 finds no file and posts nothing.
       proof: `systemctl list-timers radar-seven-days.timer` shows a next run at 11:30 UTC.
 - [x] 0.5 **`/etc/radar/alert.env`** (Josh, root; `deploy/alert.env.example`, Telegram recommended). A public bot that dies looks like a quiet week. Prove it with the empty-store command in the runbook.
 - [x] 0.6 **Four platform checks, in the Developer Console and with one test post** (Josh):
@@ -309,7 +309,7 @@ Seven things, and only these. Everything else is done, and the first one is the 
 
    The next tick then closes week 2957, and the start-up line will say so if anything is still unwritable. Pull the repo on the box first — `~/radar` is a checkout.
 
-1. **Install `radar-seven-days.timer`** (root; commands in `deploy/README.md`, "The two appointments"). Without it the first "seven days later" post finds no file and posts nothing. S25.
+1. **Install `theradar:deploy/radar-seven-days.timer`** (root; commands in `deploy/README.md`, "The two appointments"). Without it the first "seven days later" post finds no file and posts nothing. S25.
 2. **Read X's Automation Rules** at <https://help.x.com/en/rules-and-policies/x-automation> and either apply or record it as not applicable. The page returned 403 to this session, so it is a report and not a verified fact — and it stopped being hypothetical the moment the model provider was configured. S30, ADR 0014.
 3. **A Cloudflare cache rule ignoring the query string on `/v1/public/*`.** The edge caches per URL, so `?x=1`, `?x=2` each miss. Worth doing before a link goes wide; no code change would help. S26.
 4. **Set `RADAR_BIO_LEAD`, or leave item 7 off.** Phase 0.6(b) is answered — `POST /1.1/account/update_profile` returned **200** on 2026-09-07, so the bio noticeboard is built and merged. It writes nothing until this is set, because a bio write overwrites the only copy of whatever the profile says. **Copy the account's current bio into it first**, or the first write replaces it and there is nowhere to read it back from. `deploy/analyst.env.example` carries the shape.

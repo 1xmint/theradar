@@ -389,7 +389,7 @@ What needs no root, and can be done the day the stack merges: the three
 the next creator-index run and `/v1/public/stats` stops answering 404. What
 needs one root session, in one sitting, with the exact commands already in
 `deploy/README.md`: `realorrug:deploy/realorrug-analyst.service` and `/etc/radar/analyst.env`;
-`radar-seven-days.timer`; `realorrug:deploy/realorrug-payout.service` when the wallet exists;
+`theradar:deploy/radar-seven-days.timer`; `realorrug:deploy/realorrug-payout.service` when the wallet exists;
 `/etc/radar/alert.env`; the second `ExecStart` from A-2; the deploy timer from
 A-4; the NOPASSWD line for the three restarts. Then the 24-hour dry run, which
 needs the credential.
