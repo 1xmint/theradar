@@ -38,7 +38,7 @@ and the claim is a reply to *that* — and it was never built.
 - `Policy::CLOSED`, the kernel, `radar-signer`, `radar-exec`, `creator_edge`
   and `radar-graph` thresholds, the store's schema, the recorder.
 - The forbidden list's reassurance and advice rules. Nothing is removed from
-  `forbidden.rs`.
+  `realorrug:crates/realorrug-roast/src/forbidden.rs`.
 - Designs 0008, 0009, 0010 and ADR 0013. They decay by their own rule;
   corrections go to [`docs/STATE.md`](../STATE.md).
 - Anything that spends money or changes what the account says in public without
@@ -112,8 +112,8 @@ and the claim is a reply to *that* — and it was never built.
       payout; that object does not exist until the claim.
       next: implement 0011 phase 1
 
-- [x] 4. **A voice with teeth.** `voice.rs`'s rule 6 currently says to lead with
-      the cost line and `verdict.rs` demoted that line on 2026-09-05 for being
+- [x] 4. **A voice with teeth.** `realorrug:crates/realorrug-roast/src/voice.rs`'s rule 6 currently says to lead with
+      the cost line and `realorrug:crates/realorrug-roast/src/verdict.rs` demoted that line on 2026-09-05 for being
       the same 456 bps in every reply; the prompt and the template disagree and
       the prompt is the one that is wrong. A deterministic `headline` gives the
       model an anchor already on the sheet. `SYSTEM` carries no ASCII digit.
@@ -176,8 +176,8 @@ Each carries the answer assumed if the owner says nothing.
 - **Q2** The claim prompt is a new public post shape, one reply a week. **Yes**
   — it is design 0007 §6.2's own mechanism, and it lands in the dry-run log
   first.
-- **Q3** `forbidden.rs` refuses "cabal", so no post can carry the site's name
-  or the account's. **Leave it.** `weekly.rs` already chose this, and an
+- **Q3** `realorrug:crates/realorrug-roast/src/forbidden.rs` refuses "cabal", so no post can carry the site's name
+  or the account's. **Leave it.** `realorrug:crates/realorrug-analyst/src/weekly.rs` already chose this, and an
   exact-string allowance is an exemption path the checks were built not to
   have. The bio carries both. Raised rather than routed around.
 - **Q4** Handles on the leaderboard, read at week close from the call that

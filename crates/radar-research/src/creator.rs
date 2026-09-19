@@ -1,47 +1,39 @@
 // SPDX-License-Identifier: Apache-2.0
-//! Every creator's record, precomputed once so a reply can look one up.
+//! Every creator's record, precomputed once so a reader can look one up.
 //!
 //! # Why this exists
 //!
-//! The public analyst answers about a coin while the thread it was asked in is
-//! still alive. It reads the chain on demand for the things the chain can
-//! answer — the launch block, the curve — and that works because those are one
-//! block and one account.
-//!
-//! *"How did this creator's other tokens turn out"* is not answerable that way.
-//! It is a question about 529,000 recorded launches joined to 1.4 million
-//! outcome measurements, and `creator_track_record` answers it by decoding both
-//! tables in full: ten seconds and climbing, on a shared two-core box, for one
-//! mention.
+//! *"How did this creator's other tokens turn out"* is a question about 529,000
+//! recorded launches joined to 1.4 million outcome measurements, and answering
+//! it by decoding both tables in full costs ten seconds and climbing, on a
+//! shared two-core box, per lookup.
 //!
 //! So it is precomputed. The same shape `docs/research/data/0024-base-rates.json`
 //! already uses: a file with the date it was measured, read in microseconds,
 //! refused rather than guessed at when it is absent.
 //!
-//! # What it is for
-//!
-//! Without it, every reply is the same reply. Three different coins measured on
-//! 2026-09-04 produced identical text — the cost line, the recipient count, the
-//! band — because nothing in the fact sheet was about *that* coin. A creator's
-//! record is the fact that differs, and it is the one Radar has that nobody else
-//! does: 117,390 creators, watched since August.
-//!
 //! # Where the halves live
 //!
-//! This is the **reading** half: the type, the lookup, and the file. Building it
-//! needs the store, which the analyst deliberately does not have on its path, so
-//! `radar_research::creator_index` owns that and writes this shape.
+//! This is the **reading** half: the type, the lookup, and the file.
+//! [`crate::creator_index`] owns the **writing** half, because building this
+//! needs the store.
 //!
-//! The same split `BaseRates` uses, for the same reason: the consumer owns the
-//! type it depends on, and the producer is free to be as heavy as it needs.
+//! # History
+//!
+//! This module, and [`crate::baserates`], lived in `radar-roast` until
+//! 2026-09-14, when Radar's public reply bot moved into its own repository
+//! ([ADR 0024](https://github.com/1xmint/theradar/blob/main/docs/adr/0024-the-bot-stands-alone.md)
+//! there) and the crates that only existed to run it —
+//! `radar-analyst`, `radar-roast`, `radar-contest`, `radar-payout` — were
+//! deleted from this one. `radar-research` already read this type to build the
+//! index, and `radar-serve` and `radar-cli` may both depend on it, so it is the
+//! lowest crate every remaining reader can reach.
 //!
 //! # What it deliberately does not carry
 //!
 //! No rates and no verdicts, only counts. A rate computed here would be a rate
-//! computed twice — `creator_track_record` already has one, with a minimum
-//! sample and a `sample_note` explaining itself — and two of them would drift.
-//! The consumer decides what a count means, and refuses to say anything when the
-//! sample is too small.
+//! computed twice, and two of them would drift. The consumer decides what a
+//! count means, and refuses to say anything when the sample is too small.
 //!
 //! And **graduation is split**. A curve bought out within three slots of launch
 //! was bought by capital committed before the token existed, so it is evidence
@@ -327,8 +319,8 @@ mod tests {
 
     #[test]
     fn the_summary_is_written_beside_the_index_and_only_when_there_is_one() {
-        // The public site reads this file and not the index. Re-apply the bug
-        // by dropping the summary write from `write` and the read below fails.
+        // The public site reads this file and not the index. Re-apply the bug by
+        // dropping the summary write from `write` and the read below fails.
         let dir = tempfile::tempdir().expect("a temp dir");
         let index_path = dir.path().join("creator-index.json");
         let index_path = index_path.to_string_lossy().into_owned();

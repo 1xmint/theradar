@@ -596,16 +596,6 @@ pub fn audience_of(path: &str) -> Audience {
         // so requiring authentication would be circular.
         || path == "/v1/customer/siws/challenge"
         || path == "/v1/customer/siws/verify"
-        // The three documents the public site reads (design 0008 phase 1).
-        // Each is a published file, never the store, and each is listed by
-        // exact path: a prefix rule on `/v1/public/` is how the next file
-        // somebody drops in that directory becomes world-readable without
-        // anyone deciding it should be.
-        || path == "/v1/public/stats"
-        || path == "/v1/public/leaderboard"
-        || path == "/v1/public/pool"
-        || path == "/v1/public/weeks"
-        || path == "/v1/public/hunters"
         // --- the application shell ---
         //
         // The HTML and the bundle, and every client route that serves the same
@@ -1084,11 +1074,6 @@ mod tests {
     fn the_public_surface_is_the_monitor_the_paid_lane_the_documents_and_the_shell() {
         assert!(is_public("/health"));
         assert!(is_public("/x402/v1/instruments"));
-        assert!(is_public("/v1/public/stats"));
-        assert!(is_public("/v1/public/leaderboard"));
-        assert!(is_public("/v1/public/pool"));
-        assert!(is_public("/v1/public/weeks"));
-        assert!(is_public("/v1/public/hunters"));
 
         // The shell: the HTML, the bundle, and the client routes that serve the
         // same HTML. A visitor reaches the interface and its sign-in control;
@@ -1134,12 +1119,6 @@ mod tests {
             "/x402",
             "/x402-internal/secrets",
             "/health/../v1/funnel",
-            // Exact paths, not a prefix: the directory is not public, and
-            // neither is a fourth file nobody classified.
-            "/v1/public",
-            "/v1/public/",
-            "/v1/public/stats/",
-            "/v1/public/replies",
         ] {
             assert!(!is_public(private), "{private} must not be public");
         }
@@ -1159,12 +1138,6 @@ mod tests {
                 "/x402/v1/instruments/creator_track_record",
                 Audience::Public,
             ),
-            // The public site's three documents, each a published file.
-            ("/v1/public/stats", Audience::Public),
-            ("/v1/public/leaderboard", Audience::Public),
-            ("/v1/public/pool", Audience::Public),
-            ("/v1/public/weeks", Audience::Public),
-            ("/v1/public/hunters", Audience::Public),
             // The shell. Public, so a visitor reaches the interface and the
             // sign-in control it already carries.
             ("/", Audience::Public),
@@ -1238,14 +1211,10 @@ mod tests {
             ("/v1/instruments", Audience::Operator),
             ("/v1/instruments/creator_track_record", Audience::Operator),
             ("/v1/link", Audience::Operator),
-            // The public analyst's reply log. Operator because it carries the
-            // fact sheet behind every answer, which is working material rather
-            // than a public artefact -- and because it reaches this row by
-            // falling through rather than by being listed, which is the
-            // fallback doing its job.
-            ("/v1/analyst/replies", Audience::Operator),
-            // The interface page that reads it. Not in the customer list above,
-            // and this row is what says that is deliberate.
+            // The interface's route for the reply-log view the operator's
+            // page once linked to (removed with the bot, ADR 0024). Falls
+            // through rather than being classified as shell, and this row is
+            // what says that is deliberate.
             ("/analyst", Audience::Operator),
             ("/mcp", Audience::Operator),
         ] {

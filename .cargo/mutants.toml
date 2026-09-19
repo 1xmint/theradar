@@ -159,66 +159,6 @@ exclude_re = [
     # passes identically, because the two expressions are equal rather than
     # because the tests are weak.
     'replace \| with \^ in decode_base64',
-    # `radar-roast`'s `round_to`: `(v * factor).round() / factor` mutated to
-    # `... * factor`. Its only caller compares two of its results for equality:
-    #
-    #     round_to(*a, decimals) == round_to(value, decimals)
-    #
-    # Both sides go through the same transform, and multiplying by a positive
-    # finite `factor` is strictly monotone, so
-    #
-    #     (a*f).round()/f == (v*f).round()/f   <=>   (a*f).round() == (v*f).round()
-    #     (a*f).round()*f == (v*f).round()*f   <=>   (a*f).round() == (v*f).round()
-    #
-    # The two forms decide the same question. They differ in the *value*
-    # returned, which nothing reads -- `round_to` is private and has exactly one
-    # call site, checked above. If a second caller ever wants the rounded number
-    # itself, this entry stops being true and must come out.
-    #
-    # Applied by hand and the crate's suite passes identically, including the two
-    # tests added on 2026-09-03 that pin the epsilon branch either side of its
-    # boundary. It passes because the expressions agree, not because the tests
-    # are weak.
-    'replace / with \* in round_to',
-
-    # `X::from_env` reads two environment variables and hands them to
-    # `configured`, which decides. The decision is tested directly and
-    # thoroughly -- both halves present, each half missing, both missing, and
-    # whitespace counting as absent.
-    #
-    # What is left is the reading, and it cannot be tested here: setting an
-    # environment variable is process-global, this workspace runs its tests in
-    # parallel threads, and `std::env::set_var` is `unsafe` in edition 2024
-    # while the workspace sets `unsafe_code = "forbid"`. So a test that made
-    # this mutant fail cannot be written without turning off the lint that
-    # keeps the signer's process honest, which is a bad trade for a wrapper.
-    #
-    # The mutation's effect is also the safe direction rather than the dangerous
-    # one: `None` means "no credential", which means the binary falls back to
-    # the dry run and posts nothing. It is caught by the first live run.
-    'replace X::from_env -> Option<Self> with None',
-
-    # `Credentials::from_env` is the same shape and the same argument: it reads
-    # four environment variables and hands them to `from_vars`, which decides.
-    # The decision is tested at every combination -- all four present, each one
-    # missing in turn, and a blank value counting as absent.
-    #
-    # The reading is what is left, and it cannot be tested for the reason above:
-    # `std::env::set_var` is `unsafe` in edition 2024 against a workspace that
-    # forbids unsafe, and these tests run in parallel threads where process-wide
-    # state is a race with unrelated tests.
-    #
-    # The mutation's effect is the safe direction, and unlike `X::from_env` it is
-    # now **said out loud**: `None` means the instance can read and cannot post,
-    # which `daemon::posture` names on every start --
-    #
-    #   "RADAR_X_PUBLISH=on but there is no signing credential, so every reply
-    #    will be answered and none delivered."
-    #
-    # -- and `the_three_states_are_told_apart_in_words` pins that sentence. So a
-    # daemon in the mutated state announces it at startup rather than being
-    # discovered on the first real reply.
-    'replace Credentials::from_env -> Option<Self> with None',
 
     # A third category, and it is neither of the two above, so it says so rather
     # than borrowing a word that would not be true.
@@ -250,68 +190,24 @@ exclude_re = [
     'replace - with \+ in extensions',
     'replace - with / in extensions',
 
-    # `Router::from_env` is the fourth of the shape and the same argument. It
-    # reads one environment variable and hands it to `from_vars`, which decides
-    # -- and that decision is tested three ways in
+    # `Router::from_env` reads one environment variable and hands it to
+    # `from_vars`, which decides -- and that decision is tested three ways in
     # `a_router_is_built_from_a_key_and_refused_without_one`: a present key
     # builds a router, an absent one does not, and a blank one is absent rather
     # than a key of length zero.
     #
-    # The reading is what is left, and it cannot be tested for the reason above.
+    # The reading is what is left, and it cannot be tested: setting an
+    # environment variable is process-global, this workspace runs its tests in
+    # parallel threads, and `std::env::set_var` is `unsafe` in edition 2024
+    # while the workspace sets `unsafe_code = "forbid"`. So a test that made
+    # this mutant fail cannot be written without turning off the lint that
+    # keeps the signer's process honest, which is a bad trade for a wrapper.
     #
     # The mutation's effect is the safe direction and it is loud rather than
     # silent: `None` means no router, so `radar route` refuses with the missing
     # variable named instead of quoting. A quote that could not be paid for is
     # the failure worth preventing; a refusal that names its own cause is not.
     'replace Router::from_env -> Option<Self> with None',
-
-    # `Telegram::from_env` is the third of the shape, and the same argument: it
-    # reads `RADAR_TELEGRAM_BOT_TOKEN`, `RADAR_TELEGRAM_API_BASE` and
-    # `RADAR_TELEGRAM_CHANNEL` and hands them to `from_vars`, which is tested
-    # with the token present, absent and blank, the base defaulted and
-    # overridden, and the channel present and blank. The reading cannot be
-    # tested without `std::env::set_var`, for the reason above.
-    #
-    # The mutation's effect is the safe direction and is said out loud:
-    # `None` means the lane is off, and `telegram::posture` prints "telegram
-    # off -- no RADAR_TELEGRAM_BOT_TOKEN" on every start.
-    'replace Telegram::from_env -> Option<Self> with None',
-
-    # The daemon's two thinnest wrappers, and neither is equivalent -- each is
-    # **unreachable by a test in this workspace**, which is a different and more
-    # honest claim.
-    #
-    # `daemon::env` is `std::env::var(key).ok()` and `daemon::now` is the clock.
-    # Faking either means process-wide state, and this workspace runs its tests
-    # in parallel threads where that is a race between unrelated tests --
-    # `std::env::set_var` is also `unsafe` in edition 2024 against a workspace
-    # that forbids unsafe.
-    #
-    # So the *rules* that read them are what is tested, and they are tested
-    # thoroughly: `budget_from`, `limits_from` and `Prices::from_vars` all take a
-    # getter and are exercised at every combination, precisely so that only these
-    # two-line wrappers are left here.
-    #
-    # A clock has no value a test can distinguish -- `0` and `1` are each "some
-    # fixed instant", and the only thing separating them from the truth is the
-    # truth, which is the thing being faked. Written as a pattern so a third
-    # replacement value does not reopen it.
-    #
-    # These names are unqualified because that is how `cargo mutants` renders
-    # them; an earlier version wrote `daemon::now` and matched nothing at all,
-    # which CI reported as a survivor twice. The signatures are what keep them
-    # narrow: nothing else in this workspace is a `now -> u64` or an
-    # `env -> Option<String>`.
-    'replace now -> u64 with \d+',
-    'replace env -> Option<String> with None',
-    'replace env -> Option<String> with Some\(String::new\(\)\)',
-    'replace env -> Option<String> with Some\("xyzzy"\.into\(\)\)',
-
-    # `main` is four lines: it calls `daemon::run`, which loops forever. A test
-    # that ran it would not return, and there is nothing in it to assert --
-    # every decision it could make was moved into `daemon` for exactly this
-    # reason, which is why that module exists at all.
-    'replace main with \(\)',
 
     # `creator_index::build` keeps the latest measurement of a mint:
     #
@@ -330,29 +226,6 @@ exclude_re = [
     # `the_latest_measurement_of_a_mint_is_the_one_that_counts`.
     'replace > with >= in build',
 
-    # The public site's route handlers -- `weeks` and `hunters` -- replaced with
-    # `Default::default()`, which is an empty 200.
-    #
-    # Category 1 by the same argument as `X::from_env` above, and it is worth
-    # being precise about *which* part is untestable. Each handler is three
-    # lines: read `Paths::from_env()`, call the `_in` twin, wrap the answer in
-    # `respond`. The decision is entirely in the twin, and the twins are tested
-    # directly -- `weeks_in` at five states of a week, `hunters_in` at the empty
-    # board and a written one. That split is why the `_in` twins exist at all,
-    # and `public.rs`'s own module comment says so.
-    #
-    # What is left is `Paths::from_env`, which reads process-wide variables. A
-    # test that made these mutants fail would have to set them, and
-    # `std::env::set_var` is `unsafe` in edition 2024 against a workspace that
-    # forbids unsafe -- while these tests run in parallel threads where
-    # process-wide state is a race with unrelated tests.
-    #
-    # Narrow on purpose: these two names and this one replacement. The three
-    # older handlers of the same shape are not listed, because `just mutants
-    # origin/main` only mutates changed lines and they have never been
-    # reported -- adding them would be a claim nobody has checked.
-    'replace weeks -> Response with Default::default\(\)',
-    'replace hunters -> Response with Default::default\(\)',
     # `radar_types::build_sha` replaced with `None`.
     #
     # It is `option_env!("RADAR_BUILD_SHA")`, and **in every test build that is
@@ -363,10 +236,10 @@ exclude_re = [
     #
     # Neither category above, and worth saying exactly rather than filing it
     # under the nearest one. It is not *equivalent* -- in a release build the
-    # mutation would erase the commit from `/health`, from the analyst's start
-    # line, and from `radar brief`'s reading. It is not unreachable for want of
-    # a `.git` either. It is unobservable because the input is fixed at compile
-    # time and no test compiles the crate twice.
+    # mutation would erase the commit from `/health` and from `radar brief`'s
+    # reading. It is not unreachable for want of a `.git` either. It is
+    # unobservable because the input is fixed at compile time and no test
+    # compiles the crate twice.
     #
     # The other four mutants of this pair are caught, and that is what makes
     # this entry narrow rather than a hole: `Some("")`, `Some("xyzzy")`, `""`
@@ -442,43 +315,6 @@ exclude_re = [
     # and the third is `*tried += 1`, whose mutants are named `replace += with
     # *=` and do not match this.
     'replace \+ with \* in search',
-
-    # `Gate::burst` and `Gate::per_hour`: `<` widened to `<=`.
-    #
-    # Both are of the shape `if x < K { a } else { b }`, and at the only input
-    # where the two versions take different branches, **the branches return the
-    # same value**:
-    #
-    #   burst:    `if global_daily < 10 { global_daily } else { 10 }`
-    #             at 10 the then-branch yields 10 and the else-branch yields 10.
-    #   per_hour: `if global_daily < 24 { 1 } else { global_daily / 24 }`
-    #             at 24 the then-branch yields 1 and 24 / 24 is 1.
-    #
-    # So no input distinguishes them. Applied by hand, both at once, on
-    # 2026-09-07: the suite passes, and it passes because there is nothing to
-    # catch rather than because nothing looks.
-    # `the_burst_is_the_smaller_of_ten_and_the_day` and
-    # `the_refill_is_the_day_spread_over_a_day_and_never_zero` walk both
-    # boundaries, so the `==` and `>` mutants on the same lines are caught --
-    # which is what makes this a claim about these two and not about the
-    # comparison being untested.
-    'replace < with <= in Gate::burst',
-    'replace < with <= in Gate::per_hour',
-
-    # `Gate::refill_to`: the clock-went-backwards guard, `<` widened to `<=`.
-    #
-    #   `if now < self.refilled_at { self.refilled_at = now; return; }`
-    #
-    # They differ only at `now == refilled_at`. Taking the branch assigns `now`
-    # to a field that already equals `now` and returns; falling through computes
-    # `elapsed = 0`, then `earned = 0`, and returns at the `earned == 0` guard
-    # two lines later. Neither path touches `tokens`, and both leave
-    # `refilled_at` at the same value.
-    #
-    # Applied by hand on 2026-09-07. `a_clock_that_went_backwards_re_bases_rather_than_freezing`
-    # covers the branch itself, and the `==` mutant on this line is caught, so
-    # the guard is not merely untested.
-    'replace < with <= in Gate::refill_to',
 
     # `fold_holders` matches `MintTo`/`Burn` before a general `_` arm, and the
     # general arm does the same work conditionally:

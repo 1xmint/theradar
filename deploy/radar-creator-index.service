@@ -20,7 +20,8 @@ Group=guardian
 WorkingDirectory=/home/guardian/radar
 
 # The store is read; the index is written beside the other published
-# measurements, where `radar-analyst` and `radar roast` look for it.
+# measurements, where `radar brief` and the public analyst (now
+# realorrug-analyst, on its own deploy — ADR-0024) look for it.
 ExecStart=/home/guardian/bin/radar creator-index \
     --store /home/guardian/radar/data/store \
     --out /home/guardian/radar/docs/research/data/creator-index.json

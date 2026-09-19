@@ -18,9 +18,9 @@
 //! The snapshot is the real one, read from the repository, because the bar and
 //! the round trip must come from it rather than from a number written here.
 
+use radar_research::baserates::BaseRates;
 use radar_research::edge::{self, Enumeration, Horizon, Options};
 use radar_research::features::{FEATURES, FeatureTable, Row};
-use radar_roast::BaseRates;
 use radar_types::{Address, Slot};
 
 /// Rows in a synthetic table.

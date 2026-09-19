@@ -29,7 +29,7 @@ three commits.
 
 ## Items
 
-- [x] 1. `crates/radar-cli/src/roast.rs` — 24 survivors, all in `today()`
+- [x] 1. `realorrug:crates/realorrug-cli/src/roast.rs` — 24 survivors, all in `today()`
       done: **the cause was a second copy of the algorithm.** `from_days` was
       duplicated inside the test module, so the tests exercised the copy and no
       mutation of the real arithmetic could fail anything. LEARNINGS 18's shape
@@ -46,7 +46,7 @@ three commits.
       the test exists to catch.
       `cargo mutants -f crates/radar-cli/src/roast.rs`: **64 caught, 4 missed**
       (the four in `run`, above), down from 28 missed.
-- [x] 2. `crates/radar-roast/src/baserates.rs` — 8 survivors
+- [x] 2. `crates/radar-research/src/baserates.rs` — 8 survivors
       done: `band_for`'s `b.hi - b.lo` survived because the published snapshot
       lists its narrow bands first, so `min_by_key` gave the right answer with
       the wrong key. The new test builds bands wide-first and includes the pair
@@ -56,7 +56,7 @@ three commits.
       rather than needing both, and the `y * 372 + m * 31 + d` coefficients shown
       to keep each field outranking the one below it.
       `cargo mutants -f ...baserates.rs`: **37 caught, 0 missed**, 4 unviable.
-- [x] 3. `crates/radar-roast/src/fidelity.rs` — 5 survivors
+- [x] 3. `realorrug:crates/realorrug-roast/src/fidelity.rs` — 5 survivors
       done so far: two tests. `the_exact_match_is_a_difference_and_not_a_sum_or_a_ratio`
       uses two values 1e-10 apart that round to different grid points at the
       precision written, so only the `(a - value).abs()` branch can pass it — a

@@ -29,10 +29,10 @@ inviting scrutiny of a design nobody had questioned.
 
 | condition | us | where |
 |---|---|---|
-| **Mention- or quote-triggered only** | Yes. The service polls `GET /2/users/:id/mentions` and answers nothing else. No keyword search, no timeline read, no trend or hashtag monitoring — those endpoints are not called and no code path turns an observed post into a reply. | [`x.rs`](../crates/radar-analyst/src/x.rs), [`daemon.rs`](../crates/radar-analyst/src/daemon.rs) |
-| **One reply per interaction** | Yes, in reply to the summoning post. Plus self-imposed ceilings well under the API's: 3 per account per day, 50 per day total, a burst of 10 then ~2/hour, and one hour before the same token is answered again — a second asker inside that hour gets a pointer to the existing answer, not a second reply. | [`admission.rs`](../crates/radar-analyst/src/admission.rs) |
-| **Official X API only** | Yes. No scraping, no undocumented endpoints, no third-party client. No automated DMs, follows, likes or reposts. | [`x.rs`](../crates/radar-analyst/src/x.rs) |
-| **No unsolicited mentions or trend-jacking** | No automated reply reaches a post that did not mention or quote the account, and **no automated post @-mentions anyone**. See the note below on the two scheduled posts. | [`daemon.rs`](../crates/radar-analyst/src/daemon.rs) |
+| **Mention- or quote-triggered only** | Yes. The service polls `GET /2/users/:id/mentions` and answers nothing else. No keyword search, no timeline read, no trend or hashtag monitoring — those endpoints are not called and no code path turns an observed post into a reply. | [`realorrug:crates/realorrug-analyst/src/x.rs`](https://github.com/1xmint/realorrug/blob/main/crates/realorrug-analyst/src/x.rs), [`realorrug:crates/realorrug-analyst/src/daemon.rs`](https://github.com/1xmint/realorrug/blob/main/crates/realorrug-analyst/src/daemon.rs) |
+| **One reply per interaction** | Yes, in reply to the summoning post. Plus self-imposed ceilings well under the API's: 3 per account per day, 50 per day total, a burst of 10 then ~2/hour, and one hour before the same token is answered again — a second asker inside that hour gets a pointer to the existing answer, not a second reply. | [`admission.rs`](https://github.com/1xmint/realorrug/blob/main/crates/realorrug-analyst/src/admission.rs) |
+| **Official X API only** | Yes. No scraping, no undocumented endpoints, no third-party client. No automated DMs, follows, likes or reposts. | [`realorrug:crates/realorrug-analyst/src/x.rs`](https://github.com/1xmint/realorrug/blob/main/crates/realorrug-analyst/src/x.rs) |
+| **No unsolicited mentions or trend-jacking** | No automated reply reaches a post that did not mention or quote the account, and **no automated post @-mentions anyone**. See the note below on the two scheduled posts. | [`realorrug:crates/realorrug-analyst/src/daemon.rs`](https://github.com/1xmint/realorrug/blob/main/crates/realorrug-analyst/src/daemon.rs) |
 
 **The two scheduled posts, which is where we differ from the precedent.** The
 account posts daily at 12:00 UTC (what became of coins it was already asked
@@ -77,7 +77,7 @@ automated. Replace it with something like:
 > address. Operated by @1xmint_. Measured, not predicted. Not financial advice.
 
 "No mercy" is also a verdict, and this account's rule — enforced in code by
-[`forbidden.rs`](../crates/radar-roast/src/forbidden.rs) — is that it publishes
+[`realorrug:crates/realorrug-roast/src/forbidden.rs`](https://github.com/1xmint/realorrug/blob/main/crates/realorrug-roast/src/forbidden.rs) — is that it publishes
 measurements and never verdicts. A bio that breaks the rule the replies are held
 to is the first thing an adversarial reader points at.
 
@@ -93,7 +93,7 @@ mention it, and blocking ends every interaction. There is a server-side ignore
 list.
 
 If one is ever wanted, it is a small change: the gate already carries an ignore
-list ([`admission.rs`](../crates/radar-analyst/src/admission.rs)); it needs
+list ([`admission.rs`](https://github.com/1xmint/realorrug/blob/main/crates/realorrug-analyst/src/admission.rs)); it needs
 persisting and a word to look for. Written down here so that the absence is a
 decision on the record rather than an oversight.
 

@@ -13,8 +13,8 @@
 //! commands compose and the file a research note cites is the file that was
 //! measured.
 
+use radar_research::baserates::BaseRates;
 use radar_research::edge::{self, Candidate, Cost, Enumeration, Horizon, Options, Reading, Report};
-use radar_roast::BaseRates;
 
 use crate::flag;
 
@@ -36,7 +36,7 @@ pub fn run(args: &[String]) -> Result<(), String> {
         .ok_or("--features <file> is required; `radar features` writes one")?;
 
     let rates_path =
-        flag(args, "--rates").unwrap_or_else(|| radar_roast::baserates::DEFAULT_PATH.to_owned());
+        flag(args, "--rates").unwrap_or_else(|| radar_research::baserates::DEFAULT_PATH.to_owned());
     let rates =
         BaseRates::load(&rates_path).map_err(|e| format!("cannot read {rates_path}: {e}"))?;
 

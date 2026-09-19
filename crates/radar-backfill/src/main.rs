@@ -32,12 +32,28 @@ const PAUSE_BETWEEN_WINDOWS: Duration = Duration::from_millis(400);
 
 /// How far behind wall-clock time follow mode stays.
 ///
-/// Measured: CryptoHouse carries pump.fun instructions within a minute of the
-/// chain. Five minutes is not latency Radar needs -- it explicitly does not
-/// compete on speed -- it is margin against the trailing edge of ingestion being
-/// partial, which would otherwise record a busy minute as a quiet one and never
-/// revisit it.
-const FOLLOW_LAG_SECONDS: i64 = 300;
+/// Margin against the trailing edge of ingestion being partial, which would
+/// otherwise record a busy minute as a quiet one and never revisit it. That
+/// risk is real; the size of it was not measured until 2026-09-11, and five
+/// minutes turned out to be about twenty times the margin the endpoint needs.
+///
+/// **What was measured.** Sixteen consecutive one-minute windows of
+/// `solana.token_transfers` were counted, then the identical windows counted
+/// again seven minutes later: every count matched, including the window read
+/// less than sixty seconds after it closed. Repeated at ten-second resolution
+/// to find the floor -- eight consecutive ten-second buckets, the youngest read
+/// eight seconds after it closed, re-read seventy-five seconds later. Every
+/// count matched again. Nothing arrives late.
+///
+/// Twenty seconds rather than eight, because the floor found is the floor
+/// observed on one afternoon on one endpoint, and the cost of the extra twelve
+/// seconds is nothing Radar needs. The cost of being wrong in the other
+/// direction is a busy minute silently recorded as a quiet one.
+///
+/// This is not the latency any live reader sees. A reader querying CryptoHouse
+/// directly is about three seconds behind the chain; this constant governs only
+/// how quickly the *store* fills behind it.
+const FOLLOW_LAG_SECONDS: i64 = 20;
 
 /// How long follow mode waits when it has caught up.
 const FOLLOW_IDLE: Duration = Duration::from_secs(60);
@@ -162,12 +178,6 @@ struct Args {
     market_tape: bool,
     /// Replace recorded price paths instead of folding onto them.
     reprice: bool,
-    /// The analyst's directory, when the account runs on this host.
-    ///
-    /// Its reply log is the set of mints that earn a seven-day checkpoint.
-    /// `None` measures every token to a day and no further, which is what a
-    /// research backfill wants.
-    analyst_dir: Option<String>,
 }
 
 fn usage() -> &'static str {
@@ -175,15 +185,10 @@ fn usage() -> &'static str {
      --store <dir> [--window-minutes N] [--scope lifecycle|graduations|trades]
    radar-backfill --follow --store <dir> [--window-minutes N]
 
-   radar-backfill --outcomes --store <dir> [--analyst-dir <dir>]
+   radar-backfill --outcomes --store <dir>
    radar-backfill --outcomes --reprice --store <dir>
 
    radar-backfill --market-tape --store <dir>
-
---analyst-dir names the account's directory, and its only effect is to give the
-mints in `replies.jsonl` a fourth measurement at seven days. Every other token
-settles at a day. Without it the daily post reports a day-old measurement, which
-it now says out loud rather than calling it a week.
 
 --outcomes measures what became of every token already in the store: how long it
 kept trading, how many transfers, how many distinct accounts. Those are the
@@ -212,7 +217,6 @@ fn parse_args() -> Result<Args, String> {
     let mut measure_outcomes = false;
     let mut market_tape = false;
     let mut reprice = false;
-    let mut analyst_dir = None;
 
     let mut it = std::env::args().skip(1);
     while let Some(flag) = it.next() {
@@ -241,7 +245,6 @@ fn parse_args() -> Result<Args, String> {
             "--follow" => follow = true,
             "--outcomes" => measure_outcomes = true,
             "--market-tape" => market_tape = true,
-            "--analyst-dir" => analyst_dir = Some(value()?),
             "--reprice" => reprice = true,
             "-h" | "--help" => return Err(usage().to_owned()),
             other => return Err(format!("unknown flag {other}\n{}", usage())),
@@ -271,7 +274,6 @@ fn parse_args() -> Result<Args, String> {
             outcomes: measure_outcomes,
             market_tape,
             reprice,
-            analyst_dir,
         });
     }
 
@@ -297,7 +299,6 @@ fn parse_args() -> Result<Args, String> {
         outcomes: measure_outcomes,
         market_tape,
         reprice,
-        analyst_dir,
     })
 }
 
@@ -905,39 +906,10 @@ fn universe(reader: &Reader, as_of: AsOf) -> Result<Universe, String> {
 /// worse: a token seen an hour after launch and the same token seen a day later
 /// are different observations, and the second is the one that says whether the
 /// first meant anything.
-/// The mints this account has answered about in public.
-///
-/// Empty when no analyst directory was given, which is the ordinary case for a
-/// research backfill and is not an error: with no watched set every token
-/// settles at a day, exactly as before. Rule 8's shape — the absent
-/// configuration is the cheaper behaviour, not the more expensive one.
-///
-/// A missing or unreadable log is also empty. The seven-day checkpoint is an
-/// improvement to one post; it is not worth failing an outcomes pass over.
-fn answered_about(analyst_dir: Option<&str>) -> std::collections::BTreeSet<radar_types::Address> {
-    let Some(dir) = analyst_dir else {
-        return std::collections::BTreeSet::new();
-    };
-    let paths = radar_analyst::daemon::Paths::under(dir);
-    radar_analyst::log::read(&paths.log)
-        .unwrap_or_default()
-        .iter()
-        // Published only. A dry-run answer was never a public call and has
-        // nothing to age, which is the same filter the post itself applies.
-        .filter(|e| e.reply_id.is_some())
-        .filter_map(|e| e.mint.as_ref()?.parse().ok())
-        .collect()
-}
-
-/// `watched` is the set of mints the account has answered about in public.
-/// Those get one more checkpoint, at a week, because the daily post is a claim
-/// about a week and the store's last look at them is a day old. Everything else
-/// settles at a day, for the reason `checkpoints` gives.
 fn due_for_measurement(
     launches: &[(radar_types::Address, radar_types::Slot)],
     already: &[radar_store::Outcome],
     head: radar_types::Slot,
-    watched: &std::collections::BTreeSet<radar_types::Address>,
 ) -> Vec<(radar_types::Address, radar_types::Slot)> {
     let mut newest_age: std::collections::BTreeMap<radar_types::Address, radar_types::SlotDelta> =
         std::collections::BTreeMap::new();
@@ -960,7 +932,6 @@ fn due_for_measurement(
             checkpoints::needs_measuring(
                 checkpoints::age_of(*launch_slot, head),
                 newest_age.get(mint).copied(),
-                watched.contains(mint),
             )
         })
         .collect()
@@ -1097,8 +1068,7 @@ fn measure(args: &Args) -> Result<(), String> {
     let prior = baseline_prices(&already, args.reprice);
 
     let total_known = launches.len();
-    let watched = answered_about(args.analyst_dir.as_deref());
-    let due = due_for_measurement(&launches, &already, measured_at, &watched);
+    let due = due_for_measurement(&launches, &already, measured_at);
 
     if due.is_empty() {
         println!(

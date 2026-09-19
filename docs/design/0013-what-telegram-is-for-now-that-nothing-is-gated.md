@@ -94,7 +94,7 @@ flywheel in order to serve the one that is not.
 **Do not turn the Telegram lane on now.** Specifically:
 
 1. **Leave `RADAR_TELEGRAM_BOT_TOKEN` unset.** The lane is built (0009 M5,
-   `telegram.rs`) and costs nothing to leave off. Rule 8 means an unset token
+   `realorrug:crates/realorrug-analyst/src/telegram.rs`) and costs nothing to leave off. Rule 8 means an unset token
    is a lane that reads nothing and says nothing — the resting state, not a
    broken one.
 2. **Keep the two bots and the two chats anyway.** They cost nothing, the alert

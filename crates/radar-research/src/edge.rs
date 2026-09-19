@@ -43,8 +43,9 @@
 
 use std::collections::BTreeMap;
 
-use radar_roast::BaseRates;
 use radar_types::Slot;
+
+use crate::baserates::BaseRates;
 
 use crate::features::{FEATURES, FeatureTable, Missing, Row};
 use crate::wilson_bounds;

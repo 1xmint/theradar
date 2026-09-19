@@ -46,7 +46,7 @@ the operational skin that makes it safe to leave running.
       `DryRun`, which is rule 8 and already the crate's resting state.
       Backoff doubles on 429 and 5xx to a 15 minute ceiling and **never retries
       a 4xx**, because a malformed request retried is the same request.
-      done: `crates/radar-analyst/src/x.rs`. `Mention` now lives in the crate
+      done: `realorrug:crates/realorrug-analyst/src/x.rs`. `Mention` now lives in the crate
       and **`radar-cli`'s fixture reader uses it**, so the file and the API are
       two sources of one type rather than two types that can drift.
       Request-building and response-reading are pure functions; only `get` and
@@ -75,7 +75,7 @@ the operational skin that makes it safe to leave running.
       **The log entry is written before the publish call**, so a crash between
       them leaves a logged-but-unposted reply rather than a post nothing
       recorded. That ordering is the whole design and it gets a test.
-      done: `crates/radar-analyst/src/poll.rs`, plus a **fix to shipped code**.
+      done: `realorrug:crates/realorrug-analyst/src/poll.rs`, plus a **fix to shipped code**.
       **`publish` replied first and appended afterwards**, so a failed log write
       left a public statement with no record of it. Its own doc said the log was
       written "before the reply is treated as sent", which was true and not the
@@ -96,8 +96,8 @@ the operational skin that makes it safe to leave running.
       the last in the page, compared by length then lexically because these
       outgrew `u64`; the platform returns newest first, so "the last one" would
       re-read the whole page forever.
-      `just tests` 1518 passed; `cargo mutants` over `poll.rs`, `publish.rs` and
-      `log.rs`: **0 missed**. The one survivor was real — nothing tested a
+      `just tests` 1518 passed; `cargo mutants` over `realorrug:crates/realorrug-analyst/src/poll.rs`, `realorrug:crates/realorrug-analyst/src/publish.rs` and
+      `realorrug:crates/realorrug-analyst/src/log.rs`: **0 missed**. The one survivor was real — nothing tested a
       mention with a *single* record, which is exactly the interrupted-reply
       case the new ordering creates.
       not done here: the loop that ties these together. It needs the per-mention
@@ -110,7 +110,7 @@ the operational skin that makes it safe to leave running.
       way `radar-serve/src/ledger.rs` already does it.
       No budget configured means the loop starts, says it is unfunded, and
       answers nothing. Rule 8.
-      done: `crates/radar-analyst/src/spend.rs`. Two refusals, both rule 8.
+      done: `realorrug:crates/realorrug-analyst/src/spend.rs`. Two refusals, both rule 8.
       **No budget** is `Budget::CLOSED` and refuses every call while the loop
       still starts, because a bot that exits reads as a broken deploy and one
       reporting `unfunded` is legible. **No prices** means the meter cannot be
@@ -132,7 +132,7 @@ the operational skin that makes it safe to leave running.
       `radar-cli` escapes creator-controlled bytes for a **terminal**. A public
       reply needs a different rule: strip direction overrides and zero-width
       characters, cap length, and never let a token name close a fence.
-      done: `crates/radar-roast/src/render.rs`, and the finding is the ordering
+      done: `realorrug:crates/realorrug-roast/src/render.rs`, and the finding is the ordering
       rather than the sanitiser.
       **The forbidden and fidelity checks were exploitable.** Both read the
       reply as characters, and a zero-width space renders as nothing — so
@@ -164,11 +164,11 @@ the operational skin that makes it safe to leave running.
       `radar-analyst::answer`**, so the command and the daemon share one path
       rather than two copies of what the account says. The command is now
       presentation and nothing else.
-      The loop lives in `daemon.rs` rather than in `main.rs`, which is four
+      The loop lives in `realorrug:crates/realorrug-analyst/src/daemon.rs` rather than in `main.rs`, which is four
       lines, so one poll can be driven by a test against a fake platform. That
       is not a testing convenience: the orderings this loop enforces are the
       ones that cost money or credibility when wrong.
-      `crates/radar-analyst/tests/one_poll_end_to_end.rs` runs `tick` once
+      `realorrug:crates/realorrug-analyst/tests/one_poll_end_to_end.rs` runs `tick` once
       against a real socket and checks four things the unit tests cannot: the
       **credential reaches the wire**; the cursor takes the largest id from a
       deliberately out-of-order page (1001, 1003, 1002) rather than the last;
@@ -178,7 +178,7 @@ the operational skin that makes it safe to leave running.
       A bug found while writing it and worth recording: the first draft settled
       every reservation at **zero**, which hands the whole budget back and makes
       the meter decorative. Settling now uses `Commitment::reserved`.
-      `deploy/radar-analyst.service` (`Restart=always`, `MemoryMax=256M`, write
+      `realorrug:deploy/realorrug-analyst.service` (`Restart=always`, `MemoryMax=256M`, write
       access to its own directory and nowhere else) and
       `deploy/analyst.env.example`. `radar brief` gains an `analyst` line, and
       it counts **replies rather than log lines** — `publish` writes twice per

@@ -2,10 +2,9 @@
 //! Reading the published base-rate snapshot.
 //!
 //! The store's job in this product is **base rates, not lookup**. A per-mint
-//! question is answered from the chain (see `radar-onchain`); the population it
-//! is placed against is measured once, published as
-//! `docs/research/data/0024-base-rates.json`, and read from disk in
-//! microseconds.
+//! question is answered from the chain; the population it is placed against is
+//! measured once, published as `docs/research/data/0024-base-rates.json`, and
+//! read from disk in microseconds.
 //!
 //! # Every figure carries the date it was measured
 //!
@@ -23,6 +22,14 @@
 //! No snapshot means no population context — the reply says less, and says why.
 //! It does **not** mean falling back on remembered numbers, which is how a
 //! superseded figure gets published long after the note correcting it.
+//!
+//! # History
+//!
+//! This module, and [`crate::creator`], lived in `radar-roast` until
+//! 2026-09-14, when Radar's public reply bot moved into its own repository
+//! ([ADR 0024](https://github.com/1xmint/theradar/blob/main/docs/adr/0024-the-bot-stands-alone.md)
+//! there) and the crates that only existed to run it were deleted from this
+//! one.
 
 use serde::Deserialize;
 
@@ -91,7 +98,7 @@ pub struct CostBand {
 /// What happens after graduation, from research 0011.
 ///
 /// Carried in the snapshot with its own date rather than remembered in code,
-/// so the public site states it from a file. `Option` on the snapshot because
+/// so a consumer states it from a file. `Option` on the snapshot because
 /// an older snapshot without it is still a valid snapshot; a consumer that
 /// needs the figure refuses when it is absent rather than filling it in.
 #[derive(Clone, Debug)]
@@ -284,10 +291,6 @@ impl BaseRates {
     /// The band most enriched for instant graduation, or `None` when the
     /// snapshot has no bands.
     ///
-    /// This is what design 0009's hunter rule means by "the 10–13 band or
-    /// above", said without the number: research 0024 is the record of the
-    /// strongest band moving from six to ten-to-thirteen, and a rule that named
-    /// the band would have fired on the wrong launches from the day it moved.
     /// Two bands tied on enrichment resolve to the one with the lower floor, so
     /// a tie widens the signal rather than narrowing it.
     #[must_use]
@@ -355,9 +358,9 @@ mod tests {
     #[test]
     fn the_published_snapshot_carries_the_band_shares_and_the_aftermath() {
         // Both were added for the public stats document on 2026-09-05, and
-        // both are what the site prints: "70.5% of launches" and "organic
+        // both are what a site prints: "70.5% of launches" and "organic
         // graduations end at a median of -3,228 bps". A snapshot that dropped
-        // either would have the site fall back to its fixture and say so --
+        // either would have a consumer fall back to its fixture and say so --
         // which is the right failure, and this is what makes it a loud one.
         let rates = BaseRates::parse(SNAPSHOT).expect("the published snapshot");
         let one_to_three = rates
@@ -390,8 +393,8 @@ mod tests {
         assert_eq!(rates.launches, 17_497);
         assert!((rates.base_rate_instant - 0.011_830).abs() < 1e-6);
         // The three reconciled round-trip numbers, as docs/STATE.md carries
-        // them. If the snapshot and that table ever disagree, the analyst and
-        // the research notes publish different costs for the same trade.
+        // them. If the snapshot and that table ever disagree, two consumers
+        // publish different costs for the same trade.
         assert!((rates.round_trip_kernel - 850.0).abs() < 1e-9);
         assert!((rates.round_trip_bar - 456.0).abs() < 1e-9);
         assert!(!rates.bands.is_empty());
@@ -413,8 +416,7 @@ mod tests {
     #[test]
     fn the_strongest_band_is_the_most_enriched_and_a_tie_goes_to_the_lower_floor() {
         // The published snapshot's strongest band is ten to thirteen at 10.1x,
-        // not six at 4.4x -- which is research 0024's finding, and the reason
-        // the hunter rule reads this rather than naming a band.
+        // not six at 4.4x -- which is research 0024's finding.
         let rates = BaseRates::parse(SNAPSHOT).expect("the published snapshot");
         assert_eq!(
             rates.strongest_band().expect("a band").name,

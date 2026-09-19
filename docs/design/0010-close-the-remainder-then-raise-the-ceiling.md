@@ -89,7 +89,7 @@ the `verified` column is new.
 | design | row | verified 2026-09-05 | blocked on |
 |---|---|---|---|
 | 0007 A | fix what bites | done except A3: `/etc/radar/alert.env` is absent (read on the box) | one root command |
-| 0007 B | the bot goes public | code complete on the tip. **Not installed**: no unit, no env file, binary predates the stack. **B4 is priced and not built**: `Cost::PostRead` exists in `crates/radar-analyst/src/spend.rs`, and nothing in `crates/radar-analyst/src/x.rs` fetches a post by id — `mentions`, `metrics` and the two posting calls are the whole client. A mention that names no mint and is a reply to one that does is answered "nothing" today | the X credential; the five prices; a root session for the unit and the env file |
+| 0007 B | the bot goes public | code complete on the tip. **Not installed**: no unit, no env file, binary predates the stack. **B4 is priced and not built**: `Cost::PostRead` exists in `realorrug:crates/realorrug-analyst/src/spend.rs`, and nothing in `realorrug:crates/realorrug-analyst/src/x.rs` fetches a post by id — `mentions`, `metrics` and the two posting calls are the whole client. A mention that names no mint and is a reply to one that does is answered "nothing" today | the X credential; the five prices; a root session for the unit and the env file |
 | 0007 C | the token and the contest | C1–C5, C7, C8 on the tip; nothing has touched a chain | the credential; J12; the wallet; the devnet week |
 | 0007 D | trading for humans | nothing built: no `/v1/tokens/{mint}/pretrade`, no `build` route, `web/src/Token.tsx` renders recorded decisions and measurements only | an audience |
 | 0007 E | the learning loop | E2 done. **E1, E3, E4, E5 not built and nothing blocks them**: `radar-research` holds six modules — basis, control, creator index, exits, selection, study — and no features pass, no walk-forward, no research 0026 or 0027 | — |
@@ -114,7 +114,7 @@ follows. Section 8.4 has the full list with what to do; these three matter.
 2. **The price count and the switch count disagree inside two documents.**
    `docs/STATE.md` says "the four prices have no defaults" and, sixty lines
    later, "the fifth required price"; `deploy/README.md` does the same. Five
-   is right (`Cost` in `crates/radar-analyst/src/spend.rs` has five
+   is right (`Cost` in `realorrug:crates/realorrug-analyst/src/spend.rs` has five
    variants). STATE.md also still describes one switch — the credential
    alone — where #141 made it two (`RADAR_X_PUBLISH=on` speaks).
 3. **`crates/radar-graph/src/lib.rs` carries "68% … against 5%" beside
@@ -251,7 +251,7 @@ exposure are not mine to decide.
 | V4 | **The account states its own measured edge** weekly — "measured edge this week: 0 bps; nothing traded" — as GOAL.md's honesty made public | (a) yes, after J4's read; (b) keep it in the research notes only | **(a)**. It is the one sentence no competitor can post, it is measured, and it ages in public like everything else the account says. It is a public statement about Radar's own performance, so it goes to the lawyer with the rest (§7.5) | (a) after J4 |
 | V5 | **The creator's funding source on the sheet** (§7.2, row f): an address-level fact, one hop, computed locally | (a) measure it in E1 and write the base-rate note; state it on the sheet only after J4 covers it; (b) state it as soon as measured; (c) refuse it | **(a)**. It is an address, not a person, and README lists the funding graph as one of Radar's four edges — but it is the fact closest to the identity line ADR 0013 draws, and the wording matters more than the number | (a) |
 | V6 | **`docs/plans/`**: keep or delete on 2026-09-17 | (a) keep the directory, drop the date; (b) delete on the date as design 0002 set; (c) extend the date | **(a)**. The evidence: plan 0004 starts where 0003's handback points, plan 0006 closes 0005's open item 10 by name, `just orient` prints the open handbacks on every start, and this document was written from them. The honest test F6 asked for — a session that was not told — cannot be run, because the session protocol now tells every session. Keep the thing that is read; delete the date that measured the wrong question | (a) |
-| V7 | **Venues** (§9): the bot's venue-agnostic tier now; the next Solana venue chosen by the bot's own refusal log; no second chain in this design; trading pump.fun-only until an edge exists | (a) as stated; (b) record a second Solana venue now, before the bot says which; (c) add Robinhood Chain | **(a)**. (b) is a decoder and a recorder change for a venue nobody has asked the bot about yet; (c) is a second chain and a different repository's worth of work. GOAL.md's line on trading stands and is Josh's already | (a) |
+| V7 | **Venues** (§9): the bot's venue-agnostic tier now; the next Solana venue chosen by the bot's own refusal log; no second chain in this design; trading pump.fun-only until an edge exists | (a) as stated; (b) record a second Solana venue now, before the bot says which; (c) add Robinhood Chain | **(a)**. (b) is a decoder and a recorder change for a venue nobody has asked the bot about yet; (c) is a second chain and a different repository's worth of work. GOAL.md's line on trading stands and is Josh's already | (a). **"No second chain" superseded for the token and the bot by [ADR 0023](../adr/0023-realorrug-lives-on-robinhood-chain-and-the-bot-moves-with-it.md), 2026-09-13**; trading unchanged |
 
 **Not reopened**, per the prompt and the documents: ADR 0013's six
 constraints; 0009's L1–L6; the frozen trading lane; summoned-reply-only; no
@@ -388,8 +388,8 @@ What needs no root, and can be done the day the stack merges: the three
 `~/bin` binaries from the merged build, so `population.json` starts flowing on
 the next creator-index run and `/v1/public/stats` stops answering 404. What
 needs one root session, in one sitting, with the exact commands already in
-`deploy/README.md`: `radar-analyst.service` and `/etc/radar/analyst.env`;
-`radar-seven-days.timer`; `radar-payout.service` when the wallet exists;
+`deploy/README.md`: `realorrug:deploy/realorrug-analyst.service` and `/etc/radar/analyst.env`;
+`theradar:deploy/radar-seven-days.timer`; `realorrug:deploy/realorrug-payout.service` when the wallet exists;
 `/etc/radar/alert.env`; the second `ExecStart` from A-2; the deploy timer from
 A-4; the NOPASSWD line for the three restarts. Then the 24-hour dry run, which
 needs the credential.
@@ -569,7 +569,7 @@ Radar's intelligence", made checkable.
 5. It has been an E1 feature first, so the base-rate note was written from
    the same pass that feeds E3.
 
-The boundary is `FactSheet::build` in `crates/radar-roast/src/sheet.rs`. A new
+The boundary is `FactSheet::build` in `realorrug:crates/realorrug-roast/src/sheet.rs`. A new
 fact is a `push_*` there, tagged `About::Measurement`, and nothing else in the
 reply path changes.
 
@@ -814,7 +814,7 @@ Josh's question most likely refers to pump.fun's own reported USDC pairing
 | a new crate for E1 or E3 | **no** | a document that compiles; they live where their callers are |
 | a Python dependency for E3 | **no** | the probes promise stdlib-only; the harness is Rust over `Reader` |
 | fetching a metadata URI; any social data | **no** | rule 4; a stranger's mint must not choose Radar's requests |
-| a second chain | **no** | V7 |
+| a second chain | **no** for trading; **yes** for the token and bot | V7; [ADR 0023](../adr/0023-realorrug-lives-on-robinhood-chain-and-the-bot-moves-with-it.md) |
 | a per-request store scan on any public route or on D1 | **no** | 8.2 |
 | a score, a verdict word, "right" or "wrong" | **no** | GOAL.md; the forbidden list grows by two |
 | `docs/plans/` | **kept; the date dropped** (V6) | the thing is read; the test measured the wrong question |
