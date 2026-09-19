@@ -196,8 +196,17 @@ the follow idle to 90 s (needs an hour of logs); a fresh wallet signing in.
 **Rule from the owner, 2026-09-19:** tests run on GitHub CI, not on the
 workstation. Locally: `cargo fmt` and scoped `cargo clippy` only.
 
-**Next action:** Phase B item 2 (holders folded from `MarketTrades`), built on
-the snapshot from #259 so it costs no extra read. Item 3's widening waits on
+**Paused here, 2026-09-19.** Phase B item 2 is written and open as draft #261
+(`feat/holders-from-the-tape`): `/v1/market/holders/{mint}` nets each wallet's
+buys minus sells from the snapshot, fact `net_traded_in_window`. Read and found
+sound; CI had not finished when the session stopped, and the web typecheck was
+never run locally.
+
+**Next action:** read #261's CI. Fix any mutation survivors at the exact
+`file:line:column` named, mark it ready, squash-merge, deploy by the
+`deploy/README.md` procedure, and check the holders tab on radar.heyvera.org
+for a traded coin. Then item 3's "newly launched" list.
+Item 3's widening waits on
 the owner's answer about cutting `consider --cap 40` in the box's crontab,
 which shares the CryptoHouse allowance; the "newly launched" list does not
 wait. The owner step still open: set `RADAR_CUSTOMER_ACCESS=open` in
