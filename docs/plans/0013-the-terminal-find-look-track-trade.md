@@ -1,8 +1,11 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # Plan 0013 — The terminal: find, look, track, trade
 
-**Status:** Phase A in progress. #244 and #245 merged on 2026-09-18; #248 has
-main merged in and is waiting on CI; nothing in phases B to E is built.
+**Status:** Phase A done except its one owner step. Merged on 2026-09-18: #244,
+#245, #248, #243 and the patch-level updates #228, #250, #251, #252. Wallet
+sign-in on the box is still `allowlist:` one address; opening it is the owner's
+edit to `/etc/radar/radar.env`. Phase B item 1 is in progress on
+`feat/coin-names-from-launches`; nothing else in B to E is built.
 **Date:** 2026-09-18.
 **Branch:** none; each item lands on `main` as its own pull request.
 **Inspected base:** `c8fca0e` (`Remove the bot from Radar: it lives in realorrug
@@ -169,13 +172,17 @@ second chain.
 
 ## Handback
 
-**Stopped at:** Phase A, item 1. #244 and #245 are merged. #248 conflicted with
-#253 (the bot's crates left the workspace); main was merged into the branch,
-keeping the removals and keeping `radar-stream` and its probe, and
-`cargo check -p radar-serve -p radar-stream --all-targets` passed locally.
+**Stopped at:** Phase A merged. Merging #244 after #246 put two dead links on
+`main` (plan 0012 named `Scoreboard.tsx` and `PricePath.tsx`, which #246 had
+deleted) and the link check failed every branch until #255 fixed it. The lesson:
+this ruleset is `strict:false`, so a green PR can be stale; re-run CI on an old
+docs PR before merging it.
 
-**Next action:** merge #248 once CI is green, then #243 (it conflicts with main
-and needs the same treatment), then the patch-level Dependabot batch.
+**Next action:** Phase B. Item 1 (names and images from the launch records) is
+being built on `feat/coin-names-from-launches`. Items 2 and 3 are unstarted;
+item 3 starts with a day of measuring quota headroom, not with code. The owner
+step: set `RADAR_CUSTOMER_ACCESS=open` in `/etc/radar/radar.env` and restart
+`radar-serve`. Phase C needs it; Phase B does not.
 
 **Do not:** build Phase D before Phase C is live; put a CryptoHouse query on a
 request path; hold a key or a fee on the server side of a swap; start the
