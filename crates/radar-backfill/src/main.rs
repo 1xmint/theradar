@@ -56,7 +56,18 @@ const PAUSE_BETWEEN_WINDOWS: Duration = Duration::from_millis(400);
 const FOLLOW_LAG_SECONDS: i64 = 20;
 
 /// How long follow mode waits when it has caught up.
-const FOLLOW_IDLE: Duration = Duration::from_secs(60);
+///
+/// Ninety seconds, because the wait is what sets the recorder's share of the
+/// 120-an-hour quota and sixty overspent it. At sixty a caught-up recorder asks
+/// about fifty-six times an hour, not the forty `market_tape::Budget::PER_PASS`
+/// reserves for it; with the tape's 24, the outcomes cron's dozen and the
+/// hourly `consider` run's up-to-forty launch blocks, the box was measured on
+/// 2026-09-19 at 136 to 143 queries in an hour and refused in eighteen hours of
+/// twenty-four. Ninety brings the recorder to about thirty-nine. What it costs
+/// is a store that fills thirty seconds later, which nothing reading it can
+/// see: the terminal's tape is a different collector, and every other reader
+/// works in hours.
+const FOLLOW_IDLE: Duration = Duration::from_secs(90);
 
 /// The smallest window follow mode will ask for.
 ///
