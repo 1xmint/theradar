@@ -11,6 +11,12 @@ reach him (#222)`), read on 2026-09-11. Everything asserted about the tree came
 from reading it at that commit. Everything asserted about CryptoHouse came from
 queries run against it on 2026-09-11 and is quoted with its numbers. Everything
 estimated is labelled.
+**Superseded in part, 2026-09-18:** [plan 0013](0013-the-terminal-find-look-track-trade.md)
+replaces two rules here. "Do not write a line of transaction construction" no
+longer holds: the owner chose a visitor-signed buy/sell button. And 9-11-0012's
+"a wallet's own trades from CryptoHouse" on request breaks the later rule that
+nothing on a request path may query CryptoHouse; 0013 Phase C reads balances in
+the browser and history from the store instead.
 **Planned for:** Josh's implementation handoff.
 **Decided by:** the owner, 2026-09-11, recorded not argued — Radar is a public
 product, market data is free to a stranger, each wallet's own history and signals
@@ -491,7 +497,7 @@ signer — ADR 0005, unchanged.
 Apache-2.0 is this repository's own licence, so the only friction is the NOTICE
 attribution, a real obligation landing in the same pull request as a visible
 credit and link. The dependency posture in
-[`PricePath`](../../web/src/PricePath.tsx) — *every dependency is one more thing
+`PricePath` (`web/src/PricePath.tsx`, deleted by #246) — *every dependency is one more thing
 that can be compromised into a process that will eventually hold a signing key* —
 gets an answer rather than a waiver: this runs in the visitor's browser tab, not
 in the signer's process tree, and the alternative is hand-writing candles,
@@ -837,7 +843,7 @@ lands in 9-11-0010 for that reason.
   `/v1/scoreboard` become operator-only.** They are `Audience::Customer` today and
   `RADAR_CUSTOMER_ACCESS=open` hands all four to any stranger with a wallet.
   **Recommendation: yes, and before admission opens.** The cost is real: the
-  honest-scoreboard work in [`Scoreboard`](../../web/src/Scoreboard.tsx) stops
+  honest-scoreboard work in `Scoreboard` (`web/src/Scoreboard.tsx`, deleted by #246) stops
   being visible to anyone, and it is some of the best public argument this project
   has. A *curated* public evidence page is a different artefact from an open
   `/v1/decisions` and can be built later without reopening the route.
