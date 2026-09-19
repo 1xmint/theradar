@@ -4,8 +4,11 @@
 **Status:** Phase A done except its one owner step. Merged on 2026-09-18: #244,
 #245, #248, #243 and the patch-level updates #228, #250, #251, #252. Wallet
 sign-in on the box is still `allowlist:` one address; opening it is the owner's
-edit to `/etc/radar/radar.env`. Phase B item 1 is in progress on
-`feat/coin-names-from-launches`; nothing else in B to E is built.
+edit to `/etc/radar/radar.env`. Phase B item 1 merged as #257 and is live.
+Two repairs landed on the way and are deployed: #258 (the market tape gives up a
+gap it can never close) and #259 (market routes read a shared snapshot instead
+of the whole trade table per request). Items 2 and 3 of B are unstarted;
+nothing in C to E is built.
 **Date:** 2026-09-18.
 **Branch:** none; each item lands on `main` as its own pull request.
 **Inspected base:** `c8fca0e` (`Remove the bot from Radar: it lives in realorrug
@@ -178,11 +181,27 @@ deleted) and the link check failed every branch until #255 fixed it. The lesson:
 this ruleset is `strict:false`, so a green PR can be stale; re-run CI on an old
 docs PR before merging it.
 
-**Next action:** Phase B. Item 1 (names and images from the launch records) is
-being built on `feat/coin-names-from-launches`. Items 2 and 3 are unstarted;
-item 3 starts with a day of measuring quota headroom, not with code. The owner
-step: set `RADAR_CUSTOMER_ACCESS=open` in `/etc/radar/radar.env` and restart
-`radar-serve`. Phase C needs it; Phase B does not.
+**Outage, 2026-09-19, and what fixed it.** `radar.heyvera.org` stopped
+answering: `curl` to `/` on the box timed out at 5 s with `radar-serve` at 171%
+CPU. Every market request re-read and re-sorted the whole trade table (about
+1,750 files, 1.5M rows). #259 builds one snapshot off the request path,
+refreshed every 20 s (launches every 300 s), and routes read that. Measured on
+build `1540b49` after `sudo radar-deploy`: `/v1/market/coins` 0.31 s on the box
+and 0.68 s from outside; 117 CPU ticks in 60 s (6,000 is one core); 145 MB
+resident. 3 of 19 listed coins carry a name; the rest predate the recorder.
+
+**Not checked:** whether CryptoHouse quota refusals stopped after #258 raised
+the follow idle to 90 s (needs an hour of logs); a fresh wallet signing in.
+
+**Rule from the owner, 2026-09-19:** tests run on GitHub CI, not on the
+workstation. Locally: `cargo fmt` and scoped `cargo clippy` only.
+
+**Next action:** Phase B item 2 (holders folded from `MarketTrades`), built on
+the snapshot from #259 so it costs no extra read. Item 3's widening waits on
+the owner's answer about cutting `consider --cap 40` in the box's crontab,
+which shares the CryptoHouse allowance; the "newly launched" list does not
+wait. The owner step still open: set `RADAR_CUSTOMER_ACCESS=open` in
+`/etc/radar/radar.env` and restart `radar-serve`. Phase C needs it.
 
 **Do not:** build Phase D before Phase C is live; put a CryptoHouse query on a
 request path; hold a key or a fee on the server side of a swap; start the
