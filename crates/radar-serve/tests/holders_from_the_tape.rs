@@ -33,6 +33,7 @@ fn market_trade(
     ts: &str,
     slot: u64,
     side: MarketSide,
+    token_amount: f64,
     trader: Option<Address>,
 ) -> MarketTrade {
     MarketTrade {
@@ -41,7 +42,7 @@ fn market_trade(
         slot: Slot(slot),
         signature: Signature::new([(slot % 251) as u8; 64]),
         side,
-        token_amount: 5.0,
+        token_amount,
         quote_amount: Some(2.0),
         quote_mint: Some(WSOL.parse().expect("a mint")),
         price: Some(2.0),
@@ -59,6 +60,7 @@ fn store_with_a_net_holder(dir: &std::path::Path, mint: &str, slot: u64) {
         "2026-09-17 23:59:00",
         slot - 1,
         MarketSide::Buy,
+        5.0,
         Some(wallet),
     );
     let sell = market_trade(
@@ -66,6 +68,7 @@ fn store_with_a_net_holder(dir: &std::path::Path, mint: &str, slot: u64) {
         "2026-09-18 00:00:00",
         slot,
         MarketSide::Sell,
+        2.0,
         Some(wallet),
     );
     writer.append_market_trade(buy.clone()).expect("append buy");
@@ -90,6 +93,7 @@ fn store_without_a_mint_trade(dir: &std::path::Path, slot: u64) {
         "2026-09-18 00:00:00",
         slot,
         MarketSide::Buy,
+        5.0,
         Some(Address::new(WALLET)),
     );
     writer
