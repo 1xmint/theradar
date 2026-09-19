@@ -53,10 +53,10 @@ use radar_backfill::market::fold as market_fold;
 // names a span it has not reached, and every such request answered with an
 // empty list marked complete. Windows end at `newest_collected` instead, and
 // the missing import is what stops that regressing quietly.
-use radar_store::{MarketSide, MarketTrade, Reader, StoreError, Table, from_epoch};
-use radar_types::Address;
+use radar_store::{Event, MarketSide, MarketTrade, Reader, StoreError, Table, from_epoch};
+use radar_types::{Address, Slot};
 use serde::Deserialize;
-use serde_json::json;
+use serde_json::{Value, json};
 
 /// A single top-level window's width, when a caller does not name one — the
 /// span of trades folded into the tape by default.
@@ -263,6 +263,106 @@ fn market_tape_collected(store: &Reader, as_of: AsOf) -> Result<bool, StoreError
         .read_coverage(as_of)?
         .iter()
         .any(|c| c.table == Table::MarketTrades))
+}
+
+/// One coin's launch-recorded identity, as
+/// [`radar_backfill`]'s launch collector wrote it to
+/// [`radar_store::Table::Launches`] when the pump.fun `create` instruction
+/// was decoded.
+///
+/// Untrusted (rule 4 in `AGENTS.md`): `name`, `symbol` and `uri` are
+/// attacker-chosen strings copied verbatim off an on-chain instruction. They
+/// are rendered as text and never interpreted -- see [`capped`] for the
+/// bound applied before they leave this process, and `web/src`'s scheme
+/// allow-list for the bound applied before `uri` is ever fetched, client
+/// side, by a browser.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LaunchInfo {
+    name: String,
+    symbol: String,
+    /// The off-chain metadata JSON's location. **Never fetched by this
+    /// server** -- returned as an opaque string for the browser to resolve.
+    uri: String,
+}
+
+/// Mint -> its launch identity, for every launch this instance recorded
+/// within [`LAUNCH_LOOKBACK_SLOTS`] of the watermark it was built at.
+///
+/// Built once per watermark by [`build_launch_index`] and held in
+/// [`crate::AppState::launches`] -- never read per request. See that cache
+/// field's doc comment and [`crate::cache::Cache`]'s module doc for why: the
+/// same reuse-until-stale pattern already used for the scoreboard and for a
+/// token's evidence.
+pub type LaunchIndex = std::collections::HashMap<Address, LaunchInfo>;
+
+/// The longest a `name` or `symbol` field may be in a response.
+///
+/// Untrusted, attacker-controlled strings (rule 4): pump.fun's `create`
+/// instruction does not bound their length, so a launch could otherwise carry
+/// an arbitrarily large payload into every `/v1/market/coins` response that
+/// mint appears in.
+const MAX_METADATA_FIELD_LEN: usize = 200;
+
+/// The longest a `uri` field may be in a response. Wider than
+/// [`MAX_METADATA_FIELD_LEN`]: a legitimate metadata URI (an `ipfs://` CID or
+/// an HTTPS path) can run longer than a name ever should, but it is still
+/// bounded -- the same untrusted-string reasoning applies.
+const MAX_URI_LEN: usize = 2_000;
+
+/// Truncates `s` to `max` chars, counted rather than bytes so a truncation
+/// point never lands inside a multi-byte character.
+fn capped(s: &str, max: usize) -> String {
+    if s.chars().count() <= max {
+        s.to_owned()
+    } else {
+        s.chars().take(max).collect()
+    }
+}
+
+/// How far behind the watermark [`build_launch_index`] reads.
+///
+/// **~7 days.** docs/STATE.md measured 72,193 launches recorded in a
+/// two-day window -- an unbounded index would grow without limit as the
+/// store's history grows, and every caller of this module names a mint
+/// because it is on the coin list or trade tape, i.e. traded inside the last
+/// [`COINS_WINDOW_SECONDS`]/[`DEFAULT_WINDOW_SECONDS`], so a launch older
+/// than a week is not one any caller here could plausibly be asking about.
+/// Bounding the read also bounds the map: [`Reader::read_range`] skips whole
+/// partition files outside this range without opening them, so both the
+/// per-rebuild read cost and the index's memory stay flat as history grows.
+///
+/// The slot count comes from this codebase's own documented approximation --
+/// [`radar_types::SlotDelta::approx_duration`]'s "one slot is roughly 400ms"
+/// -- rather than a separately invented one: 7 * 24 * 3600 * 1000 / 400 =
+/// 1,512,000.
+const LAUNCH_LOOKBACK_SLOTS: u64 = 1_512_000;
+
+/// Scans [`radar_store::Table::Launches`] once, back to
+/// [`LAUNCH_LOOKBACK_SLOTS`] before `as_of`, and folds it into a lookup by
+/// mint.
+///
+/// **Not called per request.** [`crate::AppState::launches`] calls this
+/// through [`crate::cache::Cache::get_or_compute`]/`recent`, exactly the
+/// pattern already used for the scoreboard and for a token's evidence
+/// (`crates/radar-serve/src/cache.rs`) -- computed once per watermark, reused
+/// for every caller asking inside the staleness allowance.
+fn build_launch_index(store: &Reader, as_of: AsOf) -> Result<LaunchIndex, StoreError> {
+    let from = Slot(as_of.slot().get().saturating_sub(LAUNCH_LOOKBACK_SLOTS));
+    let events = store.read_range(Table::Launches, as_of, Some(from), None)?;
+    let mut index = LaunchIndex::new();
+    for event in events {
+        if let Event::Launch(launch) = event {
+            index.insert(
+                launch.mint,
+                LaunchInfo {
+                    name: capped(&launch.name, MAX_METADATA_FIELD_LEN),
+                    symbol: capped(&launch.symbol, MAX_METADATA_FIELD_LEN),
+                    uri: capped(&launch.uri, MAX_URI_LEN),
+                },
+            );
+        }
+    }
+    Ok(index)
 }
 
 /// Converts a stored, folded row into the shape
@@ -689,6 +789,19 @@ pub async fn coins(
     let mut coins = coins_from_trades(&windowed);
     sort_coins(&mut coins, &sort);
     coins.truncate(limit);
+
+    let launches = match state
+        .launches
+        .get_or_compute(watermark, (), || build_launch_index(&state.store, as_of))
+    {
+        Ok(index) => index,
+        Err(e) => return Degradation::from_store_error(&e).into_response(),
+    };
+    let coins: Vec<Value> = coins
+        .into_iter()
+        .map(|coin| with_launch_fields(coin, &launches))
+        .collect();
+
     Json(json!({
         "window": { "from": from_s, "to": to_s },
         "coins": coins,
@@ -696,13 +809,48 @@ pub async fn coins(
     .into_response()
 }
 
+/// Injects a coin's launch-recorded `name`/`symbol` (and, on this
+/// store-backed path only, `uri`) into its serialised row.
+///
+/// [`market_fold::Coin`] itself gains no fields for this: it is shared with
+/// `market/live.rs`'s live-stream path (unmerged, `origin/feat/live-stream`),
+/// which folds its own launch-sourced `name`/`symbol` in the same way at the
+/// JSON level rather than on the struct, so this keeps that shape rather than
+/// inventing a second one.
+fn with_launch_fields(coin: market_fold::Coin, launches: &LaunchIndex) -> Value {
+    let mint = coin.mint.parse::<Address>().ok();
+    let found = mint.and_then(|m| launches.get(&m));
+    let mut value = serde_json::to_value(coin).unwrap_or(Value::Null);
+    if let Some(obj) = value.as_object_mut() {
+        obj.insert(
+            "name".to_owned(),
+            found.map_or(Value::Null, |l| Value::String(l.name.clone())),
+        );
+        obj.insert(
+            "symbol".to_owned(),
+            found.map_or(Value::Null, |l| Value::String(l.symbol.clone())),
+        );
+        obj.insert(
+            "uri".to_owned(),
+            found.map_or(Value::Null, |l| Value::String(l.uri.clone())),
+        );
+    }
+    value
+}
+
 /// `/v1/market/token/{mint}`: a coin's header.
 ///
-/// Metadata (`name`, `symbol`, `creator`, `published_at`) is never collected
-/// by [`radar_backfill::market_tape`] -- it collects the trade tape only --
-/// so those fields are always `null` with `metadata_reason` saying so,
-/// rather than a live `solana.tokens` query this build no longer makes. Price
-/// still comes from the collected tape, the same as [`trades`].
+/// `name`, `symbol` and `uri` come from Radar's own recorder, not from
+/// CryptoHouse: every pump.fun launch it decodes is written to
+/// [`radar_store::Table::Launches`], and [`build_launch_index`] joins that in
+/// by mint, bounded and cached exactly as [`coins`] is. A mint with no
+/// recorded launch -- launched before Radar began recording, or outside the
+/// index's lookback window -- keeps all three `null` with `metadata_reason`
+/// saying which. `creator` and `published_at` are never collected by
+/// [`radar_backfill::market_tape`] at all -- it collects the trade tape only
+/// -- so those two stay `null` with the reason saying so, rather than a live
+/// `solana.tokens` query this build no longer makes. Price still comes from
+/// the collected tape, the same as [`trades`].
 ///
 /// # Why collecting it was not simply scheduled
 ///
@@ -767,13 +915,37 @@ pub async fn token(
         None => (None, Some(why_no_price(recent_trades.is_empty()))),
     };
 
+    let launches = match state
+        .launches
+        .get_or_compute(watermark, (), || build_launch_index(&state.store, as_of))
+    {
+        Ok(index) => index,
+        Err(e) => return Degradation::from_store_error(&e).into_response(),
+    };
+    let found = launches.get(&mint);
+    let (name, symbol, uri, metadata_reason) = match found {
+        Some(l) => (
+            Some(l.name.clone()),
+            Some(l.symbol.clone()),
+            Some(l.uri.clone()),
+            "name, symbol and metadata uri are read from Radar's own recorded pump.fun launch; creator and first-seen date are not -- only those three fields are",
+        ),
+        None => (
+            None,
+            None,
+            None,
+            "no pump.fun launch for this coin was recorded by Radar -- it may have launched before Radar began recording, or fall outside the launch index's lookback window",
+        ),
+    };
+
     Json(json!({
         "mint": mint.to_string(),
-        "name": Option::<String>::None,
-        "symbol": Option::<String>::None,
+        "name": name,
+        "symbol": symbol,
+        "uri": uri,
         "creator": Option::<String>::None,
         "published_at": Option::<String>::None,
-        "metadata_reason": "token metadata is not collected: the market-tape collector gathers trade data only, and the free source's own token table stopped being updated on 2026-08-10, so a name is not available on this lane at all",
+        "metadata_reason": metadata_reason,
         "price": price,
         "price_reason": price_reason,
         "market_cap": Option::<f64>::None,

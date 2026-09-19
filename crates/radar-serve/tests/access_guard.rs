@@ -40,6 +40,7 @@ fn router(access: Mode) -> axum::Router {
         token: radar_serve::cache::Cache::new(),
         challenges: None,
         market: radar_serve::market::Market::new(),
+        launches: radar_serve::cache::Cache::new(),
     }))
 }
 

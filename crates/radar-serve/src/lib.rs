@@ -126,6 +126,14 @@ pub struct AppState {
     /// anyone who can name one, and the page this serves is read one token at a
     /// time.
     pub token: cache::Cache<api::TokenEvidence, String>,
+    /// Mint -> launch-recorded name/symbol/uri, computed once per watermark.
+    ///
+    /// Keyed on the watermark alone (`K = ()`), same as [`Self::scoreboard`]:
+    /// one whole-table scan of [`radar_store::Table::Launches`], bounded by
+    /// [`market::LAUNCH_LOOKBACK_SLOTS`], reused for every `/v1/market/coins`
+    /// and `/v1/market/token/{mint}` caller at that watermark rather than
+    /// read per request.
+    pub launches: cache::Cache<market::LaunchIndex>,
     /// Outstanding sign-in challenges, or `None` when no customer domain is set.
     ///
     /// `None` is rule 8's shape: an instance that does not know its own domain
