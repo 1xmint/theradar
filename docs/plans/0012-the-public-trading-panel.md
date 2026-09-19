@@ -11,6 +11,12 @@ reach him (#222)`), read on 2026-09-11. Everything asserted about the tree came
 from reading it at that commit. Everything asserted about CryptoHouse came from
 queries run against it on 2026-09-11 and is quoted with its numbers. Everything
 estimated is labelled.
+**Superseded in part, 2026-09-18:** [plan 0013](0013-the-terminal-find-look-track-trade.md)
+replaces two rules here. "Do not write a line of transaction construction" no
+longer holds: the owner chose a visitor-signed buy/sell button. And 9-11-0012's
+"a wallet's own trades from CryptoHouse" on request breaks the later rule that
+nothing on a request path may query CryptoHouse; 0013 Phase C reads balances in
+the browser and history from the store instead.
 **Planned for:** Josh's implementation handoff.
 **Decided by:** the owner, 2026-09-11, recorded not argued — Radar is a public
 product, market data is free to a stranger, each wallet's own history and signals
