@@ -255,6 +255,22 @@ describe("holdersBasis", () => {
   it("still explains the transfer fold the store-backed route sends", () => {
     expect(holdersBasis("folded_transfers", "token_account", "a", "b")).toContain("over-counts");
   });
+
+  it("says a net-traded-in-window list is bought minus sold, not a true balance", () => {
+    // The free path with no live feed folds the trade tape it already stores
+    // rather than refusing outright -- the dangerous reading here is "these
+    // are the holders" when it is really "net activity Radar happened to see".
+    const caption = holdersBasis(
+      "net_traded_in_window",
+      "wallet",
+      "2026-09-17 23:59:00",
+      "2026-09-18 00:00:00",
+    );
+    expect(caption).toContain("Bought minus sold");
+    expect(caption).toContain("2026-09-17 23:59:00");
+    expect(caption).toContain("2026-09-18 00:00:00");
+    expect(caption).toContain("missing or understated");
+  });
 });
 
 describe("holdersBasisCaption", () => {

@@ -245,6 +245,9 @@ export function holdersBasis(
   if (fact === "balances_seen_while_watching") {
     return `Only wallets that traded since the live feed began watching at ${from} — older holders who have not moved are missing, so this is not everyone.`;
   }
+  if (fact === "net_traded_in_window") {
+    return `Bought minus sold by wallets Radar saw trading this coin between ${from} and ${to} — anyone who held before then, or received coins without trading, is missing or understated.`;
+  }
   const source =
     fact === "folded_transfers"
       ? "Folded from transfer history, not read from current account balances"

@@ -421,6 +421,13 @@ export interface HoldersFold {
   from: string;
   to: string;
   /**
+   * How many trades of this mint the fold saw but could not attribute to a
+   * wallet -- no identified trader, or an unknown side. Only the free path's
+   * `"net_traded_in_window"` fact sends it, since it is the only fold that
+   * skips rows rather than reading a balance directly.
+   */
+  unattributed_trades?: number;
+  /**
    * What the list was built from, in the server's own words -- e.g. "folded
    * from transfer history over the last 30 days", never a claim to have read
    * current account balances. Required precisely because it is the field
