@@ -1,7 +1,7 @@
 [workspace]
 resolver = "3"
 members = ["crates/radar-types", "crates/radar-asof", "crates/radar-provider", "crates/radar-agent",
-    "crates/radar-model", "crates/radar-decode", "crates/radar-store", "crates/radar-backfill", "crates/radar-cli", "crates/radar-instruments", "crates/radar-serve", "crates/radar-risk", "crates/radar-sim", "crates/radar-strategy", "crates/radar-research", "crates/radar-graph", "crates/radar-signer", "crates/radar-exec", "crates/radar-customer", "crates/radar-pumpfun", "crates/radar-onchain", "crates/radar-journal", "crates/repo-conformance"]
+    "crates/radar-model", "crates/radar-decode", "crates/radar-store", "crates/radar-stream", "crates/radar-backfill", "crates/radar-cli", "crates/radar-instruments", "crates/radar-serve", "crates/radar-risk", "crates/radar-sim", "crates/radar-strategy", "crates/radar-research", "crates/radar-graph", "crates/radar-signer", "crates/radar-exec", "crates/radar-customer", "crates/radar-pumpfun", "crates/radar-onchain", "crates/radar-journal", "crates/repo-conformance"]
 
 [workspace.package]
 version = "0.0.1"
@@ -33,6 +33,7 @@ radar-research = { path = "crates/radar-research", version = "0.0.1" }
 radar-graph = { path = "crates/radar-graph", version = "0.0.1" }
 radar-backfill = { path = "crates/radar-backfill", version = "0.0.1" }
 radar-store = { path = "crates/radar-store", version = "0.0.1" }
+radar-stream = { path = "crates/radar-stream", version = "0.0.1" }
 
 # Kept deliberately small. Every dependency here is one more thing that can be
 # compromised into a process that will eventually hold a signing key, so the bar

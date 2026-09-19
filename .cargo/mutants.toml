@@ -33,6 +33,14 @@
 # A pattern that is too broad is worse than no pattern, because it removes
 # coverage without removing the line that says coverage exists.
 
+# The purchase-day probe prints rates, memory and the busiest coins for a
+# person to read once, before the live feed is switched on. Its arithmetic is
+# display (bytes to MiB, counts per five seconds) and its loop is a timer over a
+# network connection; a test would assert on its own formatting. What it relies
+# on -- the tape, the feed configuration and the reconnect policy -- is library
+# code in `radar_stream`, and is mutated and tested there.
+exclude_globs = ["crates/radar-stream/src/bin/**"]
+
 exclude_re = [
     # `known_files`: inverting the emptiness guard makes a successful
     # `git ls-files` fall through to walking the tree instead of returning what

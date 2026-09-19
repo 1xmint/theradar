@@ -239,6 +239,12 @@ export function holdersBasis(
   from: string,
   to: string,
 ): string {
+  if (fact === "balances_since_launch") {
+    return `Every balance since launch (${from}), as the live feed saw each trade — one row is a wallet.`;
+  }
+  if (fact === "balances_seen_while_watching") {
+    return `Only wallets that traded since the live feed began watching at ${from} — older holders who have not moved are missing, so this is not everyone.`;
+  }
   const source =
     fact === "folded_transfers"
       ? "Folded from transfer history, not read from current account balances"
