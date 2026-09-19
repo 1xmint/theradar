@@ -440,6 +440,44 @@ fn snapshot_for(
     }
 }
 
+/// What one tick of the background refresher should do.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Refresh {
+    /// Nothing moved: no store read at all.
+    Skip,
+    /// The store moved: re-read the trade window, keep the launch index.
+    TradesOnly,
+    /// Read everything, the 7-day launch scan included.
+    Everything,
+}
+
+/// Decides what a refresher tick reads.
+///
+/// Pulled out of `main.rs`'s loop because this is the decision the whole fix
+/// rests on: answer [`Refresh::Skip`] too rarely and the box is back to
+/// re-reading the store all day, too often and the screen freezes on an old
+/// snapshot while looking healthy. With no snapshot to reuse a launch index
+/// from, a moved store means [`Refresh::Everything`], never a half-built one.
+#[must_use]
+pub const fn refresh_plan(launches_due: bool, store_moved: bool, have_snapshot: bool) -> Refresh {
+    if launches_due {
+        Refresh::Everything
+    } else if !store_moved {
+        Refresh::Skip
+    } else if have_snapshot {
+        Refresh::TradesOnly
+    } else {
+        Refresh::Everything
+    }
+}
+
+/// Whether the launch index is due a rebuild: never built, or built at least
+/// `every` ago.
+#[must_use]
+pub fn launches_due(since_last: Option<std::time::Duration>, every: std::time::Duration) -> bool {
+    since_last.is_none_or(|elapsed| elapsed >= every)
+}
+
 /// Why a market route could not answer, distinguishably from an empty
 /// result.
 ///
@@ -1846,5 +1884,125 @@ mod tests {
         assert_eq!(coins.len(), 1, "the mint is still on the list");
         assert_eq!(coins[0].price, None);
         assert_eq!(coins[0].quote_mint, None);
+    }
+
+    /// A refresher tick reads only what it has to.
+    ///
+    /// Every row of the table, because each wrong answer is quiet: a `Skip`
+    /// that should have been a read freezes the screen on an old snapshot, and
+    /// a read that should have been a `Skip` is the all-day store scan this
+    /// snapshot exists to stop.
+    #[test]
+    fn a_refresher_tick_reads_only_what_it_has_to() {
+        assert_eq!(refresh_plan(true, false, true), Refresh::Everything);
+        assert_eq!(refresh_plan(true, true, false), Refresh::Everything);
+        assert_eq!(refresh_plan(false, false, true), Refresh::Skip);
+        assert_eq!(refresh_plan(false, false, false), Refresh::Skip);
+        assert_eq!(refresh_plan(false, true, true), Refresh::TradesOnly);
+        assert_eq!(
+            refresh_plan(false, true, false),
+            Refresh::Everything,
+            "there is no launch index to reuse, so a trades-only read has nothing to stand on"
+        );
+    }
+
+    #[test]
+    fn the_launch_index_is_due_when_never_built_or_old_enough() {
+        let every = std::time::Duration::from_secs(300);
+        assert!(launches_due(None, every), "never built");
+        assert!(!launches_due(
+            Some(std::time::Duration::from_secs(299)),
+            every
+        ));
+        assert!(
+            launches_due(Some(every), every),
+            "due on the interval itself"
+        );
+        assert!(launches_due(
+            Some(std::time::Duration::from_secs(301)),
+            every
+        ));
+    }
+
+    /// With a background refresher, a request never builds a snapshot.
+    ///
+    /// A build would leave its snapshot in the cache, so an empty cache after
+    /// the request is the proof that the request path did not read the store.
+    #[test]
+    fn a_request_never_builds_a_snapshot_a_refresher_owns() {
+        let (_dir, store) = store_of(&[market_trade(A_MINT, "2020-01-01 00:00:01.000000", 100)]);
+        let cache = SnapshotCache::with_background_refresh();
+        let as_of = AsOf::at(radar_types::Slot(10_000));
+        assert!(
+            snapshot_for(&cache, &store, as_of)
+                .expect("no read happens")
+                .is_none(),
+            "nothing built yet is an honest nothing, not a blocking build"
+        );
+        assert!(cache.peek().is_none(), "and the request did not fill it in");
+
+        // Once the refresher has set one, a later watermark is still served
+        // the same snapshot rather than a rebuild.
+        let built = Arc::new(Snapshot::build(&store, as_of).expect("the store reads"));
+        cache.set(Arc::clone(&built));
+        let later = AsOf::at(radar_types::Slot(10_500));
+        let served = snapshot_for(&cache, &store, later)
+            .expect("no read happens")
+            .expect("a snapshot exists");
+        assert!(Arc::ptr_eq(&served, &built), "served, never rebuilt");
+    }
+
+    /// Without a refresher the snapshot is reused at its own watermark and
+    /// rebuilt at any other.
+    #[test]
+    fn without_a_refresher_a_snapshot_is_reused_only_at_its_own_watermark() {
+        let (_dir, store) = store_of(&[market_trade(A_MINT, "2020-01-01 00:00:01.000000", 100)]);
+        let cache = SnapshotCache::new();
+        assert!(!cache.has_background_refresh());
+        let as_of = AsOf::at(radar_types::Slot(10_000));
+        let first = snapshot_for(&cache, &store, as_of)
+            .expect("the store reads")
+            .expect("built on a miss");
+        assert_eq!(first.watermark(), radar_types::Slot(10_000));
+        let again = snapshot_for(&cache, &store, as_of)
+            .expect("the store reads")
+            .expect("a snapshot");
+        assert!(Arc::ptr_eq(&first, &again), "same watermark, same snapshot");
+
+        let later = AsOf::at(radar_types::Slot(10_500));
+        let rebuilt = snapshot_for(&cache, &store, later)
+            .expect("the store reads")
+            .expect("a snapshot");
+        assert!(!Arc::ptr_eq(&first, &rebuilt));
+        assert_eq!(rebuilt.watermark(), radar_types::Slot(10_500));
+    }
+
+    /// The snapshot holds the last day of trades and nothing older.
+    #[test]
+    fn a_snapshot_holds_the_window_behind_its_watermark_and_nothing_older() {
+        assert_eq!(SNAPSHOT_WINDOW_SLOTS, 220_000);
+        let (_dir, store) = store_of(&[
+            market_trade(A_MINT, "2020-01-01 00:00:01.000000", 100),
+            market_trade(A_MINT, "2020-01-03 00:00:01.000000", 400_000),
+        ]);
+        let as_of = AsOf::at(radar_types::Slot(400_100));
+        let snap = Snapshot::build(&store, as_of).expect("the store reads");
+        let slots: Vec<u64> = snap.trades().iter().map(|t| t.slot.get()).collect();
+        assert_eq!(
+            slots,
+            vec![400_000],
+            "the two-day-old row is outside the window"
+        );
+        assert_eq!(
+            snap.newest_ts(),
+            radar_store::to_epoch("2020-01-03 00:00:01").ok()
+        );
+        assert!(!snap.collected(), "no coverage row was written");
+
+        let refreshed = snap.refresh_trades(&store, as_of).expect("the store reads");
+        assert_eq!(refreshed.watermark(), radar_types::Slot(400_100));
+        assert_eq!(refreshed.trades().len(), 1);
+        assert_eq!(refreshed.newest_ts(), snap.newest_ts());
+        assert!(!refreshed.collected());
     }
 }

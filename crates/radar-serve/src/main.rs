@@ -251,11 +251,17 @@ fn market_snapshot_refresher(state: Arc<AppState>) {
         let mut last_key: Option<(Slot, Option<PathBuf>)> = None;
         let mut last_launch_refresh: Option<Instant> = None;
 
+        // An interval's first tick is immediate: a restart builds its first
+        // snapshot at once rather than answering "not built yet" for 20s.
+        let mut tick = tokio::time::interval(SNAPSHOT_REFRESH_INTERVAL);
+        tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         loop {
-            tokio::time::sleep(SNAPSHOT_REFRESH_INTERVAL).await;
+            tick.tick().await;
 
-            let rebuild_launches =
-                last_launch_refresh.is_none_or(|t| t.elapsed() >= LAUNCH_REFRESH_INTERVAL);
+            let due = market::launches_due(
+                last_launch_refresh.map(|t| t.elapsed()),
+                LAUNCH_REFRESH_INTERVAL,
+            );
             let previous_key = last_key.clone();
             let task_state = Arc::clone(&state);
 
@@ -269,33 +275,36 @@ fn market_snapshot_refresher(state: Arc<AppState>) {
                     .ok()
                     .and_then(|files| files.last().cloned());
                 let key = (watermark, newest_file);
-                // Nothing moved and the launch index is not due: skip the read
-                // entirely rather than re-scanning an unchanged store.
-                if !rebuild_launches && previous_key.as_ref() == Some(&key) {
-                    return Some((key, None));
-                }
+                let current = task_state.market_snapshot.peek();
+                let plan = market::refresh_plan(
+                    due,
+                    previous_key.as_ref() != Some(&key),
+                    current.is_some(),
+                );
                 let as_of = AsOf::at(watermark);
-                let built = if rebuild_launches {
-                    market::Snapshot::build(&task_state.store, as_of)
-                } else {
-                    match task_state.market_snapshot.peek() {
-                        Some(current) => current.refresh_trades(&task_state.store, as_of),
-                        None => market::Snapshot::build(&task_state.store, as_of),
+                let built = match (plan, current) {
+                    (market::Refresh::Skip, _) => return Some((key, plan, None)),
+                    (market::Refresh::TradesOnly, Some(current)) => {
+                        current.refresh_trades(&task_state.store, as_of)
                     }
+                    _ => market::Snapshot::build(&task_state.store, as_of),
                 };
-                Some((key, built.ok().map(Arc::new)))
+                // A failed read keeps no key, so the next tick tries again
+                // rather than waiting for the store to move.
+                let snapshot = Arc::new(built.ok()?);
+                Some((key, plan, Some(snapshot)))
             })
             .await
             .ok()
             .flatten();
 
-            let Some((key, snapshot)) = outcome else {
+            let Some((key, plan, snapshot)) = outcome else {
                 continue;
             };
             last_key = Some(key);
             if let Some(snapshot) = snapshot {
                 state.market_snapshot.set(snapshot);
-                if rebuild_launches {
+                if plan == market::Refresh::Everything {
                     last_launch_refresh = Some(Instant::now());
                 }
             }
