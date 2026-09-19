@@ -56,7 +56,9 @@ export function HoldersPanel({ mint }: { mint: string }) {
             <thead className="sticky top-0 bg-[var(--color-surface)] text-[10px] uppercase tracking-wide text-[var(--color-dim)]">
               <tr>
                 <th scope="col" className="py-1 pl-3 text-left font-medium">#</th>
-                <th scope="col" className="py-1 text-left font-medium">Token account</th>
+                <th scope="col" className="py-1 text-left font-medium">
+                  {granularity === "wallet" ? "Wallet" : "Token account"}
+                </th>
                 <th scope="col" className="py-1 pr-3 text-right font-medium">Balance</th>
               </tr>
             </thead>
@@ -67,6 +69,14 @@ export function HoldersPanel({ mint }: { mint: string }) {
                   <td className="py-1">
                     <span className="inline-flex items-center gap-1">
                       <Address value={holder.account} />
+                      {holder.pool ? (
+                        <span
+                          title="Acted as the pool in a trade the live feed saw"
+                          className="rounded border border-[var(--color-line)] px-1 text-[9px] uppercase text-[var(--color-dim)]"
+                        >
+                          pool
+                        </span>
+                      ) : null}
                       <a
                         href={explorerUrl(holder.account)}
                         target="_blank"

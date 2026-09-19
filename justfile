@@ -270,8 +270,9 @@ licence-headers:
 # tests of pages that no longer exist, not 78 assertions nobody re-made.
 #
 # The number is checked against a real run, not estimated: `npm run test` in
-# `web/` reports 95 across 6 files at this commit. Raise it from here.
-export MIN_WEB_TESTS := "95"
+# `web/` reported 95 across 6 files at that commit, and 98 once the live feed's
+# holder captions got their own tests. Raise it from here.
+export MIN_WEB_TESTS := "98"
 
 # The public site at cabalhunter.org. Lower because it has five pages, and it
 # exists for the same reason MIN_WEB_TESTS does: `vitest run` exits zero when it

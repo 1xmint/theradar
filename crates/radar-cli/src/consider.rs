@@ -30,9 +30,14 @@ use radar_backfill::launch_block::CryptoHouseBlocks;
 use radar_graph::LaunchBlockSource;
 use radar_risk::{Policy, PortfolioState, Proposal, Verdict, evaluate};
 use radar_sim::{JupiterQuoter, RpcClient};
-use radar_store::Reader;
+use radar_store::{Completion, Coverage, ObservedSlots, Reader, Table};
 use radar_strategy::{Candidate, CreatorEdge, Decision, PassReason, Strategy, Universe, universe};
-use radar_types::{Address, Custody, Market, MicroUsd, Portfolio};
+use radar_types::{
+    AccountView, Address, CallTally, CandidateTiming, CostsReport, CoverageReport, CoverageState,
+    Custody, EarliestEntry, EquityReport, EquityTotal, Funnel, Market, MicroUsd, MoneySpent,
+    NoEntryTime, Portfolio, Refusals, SESSION_SCHEMA, SessionRecord, Slot, Spend, TableCoverage,
+    Timings, UnrealisedReport, Visibility, WindowCoverage,
+};
 
 /// How many candidates the paid tier will be spent on in one pass.
 ///
@@ -51,84 +56,101 @@ const PAID_TIER_CAP: usize = 25;
 /// operated.
 const OPERATIONS_JOURNAL: &str = "data/execution/operations.jsonl";
 
-/// Runs the lane.
+/// Runs the lane, and keeps a record of having run it.
+///
+/// # Why the record is built as the pass goes rather than at the end
+///
+/// The pass has four exits — nothing recent, nothing worth paying for, no SOL
+/// price, and the full run — and three of them used to `return Ok(())` with
+/// nothing written down. A report assembled only on the fourth would describe
+/// the runs that got furthest and be silent about the ones that stopped early,
+/// which is the sample selecting itself. So the draft is filled in place and
+/// [`keep`] is called on every path out.
 ///
 /// # Errors
 ///
-/// Returns a message if the store cannot be read or has recorded nothing.
+/// Returns a message if the store cannot be read, has recorded nothing, or the
+/// session record cannot be written.
 pub fn run(
     reader: &Reader,
+    store: &str,
     window: u64,
     cap: usize,
     record_to: Option<&str>,
     pricing: Pricing,
 ) -> Result<(), String> {
+    let began = std::time::Instant::now();
     let watermark = reader
         .watermark()
         .map_err(|e| format!("cannot read the store: {e}"))?
         .ok_or("the store has recorded nothing yet")?;
     let as_of = AsOf::at(watermark);
 
+    // Read before anything is counted, because it decides what the counts mean.
+    // A window nobody collected produces the same zero as a quiet market, and
+    // the only thing that can tell them apart is this table.
+    let coverage = reader
+        .read_coverage(as_of)
+        .map_err(|e| format!("cannot read what the recorder collected: {e}"))?;
+
     let universe = universe(reader, as_of).map_err(|e| format!("cannot read the store: {e}"))?;
     let recent = universe.recent(window);
+    let strategy = CreatorEdge::default();
+    let mut session = draft(store, watermark, window, cap, &strategy, pricing, &coverage);
 
-    println!("watermark    : slot {watermark}");
-    println!("launches     : {} recorded", universe.launches.len());
-    println!("creators     : {}", universe.creators.len());
-    println!(
-        "considering  : {} launched within {window} slots\n",
-        recent.len()
+    announce(
+        watermark,
+        &universe,
+        recent.len(),
+        window,
+        session.coverage.window,
     );
+
+    session.funnel.launches_recorded = universe.launches.len();
+    session.funnel.creators_recorded = universe.creators.len();
+    session.funnel.in_window = recent.len();
 
     if recent.is_empty() {
         println!("Nothing recent enough to consider. Widen --window, or let the recorder run.");
-        return Ok(());
+        return keep(&mut session, record_to, began);
     }
 
-    // Tier 0 and 1: free. No exit report, so every candidate fails at least on
-    // NoExitSimulated, and the interesting ones fail on nothing else.
-    let strategy = CreatorEdge::default();
-    let FreeTier {
-        tally,
-        worth_paying_for,
-    } = free_tier(&universe, &strategy, &recent, pricing);
-
-    println!(
-        "free tier — why {} candidates were passed over:",
-        recent.len()
-    );
-    for (reason, count) in &tally {
-        println!("  {count:>6}  {reason:?}");
-    }
-
+    let worth_paying_for = free_pass(&mut session, &universe, &strategy, &recent, pricing);
     println!(
         "\n{} candidate(s) fail on nothing a paid look cannot resolve.",
         worth_paying_for.len()
     );
     if worth_paying_for.is_empty() {
         println!("Spending on exit analysis would change no answer, so nothing is spent.");
-        return Ok(());
+        return keep(&mut session, record_to, began);
     }
 
     let budget = worth_paying_for.len().min(cap);
     if worth_paying_for.len() > budget {
         println!("Examining the first {budget} of them this pass.");
     }
+    // The ones nobody looked at. An exclusion rather than an absence: they were
+    // worth paying for, the cap ran out, and a proposal rate computed without
+    // them measures the cap.
+    session.funnel.deferred_by_cap = worth_paying_for.len().saturating_sub(budget);
 
     // One aggregator call whichever instrument is chosen: the SOL price has no
     // other source here, and a wrong one silently rescales every position in the
     // system. One call a pass against 320 is the whole of this change.
     let quoter = JupiterQuoter::default();
     println!("exit pricing : {}", pricing.label());
-    let Some(sol_price) = radar_sim::sol_price_micro_usd(&quoter) else {
+    let mut ledger = Ledger::default();
+    let sol_price = radar_sim::sol_price_micro_usd(&quoter);
+    ledger.attempted("sol_price", sol_price.is_some());
+    let Some(sol_price) = sol_price else {
         // A wrong SOL price silently rescales every position in the system, so
         // an absent one stops the pass rather than defaulting.
         println!("\nSOL price unavailable — refusing to size anything without it.");
-        return Ok(());
+        session.spend = ledger.spend();
+        return keep(&mut session, record_to, began);
     };
     println!("SOL price    : ${:.2}\n", price_dollars(sol_price));
 
-    let mut examined: Vec<(radar_store::Decision, Address)> = Vec::new();
     // Constructed here rather than inside `paid_tier`, so the function stays
     // callable without a network. The clock stays at the edge: the launch-block
     // window is a fixed width back from *now* rather than from a calendar date,
@@ -150,15 +172,29 @@ pub fn run(
         },
         sol_price,
         watermark,
-        &mut examined,
+        &mut ledger,
     );
 
-    let verdicts_by_mint = verdicts(&pass.proposals, watermark, reader)?;
+    // Read whatever the outcome, because the report needs the account even on a
+    // pass that proposes nothing -- but propagated only where it always was, so
+    // an unreadable inventory still stops the *sizing* and only the sizing.
+    let inventory = inventory(reader, watermark);
+    note_account(&mut session, &inventory);
+
+    let verdicts_by_mint = verdicts(&pass.proposals, &inventory)?;
+    record_pass(
+        &mut session,
+        &ledger,
+        &pass,
+        budget,
+        &verdicts_by_mint,
+        &coverage,
+    );
 
     if let Some(dir) = record_to {
         // The kernel's verdict is folded in only now, because a decision is not
         // complete until the thing with the authority has seen it.
-        for (record, mint) in &mut examined {
+        for (record, mint) in &mut ledger.examined {
             if let Some(v) = verdicts_by_mint.get(mint) {
                 record.kernel_outcome = Some(match v {
                     Verdict::Authorised(_) => radar_store::KernelOutcome::Authorised,
@@ -169,9 +205,433 @@ pub fn run(
                 }
             }
         }
-        write_decisions(dir, &examined)?;
+        write_decisions(dir, &ledger.examined)?;
     }
+    keep(&mut session, record_to, began)
+}
+
+/// What an operator sees before a single candidate is counted.
+///
+/// The coverage line comes last and deliberately: it is the sentence that says
+/// whether the three numbers above it mean anything.
+fn announce(
+    watermark: radar_types::Slot,
+    universe: &Universe,
+    in_window: usize,
+    window: u64,
+    coverage: WindowCoverage,
+) {
+    println!("watermark    : slot {watermark}");
+    println!("launches     : {} recorded", universe.launches.len());
+    println!("creators     : {}", universe.creators.len());
+    println!("considering  : {in_window} launched within {window} slots");
+    print!("{}", render_window_coverage(coverage));
+}
+
+/// Runs the free tier, prints its tally, and writes it into the record.
+///
+/// Returns the mints a paid look could still change the answer for.
+fn free_pass(
+    session: &mut SessionRecord,
+    universe: &Universe,
+    strategy: &CreatorEdge,
+    recent: &[Address],
+    pricing: Pricing,
+) -> Vec<Address> {
+    // Tier 0 and 1: free. No exit report, so every candidate fails at least on
+    // NoExitSimulated, and the interesting ones fail on nothing else.
+    let FreeTier {
+        tally,
+        worth_paying_for,
+        unbuildable,
+    } = free_tier(universe, strategy, recent, pricing);
+
+    println!(
+        "\nfree tier — why {} candidates were passed over:",
+        recent.len()
+    );
+    for (reason, count) in &tally {
+        println!("  {count:>6}  {reason:?}");
+    }
+    session.refusals.free_tier = tally
+        .iter()
+        .map(|(reason, count)| (format!("{reason:?}"), *count))
+        .collect();
+    session.funnel.unbuildable = unbuildable;
+    session.funnel.worth_paying_for = worth_paying_for.len();
+    // Derived rather than counted, and this is the one place in the funnel where
+    // that is sound: every in-window mint is either unbuildable, worth paying
+    // for, or refused outright. `Funnel::unaccounted` prints the residual if
+    // that ever stops being true.
+    session.funnel.refused_free = recent
+        .len()
+        .saturating_sub(unbuildable)
+        .saturating_sub(worth_paying_for.len());
+    worth_paying_for
+}
+
+/// Folds what the paid pass learned into the record.
+///
+/// Split out of [`run`] rather than left inline, and not only for length: every
+/// line here is a denominator being written down, and inline they were
+/// unreachable by any test that did not have a network.
+fn record_pass(
+    session: &mut SessionRecord,
+    ledger: &Ledger,
+    pass: &Pass,
+    budget: usize,
+    verdicts_by_mint: &BTreeMap<Address, Verdict>,
+    coverage: &[Coverage],
+) {
+    session.funnel.paid_examined = budget;
+    session.funnel.refused_on_shape = pass.refused_on_shape;
+    session.funnel.look_failed = pass.look_failed;
+    session.funnel.dropped_after_probe = ledger.dropped_after_probe;
+    session.funnel.passed_paid = ledger.passed_paid;
+    session.funnel.proposed = pass.proposals.len();
+    for verdict in verdicts_by_mint.values() {
+        match verdict {
+            Verdict::Authorised(_) => session.funnel.kernel_authorised += 1,
+            Verdict::Refused { .. } => session.funnel.kernel_refused += 1,
+        }
+    }
+    session.refusals.kernel = tally_of(
+        verdicts_by_mint
+            .values()
+            .filter_map(|v| match v {
+                Verdict::Refused { reasons } => Some(reasons),
+                Verdict::Authorised(_) => None,
+            })
+            .flatten()
+            .map(|r| format!("{r:?}"))
+            .collect(),
+    );
+    // Read off the rows rather than counted in the loop, because the rows are
+    // what a later reader joins against: a tally that disagreed with them would
+    // be a second answer to the same question.
+    session.refusals.paid_tier = tally_of(
+        ledger
+            .examined
+            .iter()
+            .filter(|(record, _)| !record.proposed())
+            .flat_map(|(record, _)| record.reasons.clone())
+            .collect(),
+    );
+    session.spend = ledger.spend();
+    session.timings.candidates = ledger
+        .clocks
+        .iter()
+        .map(|clock| {
+            let visible_at = visibility(coverage, clock.launch_slot);
+            CandidateTiming {
+                mint: clock.mint.to_string(),
+                launch_slot: clock.launch_slot,
+                visible_at,
+                reasoning_ms: clock.reasoning_ms,
+                earliest_entry: earliest_entry(session.policy_closed, visible_at),
+            }
+        })
+        .collect();
+}
+
+/// The record a run starts with, before it has learned anything.
+///
+/// Every field a run cannot change is filled here and nowhere else, so a reader
+/// of the record can tell what was chosen from what was measured.
+fn draft(
+    store: &str,
+    watermark: radar_types::Slot,
+    window: u64,
+    cap: usize,
+    strategy: &CreatorEdge,
+    pricing: Pricing,
+    coverage: &[Coverage],
+) -> SessionRecord {
+    // A clock before the epoch is a fact about the host and not about the run.
+    // Zero rather than a panic, and it sorts first, which is where a run with a
+    // broken clock belongs in a listing.
+    let started_at_unix = u64::try_from(radar_store::now_epoch()).unwrap_or(0);
+    SessionRecord {
+        schema: SESSION_SCHEMA,
+        run_id: SessionRecord::key(watermark, started_at_unix),
+        started_at_unix,
+        finished_at_unix: started_at_unix,
+        decided_at: watermark,
+        store: store.to_owned(),
+        window_slots: window,
+        paid_tier_cap: cap,
+        strategy: strategy.name().to_owned(),
+        strategy_version: strategy.version().to_owned(),
+        assumed_round_trip_bps: strategy.thresholds.assumed_round_trip_bps,
+        pricing: pricing.label().to_owned(),
+        // Read from the policy this run will actually judge against, never
+        // written as a literal. A hardcoded `true` here would keep reassuring a
+        // reader after somebody opened the policy, which is the fourth place in
+        // this file that could not stop reassuring.
+        policy_closed: Policy::SHIPPED.is_closed(),
+        build: radar_types::build_sha().map(ToOwned::to_owned),
+        coverage: CoverageReport {
+            tables: table_coverage(coverage),
+            window: window_coverage(coverage, watermark, window),
+        },
+        funnel: Funnel::default(),
+        refusals: Refusals::default(),
+        spend: Spend::default(),
+        timings: Timings {
+            evidence_ready_at: watermark,
+            reasoning_ms: 0,
+            candidates: Vec::new(),
+        },
+        // Until the account is read, nothing about it is known -- and "nothing
+        // is known" is a different sheet from an empty one.
+        equity: AccountView::Unreadable {
+            because: "the pass ended before the account was read".to_owned(),
+        },
+    }
+}
+
+/// Stamps the record with what only the end of the pass knows, and writes it.
+///
+/// # Errors
+///
+/// Returns a message if the record cannot be written. Loud rather than
+/// swallowed, for [`write_decisions`]' reason.
+fn keep(
+    session: &mut SessionRecord,
+    record_to: Option<&str>,
+    began: std::time::Instant,
+) -> Result<(), String> {
+    session.finished_at_unix = u64::try_from(radar_store::now_epoch()).unwrap_or(0);
+    session.timings.reasoning_ms = u64::try_from(began.elapsed().as_millis()).unwrap_or(u64::MAX);
+    let Some(dir) = record_to else {
+        println!(
+            "\nNo session record kept: --record was not given, so this run leaves
+         nothing a morning report can be built from."
+        );
+        return Ok(());
+    };
+    let path = crate::session::write(dir, session)?;
+    println!("\nsession recorded to {}", path.display());
+    println!("read it back with: radar report --store {dir}");
     Ok(())
+}
+
+/// Counts how many times each string appears.
+///
+/// A free function because four call sites wanted it, and each inline copy was a
+/// place a `+= 1` could become a `-= 1` with nothing able to see it.
+fn tally_of(reasons: Vec<String>) -> Vec<(String, usize)> {
+    let mut counts: BTreeMap<String, usize> = BTreeMap::new();
+    for reason in reasons {
+        *counts.entry(reason).or_default() += 1;
+    }
+    counts.into_iter().collect()
+}
+
+/// What the store's coverage records say about each table it knows.
+///
+/// Every table appears, including the ones with no record at all — that is the
+/// entry worth reading, and a map that omitted them would report *nobody
+/// collected this* by saying nothing.
+fn table_coverage(rows: &[Coverage]) -> Vec<TableCoverage> {
+    Table::ALL
+        .iter()
+        .map(|table| {
+            let mut complete_spans = 0usize;
+            let mut measured_empty = 0usize;
+            let mut unfinished = 0usize;
+            for row in rows.iter().filter(|r| r.table == *table) {
+                match (row.status, row.observed) {
+                    (Completion::Complete, ObservedSlots::Span { .. }) => complete_spans += 1,
+                    (Completion::Complete, ObservedSlots::Nothing) => measured_empty += 1,
+                    (Completion::Partial, _) => unfinished += 1,
+                }
+            }
+            // Whether a record exists, asked directly. Summing the three
+            // counters and comparing to zero was an indirect way of asking the
+            // same thing, and an indirect way that could be got wrong: with one
+            // complete span and one measured-empty range, a single subtraction
+            // in that sum reports a collected table as one nobody ever ran.
+            let state = if rows.iter().any(|r| r.table == *table) {
+                CoverageState::Attested {
+                    complete_spans,
+                    measured_empty,
+                    unfinished,
+                }
+            } else {
+                CoverageState::NeverAttested
+            };
+            TableCoverage {
+                table: table.dir().to_owned(),
+                state,
+            }
+        })
+        .collect()
+}
+
+/// Whether anything attests the slots this run considered.
+///
+/// # Why a completed empty window does not attest a slot range
+///
+/// [`Coverage`] is explicit that a completed *time* window returning no rows has
+/// no slot range at all, so a `Complete` + `Nothing` row cannot say that *these*
+/// slots were collected. It can only say that a finished collection of this
+/// table observed nothing anywhere. That is still a measurement — but only when
+/// it is the whole story, which is why [`WindowCoverage::MeasuredEmpty`] is
+/// reached solely when every completed launch collection observed nothing.
+///
+/// A cohort capture is excluded: a row with a `filter` covers one mint and says
+/// nothing about the window it sits in.
+fn window_coverage(rows: &[Coverage], watermark: radar_types::Slot, window: u64) -> WindowCoverage {
+    let floor = watermark.get().saturating_sub(window);
+    let complete: Vec<&Coverage> = rows
+        .iter()
+        .filter(|r| {
+            r.table == Table::Launches && r.filter.is_none() && r.status == Completion::Complete
+        })
+        .collect();
+
+    let mut bounds: Option<(u64, u64)> = None;
+    for row in &complete {
+        if let Some((from, to)) = row.observed.span() {
+            let lo = from.get().max(floor);
+            let hi = to.get().min(watermark.get());
+            if lo <= hi {
+                bounds = Some(bounds.map_or((lo, hi), |(a, b)| (a.min(lo), b.max(hi))));
+            }
+        }
+    }
+    if let Some((from, to)) = bounds {
+        return WindowCoverage::Attested {
+            from: Slot(from),
+            to: Slot(to),
+        };
+    }
+    if !complete.is_empty()
+        && complete
+            .iter()
+            .all(|r| r.observed == ObservedSlots::Nothing)
+    {
+        return WindowCoverage::MeasuredEmpty;
+    }
+    WindowCoverage::Unattested
+}
+
+/// The earliest slot at which a launch could have been seen.
+///
+/// The collection watermark of the earliest completed range whose observed span
+/// contains it. Availability time rather than event time — design 0017 §6 — and
+/// [`Visibility::Unattested`] when nothing says, because the launch slot
+/// substituted here is exactly the fill at the launch price for a decision taken
+/// forty minutes later.
+fn visibility(rows: &[Coverage], launch: radar_types::Slot) -> Visibility {
+    rows.iter()
+        .filter(|r| {
+            r.table == Table::Launches && r.filter.is_none() && r.status == Completion::Complete
+        })
+        .filter(|r| {
+            r.observed
+                .span()
+                .is_some_and(|(from, to)| from <= launch && launch <= to)
+        })
+        .map(|r| r.recorded_at)
+        .min()
+        .map_or(Visibility::Unattested, Visibility::At)
+}
+
+/// The earliest slot an action could have been taken, or why there is none.
+///
+/// Never a slot today, and the reasons are different findings. Under a closed
+/// policy there was no eligible slot at all; under an open one there is still no
+/// measured build-and-land latency here, and the "~2.5 slots a second" figures in
+/// this tree are bucketing heuristics rather than a conversion.
+const fn earliest_entry(policy_closed: bool, visible: Visibility) -> EarliestEntry {
+    if policy_closed {
+        return EarliestEntry::Unknown(NoEntryTime::PolicyRefused);
+    }
+    match visible {
+        Visibility::Unattested => EarliestEntry::Unknown(NoEntryTime::VisibilityUnattested),
+        Visibility::At(_) => EarliestEntry::Unknown(NoEntryTime::LandingLatencyUnmeasured),
+    }
+}
+
+/// Writes the account and what it could not place into the record.
+///
+/// The exposure the account refused is a denominator too: a mint it could not
+/// place is not a mint it does not hold.
+fn note_account(
+    session: &mut SessionRecord,
+    inventory: &Result<(Portfolio, PortfolioState), String>,
+) {
+    session.equity = account_view(inventory);
+    if let Ok((portfolio, _)) = inventory {
+        session.refusals.portfolio = tally_of(
+            portfolio
+                .unaccounted()
+                .map(|(_, why)| format!("{why:?}"))
+                .collect(),
+        );
+    }
+}
+
+/// What the account said, or that it could not be read.
+///
+/// An unreadable account is not an empty one. `radar consider` already refuses
+/// to *size* against a portfolio it could not read; this is the same refusal on
+/// the reporting side, where a row of zeros is the convenient answer.
+fn account_view(inventory: &Result<(Portfolio, PortfolioState), String>) -> AccountView {
+    let Ok((portfolio, _)) = inventory else {
+        return AccountView::Unreadable {
+            because: inventory
+                .as_ref()
+                .err()
+                .map_or_else(|| "unknown".to_owned(), Clone::clone),
+        };
+    };
+    let results = portfolio.results();
+    let unrealised = UnrealisedReport::of(results.unrealised);
+    AccountView::Read(EquityReport {
+        holdings: portfolio.holdings().count(),
+        unaccounted: portfolio.unaccounted().count(),
+        realised_micro_usd: results.realised.0,
+        unrealised,
+        // The only constructor. One holding nobody could price makes this
+        // `Unknown`, and there is no path here that adds the realised half to
+        // nothing and calls the sum equity.
+        equity: EquityTotal::of(results.realised, unrealised),
+        costs: CostsReport {
+            network_fee_lamports: results.costs.network_fees().raw(),
+            rent_lamports: results.costs.rent().raw(),
+            tip_lamports: results.costs.tips().raw(),
+        },
+    })
+}
+
+/// The line an operator sees about the window, live, before any count.
+///
+/// Extracted rather than written inline for [`render_pass_notes`]' reason: a
+/// `match` inside a `println!` is a match no test can reach, and this is the one
+/// that decides whether the numbers underneath it mean anything.
+#[must_use]
+pub fn render_window_coverage(window: WindowCoverage) -> String {
+    match window {
+        WindowCoverage::Attested { from, to } => format!(
+            "coverage     : attested over slots {}–{}\n",
+            from.get(),
+            to.get()
+        ),
+        WindowCoverage::MeasuredEmpty => {
+            "coverage     : every completed launch collection observed nothing at all.
+               A zero below is a measurement.\n"
+                .to_owned()
+        }
+        WindowCoverage::Unattested => {
+            "coverage     : NOTHING ATTESTS THESE SLOTS. No completed launch collection
+               covers this window, so a zero below is a fact about the recorder
+               before it is a fact about the market.\n"
+                .to_owned()
+        }
+    }
 }
 
 /// What the free tier learned: why each candidate was passed over, and which
@@ -181,6 +641,13 @@ struct FreeTier {
     tally: BTreeMap<PassReason, usize>,
     /// The mints whose only failures a paid look removes.
     worth_paying_for: Vec<Address>,
+    /// In-window mints no candidate could be assembled from.
+    ///
+    /// Counted rather than skipped. This loop used to `continue` past them in
+    /// silence, so a store missing launch facts and a market holding nothing
+    /// produced the same tally -- and the tally is the denominator every rate
+    /// in the report is divided by.
+    unbuildable: usize,
 }
 
 /// The free tier, and the gate that decides what the paid one is spent on.
@@ -198,9 +665,11 @@ fn free_tier(
 ) -> FreeTier {
     let mut tally: BTreeMap<PassReason, usize> = BTreeMap::new();
     let mut worth_paying_for = Vec::new();
+    let mut unbuildable = 0usize;
 
     for mint in recent {
         let Some(candidate) = universe.candidate(mint, None, None) else {
+            unbuildable += 1;
             continue;
         };
         // The venue the paid tier *will* measure on, named before it is spent.
@@ -227,6 +696,7 @@ fn free_tier(
     FreeTier {
         tally,
         worth_paying_for,
+        unbuildable,
     }
 }
 
@@ -460,6 +930,136 @@ impl Pricing {
     }
 }
 
+/// How one paid call came out.
+///
+/// Three states rather than a boolean, because *it failed* and *it answered and
+/// changed nothing* are the two different kinds of waste and they are fixed
+/// differently. A failure leaves the gate it fed silently off; an answer that
+/// changed nothing is money the tiering could have saved. Both are charged.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum CallOutcome {
+    /// It answered, and the answer mattered.
+    Answered,
+    /// It answered, and nothing about the decision moved.
+    ChangedNothing,
+    /// It did not answer.
+    Failed,
+}
+
+/// One kind of call, counted.
+#[derive(Clone, Copy, Default, PartialEq, Eq, Debug)]
+struct CallCounts {
+    attempted: usize,
+    failed: usize,
+    produced_nothing: usize,
+}
+
+/// One candidate's clock, as the paid tier saw it.
+///
+/// Only the two facts the pass itself owns. Availability and the earliest
+/// eligible entry are joined on afterwards, from coverage and the policy, so
+/// this function stays free of both.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct CandidateClock {
+    /// The mint.
+    pub mint: Address,
+    /// When it launched.
+    pub launch_slot: radar_types::Slot,
+    /// How long reasoning about it took.
+    pub reasoning_ms: u64,
+}
+
+/// What the paid tier writes down as it goes.
+///
+/// Carries the examined rows that used to be passed on their own, so adding the
+/// spend and the clocks did not widen the signature: the three are written at
+/// the same points and separating them would mean three `&mut` arguments
+/// threaded through the same loop.
+#[derive(Default, Debug)]
+pub struct Ledger {
+    /// The decision rows that outlive the run.
+    pub examined: Vec<(radar_store::Decision, Address)>,
+    /// Examined candidates that vanished between the exit probe and the
+    /// strategy, because no candidate could be assembled from them.
+    ///
+    /// The paid tier's own `continue`, counted for the same reason the free
+    /// tier's is: money was spent on the probe and the row is not in any
+    /// bucket underneath.
+    pub dropped_after_probe: usize,
+    /// Examined candidates the strategy passed over after the paid look.
+    pub passed_paid: usize,
+    /// One entry per candidate the paid tier examined.
+    pub clocks: Vec<CandidateClock>,
+    calls: BTreeMap<&'static str, CallCounts>,
+}
+
+impl Ledger {
+    /// Charges one call.
+    ///
+    /// Every call, including the ones that bought nothing — design 0018 §7:
+    /// *"An arm cannot improve its number by discarding what it wasted."*
+    pub fn call(&mut self, kind: &'static str, outcome: CallOutcome) {
+        let counts = self.calls.entry(kind).or_default();
+        counts.attempted += 1;
+        match outcome {
+            CallOutcome::Failed => counts.failed += 1,
+            CallOutcome::ChangedNothing => counts.produced_nothing += 1,
+            CallOutcome::Answered => {}
+        }
+    }
+
+    /// Charges a call that answered, saying whether the answer mattered.
+    ///
+    /// *Answered and changed nothing* is the number a cheaper gate would move,
+    /// so it is kept apart from *answered* rather than folded into it.
+    pub fn charged(&mut self, kind: &'static str, mattered: bool) {
+        self.call(
+            kind,
+            if mattered {
+                CallOutcome::Answered
+            } else {
+                CallOutcome::ChangedNothing
+            },
+        );
+    }
+
+    /// Charges a call that may not have answered at all.
+    ///
+    /// A failure is still a call and is still charged. It also leaves whatever
+    /// it fed silently off, which is why it is not folded into the one above.
+    pub fn attempted(&mut self, kind: &'static str, answered: bool) {
+        self.call(
+            kind,
+            if answered {
+                CallOutcome::Answered
+            } else {
+                CallOutcome::Failed
+            },
+        );
+    }
+
+    /// What the pass cost.
+    ///
+    /// The money is `Unmeasured` and not a zero: no provider or model is
+    /// selected on this instance (design 0018 §11), so no rate table exists to
+    /// price these calls with, and free is the one thing they are not.
+    #[must_use]
+    pub fn spend(&self) -> Spend {
+        Spend {
+            calls: self
+                .calls
+                .iter()
+                .map(|(kind, counts)| CallTally {
+                    kind: (*kind).to_owned(),
+                    attempted: counts.attempted,
+                    failed: counts.failed,
+                    produced_nothing: counts.produced_nothing,
+                })
+                .collect(),
+            money: MoneySpent::default(),
+        }
+    }
+}
 /// What a paid pass produced, and what it declined.
 ///
 /// The counts are returned rather than only printed, and that is the point: as
@@ -562,7 +1162,7 @@ fn paid_tier<'a, B, S, Q>(
     sources: &Sources<'_, B, S, Q>,
     sol_price: MicroUsd,
     watermark: radar_types::Slot,
-    examined: &mut Vec<(radar_store::Decision, Address)>,
+    ledger: &mut Ledger,
 ) -> Pass
 where
     B: radar_graph::LaunchBlockSource,
@@ -587,8 +1187,14 @@ where
     let mut look_failed = 0usize;
 
     let prevalence_table = prevalence_table_of(blocks);
+    // Unreadable and truncated are both charged as failures. A truncated table
+    // cost the query and cannot be trusted, which is a call that bought nothing
+    // rather than a call that did not happen.
+    ledger.attempted("prevalence_table", prevalence_table.is_some());
 
     for mint in mints {
+        let candidate_began = std::time::Instant::now();
+        let launch_slot = universe.launches.get(mint).map(|facts| facts.slot);
         // The launch-block look runs first because it is the cheaper of the two
         // paid calls and it can end the question. Probing the exit of a token
         // whose curve was already bought out by whoever arranged it is money
@@ -597,58 +1203,27 @@ where
         // made the last drift invisible for nine days (ADR 0012): a threshold
         // fitted to a count the store discarded can only be re-fitted by
         // measuring the whole world again.
-        let mut launch_shape = None;
-        let coordination = match universe.launches.get(mint) {
-            Some(facts) => match blocks.shape_at(mint, facts.slot) {
-                Ok(shape) => {
-                    shapes.observe(shape);
-                    launch_shape = Some(shape);
-                    let at_launch = radar_graph::assess(shape).coordination;
-
-                    // The launch block is not the only place a bundle can
-                    // appear. A token can sit dormant for years and be bundled
-                    // by whoever picks it up, and reading only the launch leaves
-                    // it labelled clean on exactly the day that matters.
-                    //
-                    // One query for the token's whole window, not one per slot.
-                    // A failure here is *not* counted as `look_failed`: the
-                    // launch block was read, so the coordination gate is not
-                    // silently off, and conflating the two would make a broken
-                    // sweep look like an unread launch.
-                    let later = match blocks.bundle_slots(mint, facts.slot) {
-                        Ok(rows) => radar_graph::ongoing::strongest(rows),
-                        Err(e) => {
-                            eprintln!("  {mint}  later blocks unreadable: {e}");
-                            None
-                        }
-                    };
-                    if let Some(sighting) = newly_bundled(later, at_launch) {
-                        println!(
-                            "  {mint}  bundled after launch: {:?} at {:?}",
-                            sighting.coordination, sighting.when
-                        );
-                    }
-
-                    // The stronger of the two verdicts. A launch that read clean
-                    // and a later block that did not is a token to refuse, and
-                    // taking the launch alone would refuse nothing.
-                    Some(later.map_or(at_launch, |s| s.coordination.max(at_launch)))
-                }
-                Err(e) => {
-                    look_failed += 1;
-                    eprintln!("  {mint}  launch block unreadable: {e}");
-                    None
-                }
-            },
-            None => None,
+        let looked = match launch_slot {
+            Some(slot) => coordination_of(blocks, ledger, &mut shapes, mint, slot),
+            None => Looked::default(),
         };
+        let launch_shape = looked.shape;
+        let coordination = looked.coordination;
+        if looked.unreadable {
+            look_failed += 1;
+        }
 
         // Only asked when the table can answer. A second cheap single-block
         // read, skipped entirely when the answer would be discarded.
         let prevalence = prevalence_table.as_ref().and_then(|table| {
             let facts = universe.launches.get(mint)?;
-            let authorities = blocks.authorities_at(mint, facts.slot).ok()?;
-            table.strongest_of(&authorities)
+            let Ok(authorities) = blocks.authorities_at(mint, facts.slot) else {
+                ledger.call("authorities", CallOutcome::Failed);
+                return None;
+            };
+            let strongest = table.strongest_of(&authorities);
+            ledger.charged("authorities", strongest.is_some());
+            strongest
         });
 
         if coordination.is_some_and(radar_graph::Coordination::is_actionable) {
@@ -674,7 +1249,7 @@ where
                     None => base,
                 };
                 let decision = strategy.consider(&candidate);
-                examined.push((
+                ledger.examined.push((
                     record_of(
                         &candidate,
                         &decision,
@@ -687,17 +1262,27 @@ where
                     candidate.mint,
                 ));
             }
+            note_clock(ledger, *mint, launch_slot, candidate_began);
             continue;
         }
 
         let structure = rpc.mint_structure(mint);
+        ledger.attempted("mint_structure", structure.is_some());
         // Discovered, not assumed. This used to quote a hardcoded 1_000_000_000
         // base units for every token — roughly 0.00005% of a pump.fun supply —
         // so the "capacity" it measured was worth a fraction of a cent and every
         // candidate was refused as CapacityBelowFloor. Zero proposals read as a
         // fact about the market and was a fact about the probe. LEARNINGS 10.
         let exit = capacity_of(sources, quoter, mint, structure, search_for(strategy));
+        // An empty report is not a capacity of zero and is certainly not
+        // no-limit-found: it is an exit nobody could measure, and the call is
+        // charged whichever it was.
+        ledger.attempted("exit_probe", !exit.curve.is_empty());
         let Some(candidate) = universe.candidate(mint, Some(exit), Some(sol_price)) else {
+            // Money was spent on the probe and this row lands in no bucket
+            // below, so it is counted here rather than dropped.
+            ledger.dropped_after_probe += 1;
+            note_clock(ledger, *mint, launch_slot, candidate_began);
             continue;
         };
         // The venue that exit was measured on, from the instrument that measured
@@ -715,10 +1300,11 @@ where
             &candidate,
             &mut proposals,
             watermark,
-            examined,
+            ledger,
             prevalence,
             launch_shape,
         );
+        note_clock(ledger, *mint, launch_slot, candidate_began);
     }
 
     print!("{}", render_shapes(&shapes, look_failed));
@@ -729,6 +1315,115 @@ where
     };
     print!("{}", render_pass_notes(&pass));
     pass
+}
+
+/// What the launch block and the sweep after it said about one mint.
+///
+/// A struct rather than a tuple because the third field is the one that reads
+/// wrong as a bare `bool`: it means *the launch block could not be read*, which
+/// leaves the gate silently off rather than clean, and a positional `false`
+/// beside two `None`s would say the opposite.
+#[derive(Clone, Copy, Default, PartialEq, Eq, Debug)]
+struct Looked {
+    /// The stronger of the launch verdict and any later sighting.
+    coordination: Option<radar_graph::Coordination>,
+    /// The shape the verdict was computed from, kept beside the label.
+    shape: Option<radar_graph::LaunchBlockShape>,
+    /// Whether the launch block itself could not be read.
+    unreadable: bool,
+}
+
+/// Reads the launch block and the window after it.
+///
+/// Split out of [`paid_tier`] because it is the whole of the coordination gate
+/// and that function is already at its length. The charging lives here too, so a
+/// call cannot be made in one place and booked in another.
+fn coordination_of<B>(
+    blocks: &B,
+    ledger: &mut Ledger,
+    shapes: &mut radar_graph::Distribution,
+    mint: &Address,
+    launch: radar_types::Slot,
+) -> Looked
+where
+    B: radar_graph::LaunchBlockSource,
+    B::Error: std::fmt::Display,
+{
+    let Ok(shape) = blocks.shape_at(mint, launch) else {
+        ledger.call("launch_block", CallOutcome::Failed);
+        eprintln!("  {mint}  launch block unreadable");
+        return Looked {
+            unreadable: true,
+            ..Looked::default()
+        };
+    };
+    shapes.observe(shape);
+    let at_launch = radar_graph::assess(shape).coordination;
+    ledger.charged("launch_block", at_launch.is_actionable());
+
+    // The launch block is not the only place a bundle can appear. A token can
+    // sit dormant for years and be bundled by whoever picks it up, and reading
+    // only the launch leaves it labelled clean on exactly the day that matters.
+    //
+    // One query for the token's whole window, not one per slot. A failure here
+    // is *not* counted as unreadable: the launch block was read, so the
+    // coordination gate is not silently off, and conflating the two would make
+    // a broken sweep look like an unread launch.
+    let later = match blocks.bundle_slots(mint, launch) {
+        Ok(rows) => {
+            let strongest = radar_graph::ongoing::strongest(rows);
+            ledger.charged(
+                "later_blocks",
+                newly_bundled(strongest, at_launch).is_some(),
+            );
+            strongest
+        }
+        Err(e) => {
+            ledger.call("later_blocks", CallOutcome::Failed);
+            eprintln!("  {mint}  later blocks unreadable: {e}");
+            None
+        }
+    };
+    if let Some(sighting) = newly_bundled(later, at_launch) {
+        println!(
+            "  {mint}  bundled after launch: {:?} at {:?}",
+            sighting.coordination, sighting.when
+        );
+    }
+
+    Looked {
+        // The stronger of the two verdicts. A launch that read clean and a later
+        // block that did not is a token to refuse, and taking the launch alone
+        // would refuse nothing.
+        coordination: Some(later.map_or(at_launch, |s| s.coordination.max(at_launch))),
+        shape: Some(shape),
+        unreadable: false,
+    }
+}
+
+/// Writes down how long one candidate took, whichever way it left the loop.
+///
+/// A free function because the loop has three exits and an inline `push` on each
+/// is three places one of them can be forgotten -- which is how the refusal path
+/// came to be missing from the decisions table in the first place.
+///
+/// A mint with no launch facts records no clock rather than one starting at slot
+/// zero: the launch slot is the origin every duration below is measured from,
+/// and inventing it would date every one of them to the genesis block.
+fn note_clock(
+    ledger: &mut Ledger,
+    mint: Address,
+    launch_slot: Option<radar_types::Slot>,
+    began: std::time::Instant,
+) {
+    let Some(launch_slot) = launch_slot else {
+        return;
+    };
+    ledger.clocks.push(CandidateClock {
+        mint,
+        launch_slot,
+        reasoning_ms: u64::try_from(began.elapsed().as_millis()).unwrap_or(u64::MAX),
+    });
 }
 
 /// The widest bar drawn, in characters.
@@ -1055,14 +1750,14 @@ fn report_one(
     candidate: &Candidate,
     proposals: &mut Vec<radar_risk::Proposal>,
     watermark: radar_types::Slot,
-    examined: &mut Vec<(radar_store::Decision, Address)>,
+    ledger: &mut Ledger,
     prevalence: Option<radar_graph::prevalence::Prevalence>,
     launch_shape: Option<radar_graph::LaunchBlockShape>,
 ) {
     let decision = strategy.consider(candidate);
     // Recorded before the kernel runs, and updated with its verdict afterwards.
     // A proposal the kernel never saw is a different state from one it refused.
-    examined.push((
+    ledger.examined.push((
         record_of(
             candidate,
             &decision,
@@ -1076,6 +1771,7 @@ fn report_one(
     ));
     match decision {
         Decision::Pass(ref reasons) => {
+            ledger.passed_paid += 1;
             println!("  {}  passed: {reasons:?}", candidate.mint);
         }
         Decision::Propose(ref proposal) => {
@@ -1121,8 +1817,7 @@ fn search_for(strategy: &CreatorEdge) -> radar_sim::Search {
 /// nobody could read is a verdict about nothing.
 fn verdicts(
     proposals: &[radar_risk::Proposal],
-    watermark: radar_types::Slot,
-    reader: &Reader,
+    inventory: &Result<(Portfolio, PortfolioState), String>,
 ) -> Result<BTreeMap<Address, Verdict>, String> {
     let mut by_mint = BTreeMap::new();
     println!(
@@ -1149,7 +1844,13 @@ fn verdicts(
     //
     // The `?` is the point of this slice: an unreadable inventory stops the
     // pass instead of arriving as an empty account. See `inventory`.
-    let (portfolio, state) = inventory(reader, watermark)?;
+    //
+    // Read by the caller rather than here, because the *report* needs the
+    // account on every run and this function is only reached when something was
+    // proposed. The error is still raised at exactly the same point -- after the
+    // early return above -- so an unreadable account stops the sizing and only
+    // the sizing.
+    let (portfolio, state) = inventory.as_ref().map_err(Clone::clone)?;
     println!(
         "
 portfolio    : {} holding(s), {} unaccounted, realised {}",
@@ -1160,7 +1861,7 @@ portfolio    : {} holding(s), {} unaccounted, realised {}",
 
     println!("\nrisk kernel, under the policy this instance actually holds:");
     for proposal in proposals {
-        let verdict = evaluate(proposal, &state, &policy);
+        let verdict = evaluate(proposal, state, &policy);
         match &verdict {
             Verdict::Authorised(auth) => {
                 println!(
@@ -1232,6 +1933,561 @@ pub const fn default_cap() -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// One coverage row, with the fields a test cares about named.
+    fn covering(
+        table: Table,
+        recorded_at: u64,
+        observed: ObservedSlots,
+        status: Completion,
+    ) -> Coverage {
+        Coverage {
+            recorded_at: radar_types::Slot(recorded_at),
+            table,
+            filter: None,
+            observed,
+            source: "test".to_owned(),
+            decoder_version: "0".to_owned(),
+            status,
+        }
+    }
+
+    fn span(from: u64, to: u64) -> ObservedSlots {
+        ObservedSlots::Span {
+            from: radar_types::Slot(from),
+            to: radar_types::Slot(to),
+        }
+    }
+
+    #[test]
+    fn a_tally_counts_each_reason_once_per_raising() {
+        // Every refusal section on the page comes out of here, and a `+=` that
+        // became a `-=` would print a negative count of refusals as an enormous
+        // positive one.
+        let tally = tally_of(
+            [
+                "NoRoute",
+                "CreatorUnproven",
+                "NoRoute",
+                "NoRoute",
+                "CreatorUnproven",
+            ]
+            .iter()
+            .map(|r| (*r).to_owned())
+            .collect(),
+        );
+        assert_eq!(
+            tally,
+            vec![("CreatorUnproven".to_owned(), 2), ("NoRoute".to_owned(), 3),]
+        );
+        assert_eq!(
+            tally_of(Vec::new()),
+            Vec::new(),
+            "nothing raised is no rows"
+        );
+    }
+
+    #[test]
+    fn the_kernel_verdicts_reach_the_funnel_and_the_refusals_keep_their_reasons() {
+        // `record_pass` is where the paid tier's numbers become the report, and
+        // every line of it is a denominator. Nothing reached it before this:
+        // mutation testing turned both counters into subtractions and dropped
+        // the `!` that separates a refused row from a proposed one, and all
+        // three survived.
+        let watermark = radar_types::Slot(10_000);
+        let mut session = draft(
+            "store",
+            watermark,
+            216_000,
+            25,
+            &CreatorEdge::default(),
+            Pricing::Curve,
+            &[],
+        );
+
+        let mut ledger = Ledger {
+            passed_paid: 2,
+            dropped_after_probe: 1,
+            ..Ledger::default()
+        };
+        // One proposed row and two passed rows, so the filter that keeps the
+        // refusals has both sides to choose between.
+        for (i, reasons) in [
+            (1u8, vec!["CapacityBelowFloor"]),
+            (2u8, vec!["CapacityBelowFloor", "CreatorUnproven"]),
+        ] {
+            let mut row = decision_row(Address::new([i; 32]), watermark);
+            row.reasons = reasons.iter().map(|r| (*r).to_owned()).collect();
+            ledger.examined.push((row, Address::new([i; 32])));
+        }
+        let mut proposed_row = decision_row(Address::new([3u8; 32]), watermark);
+        proposed_row.conclusion = radar_store::Conclusion::Proposed;
+        proposed_row.reasons = vec!["ThisIsNotARefusal".to_owned()];
+        ledger
+            .examined
+            .push((proposed_row, Address::new([3u8; 32])));
+
+        let mut verdicts_by_mint = BTreeMap::new();
+        verdicts_by_mint.insert(
+            Address::new([3u8; 32]),
+            Verdict::Refused {
+                reasons: vec![radar_risk::Refusal::NoAutonomy, radar_risk::Refusal::Halted],
+            },
+        );
+        verdicts_by_mint.insert(
+            Address::new([4u8; 32]),
+            Verdict::Refused {
+                reasons: vec![radar_risk::Refusal::NoAutonomy],
+            },
+        );
+        verdicts_by_mint.insert(
+            Address::new([5u8; 32]),
+            Verdict::Authorised(Box::new(radar_risk::Authorization {
+                nonce: "n".to_owned(),
+                mint: Address::new([5u8; 32]),
+                action: radar_risk::Action::Buy,
+                max_notional: MicroUsd(1),
+                expires_after: watermark,
+                needs_operator_signature: false,
+            })),
+        );
+
+        let pass = Pass {
+            proposals: Vec::new(),
+            refused_on_shape: 4,
+            look_failed: 1,
+        };
+        record_pass(&mut session, &ledger, &pass, 9, &verdicts_by_mint, &[]);
+
+        assert_eq!(session.funnel.kernel_authorised, 1);
+        assert_eq!(session.funnel.kernel_refused, 2);
+        assert_eq!(session.funnel.refused_on_shape, 4);
+        assert_eq!(session.funnel.look_failed, 1);
+        assert_eq!(session.funnel.dropped_after_probe, 1);
+        assert_eq!(session.funnel.passed_paid, 2);
+        assert_eq!(session.funnel.paid_examined, 9);
+        assert_eq!(
+            session.refusals.kernel,
+            vec![("Halted".to_owned(), 1), ("NoAutonomy".to_owned(), 2)],
+            "a kernel reason keeps its own count across proposals"
+        );
+        assert_eq!(
+            session.refusals.paid_tier,
+            vec![
+                ("CapacityBelowFloor".to_owned(), 2),
+                ("CreatorUnproven".to_owned(), 1),
+            ],
+            "only the rows that were passed over are refusals; a proposed row's \
+             reasons are not"
+        );
+    }
+
+    #[test]
+    fn the_free_tier_refusals_land_in_the_funnel_and_the_funnel_balances() {
+        // The denominator, at the point it is written down. Design 0017 §6:
+        // "Do not discard excluded candidates from measurement." Re-apply the
+        // bug -- set `refused_free` to zero, or report the survivors as the
+        // window -- and `unaccounted` stops being nought and this fails.
+        let slot = radar_types::Slot(10_000);
+        let mut universe = one_launch(Address::new([1u8; 32]), slot);
+        for i in 2u8..=4 {
+            universe.launches.insert(
+                Address::new([i; 32]),
+                radar_strategy::assemble::LaunchFacts {
+                    creator: Address::new([9u8; 32]),
+                    slot,
+                    observed_at: slot,
+                },
+            );
+        }
+        let mut recent: Vec<Address> = universe.launches.keys().copied().collect();
+        // Two mints in the window that no candidate can be built from. The loop
+        // used to `continue` past these in silence, so a store missing launch
+        // facts and a market holding nothing produced the same tally.
+        recent.push(Address::new([200u8; 32]));
+        recent.push(Address::new([201u8; 32]));
+        assert_eq!(recent.len(), 6);
+
+        let mut session = draft(
+            "store",
+            slot,
+            216_000,
+            25,
+            &CreatorEdge::default(),
+            Pricing::Curve,
+            &[],
+        );
+        session.funnel.in_window = recent.len();
+        let worth = free_pass(
+            &mut session,
+            &universe,
+            &CreatorEdge::default(),
+            &recent,
+            Pricing::Curve,
+        );
+
+        // Every one of these creators is unproven, so the free tier refuses all
+        // four outright and no paid look could change it.
+        assert!(
+            worth.is_empty(),
+            "an unproven creator is not a paid question"
+        );
+        assert_eq!(
+            session.funnel.unbuildable, 2,
+            "a mint no candidate could be built from is counted, not skipped"
+        );
+        assert_eq!(
+            session.funnel.refused_free, 4,
+            "the refused candidates are counted, not dropped"
+        );
+        assert_eq!(
+            session.funnel.unaccounted(),
+            0,
+            "every in-window candidate lands in exactly one bucket"
+        );
+        assert!(
+            !session.refusals.free_tier.is_empty(),
+            "and each refusal keeps its reason and its count"
+        );
+        let raisings: usize = session.refusals.free_tier.iter().map(|(_, n)| *n).sum();
+        assert!(
+            raisings >= 4,
+            "one candidate raises at least one reason: {:?}",
+            session.refusals.free_tier
+        );
+    }
+
+    #[test]
+    fn a_window_nobody_collected_is_unattested_rather_than_empty() {
+        // The whole point of the coverage table, at the one call site that
+        // decides whether the run's counts mean anything. Re-apply the bug --
+        // return `MeasuredEmpty` when nothing is known -- and this fails, and a
+        // report over an uncollected window starts printing zeros that read as
+        // measurements.
+        let watermark = radar_types::Slot(500_000);
+        let window = 216_000;
+
+        assert_eq!(
+            window_coverage(&[], watermark, window),
+            WindowCoverage::Unattested,
+            "no coverage record at all attests nothing"
+        );
+
+        // A completed range that observed slots outside the window attests the
+        // window no more than an absent one does.
+        let elsewhere = [covering(
+            Table::Launches,
+            100,
+            span(1_000, 2_000),
+            Completion::Complete,
+        )];
+        assert_eq!(
+            window_coverage(&elsewhere, watermark, window),
+            WindowCoverage::Unattested
+        );
+
+        // A range that did not finish is an attempt, not a measurement.
+        let unfinished = [covering(
+            Table::Launches,
+            100,
+            span(300_000, 400_000),
+            Completion::Partial,
+        )];
+        assert_eq!(
+            window_coverage(&unfinished, watermark, window),
+            WindowCoverage::Unattested,
+            "an unfinished range covers nothing"
+        );
+
+        // And a range that finished and observed slots inside it does attest,
+        // clipped to the window rather than claiming past it.
+        let inside = [covering(
+            Table::Launches,
+            499_999,
+            span(200_000, 600_000),
+            Completion::Complete,
+        )];
+        assert_eq!(
+            window_coverage(&inside, watermark, window),
+            WindowCoverage::Attested {
+                from: radar_types::Slot(284_000),
+                to: watermark,
+            },
+            "a range is clipped to the window, never claimed past it"
+        );
+    }
+
+    #[test]
+    fn a_completed_collection_that_saw_nothing_is_a_measurement() {
+        // The other direction, and it has to hold or the test above passes by
+        // refusing to attest anything at all.
+        let rows = [covering(
+            Table::Launches,
+            499_999,
+            ObservedSlots::Nothing,
+            Completion::Complete,
+        )];
+        assert_eq!(
+            window_coverage(&rows, radar_types::Slot(500_000), 216_000),
+            WindowCoverage::MeasuredEmpty
+        );
+    }
+
+    #[test]
+    fn a_cohort_capture_does_not_attest_the_window_it_sits_in() {
+        // A row with a filter covers one mint. Reading it as coverage of the
+        // venue is the same error as reading a partition filename as coverage
+        // of a range, one level up.
+        let mut row = covering(
+            Table::Launches,
+            499_999,
+            span(400_000, 500_000),
+            Completion::Complete,
+        );
+        row.filter = Some("one-mint".to_owned());
+        assert_eq!(
+            window_coverage(
+                std::slice::from_ref(&row),
+                radar_types::Slot(500_000),
+                216_000
+            ),
+            WindowCoverage::Unattested
+        );
+        assert_eq!(
+            visibility(std::slice::from_ref(&row), radar_types::Slot(450_000)),
+            Visibility::Unattested,
+            "and it cannot date a launch's visibility either"
+        );
+    }
+
+    #[test]
+    fn a_launch_is_visible_no_earlier_than_the_collection_that_found_it() {
+        // Availability time, not event time. Re-apply the bug -- fall back to
+        // the launch slot when nothing attests -- and the second assertion
+        // fails, and every fill dates itself forty minutes early.
+        let rows = [
+            covering(Table::Launches, 900, span(100, 500), Completion::Complete),
+            covering(Table::Launches, 700, span(100, 500), Completion::Complete),
+            covering(Table::Launches, 600, span(600, 900), Completion::Complete),
+        ];
+        assert_eq!(
+            visibility(&rows, radar_types::Slot(300)),
+            Visibility::At(radar_types::Slot(700)),
+            "the earliest collection that contained it, not the first row"
+        );
+        assert_eq!(
+            visibility(&rows, radar_types::Slot(9_999)),
+            Visibility::Unattested,
+            "a launch no completed range contains has no attested visibility"
+        );
+    }
+
+    #[test]
+    fn a_table_with_no_coverage_record_is_never_attested() {
+        // Every table appears, and the ones nobody collected are the entries
+        // worth reading. A map that omitted them would report "nobody collected
+        // this" by saying nothing at all.
+        let rows = [
+            covering(
+                Table::Launches,
+                10,
+                ObservedSlots::Nothing,
+                Completion::Complete,
+            ),
+            covering(
+                Table::Launches,
+                11,
+                ObservedSlots::Nothing,
+                Completion::Complete,
+            ),
+            covering(Table::Launches, 12, span(1, 2), Completion::Complete),
+            covering(Table::Launches, 13, span(3, 4), Completion::Complete),
+            covering(Table::Launches, 14, span(5, 6), Completion::Complete),
+            covering(Table::Launches, 15, span(7, 8), Completion::Partial),
+        ];
+        let tables = table_coverage(&rows);
+        assert_eq!(
+            tables.len(),
+            Table::ALL.len(),
+            "a table missing from the report is a table nobody can ask about"
+        );
+        let by_name = |name: &str| {
+            tables
+                .iter()
+                .find(|t| t.table == name)
+                .map(|t| t.state)
+                .expect("every table appears")
+        };
+        assert_eq!(
+            by_name("launches"),
+            CoverageState::Attested {
+                complete_spans: 3,
+                measured_empty: 2,
+                unfinished: 1,
+            },
+            "each bucket counts its own rows, and none of them counts another's"
+        );
+        assert_eq!(
+            by_name("trades"),
+            CoverageState::NeverAttested,
+            "a table with no record is not a table that was collected and empty"
+        );
+
+        // A table whose only records are attempts is still attested: somebody
+        // ran, and the report has to say the attempt happened rather than that
+        // nobody tried. This is the case the arithmetic this replaced could get
+        // wrong in the other direction.
+        let attempts = [covering(Table::Trades, 20, span(1, 2), Completion::Partial)];
+        assert_eq!(
+            table_coverage(&attempts)
+                .iter()
+                .find(|t| t.table == "trades")
+                .map(|t| t.state),
+            Some(CoverageState::Attested {
+                complete_spans: 0,
+                measured_empty: 0,
+                unfinished: 1,
+            })
+        );
+    }
+
+    #[test]
+    fn no_earliest_entry_is_named_under_a_closed_policy() {
+        // Not "the watermark, but we declined". There was no eligible slot at
+        // all, and the reason is recorded so an open policy gives a different
+        // answer rather than the same one for a new reason.
+        assert_eq!(
+            earliest_entry(true, Visibility::At(radar_types::Slot(10))),
+            EarliestEntry::Unknown(NoEntryTime::PolicyRefused)
+        );
+        assert_eq!(
+            earliest_entry(false, Visibility::At(radar_types::Slot(10))),
+            EarliestEntry::Unknown(NoEntryTime::LandingLatencyUnmeasured),
+            "an open policy still cannot name a slot without a measured latency"
+        );
+        assert_eq!(
+            earliest_entry(false, Visibility::Unattested),
+            EarliestEntry::Unknown(NoEntryTime::VisibilityUnattested)
+        );
+    }
+
+    #[test]
+    fn the_ledger_charges_the_calls_that_bought_nothing() {
+        // An arm cannot improve its number by discarding what it wasted.
+        // Mutation testing turns these `+= 1`s into `-= 1`s; without this the
+        // whole spend section is unreachable by any test.
+        let mut ledger = Ledger::default();
+        ledger.charged("launch_block", false);
+        ledger.charged("launch_block", false);
+        ledger.charged("launch_block", true);
+        ledger.attempted("launch_block", false);
+        ledger.attempted("exit_probe", true);
+
+        let spend = ledger.spend();
+        let launch = spend
+            .calls
+            .iter()
+            .find(|c| c.kind == "launch_block")
+            .expect("the kind is recorded under its own name");
+        assert_eq!(launch.attempted, 4);
+        assert_eq!(launch.failed, 1);
+        assert_eq!(
+            launch.produced_nothing, 2,
+            "answered and changed nothing is counted apart from failed"
+        );
+        assert_eq!(spend.attempted(), 5);
+        assert_eq!(spend.wasted(), 2);
+        assert_eq!(
+            spend.money.micro_usd(),
+            None,
+            "no rate table exists here, so the bill is unknown rather than free"
+        );
+    }
+
+    #[test]
+    fn an_unvaluable_holding_leaves_the_account_with_no_equity_figure() {
+        // The account side of rule 9, at the point the report is built from.
+        // Re-apply the bug -- report the realised half as the equity -- and
+        // this fails on the figure it finds.
+        let wallet = Address::new([7u8; 32]);
+        let mut portfolio = Portfolio::at(wallet, radar_types::Slot(1_000));
+        portfolio
+            .hold(
+                radar_types::Asset::Sol,
+                radar_types::Holding::new(
+                    radar_types::AssetRole::Position,
+                    radar_types::Balance::Counted(radar_types::TokenQuantity::lamports(
+                        1_000_000_000,
+                    )),
+                    // Held, counted, and unpriceable. Not absent -- absent would
+                    // be a different refusal.
+                    radar_types::Valuation::Unknown(radar_types::Unvaluable::NoPrice),
+                    radar_types::Valuation::Known {
+                        value: MicroUsd(2_000_000),
+                        as_of: radar_types::Slot(900),
+                    },
+                ),
+            )
+            .expect("an attributed portfolio can hold");
+
+        let view = account_view(&Ok((
+            portfolio,
+            radar_strategy::state_from(
+                &[],
+                radar_types::Slot(1_000),
+                radar_strategy::Operator {
+                    halted: false,
+                    consecutive_failures: 0,
+                },
+            ),
+        )));
+        let radar_types::AccountView::Read(report) = &view else {
+            panic!("the account was readable");
+        };
+        assert_eq!(
+            report.equity,
+            radar_types::EquityTotal::Unknown(radar_types::Unvaluable::NoPrice),
+            "one holding nobody could price removes the total"
+        );
+        assert_eq!(view.equity_micro_usd(), None);
+        assert_eq!(report.holdings, 1, "and the holding is still reported");
+    }
+
+    #[test]
+    fn an_unreadable_account_is_not_an_empty_one() {
+        // The state `inventory` refuses the pass on. A row of zeros here would
+        // be a report claiming the account is flat when nobody could read it.
+        let view = account_view(&Err("positions unreadable".to_owned()));
+        assert_eq!(
+            view,
+            radar_types::AccountView::Unreadable {
+                because: "positions unreadable".to_owned()
+            }
+        );
+        assert_eq!(view.equity_micro_usd(), None);
+    }
+
+    #[test]
+    fn the_window_line_says_which_of_the_three_answers_it_is() {
+        // The line an operator reads before any count, and a `match` inside a
+        // `println!` is a match no test can reach.
+        let unattested = render_window_coverage(WindowCoverage::Unattested);
+        assert!(
+            unattested.contains("NOTHING ATTESTS THESE SLOTS"),
+            "{unattested}"
+        );
+        assert!(
+            render_window_coverage(WindowCoverage::MeasuredEmpty)
+                .contains("A zero below is a measurement"),
+        );
+        assert!(
+            render_window_coverage(WindowCoverage::Attested {
+                from: radar_types::Slot(1),
+                to: radar_types::Slot(2),
+            })
+            .contains("attested over slots 1"),
+        );
+    }
 
     #[test]
     fn only_a_stronger_later_reading_is_announced() {
@@ -1357,6 +2613,31 @@ mod tests {
     }
 
     /// A universe holding one launch, for the sweep tests.
+    /// A recorded decision with the fields a funnel test cares about.
+    fn decision_row(mint: Address, decided_at: radar_types::Slot) -> radar_store::Decision {
+        radar_store::Decision {
+            mint,
+            creator: Address::new([9u8; 32]),
+            decided_at,
+            launch_slot: decided_at,
+            strategy: "creator_edge".to_owned(),
+            strategy_version: "0.1.0".to_owned(),
+            conclusion: radar_store::Conclusion::Passed,
+            reasons: Vec::new(),
+            notional_micro_usd: None,
+            exit_capacity_micro_usd: None,
+            assumed_round_trip_bps: 850,
+            coordination: None,
+            launch_recipients: None,
+            launch_transactions: None,
+            authority_prevalence: None,
+            kernel_outcome: None,
+            kernel_reasons: Vec::new(),
+            entry_price: None,
+            inputs_digest: String::new(),
+        }
+    }
+
     fn one_launch(mint: Address, slot: radar_types::Slot) -> Universe {
         let mut launches = std::collections::BTreeMap::new();
         launches.insert(
@@ -2073,7 +3354,7 @@ mod tests {
             })
             .collect();
 
-        let by_mint = verdicts(&proposals, radar_types::Slot(1_000), &reader)
+        let by_mint = verdicts(&proposals, &inventory(&reader, radar_types::Slot(1_000)))
             .expect("a readable, empty store");
 
         assert_eq!(by_mint.len(), proposals.len(), "one verdict per proposal");
@@ -2175,7 +3456,7 @@ mod tests {
         });
 
         let mints = [mint];
-        let mut examined = Vec::new();
+        let mut ledger = Ledger::default();
         let pass = paid_tier(
             &universe,
             &CreatorEdge::default(),
@@ -2188,15 +3469,15 @@ mod tests {
             },
             radar_types::MicroUsd::from_dollars(200.0),
             slot,
-            &mut examined,
+            &mut ledger,
         );
 
         assert_eq!(
-            examined.len(),
+            ledger.examined.len(),
             1,
             "the candidate must be recorded even though it was refused"
         );
-        assert_eq!(examined[0].1, mint);
+        assert_eq!(ledger.examined[0].1, mint);
         assert!(
             pass.proposals.is_empty(),
             "an arranged launch must not become a proposal"
@@ -2208,6 +3489,116 @@ mod tests {
         assert_eq!(
             pass.look_failed, 0,
             "the block was read, and it was arranged"
+        );
+
+        // And the calls it made are charged. The launch block answered and the
+        // answer mattered -- it is what refused this candidate -- so it is not
+        // in the "bought nothing" column, and the exit was never probed at all.
+        let spend = ledger.spend();
+        let named = |kind: &str| {
+            spend
+                .calls
+                .iter()
+                .find(|c| c.kind == kind)
+                .map(|c| (c.attempted, c.failed, c.produced_nothing))
+        };
+        assert_eq!(named("launch_block"), Some((1, 0, 0)));
+        assert_eq!(
+            named("exit_probe"),
+            None,
+            "the shape refusal ended the question before anything was priced"
+        );
+        assert_eq!(ledger.dropped_after_probe, 0);
+        assert_eq!(ledger.passed_paid, 0, "it was refused, not passed over");
+        assert_eq!(
+            ledger.clocks.len(),
+            1,
+            "a candidate refused on shape still gets its clock written down"
+        );
+    }
+
+    #[test]
+    fn a_probe_that_could_not_price_an_exit_is_charged_as_a_failure() {
+        // Rule 9 in the spend column. An empty report is not a capacity of zero
+        // and it is not "no limit found" -- and a probe that measured nothing is
+        // money spent, not a call that did not happen. Delete the `!` and it
+        // books as an answer.
+        let mint = Address::new([1u8; 32]);
+        let slot = radar_types::Slot(1_000);
+        let mints = [mint];
+        let mut ledger = Ledger::default();
+        let _ = paid_tier(
+            &one_launch(mint, slot),
+            &CreatorEdge::default(),
+            mints.iter(),
+            &Sources {
+                blocks: &StubBlocks(Err("no table".to_owned())),
+                structures: &NoStructures,
+                quoter: &NoDepth,
+                pricing: Pricing::Jupiter,
+            },
+            radar_types::MicroUsd::from_dollars(200.0),
+            slot,
+            &mut ledger,
+        );
+
+        let spend = ledger.spend();
+        let probe = spend
+            .calls
+            .iter()
+            .find(|c| c.kind == "exit_probe")
+            .expect("the exit was probed");
+        assert_eq!(
+            (probe.attempted, probe.failed),
+            (1, 1),
+            "an unmeasurable exit is a charged call that failed"
+        );
+        assert_eq!(
+            ledger.passed_paid, 1,
+            "and the candidate it produced was passed over, not proposed"
+        );
+    }
+
+    #[test]
+    fn a_candidate_that_vanishes_after_the_probe_is_counted_rather_than_dropped() {
+        // The paid tier's own `continue`. Money was spent on the probe and the
+        // row lands in no bucket underneath, so a funnel that did not count it
+        // would report a proposal rate over a denominator with a hole in it.
+        //
+        // A mint the universe has no launch facts for is exactly that state: it
+        // reaches the probe and no candidate can be assembled from what comes
+        // back.
+        let known = Address::new([1u8; 32]);
+        let unknown = Address::new([2u8; 32]);
+        let slot = radar_types::Slot(1_000);
+        let mints = [unknown];
+        let mut ledger = Ledger::default();
+        let pass = paid_tier(
+            &one_launch(known, slot),
+            &CreatorEdge::default(),
+            mints.iter(),
+            &Sources {
+                blocks: &StubBlocks(Err("no table".to_owned())),
+                structures: &NoStructures,
+                quoter: &NoDepth,
+                pricing: Pricing::Jupiter,
+            },
+            radar_types::MicroUsd::from_dollars(200.0),
+            slot,
+            &mut ledger,
+        );
+
+        assert_eq!(
+            ledger.dropped_after_probe, 1,
+            "the row is counted where it left, not discarded"
+        );
+        assert!(ledger.examined.is_empty(), "and no decision was recorded");
+        assert_eq!(pass.proposals.len(), 0);
+        assert_eq!(
+            ledger.clocks.len(),
+            0,
+            "a mint with no launch slot records no clock rather than one dated \
+             to the genesis block"
         );
     }
 
@@ -2273,7 +3664,7 @@ mod tests {
         let blocks = StubBlocks(Err("no table either".to_owned()));
 
         let mints = [mint];
-        let mut examined = Vec::new();
+        let mut ledger = Ledger::default();
         let pass = paid_tier(
             &universe,
             &CreatorEdge::default(),
@@ -2286,7 +3677,7 @@ mod tests {
             },
             radar_types::MicroUsd::from_dollars(200.0),
             slot,
-            &mut examined,
+            &mut ledger,
         );
 
         assert_eq!(pass.look_failed, 1, "the unreadable block must be counted");
@@ -2329,7 +3720,7 @@ mod tests {
         };
 
         let mints = [mint];
-        let mut examined = Vec::new();
+        let mut ledger = Ledger::default();
         let pass = paid_tier(
             &one_launch(mint, slot),
             &CreatorEdge::default(),
@@ -2342,14 +3733,18 @@ mod tests {
             },
             radar_types::MicroUsd::from_dollars(200.0),
             slot,
-            &mut examined,
+            &mut ledger,
         );
 
         assert_eq!(
             pass.refused_on_shape, 1,
             "a bundle after launch must refuse the candidate"
         );
-        assert_eq!(examined.len(), 1, "and the refusal is still recorded");
+        assert_eq!(
+            ledger.examined.len(),
+            1,
+            "and the refusal is still recorded"
+        );
         assert!(pass.proposals.is_empty());
     }
 
@@ -2372,7 +3767,7 @@ mod tests {
         };
 
         let mints = [mint];
-        let mut examined = Vec::new();
+        let mut ledger = Ledger::default();
         paid_tier(
             &one_launch(mint, slot),
             &CreatorEdge::default(),
@@ -2387,10 +3782,10 @@ mod tests {
             },
             radar_types::MicroUsd::from_dollars(200.0),
             slot,
-            &mut examined,
+            &mut ledger,
         );
 
-        let (record, _) = examined.first().expect("the refusal is recorded");
+        let (record, _) = ledger.examined.first().expect("the refusal is recorded");
         assert!(
             record.reasons.iter().any(|r| r == "LaunchLooksCoordinated"),
             "recorded the wrong refusal: {:?}",
@@ -2421,7 +3816,7 @@ mod tests {
         });
 
         let mints = [mint];
-        let mut examined = Vec::new();
+        let mut ledger = Ledger::default();
         let pass = paid_tier(
             &one_launch(mint, slot),
             &CreatorEdge::default(),
@@ -2434,7 +3829,7 @@ mod tests {
             },
             radar_types::MicroUsd::from_dollars(200.0),
             slot,
-            &mut examined,
+            &mut ledger,
         );
 
         assert_eq!(pass.refused_on_shape, 1, "the launch block still decided");
@@ -2543,8 +3938,7 @@ mod tests {
         };
         let outcome = verdicts(
             std::slice::from_ref(&proposal),
-            radar_types::Slot(20_000),
-            &Reader::open(dir.path()),
+            &inventory(&Reader::open(dir.path()), radar_types::Slot(20_000)),
         );
         assert!(
             outcome.is_err(),

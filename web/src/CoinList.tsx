@@ -10,7 +10,7 @@
 
 import { useMemo } from "react";
 import type { MarketCoin, MarketCoins, MarketSort } from "./api";
-import { formatChangePct, formatCompactNumber, formatPrice } from "./format";
+import { formatChangePct, formatCompactNumber, formatPrice, quoteLabel } from "./format";
 import { MarketFigure } from "./Figures";
 import type { Load } from "./useApi";
 
@@ -80,12 +80,14 @@ export function CoinList({
     if (load.state !== "ready") return [];
     const needle = filter?.trim().toLowerCase();
     const matched = needle
-      // Mint only. The coins endpoint sends no name or symbol -- resolving
-      // metadata is one query per mint against a hundred-and-twenty-an-hour
-      // budget -- so there is nothing else here to match on, and a filter box
-      // that silently searched a field nobody sends would find nothing and
-      // look broken.
-      ? load.value.coins.filter((c) => c.mint.toLowerCase().includes(needle))
+      // Mint, and name and symbol when the server sent them. Only the live
+      // feed sends names, and only for launches it saw.
+      ? load.value.coins.filter(
+          (c) =>
+            c.mint.toLowerCase().includes(needle) ||
+            (c.symbol ?? "").toLowerCase().includes(needle) ||
+            (c.name ?? "").toLowerCase().includes(needle),
+        )
       : load.value.coins;
     const s = sortCoins(matched, sort);
     listRef?.(s);
@@ -197,19 +199,25 @@ function CoinRow({
         selected ? "bg-[var(--color-ink)] outline outline-1 -outline-offset-1 outline-[var(--color-warn)]" : "hover:bg-[var(--color-ink)]"
       }`}
     >
-      {/* The mint, abbreviated, because that is what this endpoint knows.
-          A name and symbol need a metadata lookup per mint, which the query
-          budget does not allow for a whole list -- so the row shows the
-          identifier it has rather than a column of "unknown" where a name
-          would go. The token header resolves the name for the selected coin. */}
+      {/* The symbol and name when the server knows them -- the live feed reads
+          them from pump.fun launches as they happen -- and the abbreviated
+          mint otherwise, rather than a column of "unknown" where a name would
+          go. Creator-supplied text, rendered as text and never as markup. */}
       <td className="w-[38%] py-1.5 pl-2">
-        <div className="truncate font-mono text-[11px] font-medium text-[var(--color-text)]">
-          {coin.mint.slice(0, 4)}…{coin.mint.slice(-4)}
-        </div>
+        {coin.symbol ? (
+          <div className="truncate text-[11px] font-medium text-[var(--color-text)]" title={coin.name ?? undefined}>
+            {coin.symbol}
+            {coin.name ? <span className="ml-1 font-normal text-[var(--color-dim)]">{coin.name}</span> : null}
+          </div>
+        ) : (
+          <div className="truncate font-mono text-[11px] font-medium text-[var(--color-text)]">
+            {coin.mint.slice(0, 4)}…{coin.mint.slice(-4)}
+          </div>
+        )}
         <div className="truncate text-[10px] text-[var(--color-dim)]">
           {coin.quote_mint === null
             ? "no priced fill in window"
-            : `vs ${coin.quote_mint.slice(0, 4)}…`}
+            : `vs ${quoteLabel(coin.quote_mint)}`}
         </div>
       </td>
       <td className="py-1.5 text-right tabular-nums">

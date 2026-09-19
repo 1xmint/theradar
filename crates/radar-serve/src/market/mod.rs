@@ -40,6 +40,8 @@
 //! only — so [`holders`] and the metadata half of [`token`] say that plainly
 //! rather than returning an empty answer that looks like a quiet market.
 
+pub mod live;
+
 use std::sync::Arc;
 
 use axum::Json;
@@ -145,24 +147,36 @@ fn has_a_priced_fill<T>(priced: &[T]) -> bool {
 const NOTHING_COLLECTED: &str =
     "this instance has collected no market trades yet; run radar-backfill --market-tape";
 
-/// The public market-data seam.
+/// The public market-data seam: where the market routes read from.
 ///
-/// Empty today: every route reads [`crate::AppState::store`] directly, and
-/// there is nothing left here to hold. Kept as a named type rather than
-/// removed outright because [`crate::AppState::market`] is constructed in
-/// several integration tests and in `main.rs`, and a zero-sized marker costs
-/// nothing to keep those call sites unchanged. The CryptoHouse client and the
-/// per-key `TtlCache` this used to hold are gone with the live queries they
-/// existed to pace and de-duplicate — a Parquet read against a handful of
-/// small local files does not need either.
+/// Without a live feed, every route reads [`crate::AppState::store`], which the
+/// free `radar-backfill --market-tape` collector fills. With one
+/// ([`Self::with_live`], set up in `main.rs` when `RADAR_STREAM_ENDPOINT` is
+/// set), every route answers from the feed's in-memory tape instead, in
+/// [`live`]. Never both for one request: a screen mixing a coin's live tape
+/// with the store's five-minute-old chart would show two different markets.
 #[derive(Default)]
-pub struct Market;
+pub struct Market {
+    live: Option<Arc<radar_stream::Live>>,
+}
 
 impl Market {
-    /// A fresh market seam. Takes nothing: see the type's own doc comment.
+    /// Reads the store. See the type's own doc comment.
     #[must_use]
     pub fn new() -> Self {
-        Self
+        Self { live: None }
+    }
+
+    /// Reads the live feed.
+    #[must_use]
+    pub const fn with_live(live: Arc<radar_stream::Live>) -> Self {
+        Self { live: Some(live) }
+    }
+
+    /// The live feed, when this instance has one.
+    #[must_use]
+    pub fn live(&self) -> Option<&radar_stream::Live> {
+        self.live.as_deref()
     }
 }
 
@@ -514,6 +528,12 @@ pub async fn trades(
         Ok(m) => m,
         Err(r) => return *r,
     };
+    if let Some(feed) = state.market.live() {
+        return match params.before.as_deref().map(parse_stamp).transpose() {
+            Ok(before) => live::trades(feed, mint, params.limit, before),
+            Err(r) => *r,
+        };
+    }
     let watermark = match crate::watermark_of(&state) {
         Ok(w) => w,
         Err(e) => return e.into_response(),
@@ -602,6 +622,18 @@ pub async fn candles(
     let Some(interval) = interval_seconds(params.interval.as_deref().unwrap_or("1m")) else {
         return bad_request("interval must be one of 1m, 5m, 15m, 1h, 4h, 1d");
     };
+    if let Some(feed) = state.market.live() {
+        let from = match params.from.as_deref().map(parse_stamp).transpose() {
+            Ok(v) => v,
+            Err(r) => return *r,
+        };
+        let to = match params.to.as_deref().map(parse_stamp).transpose() {
+            Ok(v) => v,
+            Err(r) => return *r,
+        };
+        let name = params.interval.as_deref().unwrap_or("1m");
+        return live::candles(feed, mint, name, interval, from, to);
+    }
     let watermark = match crate::watermark_of(&state) {
         Ok(w) => w,
         Err(e) => return e.into_response(),
@@ -751,6 +783,9 @@ pub async fn coins(
         .unwrap_or(DEFAULT_COINS_LIMIT)
         .clamp(1, MAX_COINS_LIMIT);
     let sort = params.sort.clone().unwrap_or_else(|| "activity".to_owned());
+    if let Some(feed) = state.market.live() {
+        return live::coins(feed, Some(limit), &sort);
+    }
 
     let watermark = match crate::watermark_of(&state) {
         Ok(w) => w,
@@ -880,6 +915,9 @@ pub async fn token(
         Ok(m) => m,
         Err(r) => return *r,
     };
+    if let Some(feed) = state.market.live() {
+        return live::token(feed, mint);
+    }
     let watermark = match crate::watermark_of(&state) {
         Ok(w) => w,
         Err(e) => return e.into_response(),
@@ -958,12 +996,12 @@ pub async fn token(
 
 /// `/v1/market/holders/{mint}` query parameters.
 ///
-/// Carries nothing today: [`holders`] refuses before it would ever read a
-/// parameter. Kept as a named type, rather than dropped from the route's
-/// signature, so a future holder-fold collector can add fields here without
-/// changing the router registration in [`crate::app`].
+/// Only the live feed reads `limit`: without one, [`holders`] refuses before
+/// it would read a parameter.
 #[derive(Debug, Deserialize)]
-pub struct HoldersParams {}
+pub struct HoldersParams {
+    limit: Option<usize>,
+}
 
 /// Holder balances, folded from observed transfers over a bounded window.
 ///
@@ -974,11 +1012,18 @@ pub struct HoldersParams {}
 /// for yet. Refusing plainly here is rule 9's shape: an empty holder list
 /// would look exactly like a token with no holders, which is a different and
 /// much more interesting fact than the true one.
-pub async fn holders(Path(mint): Path<String>, Query(_params): Query<HoldersParams>) -> Response {
-    let _mint = match parse_mint(&mint) {
+pub async fn holders(
+    State(state): State<Arc<crate::AppState>>,
+    Path(mint): Path<String>,
+    Query(params): Query<HoldersParams>,
+) -> Response {
+    let mint = match parse_mint(&mint) {
         Ok(m) => m,
         Err(r) => return *r,
     };
+    if let Some(feed) = state.market.live() {
+        return live::holders(feed, mint, params.limit);
+    }
     Degradation::NotCollected(
         "holder-balance collection is out of scope for the market-tape collector; only trade data is collected",
     )
