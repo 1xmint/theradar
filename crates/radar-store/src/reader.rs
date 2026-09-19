@@ -558,9 +558,30 @@ impl Reader {
 
     /// Every market-tape trade recorded at or before the watermark.
     ///
+    /// The unbounded case of [`Self::read_market_trades_range`]: every
+    /// partition the store holds, `from` unset.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StoreError`] if a file cannot be read or a required field is
+    /// malformed.
+    pub fn read_market_trades(&self, as_of: AsOf) -> Result<Vec<MarketTrade>, StoreError> {
+        self.read_market_trades_range(as_of, None)
+    }
+
+    /// Market-tape trades at or before the watermark, from `from` onward.
+    ///
     /// Read separately from events for the same reason outcomes and decisions
     /// are: this table carries no envelope, so it is not among
     /// [`Table::EVENT_TABLES`] and [`Self::read`] refuses it by name.
+    ///
+    /// **`from` restricts the disk read, not just the result**, the same
+    /// contract [`Self::read_range`] makes: a partition whose slot range —
+    /// read from its filename alone, via [`Self::partition_range`] — ends
+    /// before `from` cannot hold an admissible row, so it is skipped without
+    /// being opened. On the live store this table has 1,750 files and grows
+    /// by 288 a day; a snapshot that only needs the last day of trades has no
+    /// reason to open the other 1,738.
     ///
     /// A row whose `mint`, `signature` or `slot` does not parse is malformed
     /// and this errors, the same discipline `read_file` applies to a chain
@@ -573,10 +594,19 @@ impl Reader {
     ///
     /// Returns [`StoreError`] if a file cannot be read or a required field is
     /// malformed.
-    pub fn read_market_trades(&self, as_of: AsOf) -> Result<Vec<MarketTrade>, StoreError> {
+    pub fn read_market_trades_range(
+        &self,
+        as_of: AsOf,
+        from: Option<Slot>,
+    ) -> Result<Vec<MarketTrade>, StoreError> {
         let mut out = Vec::new();
         for path in self.files(Table::MarketTrades)? {
             if start_slot_of(&path).is_some_and(|start| start > as_of.slot().get()) {
+                continue;
+            }
+            if let Some((_, end)) = Self::partition_range(&path)
+                && from.is_some_and(|f| end < f)
+            {
                 continue;
             }
             let file = fs::File::open(&path)?;
@@ -597,6 +627,9 @@ impl Reader {
                 for i in 0..batch.num_rows() {
                     let row_slot = Slot(slot.value(i));
                     if !as_of.admits(row_slot) {
+                        continue;
+                    }
+                    if from.is_some_and(|f| row_slot < f) {
                         continue;
                     }
                     out.push(MarketTrade {
@@ -620,7 +653,13 @@ impl Reader {
                 }
             }
         }
-        out.sort_by_key(|t| (t.slot.get(), t.mint, t.signature.to_string()));
+        // `sort_by_cached_key` base58-encodes each signature once, when its key
+        // is computed, rather than on every comparison the sort makes. On the
+        // live table's 1.5M rows that is the difference between roughly 1.5M
+        // encodes and the ~21 a merge sort's O(n log n) comparisons make per
+        // row -- same final order, because the key tuple is identical to the
+        // one `sort_by_key` compared, just computed once and reused.
+        out.sort_by_cached_key(|t| (t.slot.get(), t.mint, t.signature.to_string()));
         Ok(out)
     }
 }

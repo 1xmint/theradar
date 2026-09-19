@@ -44,7 +44,7 @@ fn configured() -> axum::Router {
         token: radar_serve::cache::Cache::new(),
         challenges: None,
         market: radar_serve::market::Market::new(),
-        launches: radar_serve::cache::Cache::new(),
+        market_snapshot: radar_serve::market::SnapshotCache::new(),
     }))
 }
 
@@ -70,7 +70,7 @@ fn unconfigured() -> axum::Router {
         token: radar_serve::cache::Cache::new(),
         challenges: None,
         market: radar_serve::market::Market::new(),
-        launches: radar_serve::cache::Cache::new(),
+        market_snapshot: radar_serve::market::SnapshotCache::new(),
     }))
 }
 

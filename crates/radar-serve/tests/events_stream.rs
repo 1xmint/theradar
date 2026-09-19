@@ -57,7 +57,7 @@ fn state_with_a_store() -> (Arc<AppState>, tempfile::TempDir) {
             token: radar_serve::cache::Cache::new(),
             challenges: None,
             market: radar_serve::market::Market::new(),
-            launches: radar_serve::cache::Cache::new(),
+            market_snapshot: radar_serve::market::SnapshotCache::new(),
         }),
         dir,
     )
@@ -163,7 +163,7 @@ async fn an_empty_store_does_not_stall_the_stream_open() {
         token: radar_serve::cache::Cache::new(),
         challenges: None,
         market: radar_serve::market::Market::new(),
-        launches: radar_serve::cache::Cache::new(),
+        market_snapshot: radar_serve::market::SnapshotCache::new(),
     });
 
     let response = app(state)

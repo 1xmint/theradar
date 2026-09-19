@@ -126,14 +126,6 @@ pub struct AppState {
     /// anyone who can name one, and the page this serves is read one token at a
     /// time.
     pub token: cache::Cache<api::TokenEvidence, String>,
-    /// Mint -> launch-recorded name/symbol/uri, computed once per watermark.
-    ///
-    /// Keyed on the watermark alone (`K = ()`), same as [`Self::scoreboard`]:
-    /// one whole-table scan of [`radar_store::Table::Launches`], bounded by
-    /// [`market::LAUNCH_LOOKBACK_SLOTS`], reused for every `/v1/market/coins`
-    /// and `/v1/market/token/{mint}` caller at that watermark rather than
-    /// read per request.
-    pub launches: cache::Cache<market::LaunchIndex>,
     /// Outstanding sign-in challenges, or `None` when no customer domain is set.
     ///
     /// `None` is rule 8's shape: an instance that does not know its own domain
@@ -149,6 +141,17 @@ pub struct AppState {
     /// is `Audience::Public` in [`access::audience_of`] for exactly this
     /// field's routes.
     pub market: market::Market,
+    /// The market routes' cached snapshot of recent trades, coverage, and the
+    /// launch index -- what every `/v1/market/` route (besides the live feed,
+    /// [`Self::market`]) reads instead of [`Self::store`] directly.
+    ///
+    /// `main.rs` builds this with
+    /// [`market::SnapshotCache::with_background_refresh`] and starts the
+    /// refresher that keeps it current; every other constructor (all test
+    /// fixtures) uses [`market::SnapshotCache::new`], which lets a route build
+    /// one synchronously the one time a test asks. See [`market::Snapshot`]'s
+    /// own doc comment for why this exists at all.
+    pub market_snapshot: market::SnapshotCache,
 }
 
 /// Builds the router.

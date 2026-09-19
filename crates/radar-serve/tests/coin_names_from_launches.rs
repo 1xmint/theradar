@@ -132,7 +132,7 @@ fn state_at(dir: &std::path::Path) -> Arc<AppState> {
         token: radar_serve::cache::Cache::new(),
         challenges: None,
         market: radar_serve::market::Market::new(),
-        launches: radar_serve::cache::Cache::new(),
+        market_snapshot: radar_serve::market::SnapshotCache::new(),
     })
 }
 
@@ -277,4 +277,29 @@ async fn the_launches_table_is_not_read_per_request() {
         second["name"], "Radar Coin",
         "the cached launch index answers this request, not a fresh scan of a table that is now gone"
     );
+}
+
+/// The tape and the chart answer from a store the collector has filled.
+///
+/// Both routes turn away a store whose market tape never ran. Inverting that
+/// check turns away every store where it *did*, which is the whole public
+/// screen going blank with an honest-sounding sentence on it -- and nothing
+/// asked either route for a trade, so nothing noticed.
+#[tokio::test]
+async fn a_collected_store_answers_the_tape_and_the_chart() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    store_without_launch(dir.path(), A_MINT, 500);
+    let state = state_at(dir.path());
+
+    let tape = get_json(&state, &format!("/v1/market/trades/{A_MINT}")).await;
+    let trades = tape["trades"].as_array().expect("a trades array");
+    assert_eq!(
+        trades.len(),
+        1,
+        "the earlier trade, inside the window: {tape}"
+    );
+
+    let chart = get_json(&state, &format!("/v1/market/candles/{A_MINT}")).await;
+    let candles = chart["candles"].as_array().expect("a candles array");
+    assert_eq!(candles.len(), 1, "one trade folds to one candle: {chart}");
 }

@@ -4,10 +4,11 @@
 use std::net::SocketAddr;
 use std::process::ExitCode;
 use std::sync::Arc;
+use std::time::Duration;
 
 use radar_instruments::{CreatorHistory, CreatorTrackRecord, Registry, SimulateExit};
 use radar_serve::chat::Chat;
-use radar_serve::{AppState, access, app, chat, customer, x402};
+use radar_serve::{AppState, access, app, chat, customer, market, x402};
 use radar_store::Reader;
 
 /// Every instrument Radar exposes. The CLI builds the same list.
@@ -222,6 +223,54 @@ fn refused(why: &str) -> ExitCode {
     ExitCode::FAILURE
 }
 
+/// How often the market snapshot's trade half is checked for staleness.
+///
+/// Chosen to bound how far a request's answer can lag the tape without
+/// costing much: a tick that finds nothing changed is one directory listing
+/// (`Reader::files`), not a rebuild.
+const SNAPSHOT_REFRESH_INTERVAL: Duration = Duration::from_secs(20);
+
+/// How often the launch index -- the expensive half, a 7-day scan of
+/// `Launches` -- is rebuilt, independent of the trade half's own cadence.
+const LAUNCH_REFRESH_INTERVAL: Duration = Duration::from_secs(300);
+
+/// Starts the task that keeps `state.market_snapshot` current, off the
+/// request path.
+///
+/// See [`market::Snapshot`]'s own doc comment for why this exists. Runs for
+/// the life of the process; there is nothing to await here because nothing
+/// in `main` depends on the first snapshot existing before it starts serving
+/// -- a request that arrives first sees [`market::SnapshotCache::peek`]
+/// return `None` and answers the honest "not built yet" response, exactly as
+/// the packet requires.
+fn market_snapshot_refresher(state: Arc<AppState>) {
+    tokio::spawn(async move {
+        let mut refresher = market::Refresher::new();
+        // An interval's first tick is immediate: a restart builds its first
+        // snapshot at once rather than answering "not built yet" for 20s.
+        let mut tick = tokio::time::interval(SNAPSHOT_REFRESH_INTERVAL);
+        tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        loop {
+            tick.tick().await;
+            let task_state = Arc::clone(&state);
+            // The store read and the fold both belong off the async runtime --
+            // exactly the reason this task exists rather than a per-request read.
+            let done = tokio::task::spawn_blocking(move || {
+                refresher.tick(
+                    &task_state.store,
+                    &task_state.market_snapshot,
+                    LAUNCH_REFRESH_INTERVAL,
+                );
+                refresher
+            })
+            .await;
+            // A panicked tick took its memory with it; start over rather than
+            // stop refreshing for the life of the process.
+            refresher = done.unwrap_or_default();
+        }
+    });
+}
+
 #[tokio::main]
 async fn main() -> ExitCode {
     let store_dir = std::env::var("RADAR_STORE").unwrap_or_else(|_| "./data/store".to_owned());
@@ -296,8 +345,15 @@ async fn main() -> ExitCode {
         challenges: radar_serve::siws::domain_from(std::env::var("RADAR_CUSTOMER_DOMAIN").ok())
             .map(radar_serve::challenges::Challenges::new),
         market,
-        launches: radar_serve::cache::Cache::new(),
+        market_snapshot: radar_serve::market::SnapshotCache::with_background_refresh(),
     });
+
+    // Off the request path, per the market module's own doc comment: every
+    // route under `/v1/market/` used to read the store directly, up to twice
+    // per request, and two such requests in flight pinned a 2-core box.
+    // `state.market.live()` (the streamed feed) is untouched -- it never read
+    // the store this way and this task never overwrites it.
+    market_snapshot_refresher(Arc::clone(&state));
 
     println!("radar-serve v{}", env!("CARGO_PKG_VERSION"));
     println!("  store      : {store_dir}");

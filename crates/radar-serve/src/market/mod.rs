@@ -180,6 +180,363 @@ impl Market {
     }
 }
 
+/// How many slots behind the watermark the cached market snapshot reaches.
+///
+/// **~24h.** [`MAX_CANDLE_WINDOW_SECONDS`] is the widest span any route in
+/// this module ever serves, so a snapshot narrower than that would make the
+/// snapshot itself the constraint a route is supposed to state on its own.
+/// Converted the same way [`LAUNCH_LOOKBACK_SLOTS`] was: one slot is roughly
+/// 400ms (`radar_types::SlotDelta::approx_duration`), so 24 * 3600 * 1000 /
+/// 400 = 216,000, rounded up for headroom against that approximation's own
+/// error rather than shaved thin against it.
+pub const SNAPSHOT_WINDOW_SLOTS: u64 = 220_000;
+
+/// The newest timestamp among a set of stored trade rows, trimmed to the
+/// second.
+///
+/// Pulled out of what used to be `newest_collected`'s body so
+/// [`Snapshot::build`] can compute the same figure over an in-memory window
+/// instead of a fresh store read -- one function, so the trimming rule (a
+/// row's microseconds truncate down, never round up past it) is not stated
+/// twice with room for the two copies to disagree.
+fn newest_ts_of(rows: &[MarketTrade]) -> Option<i64> {
+    let newest = rows.iter().map(|t| t.ts.clone()).max();
+    // Stored timestamps carry CryptoHouse's microseconds
+    // (`2026-09-12 16:31:52.000000`) and `to_epoch` takes whole seconds, so
+    // the fraction is trimmed rather than parsed. Truncating toward the
+    // second is the safe direction: the window ends no later than the newest
+    // row, so it can never claim to cover a moment nothing was read at.
+    let trimmed = newest.map(|ts| ts.split('.').next().unwrap_or(&ts).to_owned());
+    trimmed.and_then(|ts| radar_store::to_epoch(&ts).ok())
+}
+
+/// The tape rows for one mint inside `[from_s, to_s)`, newest first.
+///
+/// Pulled out of what used to be `tape_for`'s body so a route can filter an
+/// already-read [`Snapshot`] in memory with the same logic `tape_for` still
+/// uses (and is still tested through) for a direct store read.
+fn filter_tape(
+    rows: &[MarketTrade],
+    mint: Address,
+    from_s: &str,
+    to_s: &str,
+) -> Vec<market_fold::Trade> {
+    let mut trades: Vec<market_fold::Trade> = rows
+        .iter()
+        .filter(|t| t.mint == mint && within_window(&t.ts, from_s, to_s))
+        .map(to_fold_trade)
+        .collect();
+    // The same order `fold_tape` produced when the collector wrote these
+    // rows -- newest first, ties broken by signature so the order does not
+    // depend on how the rows happened to be laid out across files.
+    trades.sort_by(|a, b| b.ts.cmp(&a.ts).then_with(|| b.signature.cmp(&a.signature)));
+    trades
+}
+
+/// Everything a market route needs, read off the store once and reused by
+/// every request until the background refresher (or, in a test with none
+/// configured, the next request) replaces it.
+///
+/// **Every route in this module used to read the store per request** --
+/// `read_market_trades` (the whole table: 1,750 files, ~1.5M rows measured),
+/// `read_coverage` (6,863 files), and `build_launch_index` (7 days of
+/// `Launches`), up to twice for one `/v1/market/coins` call. Two such
+/// requests in flight pinned both cores of a 2-core box and `/` stopped
+/// answering too, because a blocking store read on the async runtime blocks
+/// everything else scheduled on it. This struct is what a request reads
+/// instead: an in-memory snapshot, built off the request path by
+/// [`Self::build`]/[`Self::refresh_trades`] and handed out through
+/// [`SnapshotCache`].
+pub struct Snapshot {
+    watermark: Slot,
+    trades: Vec<MarketTrade>,
+    collected: bool,
+    newest_ts: Option<i64>,
+    launches: Arc<LaunchIndex>,
+}
+
+impl Snapshot {
+    /// Builds a snapshot at `as_of`: the trade window, coverage, and the
+    /// launch index, each read once.
+    ///
+    /// **Synchronous and blocking** -- exactly the store reads it replaces
+    /// were. A caller on the async runtime must run this inside
+    /// `tokio::task::spawn_blocking`. Used directly by tests, which construct
+    /// `AppState` with [`SnapshotCache::new`] (no background refresher), and
+    /// by `main.rs`'s background refresher on its own cadence; a route
+    /// handler must never call this when a refresher is configured -- see
+    /// [`snapshot_for`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StoreError`] if the store cannot be read.
+    pub fn build(store: &Reader, as_of: AsOf) -> Result<Self, StoreError> {
+        let collected = market_tape_collected(store, as_of)?;
+        let from = Slot(as_of.slot().get().saturating_sub(SNAPSHOT_WINDOW_SLOTS));
+        let trades = store.read_market_trades_range(as_of, Some(from))?;
+        let newest_ts = newest_ts_of(&trades);
+        let launches = build_launch_index(store, as_of)?;
+        Ok(Self {
+            watermark: as_of.slot(),
+            trades,
+            collected,
+            newest_ts,
+            launches: Arc::new(launches),
+        })
+    }
+
+    /// Rebuilds the trade half only, reusing the existing launch index.
+    ///
+    /// The launch scan is the expensive half by row count -- 7 days of
+    /// `Launches` versus ~24h of `MarketTrades` -- so the background
+    /// refresher calls this on its frequent tick and reserves the full
+    /// [`Self::build`] for its own, much less frequent, cadence. Reusing
+    /// `launches` is an `Arc` clone, not a copy of the map.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StoreError`] if the store cannot be read.
+    pub fn refresh_trades(&self, store: &Reader, as_of: AsOf) -> Result<Self, StoreError> {
+        let collected = market_tape_collected(store, as_of)?;
+        let from = Slot(as_of.slot().get().saturating_sub(SNAPSHOT_WINDOW_SLOTS));
+        let trades = store.read_market_trades_range(as_of, Some(from))?;
+        let newest_ts = newest_ts_of(&trades);
+        Ok(Self {
+            watermark: as_of.slot(),
+            trades,
+            collected,
+            newest_ts,
+            launches: Arc::clone(&self.launches),
+        })
+    }
+
+    /// Whether the market-tape collector had produced anything at all as of
+    /// this snapshot's watermark.
+    #[must_use]
+    pub const fn collected(&self) -> bool {
+        self.collected
+    }
+
+    /// The newest moment the store held a market trade at, as of this
+    /// snapshot's watermark.
+    #[must_use]
+    pub const fn newest_ts(&self) -> Option<i64> {
+        self.newest_ts
+    }
+
+    /// The trades this snapshot holds: the last [`SNAPSHOT_WINDOW_SLOTS`]
+    /// slots before its watermark.
+    #[must_use]
+    pub fn trades(&self) -> &[MarketTrade] {
+        &self.trades
+    }
+
+    /// The launch index this snapshot holds.
+    #[must_use]
+    pub fn launches(&self) -> &LaunchIndex {
+        &self.launches
+    }
+
+    /// The watermark this snapshot was built at.
+    #[must_use]
+    pub const fn watermark(&self) -> Slot {
+        self.watermark
+    }
+}
+
+/// The current [`Snapshot`], if one has been built yet.
+///
+/// A route reads this, never the store, for anything a [`Snapshot`] carries.
+/// [`Self::has_background_refresh`] tells [`snapshot_for`] which of the two
+/// honest answers to give when there is nothing here yet, or nothing at the
+/// caller's watermark: `main.rs` sets it and a route waits for the refresher
+/// rather than blocking a request on a rebuild; the test files that construct
+/// `AppState` directly leave it unset ([`Self::new`]), so a route under test
+/// builds one synchronously on a cache miss, which is the one request a test
+/// makes.
+#[derive(Default)]
+pub struct SnapshotCache {
+    current: std::sync::Mutex<Option<Arc<Snapshot>>>,
+    background: bool,
+}
+
+impl SnapshotCache {
+    /// No background refresher: [`snapshot_for`] may build one synchronously
+    /// on a cache miss. What every test file's `AppState` literal uses.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// A background refresher owns this cache: [`snapshot_for`] must never
+    /// build one itself, only read what is here and let a route answer
+    /// [`Degradation::NotCollected`] until the refresher has filled it in.
+    #[must_use]
+    pub const fn with_background_refresh() -> Self {
+        Self {
+            current: std::sync::Mutex::new(None),
+            background: true,
+        }
+    }
+
+    /// Whether a background refresher is responsible for this cache.
+    #[must_use]
+    pub const fn has_background_refresh(&self) -> bool {
+        self.background
+    }
+
+    /// The current snapshot, if one exists.
+    #[must_use]
+    pub fn peek(&self) -> Option<Arc<Snapshot>> {
+        self.current
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    }
+
+    /// Replaces the current snapshot.
+    pub fn set(&self, snapshot: Arc<Snapshot>) {
+        *self
+            .current
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(snapshot);
+    }
+}
+
+/// The snapshot a route should read, building one synchronously only when no
+/// background refresher is configured and none exists yet or the existing one
+/// is not at `as_of`'s watermark.
+///
+/// **With a refresher configured, a stale or missing snapshot is never built
+/// here.** A route with nothing yet answers [`Degradation::NotCollected`]
+/// immediately; a route with a stale one serves it anyway -- at most one
+/// refresher tick old, which is the honest cost of moving the read off the
+/// request path, never a read past the caller's own watermark (rule 3: the
+/// snapshot's `watermark` field is what it was built at, not what a later
+/// request asks for).
+///
+/// Without one (every test's `AppState`), a mismatched watermark is rebuilt
+/// rather than served stale, because a test's fixture and its assertions are
+/// written for its own watermark, not whatever an earlier test in the same
+/// process left behind.
+///
+/// # Errors
+///
+/// Returns [`StoreError`] if a synchronous build reads a broken store.
+fn snapshot_for(
+    cache: &SnapshotCache,
+    store: &Reader,
+    as_of: AsOf,
+) -> Result<Option<Arc<Snapshot>>, StoreError> {
+    match cache.peek() {
+        Some(snap) if snap.watermark() == as_of.slot() => Ok(Some(snap)),
+        Some(snap) if cache.has_background_refresh() => Ok(Some(snap)),
+        _ if cache.has_background_refresh() => Ok(None),
+        _ => {
+            let built = Arc::new(Snapshot::build(store, as_of)?);
+            cache.set(Arc::clone(&built));
+            Ok(Some(built))
+        }
+    }
+}
+
+/// What one tick of the background refresher should do.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Refresh {
+    /// Nothing moved: no store read at all.
+    Skip,
+    /// The store moved: re-read the trade window, keep the launch index.
+    TradesOnly,
+    /// Read everything, the 7-day launch scan included.
+    Everything,
+}
+
+/// Decides what a refresher tick reads.
+///
+/// Pulled out of `main.rs`'s loop because this is the decision the whole fix
+/// rests on: answer [`Refresh::Skip`] too rarely and the box is back to
+/// re-reading the store all day, too often and the screen freezes on an old
+/// snapshot while looking healthy. With no snapshot to reuse a launch index
+/// from, a moved store means [`Refresh::Everything`], never a half-built one.
+#[must_use]
+pub const fn refresh_plan(launches_due: bool, store_moved: bool, have_snapshot: bool) -> Refresh {
+    if launches_due {
+        Refresh::Everything
+    } else if !store_moved {
+        Refresh::Skip
+    } else if have_snapshot {
+        Refresh::TradesOnly
+    } else {
+        Refresh::Everything
+    }
+}
+
+/// Whether the launch index is due a rebuild: never built, or built at least
+/// `every` ago.
+#[must_use]
+pub fn launches_due(since_last: Option<std::time::Duration>, every: std::time::Duration) -> bool {
+    since_last.is_none_or(|elapsed| elapsed >= every)
+}
+
+/// The background refresher's memory between ticks: where the store stood at
+/// the last successful read, and when the launch index was last rebuilt.
+///
+/// Lives here rather than in `main.rs` so a tick can be run against a fixture
+/// store: the loop in `main.rs` is then only a timer around [`Self::tick`].
+#[derive(Default)]
+pub struct Refresher {
+    last_key: Option<(Slot, Option<std::path::PathBuf>)>,
+    launches_built: Option<std::time::Instant>,
+}
+
+impl Refresher {
+    /// A refresher that has read nothing yet.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Runs one tick: reads what [`refresh_plan`] says to and replaces the
+    /// snapshot in `cache`. Returns the plan carried out, or `None` when the
+    /// store could not be read or is empty.
+    ///
+    /// **Blocking** -- call it inside `tokio::task::spawn_blocking`.
+    ///
+    /// A failed read records nothing, so the next tick tries again rather
+    /// than waiting for the store to move.
+    pub fn tick(
+        &mut self,
+        store: &Reader,
+        cache: &SnapshotCache,
+        launches_every: std::time::Duration,
+    ) -> Option<Refresh> {
+        let watermark = store.watermark().ok().flatten()?;
+        let newest_file = store
+            .files(Table::MarketTrades)
+            .ok()
+            .and_then(|files| files.last().cloned());
+        let key = (watermark, newest_file);
+        let current = cache.peek();
+        let plan = refresh_plan(
+            launches_due(self.launches_built.map(|t| t.elapsed()), launches_every),
+            self.last_key.as_ref() != Some(&key),
+            current.is_some(),
+        );
+        let as_of = AsOf::at(watermark);
+        let built = match (plan, current) {
+            (Refresh::Skip, _) => return Some(plan),
+            (Refresh::TradesOnly, Some(current)) => current.refresh_trades(store, as_of),
+            _ => Snapshot::build(store, as_of),
+        };
+        cache.set(Arc::new(built.ok()?));
+        self.last_key = Some(key);
+        if plan == Refresh::Everything {
+            self.launches_built = Some(std::time::Instant::now());
+        }
+        Some(plan)
+    }
+}
+
 /// Why a market route could not answer, distinguishably from an empty
 /// result.
 ///
@@ -473,21 +830,17 @@ const fn reaching_back(to: i64, span_seconds: i64) -> i64 {
     to - span_seconds
 }
 
+// Routes no longer call these directly -- they go through `snapshot_for` and
+// the snapshot's own cached rows. Kept `#[cfg(test)]`-only because the tests
+// below exercise `newest_ts_of`/`filter_tape` through this exact shape, and
+// duplicating that coverage against the new call path would test the
+// snapshot, not the pure logic these wrap.
+#[cfg(test)]
 fn newest_collected(store: &Reader, as_of: AsOf) -> Result<Option<i64>, StoreError> {
-    let newest = store
-        .read_market_trades(as_of)?
-        .iter()
-        .map(|t| t.ts.clone())
-        .max();
-    // Stored timestamps carry CryptoHouse's microseconds
-    // (`2026-09-12 16:31:52.000000`) and `to_epoch` takes whole seconds, so
-    // the fraction is trimmed rather than parsed. Truncating toward the
-    // second is the safe direction: the window ends no later than the newest
-    // row, so it can never claim to cover a moment nothing was read at.
-    let trimmed = newest.map(|ts| ts.split('.').next().unwrap_or(&ts).to_owned());
-    Ok(trimmed.and_then(|ts| radar_store::to_epoch(&ts).ok()))
+    Ok(newest_ts_of(&store.read_market_trades(as_of)?))
 }
 
+#[cfg(test)]
 fn tape_for(
     store: &Reader,
     as_of: AsOf,
@@ -495,17 +848,12 @@ fn tape_for(
     from_s: &str,
     to_s: &str,
 ) -> Result<Vec<market_fold::Trade>, StoreError> {
-    let mut trades: Vec<market_fold::Trade> = store
-        .read_market_trades(as_of)?
-        .iter()
-        .filter(|t| t.mint == mint && within_window(&t.ts, from_s, to_s))
-        .map(to_fold_trade)
-        .collect();
-    // The same order `fold_tape` produced when the collector wrote these
-    // rows -- newest first, ties broken by signature so the order does not
-    // depend on how the rows happened to be laid out across files.
-    trades.sort_by(|a, b| b.ts.cmp(&a.ts).then_with(|| b.signature.cmp(&a.signature)));
-    Ok(trades)
+    Ok(filter_tape(
+        &store.read_market_trades(as_of)?,
+        mint,
+        from_s,
+        to_s,
+    ))
 }
 
 /// `/v1/market/trades/{mint}` query parameters.
@@ -539,27 +887,32 @@ pub async fn trades(
         Err(e) => return e.into_response(),
     };
     let as_of = AsOf::at(watermark);
-    match market_tape_collected(&state.store, as_of) {
-        Ok(true) => {}
-        Ok(false) => {
+    let snapshot = match snapshot_for(&state.market_snapshot, &state.store, as_of) {
+        Ok(Some(s)) => s,
+        Ok(None) => {
             return Degradation::NotCollected(
-                "the market-tape collector has not produced anything for this store yet",
+                "the market snapshot has not been built yet; check back shortly",
             )
             .into_response();
         }
         Err(e) => return Degradation::from_store_error(&e).into_response(),
+    };
+    if !snapshot.collected() {
+        return Degradation::NotCollected(
+            "the market-tape collector has not produced anything for this store yet",
+        )
+        .into_response();
     }
 
     let to = match params.before.as_deref().map(parse_stamp).transpose() {
         Ok(Some(before)) => before,
         // No cursor: end the window at what the store actually holds, never at
-        // wall-clock time. See `newest_collected` -- the collector runs behind
+        // wall-clock time. See `newest_ts_of` -- the collector runs behind
         // by design, so `now()` names a span it has not reached and the answer
         // is an empty tape presented as complete.
-        Ok(None) => match newest_collected(&state.store, as_of) {
-            Ok(Some(newest)) => newest,
-            Ok(None) => return Degradation::NotCollected(NOTHING_COLLECTED).into_response(),
-            Err(e) => return Degradation::from_store_error(&e).into_response(),
+        Ok(None) => match snapshot.newest_ts() {
+            Some(newest) => newest,
+            None => return Degradation::NotCollected(NOTHING_COLLECTED).into_response(),
         },
         Err(r) => return *r,
     };
@@ -570,18 +923,14 @@ pub async fn trades(
     let from = reaching_back(to, DEFAULT_WINDOW_SECONDS);
     let (from_s, to_s) = (from_epoch(from), from_epoch(to));
 
-    match tape_for(&state.store, as_of, mint, &from_s, &to_s) {
-        Ok(mut trades) => {
-            trades.truncate(limit);
-            Json(json!({
-                "mint": mint.to_string(),
-                "window": { "from": from_s, "to": to_s, "complete": true },
-                "trades": trades,
-            }))
-            .into_response()
-        }
-        Err(e) => Degradation::from_store_error(&e).into_response(),
-    }
+    let mut trades = filter_tape(snapshot.trades(), mint, &from_s, &to_s);
+    trades.truncate(limit);
+    Json(json!({
+        "mint": mint.to_string(),
+        "window": { "from": from_s, "to": to_s, "complete": true },
+        "trades": trades,
+    }))
+    .into_response()
 }
 
 /// `/v1/market/candles/{mint}` query parameters.
@@ -639,26 +988,31 @@ pub async fn candles(
         Err(e) => return e.into_response(),
     };
     let as_of = AsOf::at(watermark);
-    match market_tape_collected(&state.store, as_of) {
-        Ok(true) => {}
-        Ok(false) => {
+    let snapshot = match snapshot_for(&state.market_snapshot, &state.store, as_of) {
+        Ok(Some(s)) => s,
+        Ok(None) => {
             return Degradation::NotCollected(
-                "the market-tape collector has not produced anything for this store yet",
+                "the market snapshot has not been built yet; check back shortly",
             )
             .into_response();
         }
         Err(e) => return Degradation::from_store_error(&e).into_response(),
+    };
+    if !snapshot.collected() {
+        return Degradation::NotCollected(
+            "the market-tape collector has not produced anything for this store yet",
+        )
+        .into_response();
     }
 
     let requested_to = match params.to.as_deref().map(parse_stamp).transpose() {
         Ok(Some(to)) => to,
-        // The store's own horizon, not wall-clock -- see `newest_collected`.
+        // The store's own horizon, not wall-clock -- see `newest_ts_of`.
         // A chart defaulting to the last two minutes of wall-clock time drew
         // nothing at all, because the collector is always behind it.
-        Ok(None) => match newest_collected(&state.store, as_of) {
-            Ok(Some(newest)) => newest,
-            Ok(None) => return Degradation::NotCollected(NOTHING_COLLECTED).into_response(),
-            Err(e) => return Degradation::from_store_error(&e).into_response(),
+        Ok(None) => match snapshot.newest_ts() {
+            Some(newest) => newest,
+            None => return Degradation::NotCollected(NOTHING_COLLECTED).into_response(),
         },
         Err(r) => return *r,
     };
@@ -676,20 +1030,16 @@ pub async fn candles(
     let to = requested_to;
     let (from_s, to_s) = (from_epoch(from), from_epoch(to));
 
-    match tape_for(&state.store, as_of, mint, &from_s, &to_s) {
-        Ok(trades) => {
-            let candles = market_fold::fold_candles(&trades, interval);
-            Json(json!({
-                "mint": mint.to_string(),
-                "interval": params.interval.as_deref().unwrap_or("1m"),
-                "requested": { "from": from_epoch(requested_from), "to": from_epoch(requested_to) },
-                "covered": { "from": from_s, "to": to_s, "complete": true },
-                "candles": candles,
-            }))
-            .into_response()
-        }
-        Err(e) => Degradation::from_store_error(&e).into_response(),
-    }
+    let trades = filter_tape(snapshot.trades(), mint, &from_s, &to_s);
+    let candles = market_fold::fold_candles(&trades, interval);
+    Json(json!({
+        "mint": mint.to_string(),
+        "interval": params.interval.as_deref().unwrap_or("1m"),
+        "requested": { "from": from_epoch(requested_from), "to": from_epoch(requested_to) },
+        "covered": { "from": from_s, "to": to_s, "complete": true },
+        "candles": candles,
+    }))
+    .into_response()
 }
 
 /// `/v1/market/coins` query parameters.
@@ -792,49 +1142,44 @@ pub async fn coins(
         Err(e) => return e.into_response(),
     };
     let as_of = AsOf::at(watermark);
-    match market_tape_collected(&state.store, as_of) {
-        Ok(true) => {}
-        Ok(false) => {
+    let snapshot = match snapshot_for(&state.market_snapshot, &state.store, as_of) {
+        Ok(Some(s)) => s,
+        Ok(None) => {
             return Degradation::NotCollected(
-                "the market-tape collector has not produced anything for this store yet",
+                "the market snapshot has not been built yet; check back shortly",
             )
             .into_response();
         }
         Err(e) => return Degradation::from_store_error(&e).into_response(),
+    };
+    if !snapshot.collected() {
+        return Degradation::NotCollected(
+            "the market-tape collector has not produced anything for this store yet",
+        )
+        .into_response();
     }
 
-    // The store's own horizon, not wall-clock -- see `newest_collected`.
-    let to = match newest_collected(&state.store, as_of) {
-        Ok(Some(newest)) => newest,
-        Ok(None) => return Degradation::NotCollected(NOTHING_COLLECTED).into_response(),
-        Err(e) => return Degradation::from_store_error(&e).into_response(),
+    // The store's own horizon, not wall-clock -- see `newest_ts_of`.
+    let Some(to) = snapshot.newest_ts() else {
+        return Degradation::NotCollected(NOTHING_COLLECTED).into_response();
     };
     let from = reaching_back(to, COINS_WINDOW_SECONDS);
     let (from_s, to_s) = (from_epoch(from), from_epoch(to));
 
-    let rows = match state.store.read_market_trades(as_of) {
-        Ok(rows) => rows,
-        Err(e) => return Degradation::from_store_error(&e).into_response(),
-    };
-    let windowed: Vec<MarketTrade> = rows
-        .into_iter()
+    let windowed: Vec<MarketTrade> = snapshot
+        .trades()
+        .iter()
         .filter(|t| within_window(&t.ts, &from_s, &to_s))
+        .cloned()
         .collect();
 
     let mut coins = coins_from_trades(&windowed);
     sort_coins(&mut coins, &sort);
     coins.truncate(limit);
 
-    let launches = match state
-        .launches
-        .get_or_compute(watermark, (), || build_launch_index(&state.store, as_of))
-    {
-        Ok(index) => index,
-        Err(e) => return Degradation::from_store_error(&e).into_response(),
-    };
     let coins: Vec<Value> = coins
         .into_iter()
-        .map(|coin| with_launch_fields(coin, &launches))
+        .map(|coin| with_launch_fields(coin, snapshot.launches()))
         .collect();
 
     Json(json!({
@@ -923,29 +1268,30 @@ pub async fn token(
         Err(e) => return e.into_response(),
     };
     let as_of = AsOf::at(watermark);
-    match market_tape_collected(&state.store, as_of) {
-        Ok(true) => {}
-        Ok(false) => {
+    let snapshot = match snapshot_for(&state.market_snapshot, &state.store, as_of) {
+        Ok(Some(s)) => s,
+        Ok(None) => {
             return Degradation::NotCollected(
-                "the market-tape collector has not produced anything for this store yet",
+                "the market snapshot has not been built yet; check back shortly",
             )
             .into_response();
         }
         Err(e) => return Degradation::from_store_error(&e).into_response(),
+    };
+    if !snapshot.collected() {
+        return Degradation::NotCollected(
+            "the market-tape collector has not produced anything for this store yet",
+        )
+        .into_response();
     }
 
-    // The store's own horizon, not wall-clock -- see `newest_collected`.
-    let to = match newest_collected(&state.store, as_of) {
-        Ok(Some(newest)) => newest,
-        Ok(None) => return Degradation::NotCollected(NOTHING_COLLECTED).into_response(),
-        Err(e) => return Degradation::from_store_error(&e).into_response(),
+    // The store's own horizon, not wall-clock -- see `newest_ts_of`.
+    let Some(to) = snapshot.newest_ts() else {
+        return Degradation::NotCollected(NOTHING_COLLECTED).into_response();
     };
     let from = reaching_back(to, DEFAULT_WINDOW_SECONDS);
     let (from_s, to_s) = (from_epoch(from), from_epoch(to));
-    let recent_trades = match tape_for(&state.store, as_of, mint, &from_s, &to_s) {
-        Ok(t) => t,
-        Err(e) => return Degradation::from_store_error(&e).into_response(),
-    };
+    let recent_trades = filter_tape(snapshot.trades(), mint, &from_s, &to_s);
 
     let priced = recent_trades.iter().find(|t| t.price.is_some());
     let (price, price_reason) = match priced {
@@ -953,14 +1299,7 @@ pub async fn token(
         None => (None, Some(why_no_price(recent_trades.is_empty()))),
     };
 
-    let launches = match state
-        .launches
-        .get_or_compute(watermark, (), || build_launch_index(&state.store, as_of))
-    {
-        Ok(index) => index,
-        Err(e) => return Degradation::from_store_error(&e).into_response(),
-    };
-    let found = launches.get(&mint);
+    let found = snapshot.launches().get(&mint);
     let (name, symbol, uri, metadata_reason) = match found {
         Some(l) => (
             Some(l.name.clone()),
@@ -1604,5 +1943,198 @@ mod tests {
         assert_eq!(coins.len(), 1, "the mint is still on the list");
         assert_eq!(coins[0].price, None);
         assert_eq!(coins[0].quote_mint, None);
+    }
+
+    /// A refresher tick reads only what it has to.
+    ///
+    /// Every row of the table, because each wrong answer is quiet: a `Skip`
+    /// that should have been a read freezes the screen on an old snapshot, and
+    /// a read that should have been a `Skip` is the all-day store scan this
+    /// snapshot exists to stop.
+    #[test]
+    fn a_refresher_tick_reads_only_what_it_has_to() {
+        assert_eq!(refresh_plan(true, false, true), Refresh::Everything);
+        assert_eq!(refresh_plan(true, true, false), Refresh::Everything);
+        assert_eq!(refresh_plan(false, false, true), Refresh::Skip);
+        assert_eq!(refresh_plan(false, false, false), Refresh::Skip);
+        assert_eq!(refresh_plan(false, true, true), Refresh::TradesOnly);
+        assert_eq!(
+            refresh_plan(false, true, false),
+            Refresh::Everything,
+            "there is no launch index to reuse, so a trades-only read has nothing to stand on"
+        );
+    }
+
+    #[test]
+    fn the_launch_index_is_due_when_never_built_or_old_enough() {
+        let every = std::time::Duration::from_secs(300);
+        assert!(launches_due(None, every), "never built");
+        assert!(!launches_due(
+            Some(std::time::Duration::from_secs(299)),
+            every
+        ));
+        assert!(
+            launches_due(Some(every), every),
+            "due on the interval itself"
+        );
+        assert!(launches_due(
+            Some(std::time::Duration::from_secs(301)),
+            every
+        ));
+    }
+
+    /// With a background refresher, a request never builds a snapshot.
+    ///
+    /// A build would leave its snapshot in the cache, so an empty cache after
+    /// the request is the proof that the request path did not read the store.
+    #[test]
+    fn a_request_never_builds_a_snapshot_a_refresher_owns() {
+        let (_dir, store) = store_of(&[market_trade(A_MINT, "2020-01-01 00:00:01.000000", 100)]);
+        let cache = SnapshotCache::with_background_refresh();
+        let as_of = AsOf::at(radar_types::Slot(10_000));
+        assert!(
+            snapshot_for(&cache, &store, as_of)
+                .expect("no read happens")
+                .is_none(),
+            "nothing built yet is an honest nothing, not a blocking build"
+        );
+        assert!(cache.peek().is_none(), "and the request did not fill it in");
+
+        // Once the refresher has set one, a later watermark is still served
+        // the same snapshot rather than a rebuild.
+        let built = Arc::new(Snapshot::build(&store, as_of).expect("the store reads"));
+        cache.set(Arc::clone(&built));
+        let later = AsOf::at(radar_types::Slot(10_500));
+        let served = snapshot_for(&cache, &store, later)
+            .expect("no read happens")
+            .expect("a snapshot exists");
+        assert!(Arc::ptr_eq(&served, &built), "served, never rebuilt");
+    }
+
+    /// Without a refresher the snapshot is reused at its own watermark and
+    /// rebuilt at any other.
+    #[test]
+    fn without_a_refresher_a_snapshot_is_reused_only_at_its_own_watermark() {
+        let (_dir, store) = store_of(&[market_trade(A_MINT, "2020-01-01 00:00:01.000000", 100)]);
+        let cache = SnapshotCache::new();
+        assert!(!cache.has_background_refresh());
+        let as_of = AsOf::at(radar_types::Slot(10_000));
+        let first = snapshot_for(&cache, &store, as_of)
+            .expect("the store reads")
+            .expect("built on a miss");
+        assert_eq!(first.watermark(), radar_types::Slot(10_000));
+        let again = snapshot_for(&cache, &store, as_of)
+            .expect("the store reads")
+            .expect("a snapshot");
+        assert!(Arc::ptr_eq(&first, &again), "same watermark, same snapshot");
+
+        let later = AsOf::at(radar_types::Slot(10_500));
+        let rebuilt = snapshot_for(&cache, &store, later)
+            .expect("the store reads")
+            .expect("a snapshot");
+        assert!(!Arc::ptr_eq(&first, &rebuilt));
+        assert_eq!(rebuilt.watermark(), radar_types::Slot(10_500));
+    }
+
+    /// The snapshot holds the last day of trades and nothing older.
+    #[test]
+    fn a_snapshot_holds_the_window_behind_its_watermark_and_nothing_older() {
+        assert_eq!(SNAPSHOT_WINDOW_SLOTS, 220_000);
+        let (_dir, store) = store_of(&[
+            market_trade(A_MINT, "2020-01-01 00:00:01.000000", 100),
+            market_trade(A_MINT, "2020-01-03 00:00:01.000000", 400_000),
+        ]);
+        let as_of = AsOf::at(radar_types::Slot(400_100));
+        let snap = Snapshot::build(&store, as_of).expect("the store reads");
+        let slots: Vec<u64> = snap.trades().iter().map(|t| t.slot.get()).collect();
+        assert_eq!(
+            slots,
+            vec![400_000],
+            "the two-day-old row is outside the window"
+        );
+        assert_eq!(
+            snap.newest_ts(),
+            radar_store::to_epoch("2020-01-03 00:00:01").ok()
+        );
+        assert!(!snap.collected(), "no coverage row was written");
+
+        let refreshed = snap.refresh_trades(&store, as_of).expect("the store reads");
+        assert_eq!(refreshed.watermark(), radar_types::Slot(400_100));
+        assert_eq!(refreshed.trades().len(), 1);
+        assert_eq!(refreshed.newest_ts(), snap.newest_ts());
+        assert!(!refreshed.collected());
+    }
+
+    /// One refresher, four ticks: build, skip, trades only, everything.
+    ///
+    /// Each tick is told apart by what it left in the cache, not only by the
+    /// plan it reports: a skip leaves the very same snapshot, a trades-only
+    /// read replaces the snapshot but keeps the very same launch index, and a
+    /// due launch index is a new one.
+    #[test]
+    fn a_refresher_builds_then_skips_then_reads_only_what_moved() {
+        let (dir, store) = store_of(&[market_trade(A_MINT, "2020-01-01 00:00:01.000000", 100)]);
+        let cache = SnapshotCache::with_background_refresh();
+        let mut refresher = Refresher::new();
+        let an_hour = std::time::Duration::from_secs(3_600);
+
+        assert_eq!(
+            refresher.tick(&store, &cache, an_hour),
+            Some(Refresh::Everything)
+        );
+        let first = cache.peek().expect("the first tick builds a snapshot");
+        assert_eq!(first.watermark(), radar_types::Slot(100));
+
+        assert_eq!(refresher.tick(&store, &cache, an_hour), Some(Refresh::Skip));
+        let same = cache.peek().expect("a snapshot");
+        assert!(
+            Arc::ptr_eq(&first, &same),
+            "nothing moved, nothing was replaced"
+        );
+
+        {
+            let mut writer =
+                radar_store::Writer::open(dir.path().to_str().expect("a utf-8 path"), 20_000)
+                    .expect("a writer");
+            writer
+                .append_market_trade(market_trade(A_MINT, "2020-01-01 00:01:01.000000", 200))
+                .expect("a market trade appends");
+            writer.flush().expect("the writer flushes");
+        }
+        assert_eq!(
+            refresher.tick(&store, &cache, an_hour),
+            Some(Refresh::TradesOnly)
+        );
+        let moved = cache.peek().expect("a snapshot");
+        assert_eq!(moved.watermark(), radar_types::Slot(200));
+        assert_eq!(moved.trades().len(), 2);
+        assert!(
+            Arc::ptr_eq(&moved.launches, &first.launches),
+            "a trades-only read reuses the launch index"
+        );
+
+        assert_eq!(
+            refresher.tick(&store, &cache, std::time::Duration::ZERO),
+            Some(Refresh::Everything),
+            "a launch index that is due is rebuilt even though nothing moved"
+        );
+        let rebuilt = cache.peek().expect("a snapshot");
+        assert!(!Arc::ptr_eq(&rebuilt.launches, &first.launches));
+
+        // The rebuild reset the launch clock: with an hour to go, and nothing
+        // moved, the next tick reads nothing.
+        assert_eq!(refresher.tick(&store, &cache, an_hour), Some(Refresh::Skip));
+    }
+
+    #[test]
+    fn a_refresher_over_an_empty_store_builds_nothing() {
+        let dir = tempfile::tempdir().expect("a temporary directory");
+        let store = Reader::open(dir.path().to_str().expect("a utf-8 path"));
+        let cache = SnapshotCache::with_background_refresh();
+        assert_eq!(
+            Refresher::new().tick(&store, &cache, std::time::Duration::ZERO),
+            None
+        );
+        assert!(cache.peek().is_none());
     }
 }
