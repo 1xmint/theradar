@@ -272,7 +272,12 @@ licence-headers:
 # The number is checked against a real run, not estimated: `npm run test` in
 # `web/` reported 95 across 6 files at that commit, and 98 once the live feed's
 # holder captions got their own tests. Raise it from here.
-export MIN_WEB_TESTS := "98"
+#
+# 98 -> 106 on 2026-09-18: `TokenHeader.test.tsx` (2) and `CoinImage.test.tsx`
+# (6) for the coin-names-from-launches feature -- the recorded name/symbol
+# shown with a shortened-mint fallback, the image placeholder, the ipfs://
+# rewrite, and the https-only gate on a creator-supplied image URL.
+export MIN_WEB_TESTS := "106"
 
 # The public site at cabalhunter.org. Lower because it has five pages, and it
 # exists for the same reason MIN_WEB_TESTS does: `vitest run` exits zero when it

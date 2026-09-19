@@ -296,6 +296,7 @@ async fn main() -> ExitCode {
         challenges: radar_serve::siws::domain_from(std::env::var("RADAR_CUSTOMER_DOMAIN").ok())
             .map(radar_serve::challenges::Challenges::new),
         market,
+        launches: radar_serve::cache::Cache::new(),
     });
 
     println!("radar-serve v{}", env!("CARGO_PKG_VERSION"));

@@ -10,8 +10,9 @@
 
 import type { ReactNode } from "react";
 import type { MarketToken } from "./api";
+import { CoinImage } from "./CoinImage";
 import { MarketFigure } from "./Figures";
-import {formatCompactUsd, formatPrice} from "./format";
+import {formatCompactUsd, formatPrice, shortenAddress} from "./format";
 import type { Load } from "./useApi";
 
 export function TokenHeader({ load }: { load: Load<MarketToken> }) {
@@ -43,23 +44,32 @@ function Header({ load }: { load: Load<MarketToken> }) {
 
   return (
     <div>
-      <div className="flex items-baseline justify-between gap-2">
-        <h1 className="truncate text-lg font-semibold">
-          {token.symbol ?? <span className="text-[var(--color-absent)]">unknown</span>}
-        </h1>
-        {/* First seen, not age. The endpoint reports when `solana.tokens`
-            first carried the mint, which is an indexing date and not a launch
-            time -- so the header says "first seen" rather than converting it
-            into an age the server never claimed. */}
-        <span className="text-xs text-[var(--color-dim)]" title="When this mint first appeared in the chain index. Not necessarily its launch.">
-          {token.published_at === null
-            ? "first seen unknown"
-            : `first seen ${token.published_at.slice(0, 10)}`}
-        </span>
+      <div className="flex items-baseline gap-2">
+        <CoinImage uri={token.uri} symbol={token.symbol} className="h-8 w-8 shrink-0 rounded-full" />
+        <div className="min-w-0 flex-1">
+          <div className="flex items-baseline justify-between gap-2">
+            <h1 className="truncate text-lg font-semibold">
+              {/* The symbol when the server knows it -- Radar's own recorded
+                  pump.fun launch -- and the abbreviated mint otherwise, the
+                  same fallback the coin list uses, rather than the word
+                  "unknown" standing in for a name nobody invented. */}
+              {token.symbol ?? shortenAddress(token.mint)}
+            </h1>
+            {/* First seen, not age. The endpoint reports when `solana.tokens`
+                first carried the mint, which is an indexing date and not a launch
+                time -- so the header says "first seen" rather than converting it
+                into an age the server never claimed. */}
+            <span className="text-xs text-[var(--color-dim)]" title="When this mint first appeared in the chain index. Not necessarily its launch.">
+              {token.published_at === null
+                ? "first seen unknown"
+                : `first seen ${token.published_at.slice(0, 10)}`}
+            </span>
+          </div>
+          <p className="truncate text-xs text-[var(--color-dim)]">
+            {token.name ?? shortenAddress(token.mint)}
+          </p>
+        </div>
       </div>
-      <p className="truncate text-xs text-[var(--color-dim)]">
-        {token.name ?? "name unknown"}
-      </p>
 
       <p className="mt-3 text-2xl font-semibold tabular-nums">
         <MarketFigure value={token.price} reason={token.price_reason} format={formatPrice} />
