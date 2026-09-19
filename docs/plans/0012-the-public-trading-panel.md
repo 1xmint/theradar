@@ -497,7 +497,7 @@ signer — ADR 0005, unchanged.
 Apache-2.0 is this repository's own licence, so the only friction is the NOTICE
 attribution, a real obligation landing in the same pull request as a visible
 credit and link. The dependency posture in
-[`PricePath`](../../web/src/PricePath.tsx) — *every dependency is one more thing
+`PricePath` (`web/src/PricePath.tsx`, deleted by #246) — *every dependency is one more thing
 that can be compromised into a process that will eventually hold a signing key* —
 gets an answer rather than a waiver: this runs in the visitor's browser tab, not
 in the signer's process tree, and the alternative is hand-writing candles,
@@ -843,7 +843,7 @@ lands in 9-11-0010 for that reason.
   `/v1/scoreboard` become operator-only.** They are `Audience::Customer` today and
   `RADAR_CUSTOMER_ACCESS=open` hands all four to any stranger with a wallet.
   **Recommendation: yes, and before admission opens.** The cost is real: the
-  honest-scoreboard work in [`Scoreboard`](../../web/src/Scoreboard.tsx) stops
+  honest-scoreboard work in `Scoreboard` (`web/src/Scoreboard.tsx`, deleted by #246) stops
   being visible to anyone, and it is some of the best public argument this project
   has. A *curated* public evidence page is a different artefact from an open
   `/v1/decisions` and can be built later without reopening the route.
