@@ -73,7 +73,7 @@ automated following at every tier, including Enterprise. Both halves of that
 have to be false before this is a design question at all, and neither is.
 
 **The principled objection stands underneath the platform one, and it is worth
-recording because the platform could change.** `forbidden.rs` refuses to let
+recording because the platform could change.** `realorrug:crates/realorrug-roast/src/forbidden.rs` refuses to let
 this account say a coin is "legit", "safe" or "trustworthy". A follow is that
 claim in a stronger and more persistent form: it is an endorsement of a
 *person*, it sits on a public profile indefinitely, and it is made on
@@ -113,7 +113,7 @@ and one of them has never run.
   run. Since plan 0009 item 8 it is a three-post thread: the summary, the
   winner's coin torn down, and the week's best hunters.
 - The **daily** "seven days later" starts 2026-09-13 — but only once
-  `radar-seven-days.timer` is installed. It is not, and without it the first
+  `theradar:deploy/radar-seven-days.timer` is installed. It is not, and without it the first
   one finds no file and posts nothing. That is plan 0009 phase 0.4, and it is a
   root command that is Josh's.
 
@@ -163,7 +163,7 @@ claims should be checked in: a number, from a run, not an argument.
 **The second half carries real risk and is gated on measurement.** "Builds on
 its post when someone replies asking for x, y, z" means a stranger's text
 steers the answer, and today **mention text never reaches the model** — pinned
-end to end by `an_adversarial_mention_cannot_change_the_reply.rs`, which is
+end to end by `realorrug:crates/realorrug-roast/tests/an_adversarial_mention_cannot_change_the_reply.rs`, which is
 finding S10 and is verified rather than assumed.
 
 Plan 0009 item 12 is the safe form of it: `Focus`, a **closed vocabulary**

@@ -84,8 +84,8 @@ pub enum Verified {
 
 /// An append-only, hash-chained journal in one file.
 ///
-/// One JSON object per line, the shape [`radar_analyst::log`] uses and for the
-/// same reason: a crash mid-write loses the last line rather than the file, and
+/// One JSON object per line, the shape the reply log
+/// (`realorrug_analyst::log`) uses and for the same reason: a crash mid-write loses the last line rather than the file, and
 /// a partial line is detectably partial.
 pub struct Journal {
     path: PathBuf,

@@ -63,7 +63,7 @@ journalctl -u radar-analyst -n 5
 ```
 
 `may_publish` requires the exact word `on`
-([`daemon.rs:254`](../crates/radar-analyst/src/daemon.rs)), so a commented-out
+([`daemon.rs:254`](https://github.com/1xmint/realorrug/blob/main/crates/realorrug-analyst/src/daemon.rs)), so a commented-out
 line is silence. Reading continues, so the reply log keeps filling — which is the
 launch gate being satisfied for free: the first hundred replies read beside their
 fact sheets, which we wanted before publishing anyway.
@@ -78,7 +78,7 @@ there — and a reviewer checks the profile first.
 > address. Operated by @1xmint_. Measured, not predicted. Not financial advice.
 
 Also: "No mercy" is a verdict, and this account's rule — enforced in code by
-[`forbidden.rs`](../crates/radar-roast/src/forbidden.rs) — is that it publishes
+[`realorrug:crates/realorrug-roast/src/forbidden.rs`](https://github.com/1xmint/realorrug/blob/main/crates/realorrug-roast/src/forbidden.rs) — is that it publishes
 measurements and never verdicts. A bio that breaks the rule the replies are held
 to is the first thing an adversarial reader points at.
 
@@ -250,7 +250,7 @@ Happy to show sample replies with the fact sheets they were generated from.
   satisfied while you wait.
 - If a reviewer asks for the keyword opt-out, it is a small change: the gate
   already carries an ignore list
-  ([`admission.rs`](../crates/radar-analyst/src/admission.rs)); it needs
+  ([`admission.rs`](https://github.com/1xmint/realorrug/blob/main/crates/realorrug-analyst/src/admission.rs)); it needs
   persisting and a word to look for.
 - If a reviewer objects to the two scheduled posts, they are behind the same
   switch as everything else and can be left off on their own.

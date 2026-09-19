@@ -44,13 +44,15 @@ ProtectHome=read-only
 # refused the write anyway, because of a sandbox the process cannot see from its
 # own metadata (LEARNINGS 32).
 #
-# **This grant has to match `radar-analyst.service`'s for the same path**, and
-# that coupling is the reason it is written out rather than widened to
-# `.../data`. The probe runs in *this* unit's sandbox and is read as an answer
-# about the *analyst's*; where the two grants disagree, the probe answers a
-# question nobody asked. Without it the check reports "cannot be written" on a
-# perfectly healthy box -- the same false alarm this file's WorkingDirectory
-# note describes, arriving by a second route.
+# **This grant has to match whatever unit the bot itself installs for the same
+# path.** Since ADR-0024, that unit lives in realorrug's own `deploy/` — a
+# different systemd unit on the same box — and this repository's deploy guide
+# can no longer assert authoritatively what grant it gives. The probe runs in
+# *this* unit's sandbox and is read as an answer about the bot's; where the two
+# grants disagree, the probe answers a question nobody asked. Without it the
+# check reports "cannot be written" on a perfectly healthy box -- the same
+# false alarm this file's WorkingDirectory note describes, arriving by a
+# second route.
 ReadWritePaths=/home/guardian/radar/data/contest
 ProtectKernelTunables=true
 ProtectKernelModules=true

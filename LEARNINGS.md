@@ -1520,8 +1520,9 @@ cheapest check that does not depend on remembering.
 
 ## 32. The sandbox made the contest impossible to close, and it took six days to show
 
-`deploy/radar-analyst.service` grants `ProtectSystem=strict` with one
-`ReadWritePaths` entry:
+`realorrug:deploy/realorrug-analyst.service` (deploy/radar-analyst.service at
+the time; moved there on 2026-09-14 when the bot left for its own repository)
+granted `ProtectSystem=strict` with one `ReadWritePaths` entry:
 
 ```
 ReadWritePaths=/home/guardian/radar/data/analyst

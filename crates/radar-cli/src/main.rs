@@ -11,12 +11,10 @@ use std::process::ExitCode;
 
 use radar_asof::AsOf;
 use radar_instruments::{Context, CreatorHistory, CreatorTrackRecord, Registry, SimulateExit};
-mod analyst;
 mod audit;
 mod basis;
 mod brief;
 mod consider;
-mod contest;
 mod control;
 mod cost;
 mod dossier;
@@ -26,11 +24,9 @@ mod features;
 mod graduations;
 mod model_prices;
 mod replay;
-mod roast;
 mod route;
 mod selection;
 mod session;
-mod seven_days;
 mod study;
 
 use radar_sim::{JupiterQuoter, RpcClient};
@@ -121,18 +117,6 @@ commands:
                                  the store cannot: it is minutes behind by design
                                  and holds the launch-block verdict rather than
                                  the number. Read-only, holds no key
-  roast <mint> [--rpc URL] [--rates PATH] [--sheet]
-                                 the reply the public analyst would post, built
-                                 from the dossier and the published base rates.
-                                 The model picks the headline and the tone; a
-                                 check after generation refuses any number that
-                                 is not on the fact sheet, and the deterministic
-                                 template ships instead. Prints; never posts
-  analyst --mentions <file.jsonl> [--log <file>]
-                                 the whole summoned-reply loop over mentions
-                                 from a file: strict parse, admission gate,
-                                 dossier, reply, log. Dry run -- it holds no
-                                 credential and posts nothing
   model-prices <model> [--check] | --list
                                  what to paste into analyst.env for a model,
                                  read from models.dev rather than typed. The
@@ -848,7 +832,8 @@ fn event_study(args: &[String]) -> Result<(), String> {
 /// A message when the store cannot be read or the file cannot be written.
 fn creator_index(args: &[String]) -> Result<(), String> {
     let reader = store_of(args)?;
-    let out = flag(args, "--out").unwrap_or_else(|| radar_roast::creator::DEFAULT_PATH.to_owned());
+    let out =
+        flag(args, "--out").unwrap_or_else(|| radar_research::creator::DEFAULT_PATH.to_owned());
 
     let watermark = reader
         .watermark()
@@ -896,11 +881,7 @@ fn main() -> ExitCode {
         "edge" => edge::run(&args),
         "study" => event_study(&args),
         "creator-index" => creator_index(&args),
-        "seven-days-later" => seven_days::run(&args),
-        "contest" => contest::run(&args),
         "dossier" => dossier::run(&args),
-        "roast" => roast::run(&args),
-        "analyst" => analyst::run(&args),
         "audit" => audit::run(&args),
         "model-prices" => model_prices::run(&args),
         "selection" => selection_report(&args),

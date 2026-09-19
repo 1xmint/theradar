@@ -44,7 +44,7 @@ time.
       `/v1/public/leaderboard`, `/v1/public/pool`, added to `Audience::Public`
       by exact path, CORS for the site's origin only. The leaderboard reads item
       1's ledger; the pool says no token exists rather than `0.00` (rule 9).
-      done: `crates/radar-serve/src/public.rs`, nine tests over absent and
+      done: `realorrug:crates/realorrug-serve/src/public.rs`, nine tests over absent and
       present files; the access table and the router-level guard test carry
       the three paths and refuse a fourth; `cargo test` green on radar-types,
       radar-roast, radar-contest, radar-cli, radar-serve; clippy clean;
@@ -88,7 +88,7 @@ time.
       counted *replies*, so thirty mentions with unreadable mints, or thirty
       while the publisher was down, were thirty dossiers and no refusal. The
       cap is now charged on admission; the global cap still on sending. The
-      three cases are in `crates/radar-analyst/tests/one_poll_end_to_end.rs`
+      three cases are in `realorrug:crates/realorrug-analyst/tests/one_poll_end_to_end.rs`
       with a chain that counts its requests; each re-applied bug fails its
       test (see the commit)
 - [x] 5. **M5 — the Telegram publisher and source**, testable in dry run: an
@@ -96,7 +96,7 @@ time.
       gate and fact path; not a contest entry and not in the record.
       gate: the daemon's posture line names the state; a fake platform drives
       one poll end to end
-      done: 2026-09-05, `feat/telegram-lane`. `crates/radar-analyst/src/telegram.rs`
+      done: 2026-09-05, `feat/telegram-lane`. `realorrug:crates/realorrug-analyst/src/telegram.rs`
       — `getUpdates` parsed into the same `Mention` (ids `chat:message`, summoners
       `tg:<id>`), a `Publisher` that replies into the chat, its own caps
       (`RADAR_TELEGRAM_*`, unset = refuse), its own switch, its own log file
@@ -111,14 +111,14 @@ time.
       log is younger than seven days. The week-close job writes item 1's ledger.
       gate: both posts pass the fidelity and forbidden checks on real log lines
       done: 2026-09-05, `feat/weekly-and-daily-posts`. Three modules in
-      `radar-analyst`: `contest.rs` closes the week — public metrics and
+      `radar-analyst`: `realorrug:crates/realorrug-analyst/src/contest.rs` closes the week — public metrics and
       account ages read from X, refusals from a new `refusals.jsonl` the gate
       now writes, the cooldown from earlier records, the rule applied, the
-      record and the hunter tally written atomically; `weekly.rs` renders the
+      record and the hunter tally written atomically; `realorrug:crates/realorrug-analyst/src/weekly.rs` renders the
       result under 280 characters with every numeral authorised and the
-      winner's coin torn down as the reply; `daily.rs` renders and posts the
+      winner's coin torn down as the reply; `realorrug:crates/realorrug-analyst/src/daily.rs` renders and posts the
       rows `radar seven-days-later` (new, in `radar-cli`, on
-      `deploy/radar-seven-days.timer`) writes from the store — the join the
+      `theradar:deploy/radar-seven-days.timer`) writes from the store — the join the
       analyst may not make. `Publisher::post` on every publisher, priced as
       `RADAR_X_PRICE_POST`. Both posts pass the two checks in tests that
       re-apply a dropped authorisation; a post that fails is recorded and not

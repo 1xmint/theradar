@@ -211,6 +211,26 @@ export function safeHref(url: string, hosts: readonly string[]): string | null {
 }
 
 /**
+ * The repository this site is built from.
+ *
+ * A constant rather than a literal in a component, because of the rule directly
+ * above: if a link is not made in this file, it is not made. These three are
+ * the only fixed destinations the site knows — every other URL is derived from
+ * a document `/v1/public/*` served, and derived by a function that can refuse.
+ *
+ * They are also the whole of the operator's published contact surface. There is
+ * **no email address anywhere in this repository**, which is why `/contact`
+ * says so rather than inventing one.
+ */
+export const SOURCE = "https://github.com/hey-vera/radar";
+
+/** Where to report something wrong with the site or a number on it. */
+export const ISSUES = `${SOURCE}/issues`;
+
+/** Where to report a vulnerability privately. `SECURITY.md` names this form. */
+export const ADVISORY = `${SOURCE}/security/advisories/new`;
+
+/**
  * A link to an X account from its handle, or `null`.
  *
  * X's own rule: 1–15 characters, letters, digits and underscore. A 16th

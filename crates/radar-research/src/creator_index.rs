@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
-//! Building the creator index the public analyst reads.
+//! Building the creator index.
 //!
 //! The **writing** half. The type and the lookup live in
-//! [`radar_roast::creator`], because the analyst reads it and must not depend on
+//! [`crate::creator`], because a public-facing reader must not depend on
 //! the store to do so; this reads both tables in full, which is precisely the
-//! operation the index exists to stop happening per mention.
+//! operation the index exists to stop happening per lookup.
 //!
 //! Run on a timer, the way the base rates are.
 //!
@@ -26,11 +26,12 @@
 //! record until ADR 0012.
 
 use radar_asof::AsOf;
-use radar_roast::creator::{CreatorIndex, Population, Record};
 use radar_store::{Event, Outcome, Reader, StoreError, Table};
 use radar_types::Address;
 
 use std::collections::BTreeMap;
+
+use crate::creator::{CreatorIndex, Population, Record};
 
 /// Builds the index from a store.
 ///

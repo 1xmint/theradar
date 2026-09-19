@@ -536,7 +536,26 @@ nothing has ever tested.
 
 ## The public analyst, as of 2026-09-06
 
-**Live.** `radar-analyst` runs on the box under `deploy/radar-analyst.service`,
+**Moved out on 2026-09-14.** The `radar-analyst`, `radar-roast`, `radar-contest`
+and `radar-payout` crates described below, and `radar-serve`'s public routes,
+no longer live in this repository — they moved to
+[1xmint/realorrug](https://github.com/1xmint/realorrug) (that repository's
+"the bot stands alone" decision, ADR-0024), renamed with a `realorrug-`
+prefix. What follows is the status as it stood the day before the move; read
+it as history, and read realorrug's own `docs/STATE.md` for what is current
+there. Two files stayed behind: `creator.rs` and `baserates.rs`, now under
+`crates/radar-research/src/`.
+
+**Radar stopped reading the bot's files on 2026-09-15** (1xmint/realorrug's
+ADR-0026: neither repository reads the other's files). Gone from here: the
+brief's `analyst`, `contest` and `vault` lines, `radar seven-days-later` and
+its timer, and `radar-backfill --analyst-dir` with its seven-day checkpoint for
+the bot's mints, which now settle at a day like every other token. The
+reply-log reader those three shared went with them. The history below still
+names them.
+
+**Live, at the time.** `radar-analyst` ran on the box under
+`realorrug:deploy/realorrug-analyst.service`,
 polls mentions, answers them, meters what it spends and logs every reply beside
 the fact sheet it was built from. The account is
 [@thecabalhunter](https://x.com/thecabalhunter) and it has posted publicly.
@@ -616,7 +635,7 @@ by re-applying the bug it prevents:
   because the cap counted replies and none of those was one. The account's
   global cap is still charged on sending, so a publisher outage cannot spend
   it. Found by the 30-mention burst case in
-  `crates/radar-analyst/tests/one_poll_end_to_end.rs`, which now runs against
+  `realorrug:crates/realorrug-analyst/tests/one_poll_end_to_end.rs`, which now ran against
   a chain that counts its requests.
 
 **Every reply carries its refusal-signal count, as of 2026-09-05** (design
@@ -655,7 +674,7 @@ where `fidelity::check` would then bin an otherwise good reply. "Under a hundred
 characters" is spelled out in words for exactly that reason.
 
 **The Telegram lane exists, as of 2026-09-05** (design 0009 L5, M5; plan 0006
-item 5). `crates/radar-analyst/src/telegram.rs`: `getUpdates` polled in the same
+item 5). `realorrug:crates/realorrug-analyst/src/telegram.rs`: `getUpdates` polled in the same
 loop as X, each text message through the same parser, an admission gate of the
 same shape with its own caps, the same fact path and the same two checks; the
 reply goes back to the chat the question was in. Rule 8 twice: no
@@ -669,7 +688,7 @@ not run the analyst.
 
 **The week closes and the account has two appointments, as of 2026-09-05**
 (design 0009 §7, M2, M4; plan 0006 item 6). On the first tick after Monday
-00:00 UTC, `contest.rs` reads the closed week's published replies from the
+00:00 UTC, `realorrug:crates/realorrug-analyst/src/contest.rs` read the closed week's published replies from the
 log, their public metrics and the entrants' account ages from X, the week's
 refusals from `refusals.jsonl` — which the gate now writes — and earlier
 records for the cooldown, applies the published rule, and writes
@@ -687,11 +706,11 @@ Each refusal line carries a `RefusalKind`; a line written before they were
 recorded has none and is counted the old way, and there are no such lines on the
 box. The gate's ignore list also held the literal `radar` rather than the bot's
 numeric id — a value no `author_id` can equal, so the one entry it exists for
-was never in it. Then `weekly.rs` posts the result under 280 characters — counts, the top
+was never in it. Then `realorrug:crates/realorrug-analyst/src/weekly.rs` posted the result under 280 characters — counts, the top
 reply's score and URL, the pool in SOL, never a price, never a handle — with
 the winning coin's fact sheet as the reply, every numeral on an authorised
 list the same fidelity and forbidden checks read. Daily at 12:00 UTC,
-`daily.rs` posts "seven days later" from a file `radar seven-days-later`
+`realorrug:crates/realorrug-analyst/src/daily.rs` posted "seven days later" from a file `radar seven-days-later`
 writes on a timer: the join of week-old replies against the store's outcomes,
 which the daemon is not allowed to make itself. Both go to X, priced as a
 top-level post (`RADAR_X_PRICE_POST`, the fifth required price), and to a

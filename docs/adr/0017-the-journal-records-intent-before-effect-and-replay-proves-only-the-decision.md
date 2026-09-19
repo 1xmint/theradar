@@ -3,10 +3,13 @@
 
 **Date:** 2026-09-07
 **Status:** accepted, and **not yet implemented**. The reply log it extends
-ships today in
-[`crates/radar-analyst/src/log.rs`](../../crates/radar-analyst/src/log.rs); the
-journal, outbox and `radar audit` commands are item 4 of
-[plan 0010](../plans/0010-radar-actualization.md).
+shipped in this repository's `radar-analyst` crate at the time this was
+written; that crate moved to
+[1xmint/realorrug](https://github.com/1xmint/realorrug) on 2026-09-14 as
+[`realorrug:crates/realorrug-analyst/src/log.rs`](https://github.com/1xmint/realorrug/blob/main/crates/realorrug-analyst/src/log.rs).
+The journal, outbox and `radar audit` commands are item 4 of
+[plan 0010](../plans/0010-radar-actualization.md), and `radar-journal` (this
+repository) and `radar audit` are built and unaffected by that move.
 **Decides:** what the autonomous surface must write down, in what order relative
 to the effect it is writing about, and what a replay is entitled to claim.
 **Extends:** the analyst's append-only JSONL log, which keeps its shape and its
@@ -15,7 +18,8 @@ reason.
 ## Context
 
 Radar is about to run a money-bearing loop with no human in it: mentions in,
-receipts published, a weekly winner selected, a payout signed. `log.rs` already
+receipts published, a weekly winner selected, a payout signed.
+`realorrug:crates/realorrug-analyst/src/log.rs` already
 records what was asked, what was measured and what was said, and its rationale
 is exactly right — the log is what turns a public mistake into a correction
 rather than an argument.

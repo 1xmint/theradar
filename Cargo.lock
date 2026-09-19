@@ -369,12 +369,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "cmov"
-version = "0.5.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0c9ea0ac24bc397ab3c98583a3c9ba74fa56b09a4449bbe172b9b1ddb016027a"
-
-[[package]]
 name = "const-oid"
 version = "0.10.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -466,15 +460,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "ctutils"
-version = "0.4.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7d5515a3834141de9eafb9717ad39eea8247b5674e6066c404e8c4b365d2a29e"
-dependencies = [
- "cmov",
-]
-
-[[package]]
 name = "curve25519-dalek"
 version = "5.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -516,7 +501,6 @@ dependencies = [
  "block-buffer",
  "const-oid",
  "crypto-common",
- "ctutils",
 ]
 
 [[package]]
@@ -704,15 +688,6 @@ name = "hashbrown"
 version = "0.17.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ed5909b6e89a2db4456e54cd5f673791d7eca6732202bbf2a9cc504fe2f9b84a"
-
-[[package]]
-name = "hmac"
-version = "0.13.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6303bc9732ae41b04cb554b844a762b4115a61bfaa81e3e83050991eeb56863f"
-dependencies = [
- "digest",
-]
 
 [[package]]
 name = "http"
@@ -1275,27 +1250,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "radar-analyst"
-version = "0.0.1"
-dependencies = [
- "base64",
- "hmac",
- "radar-contest",
- "radar-journal",
- "radar-model",
- "radar-onchain",
- "radar-provider",
- "radar-roast",
- "radar-types",
- "rand",
- "serde",
- "serde_json",
- "sha1",
- "thiserror",
- "ureq",
-]
-
-[[package]]
 name = "radar-asof"
 version = "0.0.1"
 dependencies = [
@@ -1309,7 +1263,6 @@ name = "radar-backfill"
 version = "0.0.1"
 dependencies = [
  "bs58",
- "radar-analyst",
  "radar-asof",
  "radar-decode",
  "radar-graph",
@@ -1325,10 +1278,8 @@ dependencies = [
 name = "radar-cli"
 version = "0.0.1"
 dependencies = [
- "radar-analyst",
  "radar-asof",
  "radar-backfill",
- "radar-contest",
  "radar-decode",
  "radar-exec",
  "radar-graph",
@@ -1336,11 +1287,8 @@ dependencies = [
  "radar-journal",
  "radar-model",
  "radar-onchain",
- "radar-payout",
- "radar-pumpfun",
  "radar-research",
  "radar-risk",
- "radar-roast",
  "radar-sim",
  "radar-store",
  "radar-strategy",
@@ -1348,14 +1296,6 @@ dependencies = [
  "serde_json",
  "tempfile",
  "ureq",
-]
-
-[[package]]
-name = "radar-contest"
-version = "0.0.1"
-dependencies = [
- "serde",
- "serde_json",
 ]
 
 [[package]]
@@ -1463,23 +1403,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "radar-payout"
-version = "0.0.1"
-dependencies = [
- "base64",
- "bs58",
- "ed25519-dalek",
- "radar-contest",
- "radar-decode",
- "radar-pumpfun",
- "radar-types",
- "serde",
- "serde_json",
- "thiserror",
- "ureq",
-]
-
-[[package]]
 name = "radar-provider"
 version = "0.0.1"
 dependencies = [
@@ -1512,7 +1435,6 @@ dependencies = [
  "parquet",
  "radar-asof",
  "radar-risk",
- "radar-roast",
  "radar-store",
  "radar-strategy",
  "radar-types",
@@ -1534,20 +1456,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "radar-roast"
-version = "0.0.1"
-dependencies = [
- "radar-agent",
- "radar-model",
- "radar-onchain",
- "radar-types",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror",
-]
-
-[[package]]
 name = "radar-serve"
 version = "0.0.1"
 dependencies = [
@@ -1555,15 +1463,13 @@ dependencies = [
  "futures-util",
  "http-body-util",
  "radar-agent",
- "radar-analyst",
  "radar-asof",
- "radar-contest",
+ "radar-backfill",
  "radar-customer",
  "radar-instruments",
  "radar-model",
  "radar-research",
  "radar-risk",
- "radar-roast",
  "radar-store",
  "radar-types",
  "ring",
@@ -1805,9 +1711,9 @@ dependencies = [
 
 [[package]]
 name = "rustls"
-version = "0.23.43"
+version = "0.23.45"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0283386ce02abc0151e1761d08802dfe86c173b0b494af5cbc086574e453da06"
+checksum = "0d41d731c7d2f962d1ccc364cec258de3c0e93b38c2fb3ba97ac74513048d634"
 dependencies = [
  "log",
  "once_cell",
@@ -1974,17 +1880,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "sha1"
-version = "0.11.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "aacc4cc499359472b4abe1bf11d0b12e688af9a805fa5e3016f9a386dc2d0214"
-dependencies = [
- "cfg-if",
- "cpufeatures",
- "digest",
-]
-
-[[package]]
 name = "sha2"
 version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2087,7 +1982,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.4.3",
+ "getrandom 0.3.4",
  "once_cell",
  "rustix",
  "windows-sys 0.61.2",

@@ -149,18 +149,18 @@ Source inspection gives a narrower starting point than “the machinery exists.�
 | Asset | Present capability | Missing work relevant to selling it |
 |---|---|---|
 | [On-chain dossier](../../crates/radar-onchain/src/dossier.rs), [budget](../../crates/radar-onchain/src/budget.rs) | Launch/creator/curve evidence with bounded lookup, unavailable facts and partial counts. Default budget: 60 RPC calls, three signature pages, 20 seconds. These are ceilings, not a latency guarantee. | Customer case workflow, saved captures, entitlement and task settlement; a mint outside coverage must produce a bounded partial answer. |
-| [Creator index](../../crates/radar-research/src/creator_index.rs), [dated base rates](data/0024-base-rates.json), [fact sheet](../../crates/radar-roast/src/sheet.rs) | Shared history and dated population context; typed facts and vetted rendering assets. | Freshness ownership, capture retention and evidence dependencies across private cases. Index production consumes shared compute even when each lookup is cheap. |
+| [Creator index](../../crates/radar-research/src/creator_index.rs), [dated base rates](data/0024-base-rates.json), [fact sheet](https://github.com/1xmint/realorrug/blob/main/crates/realorrug-roast/src/sheet.rs) | Shared history and dated population context; typed facts and vetted rendering assets. | Freshness ownership, capture retention and evidence dependencies across private cases. Index production consumes shared compute even when each lookup is cheap. |
 | [Chat](../../crates/radar-serve/src/chat.rs), [evidence gathering](../../crates/radar-serve/src/evidence.rs) | Reading assistant over evidence gathered before the model call. Address extraction invokes creator-history instruments. | Mint-aware investigation, follow-up tools, multi-step evidence selection and contradiction handling. Today's chat explicitly cannot request more evidence; its output is unparsed prose. |
 | [Model ledger](../../crates/radar-serve/src/ledger.rs), [customer shares](../../crates/radar-serve/src/share.rs) | Model spend reservation/persistence and per-customer daily question counts. | Purchased credit balances, payment reconciliation, per-job holds/debits/refunds, concurrent consumption and customer receipts. A question quota is not a prepaid balance. |
 | [Feature builder](../../crates/radar-research/src/features.rs), [edge harness](../../crates/radar-research/src/edge.rs), [coverage records](../../crates/radar-store/src/coverage.rs) | Point-in-time features, population-based folds and missing-label reasons; an instrument for evaluating hypotheses. | STATE reports no production edge run and no production writer for trade coverage. The empty trades table is a 2026-09-06 observation. Declared coverage is not measured coverage. |
 
 Two source discrepancies affect this recommendation. GOAL's statement that there
-is no X data is stale: [the X client](../../crates/radar-analyst/src/x.rs) reads
+is no X data is stale: [the X client](https://github.com/1xmint/realorrug/blob/main/crates/realorrug-analyst/src/x.rs) reads
 mentions and STATE reports the public analyst live since 2026-09-06. That does
 not establish broad social research, bot identification or community quality.
 Also, design 0016's “model spend is the only materially variable cost” is too
 narrow for its proposed assistant: the
-[analyst spend model](../../crates/radar-analyst/src/spend.rs) already prices
+[analyst spend model](https://github.com/1xmint/realorrug/blob/main/crates/realorrug-analyst/src/spend.rs) already prices
 several external actions. New data acquisition, retention and monitoring add
 cost beyond tokens. [Instrument prices](../../crates/radar-instruments/src/spec.rs)
 are declared estimates, not reconciled provider bills.

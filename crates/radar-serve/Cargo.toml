@@ -18,6 +18,10 @@ axum = { version = "0.8", default-features = false, features = ["http1", "json",
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
 radar-agent.workspace = true
 radar-asof.workspace = true
+# The CryptoHouse client and its window-halving fetch strategy, for the public
+# market-data seam in `market`. Already a dependency of `radar-backfill`
+# itself; reused here rather than a second client for the same endpoint.
+radar-backfill.workspace = true
 radar-customer.workspace = true
 radar-model.workspace = true
 radar-instruments.workspace = true
@@ -27,14 +31,6 @@ ring = { version = "0.17", default-features = false }
 thiserror.workspace = true
 rust-embed = { version = "8", default-features = false }
 radar-store.workspace = true
-# The reply log's type and its fold. Read-only here: this server does not run
-# the analyst, it shows what the analyst wrote.
-radar-analyst.workspace = true
-# The contest ledger the public leaderboard and pool read, and the base-rate
-# snapshot and population summary the public stats document is built from.
-# Read-only here, like the reply log.
-radar-contest.workspace = true
-radar-roast.workspace = true
 radar-types.workspace = true
 serde.workspace = true
 serde_json.workspace = true

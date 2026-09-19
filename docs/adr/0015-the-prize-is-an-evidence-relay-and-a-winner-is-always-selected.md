@@ -3,10 +3,12 @@
 
 **Date:** 2026-09-07
 **Status:** accepted, and **not yet implemented**. This is Josh's decision,
-recorded. The code it describes lives in
-[`crates/radar-contest`](../../crates/radar-contest) and
-[`crates/radar-analyst`](../../crates/radar-analyst) and still implements the
-rule this ADR supersedes; the branches that change it are items 6 and 7 of
+recorded. The code it describes lived in this repository's `radar-contest` and
+`radar-analyst` crates at the time this was written; both moved to
+[1xmint/realorrug](https://github.com/1xmint/realorrug) on 2026-09-14 as
+`realorrug-contest` and `realorrug-analyst` (that repository's ADR-0024,
+"the bot stands alone"), and still implement the rule this ADR supersedes
+there; the branches that change it are items 6 and 7 of
 [plan 0010](../plans/0010-radar-actualization.md).
 **Decides:** what a contest entry is, how a week is scored when the engagement
 data are incomplete, and what happens when no evidence arrives at all.
@@ -29,10 +31,10 @@ Every summoned reply is an entry; the score is
 (design 0007 §6.2). So the
 entrant's contribution is asking, and everything after that is the bot's
 audience rather than the entrant's reach. Worse, the week-close walk stops early
-([`scan_ranking`](../../crates/radar-analyst/src/contest.rs)), and an entry the
-walk never reached keeps `verified: None`, which
-[`Metrics::score`](../../crates/radar-contest/src/score.rs) resolves to the
-**raw** score. A week that hits a meter refusal or a read error therefore ranks
+([`scan_ranking`](https://github.com/1xmint/realorrug/blob/main/crates/realorrug-analyst/src/contest.rs)),
+and an entry the walk never reached keeps `verified: None`, which
+[`Metrics::score`](https://github.com/1xmint/realorrug/blob/main/crates/realorrug-contest/src/score.rs)
+resolves to the **raw** score. A week that hits a meter refusal or a read error therefore ranks
 some entries by distinct accounts and others by raw counts, in the same list.
 That inequality is documented and it is real — but a ranking is not sound
 because its units are ordered, it is sound because they are the same unit.
@@ -50,8 +52,8 @@ independence.** An attacker with aged accounts produces the same observable
 inputs as an audience. A deterministic function must treat identical inputs
 identically; a model cannot recover identity evidence that was never
 observable. The current `min_account_age_days` floor and
-[`Excluded::AccountAgeUnknown`](../../crates/radar-contest/src/score.rs) do not
-change that — they price a farm at a few dollars and make a lookup failure
+[`Excluded::AccountAgeUnknown`](https://github.com/1xmint/realorrug/blob/main/crates/realorrug-contest/src/score.rs)
+do not change that — they price a farm at a few dollars and make a lookup failure
 decide a real entrant's week.
 
 ## Decision
@@ -140,8 +142,9 @@ real cost of guaranteed selection under unavailable evidence. The response is to
 **measure how often each mode fires** and publish it, not to add a secret veto.
 
 **Selecting a winner is not paying one.** A certificate is inert data. The
-existing deterministic payout policy in
-[`crates/radar-payout`](../../crates/radar-payout) separately establishes a
+existing deterministic payout policy, now in
+[`realorrug-payout`](https://github.com/1xmint/realorrug/tree/main/crates/realorrug-payout),
+separately establishes a
 permitted week, a valid claim, an eligible jurisdiction configuration, the
 destination, available earmarked fees, the reserve floor, replay protection and
 the absence of a prior payout. A selected winner with no valid claim stays

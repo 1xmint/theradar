@@ -32,7 +32,7 @@ The bio is already load-bearing and is the *only* place two things can appear:
 - **The automation disclosure.** X policy requires an automated account to say
   it is automated and who runs it. Design 0007 B7 gates going live on it. A
   process that rewrites the bio can drop it, and nothing would notice.
-- **The site's name and the account's own handle.** `forbidden.rs` refuses
+- **The site's name and the account's own handle.** `realorrug:crates/realorrug-roast/src/forbidden.rs` refuses
   "cabal", so no *post* can carry `cabalhunter.org` or `@thecabalhunter`
   (plan 0008 Q3 chose this rather than adding an exemption path). The bio is
   the workaround. Overwriting it automatically puts that at risk too.
@@ -58,7 +58,7 @@ line is a second, cheaper channel for the same failure.
 
 **This is the one to think hardest about, and the constraint is not technical.**
 
-`forbidden.rs` refuses to let this account say a coin is "legit", "safe" or
+`realorrug:crates/realorrug-roast/src/forbidden.rs` refuses to let this account say a coin is "legit", "safe" or
 "trustworthy". **A follow is that claim in a stronger and more persistent
 form** — it is an endorsement of a *person*, it sits on a public profile
 indefinitely, and it is made on statistical evidence.
@@ -87,7 +87,7 @@ and it is Josh's to make rather than a planner's — it changes what the product
 them is sharper than it first looks.**
 
 The account already posts without being asked: the weekly result and the daily
-"seven days later" both do (`weekly.rs`, `daily.rs`). So "never posts unprompted"
+"seven days later" both do (`realorrug:crates/realorrug-analyst/src/weekly.rs`, `realorrug:crates/realorrug-analyst/src/daily.rs`). So "never posts unprompted"
 is not the rule.
 
 The rule that *is* published, on the home page and in About:
@@ -131,7 +131,7 @@ someone replies asking for x, y, z" means a stranger's text steers the answer.
 
 Today **mention text never reaches the model.** The sheet goes in; the mention
 does not. That is pinned end to end by
-`an_adversarial_mention_cannot_change_the_reply.rs`, and it is finding S10 —
+`realorrug:crates/realorrug-roast/tests/an_adversarial_mention_cannot_change_the_reply.rs`, and it is finding S10 —
 verified, not assumed. A conversational follow-up is the first case where user
 text would influence what gets said, which is rule 4 territory.
 
