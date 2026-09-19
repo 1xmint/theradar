@@ -1730,6 +1730,129 @@ fn a_partition_starting_at_the_watermark_is_read_not_skipped() {
     );
 }
 
+/// `read_market_trades_range` skips a whole partition before `from` without
+/// opening it.
+///
+/// The trap is an old partition -- the OLD end of the store, not the far end
+/// `the_partition_guard_skips_files_without_opening_them` uses for the trades
+/// table -- because a ranged snapshot read is the one that must not touch
+/// history it does not need: skipping it is what turns "read the last day of
+/// trades" into a read of one file instead of 1,750.
+///
+/// Re-apply by turning the `end < f` guard into `end <= f` (drops the
+/// boundary partition) or by deleting the guard entirely (the corrupt file
+/// gets opened and the read fails with an error instead of the right rows).
+#[test]
+fn a_ranged_read_skips_a_partition_before_from_without_opening_it() {
+    let boundary = SLOTS_PER_PARTITION;
+    let dir = tempfile::tempdir().expect("tempdir");
+    let mut w = Writer::open(dir.path(), 1_000).expect("open");
+    // The one row inside the requested range: partition 2, well after `from`.
+    w.append_market_trade(market_trade(1, boundary * 2, true))
+        .expect("append");
+    w.flush().expect("flush");
+
+    // A corrupt file standing in for partition 0, entirely before `from`. A
+    // read that opens it fails; a read that prunes it by name cannot.
+    std::fs::write(
+        dir.path()
+            .join(Table::MarketTrades.dir())
+            .join(format!("slot_{:012}_g0000.parquet", 0)),
+        b"this is not a parquet file",
+    )
+    .expect("write the trap");
+
+    let r = Reader::open(dir.path());
+    let as_of = AsOf::at(Slot(boundary * 10));
+
+    let got = r
+        .read_market_trades_range(as_of, Some(Slot(boundary * 2)))
+        .expect("a ranged read never opens a partition wholly before `from`");
+    assert_eq!(got.len(), 1, "only the in-range row comes back: {got:?}");
+
+    // And the trap is real: an unbounded read over the same store does fail,
+    // so the assertion above is not passing against a store with nothing to
+    // skip.
+    assert!(
+        r.read_market_trades(as_of).is_err(),
+        "the trap file is not readable, so pruning it is what made the ranged read succeed"
+    );
+}
+
+/// A ranged read returns exactly the unbounded read's rows within `[from, ..]`,
+/// in the same order.
+///
+/// This is the correctness half of the pruning test above: pruning must not
+/// change *which* rows come back or how they are ordered, only how many files
+/// get opened to produce them.
+#[test]
+fn a_ranged_read_matches_the_unbounded_read_filtered_to_the_same_range() {
+    let boundary = SLOTS_PER_PARTITION;
+    let dir = tempfile::tempdir().expect("tempdir");
+    let mut w = Writer::open(dir.path(), 1_000).expect("open");
+    let slots = [5u64, boundary - 1, boundary, boundary + 5, boundary * 3];
+    let mints = [1u8, 2, 3, 4, 5];
+    for (mint_id, slot) in mints.iter().zip(slots.iter()) {
+        // Distinct mints so ties in the sort key are exercised too.
+        w.append_market_trade(market_trade(*mint_id, *slot, true))
+            .expect("append");
+    }
+    w.flush().expect("flush");
+
+    let r = Reader::open(dir.path());
+    let as_of = AsOf::at(Slot(boundary * 10));
+    let from = Slot(boundary);
+
+    let unbounded: Vec<MarketTrade> = r
+        .read_market_trades(as_of)
+        .expect("unbounded read")
+        .into_iter()
+        .filter(|t| t.slot >= from)
+        .collect();
+    let ranged = r
+        .read_market_trades_range(as_of, Some(from))
+        .expect("ranged read");
+
+    assert_eq!(
+        ranged, unbounded,
+        "same rows, same order, whether filtered after or pruned before"
+    );
+    assert_eq!(
+        ranged.len(),
+        3,
+        "boundary, boundary+5 and boundary*3 qualify"
+    );
+}
+
+/// The partition straddling `from` is still read, not pruned.
+///
+/// A partition covers `[start, start + SLOTS_PER_PARTITION)`, so a row at
+/// `from` can share a file with rows before `from` -- the guard compares
+/// against the partition's **end**, not its start, and this is what would
+/// break if that were reversed.
+#[test]
+fn the_boundary_partition_straddling_from_is_still_read() {
+    let boundary = SLOTS_PER_PARTITION;
+    let dir = tempfile::tempdir().expect("tempdir");
+    let mut w = Writer::open(dir.path(), 1_000).expect("open");
+    // Both rows share partition 0: one before `from`, one at it.
+    w.append_market_trade(market_trade(1, boundary - 10, true))
+        .expect("append");
+    w.append_market_trade(market_trade(2, boundary - 1, true))
+        .expect("append");
+    w.flush().expect("flush");
+
+    let got = Reader::open(dir.path())
+        .read_market_trades_range(AsOf::at(Slot(boundary * 10)), Some(Slot(boundary - 1)))
+        .expect("read");
+    assert_eq!(
+        got.len(),
+        1,
+        "the file holding both rows is opened, and only the in-range row survives: {got:?}"
+    );
+    assert_eq!(got[0].slot, Slot(boundary - 1));
+}
+
 /// Every flushed file is counted, once.
 ///
 /// `written_files += 1` mutated to `*=` leaves the count at zero however many
