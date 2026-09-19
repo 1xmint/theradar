@@ -25,15 +25,11 @@ use radar_types::Address;
 use serde_json::json;
 
 use super::{
-    COINS_WINDOW_SECONDS, DEFAULT_CANDLE_WINDOW_SECONDS, DEFAULT_TRADE_LIMIT,
-    DEFAULT_WINDOW_SECONDS, Degradation, MAX_CANDLE_WINDOW_SECONDS, MAX_COINS_LIMIT,
-    MAX_TRADE_LIMIT, clamped_start, is_a_backwards_range, reaching_back, sort_coins, to_fold_trade,
+    COINS_WINDOW_SECONDS, DEFAULT_CANDLE_WINDOW_SECONDS, DEFAULT_HOLDERS_LIMIT,
+    DEFAULT_TRADE_LIMIT, DEFAULT_WINDOW_SECONDS, Degradation, MAX_CANDLE_WINDOW_SECONDS,
+    MAX_COINS_LIMIT, MAX_HOLDERS_LIMIT, MAX_TRADE_LIMIT, clamped_start, is_a_backwards_range,
+    reaching_back, sort_coins, to_fold_trade,
 };
-
-/// Holders returned when the caller names no limit.
-const DEFAULT_HOLDERS_LIMIT: usize = 20;
-/// The most holders one request returns.
-const MAX_HOLDERS_LIMIT: usize = 100;
 
 /// Said while the feed is configured and nothing has arrived yet.
 const NOTHING_YET: &str =
