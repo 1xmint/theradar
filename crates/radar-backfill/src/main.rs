@@ -688,6 +688,41 @@ const fn market_tape_first_cursor(now: i64, lag_seconds: i64, pass_seconds: i64)
     market_tape_horizon(now, lag_seconds) - pass_seconds
 }
 
+/// How many passes behind the horizon the market tape may fall before it
+/// gives the gap up and starts again from now.
+///
+/// The cursor only ever moved one pass per pass, so lag was permanent: every
+/// failed pass retried its own window five minutes later, and the five minutes
+/// were never won back. Measured on the box on 2026-09-19, 27 quota refusals a
+/// day had left the public tape sixteen and a half hours behind the chain, and
+/// it could not have caught up at any speed the quota allows. A terminal that
+/// shows yesterday's trades as the tape is worse than one with a marked hole
+/// in it, so past this many passes the hole is what it gets.
+///
+/// Three rather than one: a single failed pass is ordinary, and retrying its
+/// window keeps the tape whole at the cost of five minutes.
+const MARKET_TAPE_MAX_PASSES_BEHIND: i64 = 3;
+
+/// Where the cursor should jump to when the tape has fallen too far behind,
+/// or `None` while it is close enough to keep walking.
+///
+/// The jump lands one full pass behind the horizon -- the same place a fresh
+/// store starts -- so the next pass has a complete window. The skipped span is
+/// the caller's to record as partial coverage; this only does the arithmetic,
+/// for the same reason [`market_tape_window_end`] does.
+const fn market_tape_skip_ahead(
+    cursor: i64,
+    horizon: i64,
+    pass_seconds: i64,
+    max_passes_behind: i64,
+) -> Option<i64> {
+    if horizon - cursor > pass_seconds * max_passes_behind {
+        Some(horizon - pass_seconds)
+    } else {
+        None
+    }
+}
+
 const fn market_tape_window_end(cursor: i64, pass_seconds: i64, horizon: i64) -> i64 {
     let wanted = cursor + pass_seconds;
     if wanted < horizon { wanted } else { horizon }
@@ -720,6 +755,37 @@ fn record_partial_pass(store: &str, store_high: Option<radar_types::Slot>) -> Re
     writer.flush().map_err(|e| e.to_string())
 }
 
+/// Moves the cursor past a gap too old to be worth collecting, and says so.
+///
+/// Said out loud and written down: the span between the old cursor and the new
+/// one is a hole in the tape, and a partial record is what stops a reader
+/// taking it for a quiet market. Returns the cursor unchanged while the tape
+/// is close enough to keep walking.
+fn give_up_a_stale_gap(
+    store: &str,
+    scope: &std::path::Path,
+    cursor: i64,
+    horizon: i64,
+    store_high: Option<radar_types::Slot>,
+) -> Result<i64, String> {
+    let Some(fresh) = market_tape_skip_ahead(
+        cursor,
+        horizon,
+        market_tape_pass_seconds(),
+        MARKET_TAPE_MAX_PASSES_BEHIND,
+    ) else {
+        return Ok(cursor);
+    };
+    eprintln!(
+        "  {} .. {} skipped: the tape was more than {MARKET_TAPE_MAX_PASSES_BEHIND} passes behind",
+        from_epoch(cursor),
+        from_epoch(fresh)
+    );
+    record_partial_pass(store, store_high)?;
+    radar_store::write_cursor(scope, fresh)?;
+    Ok(fresh)
+}
+
 fn market_tape(args: &Args) -> Result<(), String> {
     let client = Client::default();
     let scope = market_tape_scope(&args.store);
@@ -744,6 +810,7 @@ fn market_tape(args: &Args) -> Result<(), String> {
 
     loop {
         let horizon = market_tape_horizon(now_epoch(), MARKET_TAPE_LAG_SECONDS);
+        cursor = give_up_a_stale_gap(&args.store, &scope, cursor, horizon, store_high)?;
         let window_end = market_tape_window_end(cursor, pass_seconds, horizon);
         if is_between_passes(window_end, cursor) {
             std::thread::sleep(MARKET_TAPE_PASS_INTERVAL);
@@ -1184,6 +1251,87 @@ mod tests {
             !runs_without_a_range(false, false, false),
             "a plain backfill does need --from and --to"
         );
+    }
+
+    /// A tape that has fallen hours behind starts again from now.
+    ///
+    /// The numbers are the box's on 2026-09-19: sixteen and a half hours of
+    /// lag that one-pass-per-pass walking could never win back. With the
+    /// comparison inverted the collector would jump on every ordinary pass and
+    /// never when it mattered; with the subtraction an addition it would land
+    /// in a future that has not been recorded yet.
+    #[test]
+    fn a_tape_hours_behind_jumps_to_one_pass_short_of_the_horizon() {
+        let horizon = 1_000_000;
+        assert_eq!(
+            market_tape_skip_ahead(horizon - 59_400, horizon, 300, 3),
+            Some(horizon - 300)
+        );
+    }
+
+    /// A pass or two of lag is walked, not skipped: one failed pass must cost
+    /// five minutes of freshness, never a hole in the tape.
+    #[test]
+    fn a_tape_a_few_passes_behind_keeps_walking() {
+        let horizon = 1_000_000;
+        assert_eq!(market_tape_skip_ahead(horizon - 300, horizon, 300, 3), None);
+        assert_eq!(
+            market_tape_skip_ahead(horizon - 900, horizon, 300, 3),
+            None,
+            "exactly the allowance is still inside it"
+        );
+        assert_eq!(
+            market_tape_skip_ahead(horizon - 901, horizon, 300, 3),
+            Some(horizon - 300),
+            "one second past the allowance is outside it"
+        );
+        assert_eq!(
+            market_tape_skip_ahead(horizon, horizon, 300, 3),
+            None,
+            "a caught-up tape has nothing to skip"
+        );
+    }
+
+    /// A scratch store for the one test here that has to touch the disk.
+    fn scratch_store(name: &str) -> std::path::PathBuf {
+        let dir =
+            std::env::temp_dir().join(format!("radar-backfill-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("a scratch directory");
+        dir
+    }
+
+    /// Giving up a stale gap moves the cursor on disk as well as in memory,
+    /// and leaves a close tape exactly where it was.
+    ///
+    /// On disk matters: a collector that jumped only in memory would be back
+    /// sixteen hours behind after its next restart.
+    #[test]
+    fn a_given_up_gap_is_written_down_and_a_close_tape_is_left_alone() {
+        let dir = scratch_store("stale-gap");
+        let store = dir.to_str().expect("a utf-8 temp path");
+        let scope = market_tape_scope(store);
+        let horizon = 1_800_000_000;
+
+        let close = horizon - 300;
+        assert_eq!(
+            give_up_a_stale_gap(store, &scope, close, horizon, None),
+            Ok(close)
+        );
+        assert_eq!(
+            radar_store::read_cursor(&scope),
+            None,
+            "nothing was skipped"
+        );
+
+        let fresh = horizon - market_tape_pass_seconds();
+        assert_eq!(
+            give_up_a_stale_gap(store, &scope, horizon - 59_400, horizon, None),
+            Ok(fresh)
+        );
+        assert_eq!(radar_store::read_cursor(&scope), Some(fresh));
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// A window with no width is not asked about.
