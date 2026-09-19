@@ -10,6 +10,7 @@
 
 import { useMemo } from "react";
 import type { MarketCoin, MarketCoins, MarketSort } from "./api";
+import { CoinImage } from "./CoinImage";
 import { formatChangePct, formatCompactNumber, formatPrice, quoteLabel } from "./format";
 import { MarketFigure } from "./Figures";
 import type { Load } from "./useApi";
@@ -204,20 +205,25 @@ function CoinRow({
           mint otherwise, rather than a column of "unknown" where a name would
           go. Creator-supplied text, rendered as text and never as markup. */}
       <td className="w-[38%] py-1.5 pl-2">
-        {coin.symbol ? (
-          <div className="truncate text-[11px] font-medium text-[var(--color-text)]" title={coin.name ?? undefined}>
-            {coin.symbol}
-            {coin.name ? <span className="ml-1 font-normal text-[var(--color-dim)]">{coin.name}</span> : null}
+        <div className="flex items-center gap-1.5">
+          <CoinImage uri={coin.uri} symbol={coin.symbol} className="h-5 w-5 shrink-0 rounded-full" />
+          <div className="min-w-0">
+            {coin.symbol ? (
+              <div className="truncate text-[11px] font-medium text-[var(--color-text)]" title={coin.name ?? undefined}>
+                {coin.symbol}
+                {coin.name ? <span className="ml-1 font-normal text-[var(--color-dim)]">{coin.name}</span> : null}
+              </div>
+            ) : (
+              <div className="truncate font-mono text-[11px] font-medium text-[var(--color-text)]">
+                {coin.mint.slice(0, 4)}…{coin.mint.slice(-4)}
+              </div>
+            )}
+            <div className="truncate text-[10px] text-[var(--color-dim)]">
+              {coin.quote_mint === null
+                ? "no priced fill in window"
+                : `vs ${quoteLabel(coin.quote_mint)}`}
+            </div>
           </div>
-        ) : (
-          <div className="truncate font-mono text-[11px] font-medium text-[var(--color-text)]">
-            {coin.mint.slice(0, 4)}…{coin.mint.slice(-4)}
-          </div>
-        )}
-        <div className="truncate text-[10px] text-[var(--color-dim)]">
-          {coin.quote_mint === null
-            ? "no priced fill in window"
-            : `vs ${quoteLabel(coin.quote_mint)}`}
         </div>
       </td>
       <td className="py-1.5 text-right tabular-nums">

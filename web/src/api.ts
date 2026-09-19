@@ -191,11 +191,14 @@ export interface MarketCoin {
   /** Percentage, not basis points -- this is a market figure, not a return.
    *  Null when the window held fewer than two priced fills. */
   change_pct: number | null;
-  /** Creator-supplied, untrusted. Sent only by the live feed, and only for a
-   *  coin whose launch it saw; absent or null otherwise, never a guess. */
+  /** Creator-supplied, untrusted. Sent only when Radar recorded this mint's
+   *  own pump.fun launch; null otherwise, never a guess. */
   name?: string | null;
   /** Creator-supplied, untrusted. Same rules as `name`. */
   symbol?: string | null;
+  /** Creator-supplied, untrusted. An off-chain metadata document the browser
+   *  may fetch for an image -- never the server. Same rules as `name`. */
+  uri?: string | null;
 }
 
 /** What sorts the coin list may be asked for. Purely a request hint: the
@@ -258,11 +261,15 @@ export interface MarketToken {
   name: string | null;
   symbol: string | null;
   creator: string | null;
+  /** Creator-supplied, untrusted. An off-chain metadata document the browser
+   *  may fetch for an image -- never the server. Null with `metadata_reason`
+   *  when Radar recorded no launch for this mint. */
+  uri: string | null;
   /** When `solana.tokens` first carried this mint. Null with a
    *  `metadata_reason` for a token too young or too obscure to be indexed. */
   published_at: string | null;
-  /** Why `name`, `symbol`, `creator` and `published_at` are all null, when
-   *  they are. Null when metadata was found. */
+  /** Why `name`, `symbol`, `uri`, `creator` and `published_at` are all null,
+   *  when they are. Null when metadata was found. */
   metadata_reason: string | null;
   price: number | null;
   price_reason: string | null;
