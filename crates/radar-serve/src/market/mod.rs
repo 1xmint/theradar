@@ -478,6 +478,65 @@ pub fn launches_due(since_last: Option<std::time::Duration>, every: std::time::D
     since_last.is_none_or(|elapsed| elapsed >= every)
 }
 
+/// The background refresher's memory between ticks: where the store stood at
+/// the last successful read, and when the launch index was last rebuilt.
+///
+/// Lives here rather than in `main.rs` so a tick can be run against a fixture
+/// store: the loop in `main.rs` is then only a timer around [`Self::tick`].
+#[derive(Default)]
+pub struct Refresher {
+    last_key: Option<(Slot, Option<std::path::PathBuf>)>,
+    launches_built: Option<std::time::Instant>,
+}
+
+impl Refresher {
+    /// A refresher that has read nothing yet.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Runs one tick: reads what [`refresh_plan`] says to and replaces the
+    /// snapshot in `cache`. Returns the plan carried out, or `None` when the
+    /// store could not be read or is empty.
+    ///
+    /// **Blocking** -- call it inside `tokio::task::spawn_blocking`.
+    ///
+    /// A failed read records nothing, so the next tick tries again rather
+    /// than waiting for the store to move.
+    pub fn tick(
+        &mut self,
+        store: &Reader,
+        cache: &SnapshotCache,
+        launches_every: std::time::Duration,
+    ) -> Option<Refresh> {
+        let watermark = store.watermark().ok().flatten()?;
+        let newest_file = store
+            .files(Table::MarketTrades)
+            .ok()
+            .and_then(|files| files.last().cloned());
+        let key = (watermark, newest_file);
+        let current = cache.peek();
+        let plan = refresh_plan(
+            launches_due(self.launches_built.map(|t| t.elapsed()), launches_every),
+            self.last_key.as_ref() != Some(&key),
+            current.is_some(),
+        );
+        let as_of = AsOf::at(watermark);
+        let built = match (plan, current) {
+            (Refresh::Skip, _) => return Some(plan),
+            (Refresh::TradesOnly, Some(current)) => current.refresh_trades(store, as_of),
+            _ => Snapshot::build(store, as_of),
+        };
+        cache.set(Arc::new(built.ok()?));
+        self.last_key = Some(key);
+        if plan == Refresh::Everything {
+            self.launches_built = Some(std::time::Instant::now());
+        }
+        Some(plan)
+    }
+}
+
 /// Why a market route could not answer, distinguishably from an empty
 /// result.
 ///
@@ -2004,5 +2063,78 @@ mod tests {
         assert_eq!(refreshed.trades().len(), 1);
         assert_eq!(refreshed.newest_ts(), snap.newest_ts());
         assert!(!refreshed.collected());
+    }
+
+    /// One refresher, four ticks: build, skip, trades only, everything.
+    ///
+    /// Each tick is told apart by what it left in the cache, not only by the
+    /// plan it reports: a skip leaves the very same snapshot, a trades-only
+    /// read replaces the snapshot but keeps the very same launch index, and a
+    /// due launch index is a new one.
+    #[test]
+    fn a_refresher_builds_then_skips_then_reads_only_what_moved() {
+        let (dir, store) = store_of(&[market_trade(A_MINT, "2020-01-01 00:00:01.000000", 100)]);
+        let cache = SnapshotCache::with_background_refresh();
+        let mut refresher = Refresher::new();
+        let an_hour = std::time::Duration::from_secs(3_600);
+
+        assert_eq!(
+            refresher.tick(&store, &cache, an_hour),
+            Some(Refresh::Everything)
+        );
+        let first = cache.peek().expect("the first tick builds a snapshot");
+        assert_eq!(first.watermark(), radar_types::Slot(100));
+
+        assert_eq!(refresher.tick(&store, &cache, an_hour), Some(Refresh::Skip));
+        let same = cache.peek().expect("a snapshot");
+        assert!(
+            Arc::ptr_eq(&first, &same),
+            "nothing moved, nothing was replaced"
+        );
+
+        {
+            let mut writer =
+                radar_store::Writer::open(dir.path().to_str().expect("a utf-8 path"), 20_000)
+                    .expect("a writer");
+            writer
+                .append_market_trade(market_trade(A_MINT, "2020-01-01 00:01:01.000000", 200))
+                .expect("a market trade appends");
+            writer.flush().expect("the writer flushes");
+        }
+        assert_eq!(
+            refresher.tick(&store, &cache, an_hour),
+            Some(Refresh::TradesOnly)
+        );
+        let moved = cache.peek().expect("a snapshot");
+        assert_eq!(moved.watermark(), radar_types::Slot(200));
+        assert_eq!(moved.trades().len(), 2);
+        assert!(
+            Arc::ptr_eq(&moved.launches, &first.launches),
+            "a trades-only read reuses the launch index"
+        );
+
+        assert_eq!(
+            refresher.tick(&store, &cache, std::time::Duration::ZERO),
+            Some(Refresh::Everything),
+            "a launch index that is due is rebuilt even though nothing moved"
+        );
+        let rebuilt = cache.peek().expect("a snapshot");
+        assert!(!Arc::ptr_eq(&rebuilt.launches, &first.launches));
+
+        // The rebuild reset the launch clock: with an hour to go, and nothing
+        // moved, the next tick reads nothing.
+        assert_eq!(refresher.tick(&store, &cache, an_hour), Some(Refresh::Skip));
+    }
+
+    #[test]
+    fn a_refresher_over_an_empty_store_builds_nothing() {
+        let dir = tempfile::tempdir().expect("a temporary directory");
+        let store = Reader::open(dir.path().to_str().expect("a utf-8 path"));
+        let cache = SnapshotCache::with_background_refresh();
+        assert_eq!(
+            Refresher::new().tick(&store, &cache, std::time::Duration::ZERO),
+            None
+        );
+        assert!(cache.peek().is_none());
     }
 }

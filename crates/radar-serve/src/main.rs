@@ -2,17 +2,14 @@
 //! The Radar server.
 
 use std::net::SocketAddr;
-use std::path::PathBuf;
 use std::process::ExitCode;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
-use radar_asof::AsOf;
 use radar_instruments::{CreatorHistory, CreatorTrackRecord, Registry, SimulateExit};
 use radar_serve::chat::Chat;
 use radar_serve::{AppState, access, app, chat, customer, market, x402};
-use radar_store::{Reader, Table};
-use radar_types::Slot;
+use radar_store::Reader;
 
 /// Every instrument Radar exposes. The CLI builds the same list.
 fn registry() -> Registry {
@@ -248,66 +245,28 @@ const LAUNCH_REFRESH_INTERVAL: Duration = Duration::from_secs(300);
 /// the packet requires.
 fn market_snapshot_refresher(state: Arc<AppState>) {
     tokio::spawn(async move {
-        let mut last_key: Option<(Slot, Option<PathBuf>)> = None;
-        let mut last_launch_refresh: Option<Instant> = None;
-
+        let mut refresher = market::Refresher::new();
         // An interval's first tick is immediate: a restart builds its first
         // snapshot at once rather than answering "not built yet" for 20s.
         let mut tick = tokio::time::interval(SNAPSHOT_REFRESH_INTERVAL);
         tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         loop {
             tick.tick().await;
-
-            let due = market::launches_due(
-                last_launch_refresh.map(|t| t.elapsed()),
-                LAUNCH_REFRESH_INTERVAL,
-            );
-            let previous_key = last_key.clone();
             let task_state = Arc::clone(&state);
-
             // The store read and the fold both belong off the async runtime --
             // exactly the reason this task exists rather than a per-request read.
-            let outcome = tokio::task::spawn_blocking(move || {
-                let watermark = task_state.store.watermark().ok().flatten()?;
-                let newest_file = task_state
-                    .store
-                    .files(Table::MarketTrades)
-                    .ok()
-                    .and_then(|files| files.last().cloned());
-                let key = (watermark, newest_file);
-                let current = task_state.market_snapshot.peek();
-                let plan = market::refresh_plan(
-                    due,
-                    previous_key.as_ref() != Some(&key),
-                    current.is_some(),
+            let done = tokio::task::spawn_blocking(move || {
+                refresher.tick(
+                    &task_state.store,
+                    &task_state.market_snapshot,
+                    LAUNCH_REFRESH_INTERVAL,
                 );
-                let as_of = AsOf::at(watermark);
-                let built = match (plan, current) {
-                    (market::Refresh::Skip, _) => return Some((key, plan, None)),
-                    (market::Refresh::TradesOnly, Some(current)) => {
-                        current.refresh_trades(&task_state.store, as_of)
-                    }
-                    _ => market::Snapshot::build(&task_state.store, as_of),
-                };
-                // A failed read keeps no key, so the next tick tries again
-                // rather than waiting for the store to move.
-                let snapshot = Arc::new(built.ok()?);
-                Some((key, plan, Some(snapshot)))
+                refresher
             })
-            .await
-            .ok()
-            .flatten();
-
-            let Some((key, plan, snapshot)) = outcome else {
-                continue;
-            };
-            last_key = Some(key);
-            if let Some(snapshot) = snapshot {
-                state.market_snapshot.set(snapshot);
-                if plan == market::Refresh::Everything {
-                    last_launch_refresh = Some(Instant::now());
-                }
-            }
+            .await;
+            // A panicked tick took its memory with it; start over rather than
+            // stop refreshing for the life of the process.
+            refresher = done.unwrap_or_default();
         }
     });
 }
