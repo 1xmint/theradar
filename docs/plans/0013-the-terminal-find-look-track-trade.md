@@ -7,8 +7,11 @@ sign-in on the box is still `allowlist:` one address; opening it is the owner's
 edit to `/etc/radar/radar.env`. Phase B item 1 merged as #257 and is live.
 Two repairs landed on the way and are deployed: #258 (the market tape gives up a
 gap it can never close) and #259 (market routes read a shared snapshot instead
-of the whole trade table per request). Items 2 and 3 of B are unstarted;
-nothing in C to E is built.
+of the whole trade table per request). Item 2 merged as #261 and is **not yet
+deployed** -- the box's `radar-serve` restart needs an interactive sudo
+password, so it is the owner's step. Item 3 is half open: the "newly launched"
+list is being built on `feat/newly-launched-list`; the `SHORTLIST` widening
+waits on the owner. Nothing in C to E is built.
 **Date:** 2026-09-18.
 **Branch:** none; each item lands on `main` as its own pull request.
 **Inspected base:** `c8fca0e` (`Remove the bot from Radar: it lives in realorrug
@@ -196,16 +199,22 @@ the follow idle to 90 s (needs an hour of logs); a fresh wallet signing in.
 **Rule from the owner, 2026-09-19:** tests run on GitHub CI, not on the
 workstation. Locally: `cargo fmt` and scoped `cargo clippy` only.
 
-**Paused here, 2026-09-19.** Phase B item 2 is written and open as draft #261
-(`feat/holders-from-the-tape`): `/v1/market/holders/{mint}` nets each wallet's
-buys minus sells from the snapshot, fact `net_traded_in_window`. Read and found
-sound; CI had not finished when the session stopped, and the web typecheck was
-never run locally.
+**Item 2 is merged, 2026-09-20.** #261 (`feat/holders-from-the-tape`) went in
+at `0ff1f9a`: `/v1/market/holders/{mint}` nets each wallet's buys minus sells
+from the snapshot, fact `net_traded_in_window`. All 14 checks passed, mutation
+shards included, and the branch was one commit behind `main` on a file it does
+not touch (`radar-backfill/src/main.rs`), so the stale-green trap above did not
+apply. It is merged and **not deployed**: installing `radar-serve` and
+restarting it prompt for `guardian`'s sudo password, which cannot be run
+unattended, and `deploy/README.md` calls that boundary a feature.
 
-**Next action:** read #261's CI. Fix any mutation survivors at the exact
-`file:line:column` named, mark it ready, squash-merge, deploy by the
-`deploy/README.md` procedure, and check the holders tab on radar.heyvera.org
-for a traded coin. Then item 3's "newly launched" list.
+**Next action:** the owner deploys #261 by the `deploy/README.md` "Every deploy
+after that" procedure and checks the holders tab on radar.heyvera.org for a
+traded coin -- the evidence this phase is verified against the real site, not a
+local run. In parallel, item 3's "newly launched" list is in progress: a public
+`/v1/market/launches` read off the snapshot's launch index, which needs the
+launch slot and timestamp carried onto `LaunchInfo` (it keeps only name, symbol
+and uri today, so the index cannot be ordered).
 Item 3's widening waits on
 the owner's answer about cutting `consider --cap 40` in the box's crontab,
 which shares the CryptoHouse allowance; the "newly launched" list does not
