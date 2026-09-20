@@ -158,12 +158,6 @@ impl Budget {
         true
     }
 
-    /// How many queries are left unspent.
-    #[must_use]
-    pub fn remaining(&self) -> u32 {
-        self.remaining.get()
-    }
-
     /// Wraps a query runner so it refuses once the budget is gone.
     ///
     /// # Errors
