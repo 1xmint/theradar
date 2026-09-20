@@ -254,6 +254,24 @@ pub struct Funnel {
     /// An exclusion, not an absence. These were worth paying for and nobody
     /// looked, and a proposal rate computed without them measures the cap.
     pub deferred_by_cap: usize,
+    /// Whether the run's declared CryptoHouse query budget ran out before
+    /// `paid_examined` reached `worth_paying_for.min(--cap)`.
+    ///
+    /// A distinct fact from `deferred_by_cap`: the cap is a candidate count
+    /// this run chose; this is the shared query allowance running out from
+    /// under it mid-pass. Conflating the two would read "considered 12" the
+    /// same whether the cap was reached or CryptoHouse simply stopped
+    /// answering, which is exactly the distinction Rule 9 exists to keep.
+    /// `true` here means some in-window candidate this run counted as
+    /// worth paying for was never actually looked at.
+    ///
+    /// `serde(default)` because every record kept before this field existed
+    /// is still on disk and still read: `session::latest` is called with `?`
+    /// in `radar session`, so a missing key would not degrade a report, it
+    /// would refuse to show one. `false` is the honest reading for those
+    /// records -- a run with no declared budget cannot have spent one.
+    #[serde(default)]
+    pub budget_exhausted: bool,
     /// Examined candidates refused on launch-block shape before any exit probe.
     pub refused_on_shape: usize,
     /// Examined candidates whose launch block could not be read at all.
@@ -755,6 +773,29 @@ mod tests {
         Visibility, WindowCoverage,
     };
     use crate::{SignedMicroUsd, Slot, Unrealised, Unvaluable};
+
+    /// Every session record kept before `budget_exhausted` existed is still on
+    /// disk, and `radar session` reads the newest one with `?`. Without
+    /// `serde(default)` a missing key stops that command dead rather than
+    /// degrading its report. Re-apply the bug -- drop the attribute -- and this
+    /// fails with "missing field `budget_exhausted`".
+    #[test]
+    fn a_funnel_kept_before_the_budget_field_existed_still_reads() {
+        let mut written = serde_json::to_value(Funnel::default()).expect("a Funnel serialises");
+        written
+            .as_object_mut()
+            .expect("a Funnel is a JSON object")
+            .remove("budget_exhausted")
+            .expect("the field is written today, which is what makes it missing yesterday");
+
+        let read: Funnel = serde_json::from_value(written).expect(
+            "an older record must still be readable; without serde(default) this is              the line that stops radar session",
+        );
+        assert!(
+            !read.budget_exhausted,
+            "a run with no declared budget cannot have spent one"
+        );
+    }
 
     #[test]
     fn one_unvaluable_holding_makes_the_whole_total_unknown() {

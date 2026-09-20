@@ -158,7 +158,10 @@ pub fn run(
     let blocks = CryptoHouseBlocks::new(
         radar_backfill::cryptohouse::Client::default(),
         &radar_store::from_epoch(radar_store::now_epoch()),
-    );
+    )
+    .with_budget(radar_backfill::launch_block::Budget::new(
+        radar_backfill::launch_block::Budget::CONSIDER_RUN,
+    ));
     let rpc = RpcClient::default();
     let pass = paid_tier(
         &universe,
@@ -284,6 +287,7 @@ fn record_pass(
     coverage: &[Coverage],
 ) {
     session.funnel.paid_examined = budget;
+    session.funnel.budget_exhausted = ledger.budget_exhausted;
     session.funnel.refused_on_shape = pass.refused_on_shape;
     session.funnel.look_failed = pass.look_failed;
     session.funnel.dropped_after_probe = ledger.dropped_after_probe;
@@ -990,6 +994,15 @@ pub struct Ledger {
     pub passed_paid: usize,
     /// One entry per candidate the paid tier examined.
     pub clocks: Vec<CandidateClock>,
+    /// Whether this run's declared CryptoHouse query budget
+    /// ([`radar_backfill::launch_block::Budget::CONSIDER_RUN`]) ran out before
+    /// every candidate the caller asked for was considered.
+    ///
+    /// Kept apart from `calls`' per-kind failure counts: a query refused for
+    /// budget is this process choosing to stop, not CryptoHouse failing, and
+    /// the difference must reach whoever reads the run — see
+    /// [`note_if_budget_exhausted`].
+    pub budget_exhausted: bool,
     calls: BTreeMap<&'static str, CallCounts>,
 }
 
@@ -1155,6 +1168,21 @@ where
     }
 }
 
+/// Records that this run's CryptoHouse query budget is the reason a call
+/// failed, when it is.
+///
+/// A budget-exhausted read must not be mistaken for CryptoHouse itself
+/// refusing: the marker is checked through `Display` because the generic
+/// callers here only know `B::Error: std::fmt::Display`, not the concrete
+/// `radar_backfill::cryptohouse::QueryError` -- the same substring
+/// classification `QueryError::is_budget_exhausted` uses, reached the only
+/// way this generic code can reach it.
+fn note_if_budget_exhausted<E: std::fmt::Display>(ledger: &mut Ledger, e: &E) {
+    if format!("{e}").contains(radar_backfill::cryptohouse::BUDGET_EXHAUSTED_MARKER) {
+        ledger.budget_exhausted = true;
+    }
+}
+
 fn paid_tier<'a, B, S, Q>(
     universe: &Universe,
     strategy: &CreatorEdge,
@@ -1186,7 +1214,7 @@ where
     let mut shapes = radar_graph::Distribution::new();
     let mut look_failed = 0usize;
 
-    let prevalence_table = prevalence_table_of(blocks);
+    let prevalence_table = prevalence_table_of(blocks, ledger);
     // Unreadable and truncated are both charged as failures. A truncated table
     // cost the query and cannot be trusted, which is a call that bought nothing
     // rather than a call that did not happen.
@@ -1217,9 +1245,13 @@ where
         // read, skipped entirely when the answer would be discarded.
         let prevalence = prevalence_table.as_ref().and_then(|table| {
             let facts = universe.launches.get(mint)?;
-            let Ok(authorities) = blocks.authorities_at(mint, facts.slot) else {
-                ledger.call("authorities", CallOutcome::Failed);
-                return None;
+            let authorities = match blocks.authorities_at(mint, facts.slot) {
+                Ok(authorities) => authorities,
+                Err(e) => {
+                    ledger.call("authorities", CallOutcome::Failed);
+                    note_if_budget_exhausted(ledger, &e);
+                    return None;
+                }
             };
             let strongest = table.strongest_of(&authorities);
             ledger.charged("authorities", strongest.is_some());
@@ -1349,13 +1381,17 @@ where
     B: radar_graph::LaunchBlockSource,
     B::Error: std::fmt::Display,
 {
-    let Ok(shape) = blocks.shape_at(mint, launch) else {
-        ledger.call("launch_block", CallOutcome::Failed);
-        eprintln!("  {mint}  launch block unreadable");
-        return Looked {
-            unreadable: true,
-            ..Looked::default()
-        };
+    let shape = match blocks.shape_at(mint, launch) {
+        Ok(shape) => shape,
+        Err(e) => {
+            ledger.call("launch_block", CallOutcome::Failed);
+            note_if_budget_exhausted(ledger, &e);
+            eprintln!("  {mint}  launch block unreadable: {e}");
+            return Looked {
+                unreadable: true,
+                ..Looked::default()
+            };
+        }
     };
     shapes.observe(shape);
     let at_launch = radar_graph::assess(shape).coordination;
@@ -1380,6 +1416,7 @@ where
         }
         Err(e) => {
             ledger.call("later_blocks", CallOutcome::Failed);
+            note_if_budget_exhausted(ledger, &e);
             eprintln!("  {mint}  later blocks unreadable: {e}");
             None
         }
@@ -1599,7 +1636,7 @@ fn entry_price_of(exit: &radar_sim::ExitReport) -> Option<u64> {
 /// A truncated table is `None`, not a short one. Every authority the row cap cut
 /// would otherwise read as `Ordinary` — the least alarming answer available —
 /// and a decision would record that as though it had been measured. Rule 9.
-fn prevalence_table_of<B>(blocks: &B) -> Option<radar_graph::prevalence::Table>
+fn prevalence_table_of<B>(blocks: &B, ledger: &mut Ledger) -> Option<radar_graph::prevalence::Table>
 where
     B: LaunchBlockSource,
     B::Error: std::fmt::Display,
@@ -1619,6 +1656,7 @@ where
             None
         }
         Err(e) => {
+            note_if_budget_exhausted(ledger, &e);
             eprintln!("  prevalence table unreadable: {e}");
             None
         }
@@ -1933,6 +1971,47 @@ pub const fn default_cap() -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The budget refusal has to be told apart from CryptoHouse failing, and
+    /// the only handle the generic callers have is `Display`. If this stops
+    /// matching, the run reports "CryptoHouse is down" for a limit this process
+    /// imposed on itself -- and the operator goes looking at the wrong thing.
+    #[test]
+    fn a_budget_refusal_is_recognised_as_one() {
+        let mut ledger = Ledger::default();
+        assert!(!ledger.budget_exhausted, "a fresh ledger has spent nothing");
+        note_if_budget_exhausted(
+            &mut ledger,
+            &format!(
+                "shape_at: {}",
+                radar_backfill::cryptohouse::BUDGET_EXHAUSTED_MARKER
+            ),
+        );
+        assert!(ledger.budget_exhausted);
+    }
+
+    #[test]
+    fn an_ordinary_failure_is_not_charged_to_the_budget() {
+        let mut ledger = Ledger::default();
+        note_if_budget_exhausted(&mut ledger, &"endpoint down".to_owned());
+        assert!(
+            !ledger.budget_exhausted,
+            "CryptoHouse being unreachable is not this process choosing to stop"
+        );
+    }
+
+    /// Once true it stays true. A later successful read does not undo the fact
+    /// that some candidate went unexamined.
+    #[test]
+    fn the_budget_flag_does_not_unset_itself() {
+        let mut ledger = Ledger::default();
+        note_if_budget_exhausted(
+            &mut ledger,
+            &radar_backfill::cryptohouse::BUDGET_EXHAUSTED_MARKER.to_owned(),
+        );
+        note_if_budget_exhausted(&mut ledger, &"endpoint down".to_owned());
+        assert!(ledger.budget_exhausted);
+    }
 
     /// One coverage row, with the fields a test cares about named.
     fn covering(
@@ -2765,8 +2844,9 @@ mod tests {
             "the fixture is actually truncated"
         );
 
+        let mut ledger = Ledger::default();
         assert_eq!(
-            prevalence_table_of(&StubBlocks(Ok(truncated))),
+            prevalence_table_of(&StubBlocks(Ok(truncated)), &mut ledger),
             None,
             "a truncated table must not be used"
         );
@@ -2780,7 +2860,9 @@ mod tests {
         let table = radar_graph::prevalence::Table::new([("factory".to_owned(), 8)]);
         assert!(table.is_complete());
 
-        let kept = prevalence_table_of(&StubBlocks(Ok(table))).expect("a complete table is used");
+        let mut ledger = Ledger::default();
+        let kept = prevalence_table_of(&StubBlocks(Ok(table)), &mut ledger)
+            .expect("a complete table is used");
         assert_eq!(
             kept.of("factory"),
             Some(radar_graph::prevalence::Prevalence::Repeat)
@@ -2797,8 +2879,9 @@ mod tests {
         // A prevalence the pass could not fetch must not stop it deciding. The
         // decision is still worth recording; what it carries is an absent
         // prevalence, which is the honest value.
+        let mut ledger = Ledger::default();
         assert_eq!(
-            prevalence_table_of(&StubBlocks(Err("endpoint down".to_owned()))),
+            prevalence_table_of(&StubBlocks(Err("endpoint down".to_owned())), &mut ledger),
             None
         );
     }
