@@ -68,8 +68,10 @@ reversed it today) and P3's "a wallet's trades from CryptoHouse on request"
 2. Batch the patch-level Dependabot PRs (#250, #251, #252, #228). Leave the
    major bumps (#195, #196, #208–#210): vite 8 is blocked on
    `@tailwindcss/vite` per plan 0003's handback.
-3. Confirm on the box whether `RADAR_CUSTOMER_ACCESS=open` is set. If not, it
-   is Josh's one sudo env edit; hand him the exact line from `deploy/README.md`.
+3. ~~Confirm on the box whether `RADAR_CUSTOMER_ACCESS=open` is set.~~
+   **Done 2026-09-20.** It is already set in `/etc/radar/radar.env`; no sudo
+   edit is needed. Note that `/health`'s `paidSurface` is a *different*
+   switch — reading it does not tell you whether customer access is open.
 
 Done when: `gh pr list` shows only the major-bump PRs, and a fresh wallet can
 sign in on radar.heyvera.org.
@@ -92,7 +94,8 @@ All three items cost **zero** extra CryptoHouse queries on a request path.
 3. **More than 10 coins, inside the budget.** The "newly launched" list
    straight from the launches table is built and merged (#263, no CryptoHouse
    cost at all). **The `SHORTLIST` widening is blocked on a decision, not on
-   effort** -- the measurement it was waiting for has been taken. The day of logs this item asked for was read on 2026-09-20 and
+   effort** — the measurement it was waiting for has been taken. The day of
+   logs this item asked for was read on 2026-09-20 and
    there is no headroom to widen into: the hourly `consider` cron already
    spends the whole 120/hour allowance at minute 37, and the recorder is
    refused 91 times a day as a result —
@@ -119,10 +122,20 @@ half:
    wallet's view through us because we never serve one. Price each holding
    from `/v1/market/token`.
 3. **History: from the store only.** "Your trades in this coin" filters
-   `MarketTrades` by the signed-in wallet. Check first whether the tape rows
-   carry the trader (0012 says backfilled rows do not; the live decoder
-   does). If they do not, add the column in the collector before building the
-   view. Coins we do not track say so in one sentence.
+   `MarketTrades` by the signed-in wallet. **The check this item asked for is
+   done, and the answer blocks the item:** the tape carries the trader on one
+   trade in five. Every sell has one; only a buy paid in *wrapped* SOL has
+   one, and most retail buys pay in native SOL, which leaves no row in
+   `solana.token_transfers` for the query to read an authority from. Measured
+   2026-09-20 at 20 of 100 live trades, partitioning perfectly — see
+   [0037](../research/0037-four-buys-in-five-have-no-trader-because-the-buyer-paid-in-native-sol.md),
+   which also names the two ways to recover the buyer and what each costs
+   against the CryptoHouse allowance. Built as-is, this view would show a
+   wallet its sells, hide four of its five buys, and say nothing about the
+   difference — a missing trade rendered exactly like a trade never made.
+   Either recover the buyer first, or have the view state in its own words
+   that it shows sells and only the buys paid in wrapped SOL. Coins we do not
+   track say so in one sentence.
 4. The private column of the screen, with 0012's distinct empty sentences
    ("no trades yet" must differ from "could not look").
 
@@ -247,16 +260,16 @@ merged 2026-09-20). The "newly launched" list does not wait on any of this.
 
 **The budget fix probably does not need the privileged half of the deploy, and
 that is worth checking before scheduling one.** It ships in the `radar` binary,
-which `deploy/README.md`'''s table places in `~/bin` -- an unprivileged
+which `deploy/README.md`'s table places in `~/bin` — an unprivileged
 `install` -- while only `radar-serve` lives in `/usr/local/bin` and needs the
 interactive `sudo`. `radar-serve` is what #261 and #263 change. If the
 `consider` cron invokes `~/bin/radar`, the new binary takes effect on the next
 run with no restart at all, because cron starts a fresh process every time.
 
-**Unverified from a workstation:** which path the cron entry actually names.
-`ssh guardian-vps-tail '''crontab -l'''` settles it in one line, and it decides
-whether stopping the recorder being starved needs a password or does not. The owner step still open: set `RADAR_CUSTOMER_ACCESS=open` in
-`/etc/radar/radar.env` and restart `radar-serve`. Phase C needs it.
+**Both settled 2026-09-20.** The cron entry names `/home/guardian/bin/radar`,
+the unprivileged path, so replacing that binary *is* the deploy and no restart
+is involved. And `RADAR_CUSTOMER_ACCESS=open` was already set, so the owner
+step Phase C was waiting on never existed.
 
 **Do not:** build Phase D before Phase C is live; put a CryptoHouse query on a
 request path; hold a key or a fee on the server side of a swap; start the

@@ -461,7 +461,7 @@ mod tests {
     ///
     /// Local to the tests rather than added beside `decode_url` in
     /// `radar-types`: nothing in production builds a token, and production API
-    /// added for a test'''s convenience is API nobody audits.
+    /// added for a test's convenience is API nobody audits.
     fn b64(bytes: &[u8]) -> String {
         radar_types::b64::encode(bytes)
             .replace('+', "-")
