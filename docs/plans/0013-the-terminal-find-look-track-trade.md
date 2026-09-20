@@ -89,12 +89,17 @@ All three items cost **zero** extra CryptoHouse queries on a request path.
    wallets seen trading here since <time>"), per 0012's holders section.
    Reuse the shape `market/live.rs:243` already returns so the screen does
    not care which source answered.
-3. **More than 10 coins, inside the budget.** First measure: run the tape at
-   today's load for a day and read the quota headroom from the coverage
-   table. Then widen `SHORTLIST` by batching several mints into one query
-   (`IN (...)`) instead of one query per coin. Hold total under 80/hour; the
-   recorder and the hourly outcomes cron share the IP. Add a "newly launched"
-   list straight from the launches table (no CryptoHouse cost at all).
+3. **More than 10 coins, inside the budget.** The "newly launched" list
+   straight from the launches table is built and merged (#263, no CryptoHouse
+   cost at all). **The `SHORTLIST` widening is blocked on measurement, not on
+   effort.** The day of logs this item asked for was read on 2026-09-20 and
+   there is no headroom to widen into: the hourly `consider` cron already
+   spends the whole 120/hour allowance at minute 37, and the recorder is
+   refused 91 times a day as a result —
+   [0036](../research/0036-the-hourly-consider-run-eats-the-whole-cryptohouse-allowance.md).
+   The batching this item proposes would not help either: the tape already
+   batches and already holds itself to 72/hour. Widening waits on the owner
+   deciding between a smaller `consider` and a larger allowance.
 
 Done when: a screenshot with no wallet shows named coins with images, a
 holders tab with rows, and more than 10 coins; `radar brief` on the box shows
@@ -194,8 +199,13 @@ build `1540b49` after `sudo radar-deploy`: `/v1/market/coins` 0.31 s on the box
 and 0.68 s from outside; 117 CPU ticks in 60 s (6,000 is one core); 145 MB
 resident. 3 of 19 listed coins carry a name; the rest predate the recorder.
 
-**Not checked:** whether CryptoHouse quota refusals stopped after #258 raised
-the follow idle to 90 s (needs an hour of logs); a fresh wallet signing in.
+**Checked since:** the CryptoHouse refusals did **not** stop after #258 raised
+the follow idle to 90 s. 24 hours of logs, read 2026-09-20: the recorder was
+refused 91 times, all of them between minute 40 and minute 59 of the hour, which
+is the `consider` cron at minute 37 draining what is left —
+[0036](../research/0036-the-hourly-consider-run-eats-the-whole-cryptohouse-allowance.md).
+
+**Not checked:** a fresh wallet signing in.
 
 **Rule from the owner, 2026-09-19:** tests run on GitHub CI, not on the
 workstation. Locally: `cargo fmt` and scoped `cargo clippy` only.
@@ -225,10 +235,14 @@ text now reads as a sentence rather than a code.
 `deploy/README.md` "Every deploy after that" procedure, then checks two things
 on radar.heyvera.org: the holders tab on a traded coin, and the "New" tab. That
 is the evidence Phase B is verified against the real site, not a local run.
-Item 3's widening waits on
-the owner's answer about cutting `consider --cap 40` in the box's crontab,
-which shares the CryptoHouse allowance; the "newly launched" list does not
-wait. The owner step still open: set `RADAR_CUSTOMER_ACCESS=open` in
+Item 3's widening waits on a decision
+that 0036 now frames with numbers: at 120 CryptoHouse queries an hour the box
+cannot run all four units at the sizes currently asked for, so either
+`consider` runs less often or over fewer candidates, or the allowance grows.
+Separately and regardless of that answer, `consider` is having a declared query
+ceiling added, the same one `market_tape.rs` already enforces, so that it
+cannot spend an allowance it does not own; the "newly launched" list does not
+wait on any of this. The owner step still open: set `RADAR_CUSTOMER_ACCESS=open` in
 `/etc/radar/radar.env` and restart `radar-serve`. Phase C needs it.
 
 **Do not:** build Phase D before Phase C is live; put a CryptoHouse query on a
