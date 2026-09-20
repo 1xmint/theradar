@@ -660,6 +660,13 @@ pub struct LaunchInfo {
     /// The off-chain metadata JSON's location. **Never fetched by this
     /// server** -- returned as an opaque string for the browser to resolve.
     uri: String,
+    /// The slot the launch landed in -- [`radar_store::Launch`]'s envelope
+    /// carries no wall-clock timestamp, only this, so it is what
+    /// [`newest_launches`] orders by. Higher is more recent (`AGENTS.md`
+    /// rule 9: this repository does not invent a conversion to wall-clock
+    /// time it cannot verify -- see [`LAUNCH_LOOKBACK_SLOTS`]'s own doc
+    /// comment for the one approximation this codebase does use).
+    slot: Slot,
 }
 
 /// Mint -> its launch identity, for every launch this instance recorded
@@ -735,11 +742,49 @@ fn build_launch_index(store: &Reader, as_of: AsOf) -> Result<LaunchIndex, StoreE
                     name: capped(&launch.name, MAX_METADATA_FIELD_LEN),
                     symbol: capped(&launch.symbol, MAX_METADATA_FIELD_LEN),
                     uri: capped(&launch.uri, MAX_URI_LEN),
+                    slot: launch.envelope.slot,
                 },
             );
         }
     }
     Ok(index)
+}
+
+/// One launch, ranked -- the mint plus what [`LaunchInfo`] already carries,
+/// ready for [`launches`] to serialise.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct RankedLaunch {
+    pub(crate) mint: Address,
+    pub(crate) info: LaunchInfo,
+}
+
+/// The newest `limit` entries of `index`, newest first.
+///
+/// **Pure**, like [`net_positions`] -- takes the index a watermark already
+/// folded and decides nothing about the store, which is what makes it
+/// testable without a fixture store. Ties (two launches recorded in the same
+/// slot) break on the mint's own address string, ascending, so the order
+/// never flaps between two refreshes of the same underlying data -- a
+/// `HashMap`'s own iteration order is not stable across runs, and without a
+/// deterministic tiebreak two requests a moment apart could show the same
+/// coins in a different order for no reason a reader could see.
+#[must_use]
+pub(crate) fn newest_launches(index: &LaunchIndex, limit: usize) -> Vec<RankedLaunch> {
+    let mut rows: Vec<RankedLaunch> = index
+        .iter()
+        .map(|(mint, info)| RankedLaunch {
+            mint: *mint,
+            info: info.clone(),
+        })
+        .collect();
+    rows.sort_by(|a, b| {
+        b.info
+            .slot
+            .cmp(&a.info.slot)
+            .then_with(|| a.mint.to_string().cmp(&b.mint.to_string()))
+    });
+    rows.truncate(limit);
+    rows
 }
 
 /// Converts a stored, folded row into the shape
@@ -1537,6 +1582,85 @@ pub async fn holders(
             "unattributed_trades": folded.unattributed,
             "holders": rows,
         },
+    }))
+    .into_response()
+}
+
+/// `/v1/market/launches` query parameters.
+#[derive(Debug, Deserialize)]
+pub struct LaunchesParams {
+    limit: Option<usize>,
+}
+
+/// Launches returned when the caller names no limit.
+pub(super) const DEFAULT_LAUNCHES_LIMIT: usize = 20;
+/// The most launches one request returns.
+pub(super) const MAX_LAUNCHES_LIMIT: usize = 100;
+
+/// `/v1/market/launches`: the coins most recently launched that this
+/// instance recorded.
+///
+/// **Zero CryptoHouse queries.** This reads [`Snapshot::launches`] -- the
+/// same cached [`LaunchIndex`] [`coins`] and [`token`] already join in -- and
+/// never the store directly, exactly the pattern this module's own doc
+/// comment describes.
+///
+/// **Not every launch on Solana.** Only what
+/// [`radar_backfill`]'s launch collector decoded and wrote to
+/// [`radar_store::Table::Launches`], within [`LAUNCH_LOOKBACK_SLOTS`] of the
+/// watermark. A coin that launched before this instance started recording,
+/// or further back than that window, is not here -- and an empty index
+/// answers [`Degradation::NotCollected`], never an empty list, so "nothing
+/// launched recently" is never confused with "this instance has recorded
+/// nothing at all" (rule 9).
+pub async fn launches(
+    State(state): State<Arc<crate::AppState>>,
+    Query(params): Query<LaunchesParams>,
+) -> Response {
+    let limit = params
+        .limit
+        .unwrap_or(DEFAULT_LAUNCHES_LIMIT)
+        .clamp(1, MAX_LAUNCHES_LIMIT);
+
+    let watermark = match crate::watermark_of(&state) {
+        Ok(w) => w,
+        Err(e) => return e.into_response(),
+    };
+    let as_of = AsOf::at(watermark);
+    let snapshot = match snapshot_for(&state.market_snapshot, &state.store, as_of) {
+        Ok(Some(s)) => s,
+        Ok(None) => {
+            return Degradation::NotCollected(
+                "the market snapshot has not been built yet; check back shortly",
+            )
+            .into_response();
+        }
+        Err(e) => return Degradation::from_store_error(&e).into_response(),
+    };
+
+    if snapshot.launches().is_empty() {
+        return Degradation::NotCollected("Radar has recorded no launches in its window")
+            .into_response();
+    }
+
+    let from_slot = Slot(watermark.get().saturating_sub(LAUNCH_LOOKBACK_SLOTS));
+    let rows: Vec<Value> = newest_launches(snapshot.launches(), limit)
+        .into_iter()
+        .map(|ranked| {
+            json!({
+                "mint": ranked.mint.to_string(),
+                "name": ranked.info.name,
+                "symbol": ranked.info.symbol,
+                "uri": ranked.info.uri,
+                "slot": ranked.info.slot.get(),
+            })
+        })
+        .collect();
+
+    Json(json!({
+        "window": { "from_slot": from_slot.get(), "to_slot": watermark.get() },
+        "complete": false,
+        "launches": rows,
     }))
     .into_response()
 }
