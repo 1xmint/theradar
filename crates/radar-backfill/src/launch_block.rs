@@ -95,6 +95,114 @@ pub fn query_for_prevalence() -> String {
     )
 }
 
+/// A hard ceiling on the CryptoHouse queries one `consider` run may issue
+/// through [`CryptoHouseBlocks`].
+///
+/// **Copies [`radar_backfill::market_tape::Budget`]'s shape rather than
+/// sharing the type**, because sharing it would report `consider`'s
+/// exhaustion under market-tape's message and mislabel which caller ran out
+/// -- and its doc comment is the reason to enforce a ceiling here at all: a
+/// single counter at [`Self::guard`], the one place every query in
+/// [`CryptoHouseBlocks`] passes through, rather than by counting the calls
+/// this file appears to make. `authorities_at`, `prevalence_table`,
+/// `bundle_slots` and `shape_at` all route through it.
+///
+/// Exhaustion is reported as a [`QueryError::Server`] carrying
+/// [`crate::cryptohouse::BUDGET_EXHAUSTED_MARKER`], so a caller can tell it
+/// apart from CryptoHouse itself refusing.
+pub struct Budget {
+    remaining: std::cell::Cell<u32>,
+}
+
+impl Budget {
+    /// Queries one `consider` run may spend against CryptoHouse.
+    ///
+    /// CryptoHouse allows 120 queries an hour, shared by every Radar process on
+    /// the box: `radar-market-tape`, `radar-follow`, the hourly `--outcomes`
+    /// job, and `consider` itself. `radar-market-tape` already reserves
+    /// [`radar_backfill::market_tape::Budget::PER_PASS`] queries a pass, 80 an
+    /// hour by its own arithmetic
+    /// ([`radar_backfill::market_tape::Budget::PER_PASS`]'s doc comment), which
+    /// leaves 40. `radar-follow` records each launch as it happens and can
+    /// never backfill a slot it missed once the hour has passed, so it gets
+    /// half of what remains -- 20 -- and the other 20 splits evenly between the
+    /// hourly `--outcomes` job and `consider`, which both run once an hour: 10
+    /// each. Stated as the division rather than the answer so the parts cannot
+    /// drift apart.
+    ///
+    /// **This does not mean ten candidates.** `paid_tier` costs up to three
+    /// CryptoHouse queries per candidate it examines -- `shape_at` and
+    /// `bundle_slots` in [`coordination_of`](radar_cli), plus `authorities_at`
+    /// whenever the run's one `prevalence_table` call loaded -- so ten queries
+    /// covers roughly the first three candidates of whatever `--cap` the run
+    /// was given, not the whole pass. That is a real shortfall against a
+    /// `--cap 40` cron, not an artefact of this constant; raising it would only
+    /// take the allowance `radar-follow` needs to keep working.
+    pub const CONSIDER_RUN: u32 = ((120 - 80) / 2) / 2;
+
+    /// A budget for one run.
+    #[must_use]
+    pub fn new(queries: u32) -> Self {
+        Self {
+            remaining: std::cell::Cell::new(queries),
+        }
+    }
+
+    /// Whether another query may be issued, spending one if so.
+    fn take(&self) -> bool {
+        let left = self.remaining.get();
+        if left == 0 {
+            return false;
+        }
+        self.remaining.set(left - 1);
+        true
+    }
+
+    /// How many queries are left unspent.
+    #[must_use]
+    pub fn remaining(&self) -> u32 {
+        self.remaining.get()
+    }
+
+    /// Wraps a query runner so it refuses once the budget is gone.
+    ///
+    /// # Errors
+    ///
+    /// Returns the exhaustion error, carrying
+    /// [`crate::cryptohouse::BUDGET_EXHAUSTED_MARKER`], rather than calling
+    /// `run`, once the budget's queries have been issued.
+    fn guard<T>(
+        &self,
+        run: impl Fn(&str) -> Result<Vec<T>, QueryError>,
+        sql: &str,
+    ) -> Result<Vec<T>, QueryError> {
+        if self.take() {
+            run(sql)
+        } else {
+            Err(Self::exhausted())
+        }
+    }
+
+    /// The error a spent budget reports.
+    #[must_use]
+    fn exhausted() -> QueryError {
+        QueryError::Server(format!(
+            "consider {}: this run's CryptoHouse allowance is spent; the rest of \
+             the pass was not considered",
+            crate::cryptohouse::BUDGET_EXHAUSTED_MARKER
+        ))
+    }
+}
+
+/// A run needs at least one query for the prevalence table and one per
+/// candidate, or the budget cannot do anything. Checked at compile time
+/// rather than in a test, because it is a property of the constant rather
+/// than of any behaviour.
+const _: () = assert!(
+    Budget::CONSIDER_RUN >= 2,
+    "a run needs at least the prevalence read and one candidate's launch-block read"
+);
+
 /// Reads launch-block shapes from CryptoHouse.
 pub struct CryptoHouseBlocks {
     client: Client,
@@ -103,15 +211,43 @@ pub struct CryptoHouseBlocks {
     /// Held rather than recomputed per call so one run asks one question of the
     /// endpoint, and so a long run cannot drift its own window underneath itself.
     since: String,
+    /// A declared ceiling on how many queries this instance may issue, or
+    /// none for a caller that wants every query answered -- `examples/shape.rs`,
+    /// the only caller besides `consider` and a manual one-off tool, not
+    /// something run on a schedule against the shared allowance.
+    budget: Option<Budget>,
 }
 
 impl CryptoHouseBlocks {
-    /// Builds one against a given client, looking back from `now`.
+    /// Builds one against a given client, looking back from `now`, with no
+    /// declared ceiling on how many queries it may issue.
     #[must_use]
     pub fn new(client: Client, now: &str) -> Self {
         Self {
             client,
             since: since(now),
+            budget: None,
+        }
+    }
+
+    /// Attaches a query budget, so every call through the
+    /// [`LaunchBlockSource`] trait refuses once it is spent instead of
+    /// reaching the network.
+    #[must_use]
+    pub fn with_budget(mut self, budget: Budget) -> Self {
+        self.budget = Some(budget);
+        self
+    }
+
+    /// The single place every CryptoHouse query in this type passes through.
+    ///
+    /// Whichever of the four trait methods calls this, the same counter is
+    /// spent -- the ceiling is on queries against the endpoint, not on any one
+    /// kind of question.
+    fn query<T: serde::de::DeserializeOwned>(&self, sql: &str) -> Result<Vec<T>, QueryError> {
+        match &self.budget {
+            Some(budget) => budget.guard(|q| self.client.query(q), sql),
+            None => self.client.query(sql),
         }
     }
 }
@@ -238,13 +374,12 @@ impl LaunchBlockSource for CryptoHouseBlocks {
 
     fn authorities_at(&self, mint: &Address, slot: Slot) -> Result<Vec<String>, Self::Error> {
         let rows: Vec<AuthorityOnly> =
-            self.client
-                .query(&query_for_authorities(mint, slot, &self.since))?;
+            self.query(&query_for_authorities(mint, slot, &self.since))?;
         Ok(rows.into_iter().map(|r| r.authority).collect())
     }
 
     fn prevalence_table(&self) -> Result<radar_graph::prevalence::Table, Self::Error> {
-        let rows: Vec<AuthorityRow> = self.client.query(&query_for_prevalence())?;
+        let rows: Vec<AuthorityRow> = self.query(&query_for_prevalence())?;
         Ok(radar_graph::prevalence::Table::new(
             rows.into_iter().filter_map(|row| {
                 // A count that will not parse is dropped rather than read as
@@ -265,9 +400,7 @@ impl LaunchBlockSource for CryptoHouseBlocks {
         mint: &Address,
         launch: Slot,
     ) -> Result<Vec<(u64, LaunchBlockShape)>, Self::Error> {
-        let rows: Vec<BundleSlotRow> = self
-            .client
-            .query(&query_for_bundle_slots(mint, &self.since))?;
+        let rows: Vec<BundleSlotRow> = self.query(&query_for_bundle_slots(mint, &self.since))?;
         Ok(rows
             .into_iter()
             .filter_map(|row| {
@@ -289,9 +422,7 @@ impl LaunchBlockSource for CryptoHouseBlocks {
     }
 
     fn shape_at(&self, mint: &Address, slot: Slot) -> Result<LaunchBlockShape, Self::Error> {
-        let rows: Vec<ShapeRow> = self
-            .client
-            .query(&query_for_shape(mint, slot, &self.since))?;
+        let rows: Vec<ShapeRow> = self.query(&query_for_shape(mint, slot, &self.since))?;
 
         // No row means the query ran and found nothing, which is a real
         // observation: the token had no transfers in that slot. An error would
@@ -460,5 +591,63 @@ mod tests {
         // than the token.
         let sql = query_for_shape(&mint(), Slot(1), A_BOUND);
         assert!(sql.contains("So11111111111111111111111111111111111111112"));
+    }
+
+    #[test]
+    fn a_budget_lets_through_exactly_as_many_queries_as_it_was_given() {
+        let budget = Budget::new(2);
+        let runs = std::cell::Cell::new(0u32);
+        let run = |_: &str| {
+            runs.set(runs.get() + 1);
+            Ok::<Vec<()>, QueryError>(vec![])
+        };
+
+        assert!(budget.guard(run, "one").is_ok());
+        assert!(budget.guard(run, "two").is_ok());
+        assert_eq!(runs.get(), 2, "both allowed queries must have run");
+    }
+
+    #[test]
+    fn a_spent_budget_refuses_without_running_the_query() {
+        let budget = Budget::new(1);
+        let runs = std::cell::Cell::new(0u32);
+        let run = |_: &str| {
+            runs.set(runs.get() + 1);
+            Ok::<Vec<()>, QueryError>(vec![])
+        };
+
+        assert!(budget.guard(run, "spends the one query").is_ok());
+        let refused = budget.guard(run, "over the limit");
+        assert!(refused.is_err(), "a third call must be refused");
+        assert_eq!(runs.get(), 1, "the refused call must never reach `run`");
+    }
+
+    #[test]
+    fn a_zero_budget_never_runs_a_query() {
+        let budget = Budget::new(0);
+        let refused = budget.guard(|_| Ok::<Vec<()>, QueryError>(vec![]), "anything");
+        assert!(refused.is_err(), "a zero budget must refuse immediately");
+    }
+
+    #[test]
+    fn budget_exhaustion_is_reported_through_the_shared_marker() {
+        let budget = Budget::new(0);
+        let err = budget
+            .guard(|_| Ok::<Vec<()>, QueryError>(vec![]), "anything")
+            .expect_err("a zero budget must refuse");
+        assert!(
+            err.is_budget_exhausted(),
+            "the guard's own refusal must be recognised as budget exhaustion: {err}"
+        );
+    }
+
+    #[test]
+    fn the_consider_run_ceiling_matches_its_own_arithmetic() {
+        // Restated here so a change to the constant that does not also update
+        // its doc comment's division is caught: 120 CryptoHouse queries an
+        // hour, minus market-tape's 80, split in half to radar-follow, split in
+        // half again between the hourly outcomes job and `consider`.
+        assert_eq!(Budget::CONSIDER_RUN, ((120 - 80) / 2) / 2);
+        assert_eq!(Budget::CONSIDER_RUN, 10);
     }
 }

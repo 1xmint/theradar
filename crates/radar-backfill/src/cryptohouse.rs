@@ -40,6 +40,14 @@ pub enum QueryError {
     Row(#[from] serde_json::Error),
 }
 
+/// Marker text every declared-budget exhaustion carries in its message, so a
+/// caller can tell "a query ceiling this process chose ran out" apart from
+/// every other CryptoHouse failure — the same way [`QueryError::should_narrow`]
+/// classifies by substring rather than by a dedicated variant. One constant so
+/// every budget that reports exhaustion this way, in whichever module builds
+/// it, is found by the same check.
+pub const BUDGET_EXHAUSTED_MARKER: &str = "query budget spent";
+
 impl QueryError {
     /// Whether narrowing the window and retrying is worth trying.
     ///
@@ -53,6 +61,19 @@ impl QueryError {
             Self::Server(m)
                 if m.contains("TIMEOUT_EXCEEDED") || m.contains("TOO_MANY_ROWS_OR_BYTES")
         )
+    }
+
+    /// Whether this failure is a declared query budget running out, rather
+    /// than a real CryptoHouse refusal.
+    ///
+    /// A budget-exhausted read must not be mistaken for the endpoint itself
+    /// failing: one is this process choosing to stop, the other is the vendor
+    /// or the query. Conflating them would make a `consider` run started with
+    /// a small budget look, to `radar brief`, exactly like CryptoHouse being
+    /// down.
+    #[must_use]
+    pub fn is_budget_exhausted(&self) -> bool {
+        matches!(self, Self::Server(m) if m.contains(BUDGET_EXHAUSTED_MARKER))
     }
 }
 
@@ -327,5 +348,27 @@ mod tests {
     fn an_empty_body_is_zero_rows_not_an_error() {
         let rows: Vec<Row> = parse_rows("").expect("parses");
         assert!(rows.is_empty());
+    }
+
+    #[test]
+    fn a_budget_exhaustion_message_is_recognised() {
+        // Any budget that reports exhaustion through the shared marker must be
+        // found this way, whichever module built it and whatever the rest of
+        // the sentence says.
+        let err = QueryError::Server(
+            "consider query budget spent for this run; remaining candidates were not considered"
+                .to_owned(),
+        );
+        assert!(err.is_budget_exhausted(), "{err}");
+    }
+
+    #[test]
+    fn an_ordinary_server_error_is_not_mistaken_for_budget_exhaustion() {
+        // A real CryptoHouse refusal must not be read as this process's own
+        // declared ceiling -- that would hide the endpoint actually failing
+        // behind "the budget ran out", which is a different fix.
+        let body = "Code: 159. DB::Exception: Timeout exceeded (TIMEOUT_EXCEEDED)";
+        let err = server_error(500, body, "SELECT 1");
+        assert!(!err.is_budget_exhausted(), "{err}");
     }
 }
