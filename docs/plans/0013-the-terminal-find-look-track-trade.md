@@ -9,9 +9,10 @@ Two repairs landed on the way and are deployed: #258 (the market tape gives up a
 gap it can never close) and #259 (market routes read a shared snapshot instead
 of the whole trade table per request). Item 2 merged as #261 and is **not yet
 deployed** -- the box's `radar-serve` restart needs an interactive sudo
-password, so it is the owner's step. Item 3 is half open: the "newly launched"
-list is being built on `feat/newly-launched-list`; the `SHORTLIST` widening
-waits on the owner. Nothing in C to E is built.
+password, so it is the owner's step. Item 3's "newly launched" list merged as #263
+(`/v1/market/launches`, a "New" tab), also **not yet deployed**. That leaves
+item 3's `SHORTLIST` widening as the only unbuilt part of Phase B, and it waits
+on the owner. Nothing in C to E is built.
 **Date:** 2026-09-18.
 **Branch:** none; each item lands on `main` as its own pull request.
 **Inspected base:** `c8fca0e` (`Remove the bot from Radar: it lives in realorrug
@@ -208,13 +209,22 @@ apply. It is merged and **not deployed**: installing `radar-serve` and
 restarting it prompt for `guardian`'s sudo password, which cannot be run
 unattended, and `deploy/README.md` calls that boundary a feature.
 
-**Next action:** the owner deploys #261 by the `deploy/README.md` "Every deploy
-after that" procedure and checks the holders tab on radar.heyvera.org for a
-traded coin -- the evidence this phase is verified against the real site, not a
-local run. In parallel, item 3's "newly launched" list is in progress: a public
-`/v1/market/launches` read off the snapshot's launch index, which needs the
-launch slot and timestamp carried onto `LaunchInfo` (it keeps only name, symbol
-and uri today, so the index cannot be ordered).
+**Item 3's first half is merged, 2026-09-20.** #263 adds a public
+`GET /v1/market/launches` and a "New" tab, read off the snapshot's launch index
+at zero CryptoHouse cost. `LaunchInfo` now carries the launch **slot**: the
+`Envelope` holds no wall-clock timestamp, so the ordering and the response's
+own window are in slots (`from_slot`/`to_slot`), not the timestamp window the
+trade-backed routes use. One change reached wider than the route: `web/src/api.ts`'s
+`get()` now prefers the server's `message` over its `error` code when both are
+present, because the two `Degradation::NotCollected` answers this route can
+give -- an empty launch index, and a snapshot that could not be built -- share
+one code by design, and the screen has to tell them apart. Every panel's failure
+text now reads as a sentence rather than a code.
+
+**Next action:** the owner deploys #261 and #263 together by the
+`deploy/README.md` "Every deploy after that" procedure, then checks two things
+on radar.heyvera.org: the holders tab on a traded coin, and the "New" tab. That
+is the evidence Phase B is verified against the real site, not a local run.
 Item 3's widening waits on
 the owner's answer about cutting `consider --cap 40` in the box's crontab,
 which shares the CryptoHouse allowance; the "newly launched" list does not
