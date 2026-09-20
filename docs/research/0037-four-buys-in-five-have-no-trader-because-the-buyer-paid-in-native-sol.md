@@ -64,39 +64,69 @@ forced:
   the receiving token account. `trades_query` sets `'' AS leg_authority` on
   every destination row for exactly this reason. So the buy has to find the
   trader on the other leg, as whoever paid the quote asset.
-- That fallback works only when the quote leg **is an SPL transfer**. A buyer
-  paying with wrapped SOL leaves a row, so the trader is found — that is the
-  single buy in the table above. A buyer paying with native SOL leaves no row
-  in `solana.token_transfers` at all, so `qmint.payer` is empty and
-  `quote_authority` comes back blank.
+- That fallback needs the quote leg to have a **source** row, because
+  `qmint.payer` is `argMin(authority, net)` and only a source row carries an
+  authority. A buyer paying with wrapped SOL sends it from a token account of
+  their own, so there is a source row and the trader is found — that is the
+  single buy in the table above.
 
-Most retail pump.fun buys pay in native SOL. Hence four in five.
+Most retail pump.fun buys pay in SOL that never sits in a token account of the
+buyer's. Hence four in five.
+
+**What is proved, and what is inferred.** Proved: the quote leg of those 80
+buys produces a correct price, so rows for `...111` exist in
+`solana.token_transfers` — an earlier draft of this document said they do not,
+which the prices above refute. Proved: `quote_authority` is blank on all of
+them. Inferred, and the two candidates are not distinguished by anything
+measured here:
+
+- the transaction has only the **destination** row for the quote mint — the
+  pool receiving — and `trades_query` hardcodes `'' AS leg_authority` on every
+  destination row, so `argMin` has nothing but a blank to pick; or
+- a source row exists and CryptoHouse leaves `authority` empty on it.
+
+Both lead to the same place: **the trader is not on the quote leg of these
+buys, and no rearrangement of this query puts it there.** The choice between
+them only changes which fix is cheapest, and one query for the raw transfer
+rows of a single signature would settle it before anyone spends effort.
 
 ## What follows
 
-1. **Correct the comment in `query.rs`.** As written it will send the next
-   reader hunting a pricing bug that the numbers above rule out. This costs
-   nothing and should not wait for the rest.
-2. **Decide whether to recover the buyer, and accept that it costs rows.** Two
-   candidates, neither free:
-   - Join `tx_signature` against the transactions table and take the fee
-     payer. On a retail buy the fee payer is the trader. This is one more
-     table in the same HTTP request, so it spends no extra query against the
-     120-per-hour allowance — but it scans more rows, and CryptoHouse's
-     thousand-row cap is what turns one written query into several real ones.
-     That cap is the scarcity 0036 just finished fixing, so this is not a
-     free change.
-   - Resolve the receiving token account to its owner. Correct in every case,
-     including a buy routed through an aggregator, and strictly more expensive.
-3. **Do not build Phase C item 3's per-wallet history on today's data.** A view
-   that filters trades by the signed-in wallet would show that wallet its
-   sells and hide four of its five buys, with nothing on screen to say a buy
-   was dropped rather than never made. That is the failure rule 9 names: an
-   absence rendering identically to a zero. Until the buyer is recoverable,
-   either the view waits, or it says in its own words that it shows sells and
-   the minority of buys paid in wrapped SOL.
+**Decided 2026-09-20**, the owner having handed both calls over.
 
-The owner's decision is item 2, and it is not urgent: nothing is wrong on
-screen today, and no data is being lost that a later query cannot recover,
-because the trades sit in `solana.token_transfers` for as long as CryptoHouse
-keeps them. That is the opposite of the launch recorder in 0036.
+1. **Correct the comment in `query.rs`.** Done in the same change. As written
+   it would send the next reader hunting a pricing bug the numbers rule out.
+2. **Recover the buyer by deriving the token account, not by widening the
+   query.** This reverses the recommendation the first draft of this document
+   made, and the reason is that the first draft missed something already in
+   the tree. On a buy, `ends.receiver` — selected as `token_destination` —
+   *is* the buyer's token account. It is not a wallet, so it cannot answer
+   "who traded this". But the per-wallet view does not need that direction. It
+   starts from a wallet that is already signed in, and
+   `radar_pumpfun::pda::associated_token_account(owner, mint, token_program)`
+   turns a wallet and a mint into exactly that address, locally, for free.
+   Match it against `token_destination` and the buy is the signed-in wallet's.
+
+   So the two candidates the first draft weighed — joining the transactions
+   table for the fee payer, or resolving the token account to its owner — are
+   both dropped. Each spends rows against the CryptoHouse allowance that 0036
+   just finished protecting, and neither is needed.
+
+   What it costs instead: `token_destination` is computed in `market/fold.rs`
+   and then thrown away, so the store must keep it. That is a column, not a
+   query. It is *not* the `trader` field — a token account written where a
+   wallet is expected is the placeholder that field's own doc comment forbids.
+
+   What it does not cover: a buyer whose receiving account is not the derived
+   associated one. Rare for retail, real for some routers, and the view must
+   say so rather than let those trades vanish quietly.
+3. **Phase C item 3 is unblocked by point 2, and is the next thing to build.**
+   The view filters on `trader == wallet` for sells and the derived token
+   account for buys, and states in its own words that a trade routed through
+   an unusual account may be missing. Sells alone, silently, remains the one
+   thing it must not do.
+
+The remaining open question is not in this document. It is
+[0036](0036-the-hourly-consider-run-eats-the-whole-cryptohouse-allowance.md)
+point 2, the size of the allowance, and the half of it that costs money stays
+with the owner.

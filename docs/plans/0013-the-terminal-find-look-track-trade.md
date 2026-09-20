@@ -129,13 +129,19 @@ half:
    `solana.token_transfers` for the query to read an authority from. Measured
    2026-09-20 at 20 of 100 live trades, partitioning perfectly — see
    [0037](../research/0037-four-buys-in-five-have-no-trader-because-the-buyer-paid-in-native-sol.md),
-   which also names the two ways to recover the buyer and what each costs
-   against the CryptoHouse allowance. Built as-is, this view would show a
-   wallet its sells, hide four of its five buys, and say nothing about the
-   difference — a missing trade rendered exactly like a trade never made.
-   Either recover the buyer first, or have the view state in its own words
-   that it shows sells and only the buys paid in wrapped SOL. Coins we do not
-   track say so in one sentence.
+   **and unblocked by it.** Built naively, this view would show a wallet its
+   sells, hide four of its five buys, and say nothing about the difference —
+   a missing trade rendered exactly like a trade never made. The way through
+   costs no CryptoHouse queries at all: a buy's `token_destination` is the
+   buyer's token account, and
+   `radar_pumpfun::pda::associated_token_account(wallet, mint, token_program)`
+   derives that address locally from a wallet that is already signed in. So
+   filter sells on `trader` and buys on the derived account. The one cost is
+   that `market/fold.rs` currently discards `token_destination`, so the store
+   needs a column for it — and it must be a new field, not `trader`, which a
+   token account would turn into the placeholder its doc comment forbids. Say
+   plainly that a buy routed through an unusual account may be missing. Coins
+   we do not track say so in one sentence.
 4. The private column of the screen, with 0012's distinct empty sentences
    ("no trades yet" must differ from "could not look").
 
