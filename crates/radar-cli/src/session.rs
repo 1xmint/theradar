@@ -299,6 +299,13 @@ pub fn render(r: &SessionRecord) -> String {
         "      examined                       : {}",
         f.paid_examined
     );
+    if f.budget_exhausted {
+        let _ = writeln!(
+            out,
+            "      stopped early: the shared CryptoHouse query allowance was \
+             spent, not because the cap or the population ran out"
+        );
+    }
     let _ = writeln!(
         out,
         "      not examined, cap of {} ran out : {}   <- worth paying for, nobody looked",
@@ -533,6 +540,32 @@ mod tests {
         UnrealisedReport, Unvaluable, Visibility, WindowCoverage,
     };
 
+    /// A run stopped by its query budget must not read like a run that
+    /// finished. The two differ by one boolean and by nothing an operator can
+    /// see otherwise -- `paid_examined` is a number either way.
+    #[test]
+    fn a_budget_stopped_run_says_why_it_stopped() {
+        let mut r = a_run();
+        r.funnel.budget_exhausted = true;
+        r.funnel.paid_examined = 3;
+        let said = render(&r);
+        assert!(
+            said.contains("shared CryptoHouse query allowance was spent"),
+            "the reason must be printed, not left to be inferred:
+{said}"
+        );
+    }
+
+    #[test]
+    fn a_run_that_finished_does_not_claim_it_was_stopped() {
+        let said = render(&a_run());
+        assert!(
+            !said.contains("allowance was spent"),
+            "a completed run must not borrow the stopped run's sentence:
+{said}"
+        );
+    }
+
     /// A run that collected, looked and refused. The baseline the honesty tests
     /// bend one field of at a time.
     fn a_run() -> SessionRecord {
@@ -574,6 +607,7 @@ mod tests {
                 worth_paying_for: 25,
                 paid_examined: 25,
                 deferred_by_cap: 0,
+                budget_exhausted: false,
                 refused_on_shape: 4,
                 look_failed: 1,
                 dropped_after_probe: 0,

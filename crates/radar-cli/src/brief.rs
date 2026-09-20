@@ -145,6 +145,7 @@ pub fn run(store: &Path, serve_url: Option<&str>) -> bool {
         now,
     ));
     checks.push(binaries(&build_info));
+    checks.push(query_budget(store));
     checks.push(trading_lane());
 
     println!("radar brief — {}\n", from_epoch(now));
@@ -539,6 +540,66 @@ fn creator_index(path: &str, now: i64) -> Check {
             Status::Unknown,
             "index",
             format!("creator index at {path} cannot be read: {e}"),
+        ),
+    }
+}
+
+/// Grades the last `consider` run's CryptoHouse query budget.
+///
+/// Pure over the loaded record so both directions are testable without a
+/// store, mirroring [`grade_index`].
+///
+/// Exhaustion is `Warn`, not `Fail`. The run still decided on everything it
+/// managed to look at, and under the ceiling in
+/// [`radar_backfill::launch_block::Budget::CONSIDER_RUN`] stopping early is the
+/// expected outcome, not a malfunction -- the budget exists precisely so this
+/// process stops instead of eating the allowance `radar-follow` needs. A check
+/// that failed every hour for doing its job would train its reader to ignore
+/// it, which costs the credibility of every other line in the brief.
+fn grade_query_budget(f: &radar_types::Funnel) -> Check {
+    if f.budget_exhausted {
+        return Check::new(
+            Status::Warn,
+            "query budget",
+            format!(
+                "the last run examined {} of {} worth paying for and stopped:                  the shared CryptoHouse allowance was spent, not the cap",
+                f.paid_examined, f.worth_paying_for
+            ),
+        );
+    }
+    Check::new(
+        Status::Ok,
+        "query budget",
+        format!(
+            "the last run examined {} of {} worth paying for within its query budget",
+            f.paid_examined, f.worth_paying_for
+        ),
+    )
+}
+
+/// Reads the last kept `consider` run and grades its query budget.
+///
+/// No record at all is `Ok` and said plainly: a store nobody has run the
+/// decision lane against has not exhausted anything. A record that will not
+/// load is `Unknown` -- something is there and it is not a session, which is a
+/// different situation from nobody having written one. Same split as
+/// [`creator_index`].
+fn query_budget(store: &Path) -> Check {
+    let dir = store.to_string_lossy();
+    match crate::session::latest(&dir) {
+        Ok(Some(record)) => grade_query_budget(&record.funnel),
+        Ok(None) => Check::new(
+            Status::Ok,
+            "query budget",
+            format!(
+                "no kept `consider` run under {dir}/{} yet",
+                crate::session::SESSIONS_DIR
+            ),
+        ),
+        Err(e) => Check::new(
+            Status::Unknown,
+            "query budget",
+            format!("the last `consider` run under {dir} cannot be read: {e}"),
         ),
     }
 }
@@ -1300,6 +1361,90 @@ fn humanise(seconds: i64) -> String {
 
 #[cfg(test)]
 mod tests {
+
+    use super::{Status, grade_query_budget, query_budget};
+    use radar_types::Funnel;
+
+    /// A run that spent its whole query budget before it ran out of candidates.
+    fn a_starved_run() -> Funnel {
+        Funnel {
+            worth_paying_for: 40,
+            paid_examined: 3,
+            budget_exhausted: true,
+            ..Funnel::default()
+        }
+    }
+
+    #[test]
+    fn a_run_that_spent_its_query_budget_says_so() {
+        let check = grade_query_budget(&a_starved_run());
+        assert_eq!(
+            check.status,
+            Status::Warn,
+            "stopping on budget is degraded, not broken -- but it is not ok either"
+        );
+        assert!(
+            check.detail.contains("CryptoHouse allowance was spent"),
+            "the reason has to be in the line, not inferable from the numbers: {}",
+            check.detail
+        );
+        assert!(
+            check.detail.contains('3') && check.detail.contains("40"),
+            "the shortfall is the point of the line: {}",
+            check.detail
+        );
+    }
+
+    #[test]
+    fn a_run_inside_its_query_budget_is_ok_and_says_nothing_about_spending() {
+        let f = Funnel {
+            worth_paying_for: 3,
+            paid_examined: 3,
+            budget_exhausted: false,
+            ..Funnel::default()
+        };
+        let check = grade_query_budget(&f);
+        assert_eq!(check.status, Status::Ok);
+        assert!(
+            !check.detail.contains("was spent"),
+            "a run that finished must not borrow the starved run's sentence: {}",
+            check.detail
+        );
+    }
+
+    /// The two answers must not be interchangeable. Rule 9 is about the
+    /// sentence, not only the status: an operator skimming the brief reads the
+    /// detail, and two runs that differ this much reading alike is the bug.
+    #[test]
+    fn the_starved_and_the_finished_run_do_not_read_alike() {
+        let starved = grade_query_budget(&a_starved_run());
+        let finished = grade_query_budget(&Funnel {
+            worth_paying_for: 40,
+            paid_examined: 40,
+            ..Funnel::default()
+        });
+        assert_ne!(starved.detail, finished.detail);
+        assert_ne!(starved.status, finished.status);
+    }
+
+    /// Absent is not exhausted. A store nobody has run the lane against has
+    /// spent nothing, and must not alarm.
+    #[test]
+    fn no_kept_run_is_ok_and_not_a_warning() {
+        let empty = std::env::temp_dir().join(format!("radar-brief-nb{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&empty);
+        let check = query_budget(&empty);
+        assert_eq!(
+            check.status,
+            Status::Ok,
+            "nobody has run consider here; that is not a budget problem"
+        );
+        assert!(
+            !check.detail.contains("was spent"),
+            "an unrun store must not report a spend: {}",
+            check.detail
+        );
+    }
 
     /// A manifest with one real-looking sha line, so the check gets past its
     /// two `Unknown` guards and reaches the decision.
