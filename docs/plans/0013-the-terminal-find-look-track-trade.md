@@ -91,8 +91,8 @@ All three items cost **zero** extra CryptoHouse queries on a request path.
    not care which source answered.
 3. **More than 10 coins, inside the budget.** The "newly launched" list
    straight from the launches table is built and merged (#263, no CryptoHouse
-   cost at all). **The `SHORTLIST` widening is blocked on measurement, not on
-   effort.** The day of logs this item asked for was read on 2026-09-20 and
+   cost at all). **The `SHORTLIST` widening is blocked on a decision, not on
+   effort** -- the measurement it was waiting for has been taken. The day of logs this item asked for was read on 2026-09-20 and
    there is no headroom to widen into: the hourly `consider` cron already
    spends the whole 120/hour allowance at minute 37, and the recorder is
    refused 91 times a day as a result —
@@ -239,10 +239,23 @@ Item 3's widening waits on a decision
 that 0036 now frames with numbers: at 120 CryptoHouse queries an hour the box
 cannot run all four units at the sizes currently asked for, so either
 `consider` runs less often or over fewer candidates, or the allowance grows.
-Separately and regardless of that answer, `consider` is having a declared query
-ceiling added, the same one `market_tape.rs` already enforces, so that it
-cannot spend an allowance it does not own; the "newly launched" list does not
-wait on any of this. The owner step still open: set `RADAR_CUSTOMER_ACCESS=open` in
+Separately and regardless of that answer, `consider` now **has** a declared
+query ceiling -- ten queries a run, the same pattern `market_tape.rs` enforces
+-- so it cannot spend an allowance it does not own, and a run that hits the
+ceiling says so instead of reporting a short pass as a complete one (#266,
+merged 2026-09-20). The "newly launched" list does not wait on any of this.
+
+**The budget fix probably does not need the privileged half of the deploy, and
+that is worth checking before scheduling one.** It ships in the `radar` binary,
+which `deploy/README.md`'''s table places in `~/bin` -- an unprivileged
+`install` -- while only `radar-serve` lives in `/usr/local/bin` and needs the
+interactive `sudo`. `radar-serve` is what #261 and #263 change. If the
+`consider` cron invokes `~/bin/radar`, the new binary takes effect on the next
+run with no restart at all, because cron starts a fresh process every time.
+
+**Unverified from a workstation:** which path the cron entry actually names.
+`ssh guardian-vps-tail '''crontab -l'''` settles it in one line, and it decides
+whether stopping the recorder being starved needs a password or does not. The owner step still open: set `RADAR_CUSTOMER_ACCESS=open` in
 `/etc/radar/radar.env` and restart `radar-serve`. Phase C needs it.
 
 **Do not:** build Phase D before Phase C is live; put a CryptoHouse query on a
