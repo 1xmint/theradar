@@ -24,7 +24,7 @@ const MINT_A = "5NfV2sy8DqXamLvYEE4LcTWzGqZc5Emv4bqqhVDWpump";
 const MINT_B = "9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin";
 
 describe("NewlyLaunchedPanel", () => {
-  it("lists the recorded launches the server sent, newest slot first as given", () => {
+  it("lists the recorded launches the server sent, newest slot first as given", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async () =>
