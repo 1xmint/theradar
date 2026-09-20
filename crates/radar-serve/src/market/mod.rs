@@ -35,13 +35,19 @@
 //! store that cannot be read is a separate fact again, about this build or
 //! this disk, never about a coin.
 //!
-//! Holder balances and token metadata are not collected by
-//! [`radar_backfill::market_tape`] at all today — it collects the trade tape
-//! only — so [`holders`] and the metadata half of [`token`] say that plainly
-//! rather than returning an empty answer that looks like a quiet market.
+//! Token metadata is not collected by [`radar_backfill::market_tape`] at all
+//! today — it collects the trade tape only — so the metadata half of
+//! [`token`] says that plainly rather than returning an empty answer that
+//! looks like a quiet market. [`holders`] answers from the same trade tape
+//! instead of refusing: without a live feed it is net bought-minus-sold per
+//! wallet over the trades this store has actually seen of a coin, never a
+//! true balance, and it says so through [`NetPositions`]'s `net_traded_in_window`
+//! fact on every response rather than passing off a fold as a full holder
+//! list.
 
 pub mod live;
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use axum::Json;
@@ -866,6 +872,16 @@ pub struct TapeParams {
 const DEFAULT_TRADE_LIMIT: usize = 100;
 const MAX_TRADE_LIMIT: usize = 500;
 
+/// Holders returned when the caller names no limit.
+///
+/// Shared between [`live::holders`] and [`holders`] so the free path and the
+/// live-feed path clamp to the same size — a caller switching between a
+/// deployment with a live feed and one without should see the same default,
+/// not a second number to learn.
+pub(super) const DEFAULT_HOLDERS_LIMIT: usize = 20;
+/// The most holders one request returns.
+pub(super) const MAX_HOLDERS_LIMIT: usize = 100;
+
 /// The tape: recent trades for one mint, newest first.
 pub async fn trades(
     State(state): State<Arc<crate::AppState>>,
@@ -1334,23 +1350,132 @@ pub async fn token(
 }
 
 /// `/v1/market/holders/{mint}` query parameters.
-///
-/// Only the live feed reads `limit`: without one, [`holders`] refuses before
-/// it would read a parameter.
 #[derive(Debug, Deserialize)]
 pub struct HoldersParams {
     limit: Option<usize>,
 }
 
-/// Holder balances, folded from observed transfers over a bounded window.
+/// What [`net_positions`] folded a mint's trades into.
 ///
-/// **Not collected by [`radar_backfill::market_tape`] today.** The collector
-/// gathers a batched trade tape (`mint IN (...)` against a shortlist of
-/// active mints); a holders fold needs every raw transfer for one mint over a
-/// wide window, which is a different query this budget does not have room
-/// for yet. Refusing plainly here is rule 9's shape: an empty holder list
-/// would look exactly like a token with no holders, which is a different and
-/// much more interesting fact than the true one.
+/// Distinct from an empty answer: [`net_positions`] returns `None` when
+/// `mint` has no trades in the snapshot at all, and `Some` with an empty
+/// `rows` when it has trades but nobody nets positive -- see the function's
+/// own doc comment.
+pub(crate) struct NetPositions {
+    /// Wallet and net token balance, richest first, ties broken by the
+    /// address's own string so the order never depends on hash-map
+    /// iteration or the order trades happened to arrive in.
+    pub(crate) rows: Vec<(Address, f64)>,
+    /// The oldest trade of this mint the fold considered, verbatim as
+    /// stored.
+    pub(crate) from: String,
+    /// The newest trade of this mint the fold considered, verbatim as
+    /// stored.
+    pub(crate) to: String,
+    /// Trades of this mint the fold skipped because the trader was not
+    /// identified or the side was [`MarketSide::Unknown`] -- neither a buy
+    /// nor a sell, so nothing safe to add or subtract from any wallet.
+    pub(crate) unattributed: usize,
+    /// Whether more wallets net positive than `limit` allowed through
+    /// [`Self::rows`].
+    ///
+    /// The route does not read this today -- `complete` in its response is
+    /// always `false` regardless, since a wallet-count truncation is not the
+    /// only reason this fold can never be everyone. Kept on the struct and
+    /// covered by [`net_positions`]'s own tests because a caller reading the
+    /// fold directly (rather than through the route's JSON) still needs to
+    /// tell "every net-positive wallet" from "the top `limit` of them" apart.
+    #[allow(
+        dead_code,
+        reason = "read by net_positions' own unit tests; the route folds it into no response field yet -- see the field's own doc comment"
+    )]
+    pub(crate) truncated: bool,
+}
+
+/// Nets buys against sells per wallet, over every trade of `mint` in
+/// `trades` -- not a display window, because "who holds now" needs
+/// everything this store has of the coin, not a slice of it.
+///
+/// A buy adds `token_amount` to the trader's balance, a sell subtracts it.
+/// **A wallet whose net comes out at or below zero is dropped, never shown
+/// as a zero or negative balance.** Net <= 0 means it held coins from before
+/// Radar's window started -- a sell against a buy this store never saw --
+/// and reporting a number for that would be reporting something Radar does
+/// not actually know (rule 9: absent is not zero, and a negative balance
+/// here would be a still less honest way of saying the same absence).
+///
+/// A trade with no identified trader, or [`MarketSide::Unknown`], moves no
+/// wallet's balance and is counted in [`NetPositions::unattributed`] instead
+/// of being guessed at.
+///
+/// Returns `None` when `trades` holds nothing for `mint` at all -- distinct
+/// from `Some` with empty `rows`, which means the mint traded but no wallet
+/// nets positive (every trade unattributed, or every trader net <= 0).
+#[must_use]
+pub(crate) fn net_positions(
+    trades: &[MarketTrade],
+    mint: &Address,
+    limit: usize,
+) -> Option<NetPositions> {
+    let of_this_mint: Vec<&MarketTrade> = trades.iter().filter(|row| row.mint == *mint).collect();
+    if of_this_mint.is_empty() {
+        return None;
+    }
+    // Stored timestamps sort lexicographically the same way they sort in
+    // time -- `newest_ts_of` above relies on the same fact.
+    let from = of_this_mint
+        .iter()
+        .map(|row| row.ts.clone())
+        .min()
+        .expect("of_this_mint is non-empty");
+    let to = of_this_mint
+        .iter()
+        .map(|row| row.ts.clone())
+        .max()
+        .expect("of_this_mint is non-empty");
+
+    let mut balances: HashMap<Address, f64> = HashMap::new();
+    let mut unattributed = 0usize;
+    for row in &of_this_mint {
+        match (row.trader, row.side) {
+            (Some(wallet), MarketSide::Buy) => {
+                *balances.entry(wallet).or_insert(0.0) += row.token_amount;
+            }
+            (Some(wallet), MarketSide::Sell) => {
+                *balances.entry(wallet).or_insert(0.0) -= row.token_amount;
+            }
+            _ => unattributed += 1,
+        }
+    }
+
+    let mut rows: Vec<(Address, f64)> =
+        balances.into_iter().filter(|&(_, bal)| bal > 0.0).collect();
+    rows.sort_by(|a, b| {
+        b.1.partial_cmp(&a.1)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| a.0.to_string().cmp(&b.0.to_string()))
+    });
+    let truncated = rows.len() > limit;
+    rows.truncate(limit);
+
+    Some(NetPositions {
+        rows,
+        from,
+        to,
+        unattributed,
+        truncated,
+    })
+}
+
+/// Holder balances, folded from the trades Radar has already stored.
+///
+/// **Not the same fact a live feed's [`live::holders`] answers.** With no
+/// live feed this fold only sees the trades the market-tape collector has
+/// recorded, so it can only ever report net-traded-in-window, never a true
+/// balance including coins a wallet held before that window or received
+/// without trading -- [`net_positions`] states that gap in its own `fact`
+/// field on every response, and never returns an empty list for a mint the
+/// collector has simply never traded (rule 9).
 pub async fn holders(
     State(state): State<Arc<crate::AppState>>,
     Path(mint): Path<String>,
@@ -1363,9 +1488,56 @@ pub async fn holders(
     if let Some(feed) = state.market.live() {
         return live::holders(feed, mint, params.limit);
     }
-    Degradation::NotCollected(
-        "holder-balance collection is out of scope for the market-tape collector; only trade data is collected",
-    )
+    let watermark = match crate::watermark_of(&state) {
+        Ok(w) => w,
+        Err(e) => return e.into_response(),
+    };
+    let as_of = AsOf::at(watermark);
+    let snapshot = match snapshot_for(&state.market_snapshot, &state.store, as_of) {
+        Ok(Some(s)) => s,
+        Ok(None) => {
+            return Degradation::NotCollected(
+                "the market snapshot has not been built yet; check back shortly",
+            )
+            .into_response();
+        }
+        Err(e) => return Degradation::from_store_error(&e).into_response(),
+    };
+    if !snapshot.collected() {
+        return Degradation::NotCollected(
+            "the market-tape collector has not produced anything for this store yet",
+        )
+        .into_response();
+    }
+
+    let limit = params
+        .limit
+        .unwrap_or(DEFAULT_HOLDERS_LIMIT)
+        .clamp(1, MAX_HOLDERS_LIMIT);
+    let Some(folded) = net_positions(snapshot.trades(), &mint, limit) else {
+        return Degradation::NotCollected(
+            "Radar has recorded no trades of this coin in its window",
+        )
+        .into_response();
+    };
+
+    let rows: Vec<Value> = folded
+        .rows
+        .iter()
+        .map(|(account, balance)| json!({ "account": account.to_string(), "balance": balance, "pool": false }))
+        .collect();
+    Json(json!({
+        "mint": mint.to_string(),
+        "fold": {
+            "fact": "net_traded_in_window",
+            "granularity": "wallet",
+            "from": folded.from,
+            "to": folded.to,
+            "complete": false,
+            "unattributed_trades": folded.unattributed,
+            "holders": rows,
+        },
+    }))
     .into_response()
 }
 
@@ -2136,5 +2308,290 @@ mod tests {
             None
         );
         assert!(cache.peek().is_none());
+    }
+
+    mod net_positions_tests {
+        use super::*;
+
+        const WALLET_A: [u8; 32] = [1u8; 32];
+        const WALLET_B: [u8; 32] = [2u8; 32];
+        const OTHER_MINT: &str = "9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin";
+
+        fn trade(
+            mint: &str,
+            ts: &str,
+            side: MarketSide,
+            trader: Option<Address>,
+            token_amount: f64,
+        ) -> MarketTrade {
+            MarketTrade {
+                mint: mint.parse().expect("a mint"),
+                ts: ts.to_owned(),
+                slot: radar_types::Slot(1),
+                signature: radar_types::Signature::new([7u8; 64]),
+                side,
+                token_amount,
+                quote_amount: Some(2.0),
+                quote_mint: Some(WSOL.parse().expect("a mint")),
+                price: Some(2.0),
+                trader,
+            }
+        }
+
+        #[test]
+        fn no_trades_of_the_mint_at_all_returns_none() {
+            let trades = [trade(
+                OTHER_MINT,
+                "2026-09-18 00:00:00",
+                MarketSide::Buy,
+                Some(Address::new(WALLET_A)),
+                5.0,
+            )];
+            let mint: Address = A_MINT.parse().expect("a mint");
+            assert!(
+                net_positions(&trades, &mint, 20).is_none(),
+                "a mint with zero trades in the snapshot must be told apart from one with none held"
+            );
+        }
+
+        #[test]
+        fn a_buy_then_a_sell_nets_the_difference() {
+            let wallet = Address::new(WALLET_A);
+            let trades = [
+                trade(
+                    A_MINT,
+                    "2026-09-18 00:00:00",
+                    MarketSide::Buy,
+                    Some(wallet),
+                    10.0,
+                ),
+                trade(
+                    A_MINT,
+                    "2026-09-18 00:01:00",
+                    MarketSide::Sell,
+                    Some(wallet),
+                    4.0,
+                ),
+            ];
+            let mint: Address = A_MINT.parse().expect("a mint");
+            let folded = net_positions(&trades, &mint, 20).expect("this mint traded");
+            assert_eq!(folded.rows, vec![(wallet, 6.0)]);
+            assert_eq!(folded.unattributed, 0);
+        }
+
+        #[test]
+        fn a_net_of_exactly_zero_is_dropped() {
+            let wallet = Address::new(WALLET_A);
+            let trades = [
+                trade(
+                    A_MINT,
+                    "2026-09-18 00:00:00",
+                    MarketSide::Buy,
+                    Some(wallet),
+                    5.0,
+                ),
+                trade(
+                    A_MINT,
+                    "2026-09-18 00:01:00",
+                    MarketSide::Sell,
+                    Some(wallet),
+                    5.0,
+                ),
+            ];
+            let mint: Address = A_MINT.parse().expect("a mint");
+            let folded = net_positions(&trades, &mint, 20).expect("this mint traded");
+            assert!(
+                folded.rows.is_empty(),
+                "net <= 0 must never be shown as a held balance"
+            );
+        }
+
+        #[test]
+        fn a_negative_net_is_dropped_too() {
+            let wallet = Address::new(WALLET_A);
+            let trades = [
+                trade(
+                    A_MINT,
+                    "2026-09-18 00:00:00",
+                    MarketSide::Buy,
+                    Some(wallet),
+                    3.0,
+                ),
+                trade(
+                    A_MINT,
+                    "2026-09-18 00:01:00",
+                    MarketSide::Sell,
+                    Some(wallet),
+                    5.0,
+                ),
+            ];
+            let mint: Address = A_MINT.parse().expect("a mint");
+            let folded = net_positions(&trades, &mint, 20).expect("this mint traded");
+            assert!(
+                folded.rows.is_empty(),
+                "a net seller before our window holds nothing here"
+            );
+        }
+
+        #[test]
+        fn unknown_side_and_missing_trader_are_unattributed_and_move_nothing() {
+            let wallet = Address::new(WALLET_A);
+            let trades = [
+                trade(
+                    A_MINT,
+                    "2026-09-18 00:00:00",
+                    MarketSide::Unknown,
+                    Some(wallet),
+                    9.0,
+                ),
+                trade(A_MINT, "2026-09-18 00:01:00", MarketSide::Buy, None, 9.0),
+                trade(
+                    A_MINT,
+                    "2026-09-18 00:02:00",
+                    MarketSide::Buy,
+                    Some(wallet),
+                    2.0,
+                ),
+            ];
+            let mint: Address = A_MINT.parse().expect("a mint");
+            let folded = net_positions(&trades, &mint, 20).expect("this mint traded");
+            assert_eq!(folded.unattributed, 2);
+            assert_eq!(folded.rows, vec![(wallet, 2.0)]);
+        }
+
+        #[test]
+        fn other_mints_trades_are_ignored() {
+            let wallet = Address::new(WALLET_A);
+            let trades = [
+                trade(
+                    A_MINT,
+                    "2026-09-18 00:00:00",
+                    MarketSide::Buy,
+                    Some(wallet),
+                    4.0,
+                ),
+                trade(
+                    OTHER_MINT,
+                    "2026-09-18 00:05:00",
+                    MarketSide::Buy,
+                    Some(wallet),
+                    100.0,
+                ),
+            ];
+            let mint: Address = A_MINT.parse().expect("a mint");
+            let folded = net_positions(&trades, &mint, 20).expect("this mint traded");
+            assert_eq!(folded.rows, vec![(wallet, 4.0)]);
+            assert_eq!(folded.to, "2026-09-18 00:00:00");
+        }
+
+        #[test]
+        fn richest_first_ties_broken_by_address_string() {
+            let a = Address::new(WALLET_A);
+            let b = Address::new(WALLET_B);
+            // Two wallets net the same balance -- the tiebreak has to decide,
+            // and it decides by the address's own string, not insertion order.
+            let (first, second) = if a.to_string() < b.to_string() {
+                (a, b)
+            } else {
+                (b, a)
+            };
+            let trades = [
+                trade(
+                    A_MINT,
+                    "2026-09-18 00:00:00",
+                    MarketSide::Buy,
+                    Some(second),
+                    5.0,
+                ),
+                trade(
+                    A_MINT,
+                    "2026-09-18 00:01:00",
+                    MarketSide::Buy,
+                    Some(first),
+                    5.0,
+                ),
+            ];
+            let mint: Address = A_MINT.parse().expect("a mint");
+            let folded = net_positions(&trades, &mint, 20).expect("this mint traded");
+            assert_eq!(folded.rows, vec![(first, 5.0), (second, 5.0)]);
+        }
+
+        #[test]
+        fn a_limit_below_the_wallet_count_truncates_and_marks_it() {
+            let a = Address::new(WALLET_A);
+            let b = Address::new(WALLET_B);
+            let trades = [
+                trade(
+                    A_MINT,
+                    "2026-09-18 00:00:00",
+                    MarketSide::Buy,
+                    Some(a),
+                    10.0,
+                ),
+                trade(A_MINT, "2026-09-18 00:01:00", MarketSide::Buy, Some(b), 5.0),
+            ];
+            let mint: Address = A_MINT.parse().expect("a mint");
+            let folded = net_positions(&trades, &mint, 1).expect("this mint traded");
+            assert_eq!(folded.rows.len(), 1);
+            assert!(
+                folded.truncated,
+                "one wallet was left out of a two-wallet fold"
+            );
+        }
+
+        #[test]
+        fn exactly_the_limit_worth_of_wallets_is_not_truncated() {
+            let a = Address::new(WALLET_A);
+            let b = Address::new(WALLET_B);
+            let trades = [
+                trade(
+                    A_MINT,
+                    "2026-09-18 00:00:00",
+                    MarketSide::Buy,
+                    Some(a),
+                    10.0,
+                ),
+                trade(A_MINT, "2026-09-18 00:01:00", MarketSide::Buy, Some(b), 5.0),
+            ];
+            let mint: Address = A_MINT.parse().expect("a mint");
+            let folded = net_positions(&trades, &mint, 2).expect("this mint traded");
+            assert_eq!(folded.rows.len(), 2);
+            assert!(
+                !folded.truncated,
+                "exactly filling the limit is not the same as exceeding it"
+            );
+        }
+
+        #[test]
+        fn from_and_to_are_this_mints_oldest_and_newest_trade() {
+            let wallet = Address::new(WALLET_A);
+            let trades = [
+                trade(
+                    A_MINT,
+                    "2026-09-18 00:05:00",
+                    MarketSide::Buy,
+                    Some(wallet),
+                    1.0,
+                ),
+                trade(
+                    A_MINT,
+                    "2026-09-17 23:00:00",
+                    MarketSide::Buy,
+                    Some(wallet),
+                    1.0,
+                ),
+                trade(
+                    A_MINT,
+                    "2026-09-18 00:02:00",
+                    MarketSide::Buy,
+                    Some(wallet),
+                    1.0,
+                ),
+            ];
+            let mint: Address = A_MINT.parse().expect("a mint");
+            let folded = net_positions(&trades, &mint, 20).expect("this mint traded");
+            assert_eq!(folded.from, "2026-09-17 23:00:00");
+            assert_eq!(folded.to, "2026-09-18 00:05:00");
+        }
     }
 }
