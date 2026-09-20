@@ -14,6 +14,9 @@ lines per unit. No paid source, no synthetic load.
 **Bears on:** [plan 0013](../plans/0013-the-terminal-find-look-track-trade.md),
 whose Phase B item 3 asks for more than ten coins — this says there is no
 allowance left to widen into.
+**Answered in part:** point 1 of *What follows* is built — `consider` now
+declares a budget and stops when it is spent. See *The half of this that is
+fixed*, below. Point 2 is still open and still the owner'''s.
 
 ## The question this closes
 
@@ -116,6 +119,24 @@ implementation detail:
 second of those.** The `SHORTLIST` of ten is not an arbitrary cap; widening it
 raises the tape's query cost, and there is no headroom to raise it into. That
 item cannot proceed on measurement, not on effort.
+
+## The half of this that is fixed
+
+**Built, not yet deployed.** `consider`'''s CryptoHouse reads now go through a
+declared budget of ten queries a run, enforced at the single point every query
+passes through, and a run that hits the ceiling says so rather than reporting a
+short pass as a complete one — in `radar session` and as a `query budget` line
+in `radar brief`. Rule 9: *considered three candidates* and *considered three
+and stopped because the allowance was spent* are now different sentences.
+
+This fixes point 1 above and **does not touch point 2**. Ten queries still buys
+about three of the forty candidates the cron asks for. The budget stops
+`consider` starving `radar-follow`; it does not make `consider` able to do its
+job at its current size. Choosing between a smaller run and a larger allowance
+is still the owner'''s decision, and the recommendation recorded with the change
+is to watch one day of recorder data after deploying before making it — the
+refusal count going to roughly zero is free evidence that changing two things
+at once would destroy.
 
 ## What was not checked
 
