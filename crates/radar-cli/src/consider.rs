@@ -1094,6 +1094,14 @@ pub struct Pass {
     /// the verdict absent, the strategy correctly declines to refuse on an
     /// absence, and the gate is then silently off.
     pub look_failed: usize,
+    /// Proposals raised on a candidate whose coordination gate never ran.
+    ///
+    /// [`Self::look_failed`] counts candidates; this counts the ones that got
+    /// all the way to a proposal anyway. The distinction is the whole point:
+    /// a reader of `PROPOSED: 11` beside `unreadable: 30` cannot tell whether
+    /// the eleven are the examined ones or the unexamined ones, and those are
+    /// opposite facts.
+    pub proposed_unexamined: usize,
 }
 
 /// The lines a pass prints about what it declined.
@@ -1118,6 +1126,14 @@ pub fn render_pass_notes(pass: &Pass) -> String {
                and the strategy will not refuse on an absence — so those passed this
                gate without being examined rather than by being clean.
 ",
+        );
+    }
+    if pass.proposed_unexamined > 0 {
+        let _ = writeln!(
+            out,
+            "  {} of the proposal(s) above were raised on a candidate whose
+               coordination gate never ran. Nobody looked at those.",
+            pass.proposed_unexamined
         );
     }
     out
@@ -1213,6 +1229,7 @@ where
     // whose constant has moved prints too. See [`render_shapes`].
     let mut shapes = radar_graph::Distribution::new();
     let mut look_failed = 0usize;
+    let mut proposed_unexamined = 0usize;
 
     let prevalence_table = prevalence_table_of(blocks, ledger);
     // Unreadable and truncated are both charged as failures. A truncated table
@@ -1327,7 +1344,7 @@ where
             // refuse on it, and it will not treat it as a pass either.
             None => candidate,
         };
-        report_one(
+        if report_one(
             strategy,
             &candidate,
             &mut proposals,
@@ -1335,7 +1352,9 @@ where
             ledger,
             prevalence,
             launch_shape,
-        );
+        ) {
+            proposed_unexamined += 1;
+        }
         note_clock(ledger, *mint, launch_slot, candidate_began);
     }
 
@@ -1344,6 +1363,7 @@ where
         proposals,
         refused_on_shape,
         look_failed,
+        proposed_unexamined,
     };
     print!("{}", render_pass_notes(&pass));
     pass
@@ -1783,6 +1803,12 @@ fn render_calibration(dist: &radar_graph::Distribution) -> String {
 }
 
 /// Prints what the strategy made of one paid-for candidate.
+///
+/// Returns whether this became a proposal **without** the coordination gate
+/// having run on it. That is not a detail of the printing: a proposal raised
+/// on a candidate nobody could look at is a different object from one raised
+/// on a candidate that was looked at and found unremarkable, and the pass
+/// summary has to be able to say which it has.
 fn report_one(
     strategy: &CreatorEdge,
     candidate: &Candidate,
@@ -1791,7 +1817,7 @@ fn report_one(
     ledger: &mut Ledger,
     prevalence: Option<radar_graph::prevalence::Prevalence>,
     launch_shape: Option<radar_graph::LaunchBlockShape>,
-) {
+) -> bool {
     let decision = strategy.consider(candidate);
     // Recorded before the kernel runs, and updated with its verdict afterwards.
     // A proposal the kernel never saw is a different state from one it refused.
@@ -1813,15 +1839,27 @@ fn report_one(
             println!("  {}  passed: {reasons:?}", candidate.mint);
         }
         Decision::Propose(ref proposal) => {
+            // `None` here is "the gate did not run", never "the gate ran and
+            // found nothing" — `Coordination::Unremarkable` is that. Saying so
+            // on the line itself is the only way a reader of a forty-candidate
+            // pass can tell which proposals were looked at.
+            let unexamined = candidate.coordination.is_none();
             println!(
-                "  {}  PROPOSED ${:.2} (exit capacity ${:.2})",
+                "  {}  PROPOSED ${:.2} (exit capacity ${:.2}){}",
                 candidate.mint,
                 price_dollars(proposal.notional),
-                proposal.simulated_exit_capacity.map_or(0.0, price_dollars)
+                proposal.simulated_exit_capacity.map_or(0.0, price_dollars),
+                if unexamined {
+                    "  <- coordination gate never ran on this one"
+                } else {
+                    ""
+                }
             );
             proposals.push((**proposal).clone());
+            return unexamined;
         }
     }
+    false
 }
 
 /// The exit search this strategy asks for.
@@ -2135,6 +2173,7 @@ mod tests {
             proposals: Vec::new(),
             refused_on_shape: 4,
             look_failed: 1,
+            proposed_unexamined: 0,
         };
         record_pass(&mut session, &ledger, &pass, 9, &verdicts_by_mint, &[]);
 
@@ -2530,6 +2569,49 @@ mod tests {
         );
         assert_eq!(view.equity_micro_usd(), None);
         assert_eq!(report.holdings, 1, "and the holding is still reported");
+    }
+
+    /// `PROPOSED: 11` beside `unreadable: 30` is the shape of the live run on
+    /// 2026-09-20, and a reader of it cannot tell whether the eleven are the
+    /// three that were examined or eleven of the thirty that were not. The
+    /// pass has to say so itself.
+    #[test]
+    fn a_pass_says_how_many_proposals_nobody_looked_at() {
+        let notes = render_pass_notes(&Pass {
+            proposals: Vec::new(),
+            refused_on_shape: 0,
+            look_failed: 30,
+            proposed_unexamined: 11,
+        });
+        assert!(
+            notes.contains("11 of the proposal(s)"),
+            "the count of unexamined proposals must be stated: {notes}"
+        );
+        assert!(
+            notes.contains("Nobody looked at those"),
+            "and stated as an absence, not as a clean result: {notes}"
+        );
+    }
+
+    /// The other half, and the one that decays quietly: a pass where every
+    /// proposal *was* examined must not carry the sentence at all. A warning
+    /// that is always printed is a warning nobody reads.
+    #[test]
+    fn a_pass_whose_proposals_were_all_examined_says_nothing_about_it() {
+        let notes = render_pass_notes(&Pass {
+            proposals: Vec::new(),
+            refused_on_shape: 0,
+            look_failed: 30,
+            proposed_unexamined: 0,
+        });
+        assert!(
+            !notes.contains("Nobody looked at those"),
+            "no unexamined proposal, so no sentence: {notes}"
+        );
+        assert!(
+            notes.contains("without being examined"),
+            "the candidate-level note still belongs, and is a different fact: {notes}"
+        );
     }
 
     #[test]
