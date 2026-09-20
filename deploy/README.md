@@ -565,7 +565,7 @@ whatever `/tmp` already held from a previous deploy and succeeds. That happened 
 nothing in the output saying so.
 
 ```bash
-gh run download --repo hey-vera/radar --name radar-linux-x86_64 --dir ./dist
+gh run download --repo 1xmint/theradar --name radar-linux-x86_64 --dir ./dist
 head -2 ./dist/BUILD-INFO.txt   # confirm this is the commit you meant to ship
 sha256sum -c <(awk 'NF==2 {print $1"  ./dist/"$2}' dist/BUILD-INFO.txt)
 
