@@ -169,6 +169,23 @@ export function emptyTapeMessage(
 }
 
 /**
+ * The words for `/v1/market/launches` answering `NotCollected` -- which it
+ * does both when the index genuinely holds nothing in its window, and when
+ * the snapshot behind it could not be read or built. Same status, same empty
+ * list, two different facts about the world: "nothing launched recently" is
+ * a fact about the market, "Radar could not look" is a fact about this
+ * instance. The server already tells them apart in `message` (`holdersBasis`
+ * above reads a comparable server-stated fact rather than inferring one), so
+ * this only chooses the sentence -- it does not invent the distinction.
+ */
+export function launchesEmptyMessage(detail: string): string {
+  if (detail.includes("recorded no launches")) {
+    return "Radar has not recorded a launch in its window. That is a fact about what this instance has seen, not a connection problem.";
+  }
+  return `Could not read the launch index${detail ? `: ${detail}` : ""}. This says nothing about whether coins have launched recently -- Radar could not look.`;
+}
+
+/**
  * Whether a page of rows might be a cropped view of a longer list, inferred
  * rather than asserted.
  *

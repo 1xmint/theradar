@@ -40,12 +40,19 @@ async function get<T>(path: string, signal?: AbortSignal): Promise<T> {
     headers: { accept: "application/json" },
   });
   if (!response.ok) {
-    // The server sends `{"error": "..."}` for every failure it authors, so this
-    // usually says something useful. When it does not, the status still does.
+    // The server sends `{"error": "...", "message": "..."}` for every failure
+    // it authors -- `error` is a stable code (`"not_collected"`), `message`
+    // is the human sentence explaining *which* not-collected this is (e.g.
+    // an empty launch index versus a snapshot not yet built). `message` wins
+    // when both are present: two different `Degradation::NotCollected`
+    // responses share the same `error` code by design (`market/mod.rs`), so a
+    // caller that needs to tell them apart -- `launchesEmptyMessage` in
+    // `honesty.ts` does -- needs the sentence, not the code.
     let detail = response.statusText;
     try {
-      const body = (await response.json()) as { error?: string };
-      if (body.error) detail = body.error;
+      const body = (await response.json()) as { error?: string; message?: string };
+      if (body.message) detail = body.message;
+      else if (body.error) detail = body.error;
     } catch {
       // A non-JSON body is itself informative: something upstream answered.
     }
@@ -153,6 +160,8 @@ export const market = {
     get<Trades>(`/v1/market/trades/${encodeURIComponent(mint)}${tradesSearch(query)}`, signal),
   holders: (mint: string, query: HoldersQuery = {}, signal?: AbortSignal) =>
     get<Holders>(`/v1/market/holders/${encodeURIComponent(mint)}${holdersSearch(query)}`, signal),
+  launches: (query: LaunchesQuery = {}, signal?: AbortSignal) =>
+    get<Launches>(`/v1/market/launches${launchesSearch(query)}`, signal),
 };
 
 /**
@@ -436,4 +445,55 @@ export interface HoldersFold {
    * warning on the one response shape that omits it.
    */
   basis: string;
+}
+
+export interface LaunchesQuery {
+  limit?: number | undefined;
+}
+
+function launchesSearch(query: LaunchesQuery): string {
+  const params = new URLSearchParams();
+  if (query.limit !== undefined) params.set("limit", String(query.limit));
+  const search = params.toString();
+  return search ? `?${search}` : "";
+}
+
+/**
+ * One launch, as `/v1/market/launches` sends it -- the coins Radar's own
+ * collector recorded the launch of, not every launch on Solana.
+ */
+export interface MarketLaunch {
+  mint: string;
+  /** Creator-supplied, untrusted. Capped server-side; never fetched by
+   *  either the server or this client. */
+  name: string;
+  /** Creator-supplied, untrusted. Same rules as `name`. */
+  symbol: string;
+  /** Creator-supplied, untrusted. An off-chain metadata document the browser
+   *  may fetch for an image -- never the server, and this client does not
+   *  fetch it either. */
+  uri: string;
+  /** The slot Radar recorded the launch at. There is no wall-clock timestamp
+   *  on a launch record, only a slot -- so ranking and the window below are
+   *  both in slots, not the `YYYY-MM-DD HH:MM:SS` window the trade-backed
+   *  routes send. */
+  slot: number;
+}
+
+/** The window `/v1/market/launches` covers, in slots -- see `MarketLaunch.slot`. */
+export interface LaunchesWindow {
+  from_slot: number;
+  to_slot: number;
+}
+
+export interface Launches {
+  launches: MarketLaunch[];
+  window: LaunchesWindow;
+  /**
+   * Always `false`. The launch index only reaches
+   * `LAUNCH_LOOKBACK_SLOTS` (roughly a week) back from the watermark, so this
+   * list is never the whole history of a coin's launch -- only ever "what
+   * Radar recorded recently".
+   */
+  complete: boolean;
 }

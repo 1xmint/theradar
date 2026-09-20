@@ -21,6 +21,7 @@ import { CandleChart } from "./CandleChart";
 import { CoinList, type SortState } from "./CoinList";
 import { HoldersPanel } from "./HoldersPanel";
 import { InfoPanel } from "./InfoPanel";
+import { NewlyLaunchedPanel } from "./NewlyLaunchedPanel";
 import { isMintLike, tokenPath } from "./routes";
 import { TokenHeader } from "./TokenHeader";
 import { TradeTape } from "./TradeTape";
@@ -33,7 +34,7 @@ const COIN_LIST_LIMIT = 100;
  *  a market one), so "live" here means polled rather than pushed. */
 const REFRESH_MS = 15_000;
 
-type Tab = "trades" | "holders" | "info";
+type Tab = "trades" | "holders" | "info" | "launches";
 
 export function Terminal({ mint }: { mint?: string }) {
   const [, navigate] = useLocation();
@@ -162,6 +163,12 @@ export function Terminal({ mint }: { mint?: string }) {
                   {tab === "info" && (
                     <InfoPanel load={tokenLoad} />
                   )}
+                  {/* Not mint-scoped -- Radar's own recorded launches across
+                      every coin, independent of which one is selected. Lives
+                      under this tab bar anyway rather than a sixth region,
+                      since a mint is pinned in the URL on every load this
+                      panel would otherwise be reachable from. */}
+                  {tab === "launches" && <NewlyLaunchedPanel />}
                 </div>
               </div>
             ) : (
@@ -232,6 +239,7 @@ function TabBar({ tab, onChange }: { tab: Tab; onChange: (tab: Tab) => void }) {
     { key: "trades", label: "Trades" },
     { key: "holders", label: "Holders" },
     { key: "info", label: "Info" },
+    { key: "launches", label: "New" },
   ];
   return (
     <div className="flex shrink-0 border-b border-[var(--color-line)]">

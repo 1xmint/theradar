@@ -24,6 +24,7 @@ import {
   holdersBasisCaption,
   isNarrowerThanRequested,
   isPossiblyCapped,
+  launchesEmptyMessage,
   median,
   netOfCost,
   partitionReasons,
@@ -210,6 +211,29 @@ describe("emptyTapeMessage", () => {
 
   it("still says something when there is no detail to fold in", () => {
     expect(emptyTapeMessage("unreachable")).toContain("Radar could not look");
+  });
+});
+
+describe("launchesEmptyMessage", () => {
+  it("tells a quiet launch window apart from a snapshot Radar could not read", () => {
+    // `/v1/market/launches` answers `not_collected` for both an empty index
+    // and a snapshot that failed to build -- same status, same empty list --
+    // and the server's own `message` (not the shared `error` code) is the
+    // only thing that tells them apart. Reversing which branch fires, or
+    // collapsing both to one sentence, must make this fail.
+    const quiet = launchesEmptyMessage("Radar has recorded no launches in its window");
+    const unreachable = launchesEmptyMessage(
+      "the market snapshot has not been built yet; check back shortly",
+    );
+    expect(quiet).not.toBe(unreachable);
+    expect(quiet.toLowerCase()).not.toContain("could not look");
+    expect(unreachable.toLowerCase()).toContain("could not look");
+  });
+
+  it("folds the server's own detail into the could-not-look sentence", () => {
+    expect(
+      launchesEmptyMessage("the market snapshot has not been built yet; check back shortly"),
+    ).toContain("the market snapshot has not been built yet");
   });
 });
 

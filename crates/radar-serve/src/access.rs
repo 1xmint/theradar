@@ -1103,6 +1103,7 @@ mod tests {
         assert!(is_public(
             "/v1/market/holders/So11111111111111111111111111111111111111112"
         ));
+        assert!(is_public("/v1/market/launches"));
 
         for private in [
             // The operator's screens are not shell. A direct navigation to one
@@ -1198,6 +1199,7 @@ mod tests {
                 "/v1/market/holders/So11111111111111111111111111111111111111112",
                 Audience::Public,
             ),
+            ("/v1/market/launches", Audience::Public),
             // The operator's surface. `/v1/store` and `/v1/events` are here on
             // purpose: store counts and a raw event stream are debugging tools,
             // not product.
