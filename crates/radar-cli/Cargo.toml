@@ -41,6 +41,11 @@ ureq = { version = "3", default-features = false, features = ["rustls", "json"] 
 
 [dev-dependencies]
 tempfile = "3"
+# Test-only. The curve fixture a `consider` test prices an exit against needs
+# `BondingCurve` by name, and `radar-sim` re-exports the quoter but not the
+# layout it is built from. Already in the tree via `radar-sim`, so this is an
+# edge rather than a dependency.
+radar-pumpfun.workspace = true
 
 [lints]
 workspace = true

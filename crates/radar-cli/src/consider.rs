@@ -2690,6 +2690,73 @@ mod tests {
         assert!(newly_bundled(None, Coordination::Unremarkable).is_none());
     }
 
+    /// A mint and a curve real enough to size a position off.
+    ///
+    /// [`NoStructures`] is the other half of this pair: both are absent there,
+    /// so nothing can be priced and nothing can be proposed. Here both are
+    /// present, with a freshly launched curve carrying the reserves pump.fun
+    /// starts one at, no mint authority, no freeze authority and no extensions
+    /// -- so nothing about the token itself refuses, and a proposal turns on
+    /// the creator's record and the coordination gate alone.
+    struct DeepCurve;
+
+    impl Structures for DeepCurve {
+        fn mint_structure(&self, _: &Address) -> Option<radar_sim::MintStructure> {
+            Some(radar_sim::MintStructure {
+                decimals: 6,
+                supply: 1_000_000_000_000_000,
+                mint_authority: None,
+                freeze_authority: None,
+                token_2022: false,
+                extensions: Vec::new(),
+            })
+        }
+
+        fn depth(&self, mint: &Address) -> Option<radar_sim::curve::Depth> {
+            Some(radar_sim::curve::Depth::new(
+                *mint,
+                radar_pumpfun::BondingCurve {
+                    virtual_token_reserves: 1_073_000_000_000_000,
+                    virtual_sol_reserves: 30_000_000_000,
+                    real_token_reserves: 793_100_000_000_000,
+                    real_sol_reserves: 0,
+                    token_total_supply: 1_000_000_000_000_000,
+                    complete: false,
+                    creator: Address::new([9u8; 32]),
+                },
+                radar_pumpfun::Fees {
+                    lp_bps: 0,
+                    protocol_bps: 95,
+                    creator_bps: 30,
+                },
+            ))
+        }
+    }
+
+    /// [`one_launch`], plus a creator with a record good enough to act on.
+    ///
+    /// The numbers are the ones `creator_edge`'s own fixture qualifies with:
+    /// twenty launches, all measured, three of them graduated the slow way, and
+    /// half stillborn -- comfortably inside every threshold. Read at the
+    /// watermark, so nothing is refused for age.
+    fn one_launch_by_a_proven_creator(mint: Address, slot: radar_types::Slot) -> Universe {
+        let creator = Address::new([9u8; 32]);
+        let mut universe = one_launch(mint, slot);
+        universe.creators.insert(
+            creator,
+            radar_strategy::CreatorRecord {
+                launches: 20,
+                measured: 20,
+                stillborn: 10,
+                graduated: 3,
+                graduated_organic: 3,
+                launches_per_day: None,
+            },
+        );
+        universe.creators_observed_at.insert(creator, slot);
+        universe
+    }
+
     /// A launch-block source that answers however a test needs it to.
     struct StubBlocks(Result<radar_graph::prevalence::Table, String>);
 
@@ -4001,6 +4068,54 @@ mod tests {
         assert_eq!(
             pass.look_failed, 0,
             "a failed sweep is not an unread launch block"
+        );
+    }
+
+    #[test]
+    fn a_proposal_raised_with_the_gate_off_is_counted_as_such() {
+        // `PROPOSED: 11` beside `unreadable: 30` cannot be read: the eleven are
+        // either the examined ones or the unexamined ones, and those are
+        // opposite facts. This is the counter that tells them apart, driven the
+        // whole way rather than asserted on a hand-built `Pass`.
+        //
+        // Everything here qualifies except the one thing that could not be
+        // checked: the creator is proven, the curve is deep, and the launch
+        // block could not be read at all -- so the coordination gate never ran
+        // and the proposal is raised anyway, which is correct (rule 9: an
+        // absence is not evidence against) and must be visible.
+        let mint = Address::new([2u8; 32]);
+        let slot = radar_types::Slot(1_000);
+        let blocks = StubBlocks(Err("no table either".to_owned()));
+
+        let mints = [mint];
+        let mut ledger = Ledger::default();
+        let pass = paid_tier(
+            &one_launch_by_a_proven_creator(mint, slot),
+            &CreatorEdge::default(),
+            mints.iter(),
+            &Sources {
+                blocks: &blocks,
+                structures: &DeepCurve,
+                quoter: &UnusedQuoter,
+                // The curve, not the aggregator: only this instrument names the
+                // venue it measured, and a capacity attributed to no venue
+                // cannot be sized from at all.
+                pricing: Pricing::Curve,
+            },
+            radar_types::MicroUsd::from_dollars(200.0),
+            slot,
+            &mut ledger,
+        );
+
+        assert_eq!(
+            pass.proposals.len(),
+            1,
+            "the fixture must actually reach a proposal, or this proves nothing"
+        );
+        assert_eq!(pass.look_failed, 1, "the launch block was unreadable");
+        assert_eq!(
+            pass.proposed_unexamined, 1,
+            "a proposal raised with the gate off must be counted as one"
         );
     }
 
