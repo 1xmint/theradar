@@ -11,12 +11,19 @@
 //!
 //! A swap on any venue is one transaction in which the target mint moves and a
 //! quote asset — wrapped SOL, USDC or USDT — moves too. The sketch this was
-//! built from matched wrapped SOL with `LIKE 'So1111...%'`, which also matches
-//! `So11111111111111111111111111111111111111111` — a real, active, unrelated
-//! mint one character longer than wrapped SOL, confirmed live against
-//! CryptoHouse on 2026-09-11. [`crate::extract::QUOTE_MINTS`] already excludes
-//! it by exact match, for the same reason, so the quote set here is that list
-//! rather than a pattern.
+//! built from matched wrapped SOL with `LIKE 'So1111...%'`, which catches
+//! anything sharing that prefix, so the quote set here is
+//! [`crate::extract::QUOTE_MINTS`] matched exactly rather than a pattern.
+//!
+//! That list holds two spellings of SOL — `So1111...112`, wrapped SOL, and
+//! `So1111...111`. An earlier note here called the second one "a real,
+//! active, unrelated mint" and said the list *excluded* it. Neither holds:
+//! `QUOTE_MINTS` names mints that are never the trade's subject, and reusing
+//! it as the quote set admits every one of them as a quote asset. `...111`
+//! earns that place. Measured 2026-09-20 over 100 live trades of one mint,
+//! 80 priced against `...111` and 20 against wrapped SOL, the medians were
+//! 3.554e-4 and 3.532e-4 — inside a percent of each other, which an
+//! unrelated asset does not produce. See `docs/research/0037`.
 //!
 //! It also summed values that had not been divided by `decimals`, dropped a
 //! trade outright when the quote leg's join found nothing, and looked only at

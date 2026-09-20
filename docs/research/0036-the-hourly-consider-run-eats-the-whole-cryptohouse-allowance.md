@@ -16,7 +16,7 @@ whose Phase B item 3 asks for more than ten coins — this says there is no
 allowance left to widen into.
 **Answered in part:** point 1 of *What follows* is built and deployed —
 `consider` declares a budget and stops when it is spent. See *The half of
-this that is fixed*, below. Point 2 is still open and still the owner'''s.
+this that is fixed*, below. Point 2 is still open and still the owner's.
 
 ## The question this closes
 
@@ -125,18 +125,39 @@ item cannot proceed on measurement, not on effort.
 **Deployed 2026-09-20.** Merged as `2d7f91d` and installed to
 `/home/guardian/bin/radar` on `clawguard`, which is the path the `37 * * * *`
 cron entry names, so the ceiling took effect on the next hourly run with no
-restart. `consider`'''s CryptoHouse reads now go through a
+restart. `consider`'s CryptoHouse reads now go through a
 declared budget of ten queries a run, enforced at the single point every query
 passes through, and a run that hits the ceiling says so rather than reporting a
-short pass as a complete one — in `radar session` and as a `query budget` line
-in `radar brief`. Rule 9: *considered three candidates* and *considered three
-and stopped because the allowance was spent* are now different sentences.
+short pass as a complete one — in the run's own output, in the session report
+`radar report --store <dir>`, and as a `query budget` line in `radar brief`.
+Rule 9: *considered three candidates* and *considered three and stopped
+because the allowance was spent* are now different sentences.
+
+**Measured live the same day, and it settles the second half of the owner's
+decision.** A manually triggered run at 2026-09-20T20:08:34Z printed the new
+sentence — `stopped early: the shared CryptoHouse query allowance was spent,
+not because the cap or the population ran out` — and the rest of its output
+says what ten queries buys:
+
+```
+worth a paid look: 33
+launch block unreadable: 30  <- the gate was off, not clean
+PROPOSED: 11
+```
+
+Thirty of the thirty-three were never examined. An unreadable launch block does
+not refuse a candidate; it passes it through unlooked-at. So eleven proposals
+were raised off coins nobody had read the launch block for. No capital was at
+risk — the policy refuses everything and the kernel refused all eleven — but
+ten queries covering three candidates in thirty-three is not a working budget,
+it is a run that is mostly blind and now honest about it. Point 2 below is no
+longer a question of whether the allowance is too small. It is.
 
 This fixes point 1 above and **does not touch point 2**. Ten queries still buys
 about three of the forty candidates the cron asks for. The budget stops
 `consider` starving `radar-follow`; it does not make `consider` able to do its
 job at its current size. Choosing between a smaller run and a larger allowance
-is still the owner'''s decision, and the recommendation recorded with the change
+is still the owner's decision, and the recommendation recorded with the change
 is to watch one day of recorder data before making it — the refusal count
 going to roughly zero is free evidence that changing two things at once
 would destroy. That day starts 2026-09-20; `radar/outcomes.log` and
