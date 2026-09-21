@@ -26,6 +26,7 @@ import { isMintLike, tokenPath } from "./routes";
 import { TokenHeader } from "./TokenHeader";
 import { TradeTape } from "./TradeTape";
 import { Wallet } from "./Wallet";
+import { YourTradesPanel } from "./YourTradesPanel";
 import { useApi } from "./useApi";
 
 const COIN_LIST_LIMIT = 100;
@@ -34,7 +35,7 @@ const COIN_LIST_LIMIT = 100;
  *  a market one), so "live" here means polled rather than pushed. */
 const REFRESH_MS = 15_000;
 
-type Tab = "trades" | "holders" | "info" | "launches";
+type Tab = "trades" | "yours" | "holders" | "info" | "launches";
 
 export function Terminal({ mint }: { mint?: string }) {
   const [, navigate] = useLocation();
@@ -159,6 +160,10 @@ export function Terminal({ mint }: { mint?: string }) {
                 <TabBar tab={tab} onChange={setTab} />
                 <div className="min-h-0 flex-1">
                   {tab === "trades" && <TradeTape mint={mint} />}
+                  {/* The one tab whose answer depends on who is reading. It
+                      still asks a public, identity-free route -- the wallet
+                      is a query parameter, not a session. */}
+                  {tab === "yours" && <YourTradesPanel mint={mint} />}
                   {tab === "holders" && <HoldersPanel mint={mint} />}
                   {tab === "info" && (
                     <InfoPanel load={tokenLoad} />
@@ -237,6 +242,7 @@ function TopBar({
 function TabBar({ tab, onChange }: { tab: Tab; onChange: (tab: Tab) => void }) {
   const tabs: { key: Tab; label: string }[] = [
     { key: "trades", label: "Trades" },
+    { key: "yours", label: "Yours" },
     { key: "holders", label: "Holders" },
     { key: "info", label: "Info" },
     { key: "launches", label: "New" },
