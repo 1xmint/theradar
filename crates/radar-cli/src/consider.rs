@@ -1094,6 +1094,14 @@ pub struct Pass {
     /// the verdict absent, the strategy correctly declines to refuse on an
     /// absence, and the gate is then silently off.
     pub look_failed: usize,
+    /// Proposals raised on a candidate whose coordination gate never ran.
+    ///
+    /// [`Self::look_failed`] counts candidates; this counts the ones that got
+    /// all the way to a proposal anyway. The distinction is the whole point:
+    /// a reader of `PROPOSED: 11` beside `unreadable: 30` cannot tell whether
+    /// the eleven are the examined ones or the unexamined ones, and those are
+    /// opposite facts.
+    pub proposed_unexamined: usize,
 }
 
 /// The lines a pass prints about what it declined.
@@ -1118,6 +1126,14 @@ pub fn render_pass_notes(pass: &Pass) -> String {
                and the strategy will not refuse on an absence — so those passed this
                gate without being examined rather than by being clean.
 ",
+        );
+    }
+    if pass.proposed_unexamined > 0 {
+        let _ = writeln!(
+            out,
+            "  {} of the proposal(s) above were raised on a candidate whose
+               coordination gate never ran. Nobody looked at those.",
+            pass.proposed_unexamined
         );
     }
     out
@@ -1213,6 +1229,7 @@ where
     // whose constant has moved prints too. See [`render_shapes`].
     let mut shapes = radar_graph::Distribution::new();
     let mut look_failed = 0usize;
+    let mut proposed_unexamined = 0usize;
 
     let prevalence_table = prevalence_table_of(blocks, ledger);
     // Unreadable and truncated are both charged as failures. A truncated table
@@ -1327,7 +1344,7 @@ where
             // refuse on it, and it will not treat it as a pass either.
             None => candidate,
         };
-        report_one(
+        if report_one(
             strategy,
             &candidate,
             &mut proposals,
@@ -1335,7 +1352,9 @@ where
             ledger,
             prevalence,
             launch_shape,
-        );
+        ) {
+            proposed_unexamined += 1;
+        }
         note_clock(ledger, *mint, launch_slot, candidate_began);
     }
 
@@ -1344,6 +1363,7 @@ where
         proposals,
         refused_on_shape,
         look_failed,
+        proposed_unexamined,
     };
     print!("{}", render_pass_notes(&pass));
     pass
@@ -1783,6 +1803,12 @@ fn render_calibration(dist: &radar_graph::Distribution) -> String {
 }
 
 /// Prints what the strategy made of one paid-for candidate.
+///
+/// Returns whether this became a proposal **without** the coordination gate
+/// having run on it. That is not a detail of the printing: a proposal raised
+/// on a candidate nobody could look at is a different object from one raised
+/// on a candidate that was looked at and found unremarkable, and the pass
+/// summary has to be able to say which it has.
 fn report_one(
     strategy: &CreatorEdge,
     candidate: &Candidate,
@@ -1791,7 +1817,7 @@ fn report_one(
     ledger: &mut Ledger,
     prevalence: Option<radar_graph::prevalence::Prevalence>,
     launch_shape: Option<radar_graph::LaunchBlockShape>,
-) {
+) -> bool {
     let decision = strategy.consider(candidate);
     // Recorded before the kernel runs, and updated with its verdict afterwards.
     // A proposal the kernel never saw is a different state from one it refused.
@@ -1813,15 +1839,27 @@ fn report_one(
             println!("  {}  passed: {reasons:?}", candidate.mint);
         }
         Decision::Propose(ref proposal) => {
+            // `None` here is "the gate did not run", never "the gate ran and
+            // found nothing" — `Coordination::Unremarkable` is that. Saying so
+            // on the line itself is the only way a reader of a forty-candidate
+            // pass can tell which proposals were looked at.
+            let unexamined = candidate.coordination.is_none();
             println!(
-                "  {}  PROPOSED ${:.2} (exit capacity ${:.2})",
+                "  {}  PROPOSED ${:.2} (exit capacity ${:.2}){}",
                 candidate.mint,
                 price_dollars(proposal.notional),
-                proposal.simulated_exit_capacity.map_or(0.0, price_dollars)
+                proposal.simulated_exit_capacity.map_or(0.0, price_dollars),
+                if unexamined {
+                    "  <- coordination gate never ran on this one"
+                } else {
+                    ""
+                }
             );
             proposals.push((**proposal).clone());
+            return unexamined;
         }
     }
+    false
 }
 
 /// The exit search this strategy asks for.
@@ -2135,6 +2173,7 @@ mod tests {
             proposals: Vec::new(),
             refused_on_shape: 4,
             look_failed: 1,
+            proposed_unexamined: 0,
         };
         record_pass(&mut session, &ledger, &pass, 9, &verdicts_by_mint, &[]);
 
@@ -2532,6 +2571,49 @@ mod tests {
         assert_eq!(report.holdings, 1, "and the holding is still reported");
     }
 
+    /// `PROPOSED: 11` beside `unreadable: 30` is the shape of the live run on
+    /// 2026-09-20, and a reader of it cannot tell whether the eleven are the
+    /// three that were examined or eleven of the thirty that were not. The
+    /// pass has to say so itself.
+    #[test]
+    fn a_pass_says_how_many_proposals_nobody_looked_at() {
+        let notes = render_pass_notes(&Pass {
+            proposals: Vec::new(),
+            refused_on_shape: 0,
+            look_failed: 30,
+            proposed_unexamined: 11,
+        });
+        assert!(
+            notes.contains("11 of the proposal(s)"),
+            "the count of unexamined proposals must be stated: {notes}"
+        );
+        assert!(
+            notes.contains("Nobody looked at those"),
+            "and stated as an absence, not as a clean result: {notes}"
+        );
+    }
+
+    /// The other half, and the one that decays quietly: a pass where every
+    /// proposal *was* examined must not carry the sentence at all. A warning
+    /// that is always printed is a warning nobody reads.
+    #[test]
+    fn a_pass_whose_proposals_were_all_examined_says_nothing_about_it() {
+        let notes = render_pass_notes(&Pass {
+            proposals: Vec::new(),
+            refused_on_shape: 0,
+            look_failed: 30,
+            proposed_unexamined: 0,
+        });
+        assert!(
+            !notes.contains("Nobody looked at those"),
+            "no unexamined proposal, so no sentence: {notes}"
+        );
+        assert!(
+            notes.contains("without being examined"),
+            "the candidate-level note still belongs, and is a different fact: {notes}"
+        );
+    }
+
     #[test]
     fn an_unreadable_account_is_not_an_empty_one() {
         // The state `inventory` refuses the pass on. A row of zeros here would
@@ -2606,6 +2688,73 @@ mod tests {
         // An unread sweep announces nothing, which is distinct from a sweep that
         // read clean.
         assert!(newly_bundled(None, Coordination::Unremarkable).is_none());
+    }
+
+    /// A mint and a curve real enough to size a position off.
+    ///
+    /// [`NoStructures`] is the other half of this pair: both are absent there,
+    /// so nothing can be priced and nothing can be proposed. Here both are
+    /// present, with a freshly launched curve carrying the reserves pump.fun
+    /// starts one at, no mint authority, no freeze authority and no extensions
+    /// -- so nothing about the token itself refuses, and a proposal turns on
+    /// the creator's record and the coordination gate alone.
+    struct DeepCurve;
+
+    impl Structures for DeepCurve {
+        fn mint_structure(&self, _: &Address) -> Option<radar_sim::MintStructure> {
+            Some(radar_sim::MintStructure {
+                decimals: 6,
+                supply: 1_000_000_000_000_000,
+                mint_authority: None,
+                freeze_authority: None,
+                token_2022: false,
+                extensions: Vec::new(),
+            })
+        }
+
+        fn depth(&self, mint: &Address) -> Option<radar_sim::curve::Depth> {
+            Some(radar_sim::curve::Depth::new(
+                *mint,
+                radar_pumpfun::BondingCurve {
+                    virtual_token_reserves: 1_073_000_000_000_000,
+                    virtual_sol_reserves: 30_000_000_000,
+                    real_token_reserves: 793_100_000_000_000,
+                    real_sol_reserves: 0,
+                    token_total_supply: 1_000_000_000_000_000,
+                    complete: false,
+                    creator: Address::new([9u8; 32]),
+                },
+                radar_pumpfun::Fees {
+                    lp_bps: 0,
+                    protocol_bps: 95,
+                    creator_bps: 30,
+                },
+            ))
+        }
+    }
+
+    /// [`one_launch`], plus a creator with a record good enough to act on.
+    ///
+    /// The numbers are the ones `creator_edge`'s own fixture qualifies with:
+    /// twenty launches, all measured, three of them graduated the slow way, and
+    /// half stillborn -- comfortably inside every threshold. Read at the
+    /// watermark, so nothing is refused for age.
+    fn one_launch_by_a_proven_creator(mint: Address, slot: radar_types::Slot) -> Universe {
+        let creator = Address::new([9u8; 32]);
+        let mut universe = one_launch(mint, slot);
+        universe.creators.insert(
+            creator,
+            radar_strategy::CreatorRecord {
+                launches: 20,
+                measured: 20,
+                stillborn: 10,
+                graduated: 3,
+                graduated_organic: 3,
+                launches_per_day: None,
+            },
+        );
+        universe.creators_observed_at.insert(creator, slot);
+        universe
     }
 
     /// A launch-block source that answers however a test needs it to.
@@ -3919,6 +4068,54 @@ mod tests {
         assert_eq!(
             pass.look_failed, 0,
             "a failed sweep is not an unread launch block"
+        );
+    }
+
+    #[test]
+    fn a_proposal_raised_with_the_gate_off_is_counted_as_such() {
+        // `PROPOSED: 11` beside `unreadable: 30` cannot be read: the eleven are
+        // either the examined ones or the unexamined ones, and those are
+        // opposite facts. This is the counter that tells them apart, driven the
+        // whole way rather than asserted on a hand-built `Pass`.
+        //
+        // Everything here qualifies except the one thing that could not be
+        // checked: the creator is proven, the curve is deep, and the launch
+        // block could not be read at all -- so the coordination gate never ran
+        // and the proposal is raised anyway, which is correct (rule 9: an
+        // absence is not evidence against) and must be visible.
+        let mint = Address::new([2u8; 32]);
+        let slot = radar_types::Slot(1_000);
+        let blocks = StubBlocks(Err("no table either".to_owned()));
+
+        let mints = [mint];
+        let mut ledger = Ledger::default();
+        let pass = paid_tier(
+            &one_launch_by_a_proven_creator(mint, slot),
+            &CreatorEdge::default(),
+            mints.iter(),
+            &Sources {
+                blocks: &blocks,
+                structures: &DeepCurve,
+                quoter: &UnusedQuoter,
+                // The curve, not the aggregator: only this instrument names the
+                // venue it measured, and a capacity attributed to no venue
+                // cannot be sized from at all.
+                pricing: Pricing::Curve,
+            },
+            radar_types::MicroUsd::from_dollars(200.0),
+            slot,
+            &mut ledger,
+        );
+
+        assert_eq!(
+            pass.proposals.len(),
+            1,
+            "the fixture must actually reach a proposal, or this proves nothing"
+        );
+        assert_eq!(pass.look_failed, 1, "the launch block was unreadable");
+        assert_eq!(
+            pass.proposed_unexamined, 1,
+            "a proposal raised with the gate off must be counted as one"
         );
     }
 
