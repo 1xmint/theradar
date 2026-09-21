@@ -623,6 +623,11 @@ impl Reader {
                 let quote_mint = str_col(&batch, "quote_mint")?;
                 let price = f64_col(&batch, "price")?;
                 let trader = str_col(&batch, "trader")?;
+                // Optional, not required: this column was added on 2026-09-20
+                // and every file written before then lacks it. Reading it with
+                // the erroring form would make the whole recorded tape
+                // unreadable for one schema change.
+                let token_destination = optional_str_col(&batch, "token_destination");
 
                 for i in 0..batch.num_rows() {
                     let row_slot = Slot(slot.value(i));
@@ -648,6 +653,10 @@ impl Reader {
                         trader: trader
                             .is_valid(i)
                             .then(|| parse(trader.value(i), "trader"))
+                            .transpose()?,
+                        token_destination: token_destination
+                            .filter(|c| c.is_valid(i))
+                            .map(|c| parse(c.value(i), "token_destination"))
                             .transpose()?,
                     });
                 }

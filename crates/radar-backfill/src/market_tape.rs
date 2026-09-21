@@ -271,6 +271,10 @@ pub fn fold_market_trades(rows: &[fold::TapeRow]) -> Vec<MarketTrade> {
                 quote_mint: trade.quote_mint.as_deref().and_then(|m| m.parse().ok()),
                 price: trade.price,
                 trader: trade.trader.as_deref().and_then(|a| a.parse().ok()),
+                token_destination: trade
+                    .token_destination
+                    .as_deref()
+                    .and_then(|a| a.parse().ok()),
             });
         }
     }

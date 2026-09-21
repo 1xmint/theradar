@@ -486,6 +486,7 @@ fn build_market_trade_batch(rows: &[crate::MarketTrade]) -> Result<RecordBatch, 
     let mut quote_mint = StringBuilder::new();
     let mut price = Float64Builder::new();
     let mut trader = StringBuilder::new();
+    let mut token_destination = StringBuilder::new();
 
     for t in rows {
         mint.append_value(t.mint.to_string());
@@ -502,6 +503,7 @@ fn build_market_trade_batch(rows: &[crate::MarketTrade]) -> Result<RecordBatch, 
         quote_mint.append_option(t.quote_mint.map(|m| m.to_string()));
         price.append_option(t.price);
         trader.append_option(t.trader.map(|a| a.to_string()));
+        token_destination.append_option(t.token_destination.map(|a| a.to_string()));
     }
 
     RecordBatch::try_new(
@@ -517,6 +519,7 @@ fn build_market_trade_batch(rows: &[crate::MarketTrade]) -> Result<RecordBatch, 
             Arc::new(quote_mint.finish()),
             Arc::new(price.finish()),
             Arc::new(trader.finish()),
+            Arc::new(token_destination.finish()),
         ],
     )
     .map_err(StoreError::from)

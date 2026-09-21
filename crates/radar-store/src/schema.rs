@@ -249,6 +249,11 @@ fn recorded_schema(table: Table) -> Arc<Schema> {
             Field::new("quote_mint", DataType::Utf8, true),
             Field::new("price", DataType::Float64, true),
             Field::new("trader", DataType::Utf8, true),
+            // Added 2026-09-20, after the table already held rows. Nullable
+            // for the ordinary reason -- a row may name no destination -- and
+            // read through `optional_str_col`, so the files written before it
+            // stay readable rather than failing as corrupt.
+            Field::new("token_destination", DataType::Utf8, true),
         ])),
         Table::Launches | Table::Trades | Table::Graduations => {
             unreachable!("chain events; handled by event_schema")

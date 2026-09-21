@@ -164,6 +164,7 @@ async fn no_recorded_launches_is_not_collected_rather_than_an_empty_list() {
             quote_mint: None,
             price: None,
             trader: None,
+            token_destination: None,
         })
         .expect("append trade");
     writer.flush().expect("flush");

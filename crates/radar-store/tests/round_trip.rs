@@ -1467,6 +1467,9 @@ fn market_trade(mint_id: u8, slot: u64, priced: bool) -> MarketTrade {
         }),
         price: priced.then_some(0.176_59),
         trader: priced.then(|| mint(8)),
+        // Present on the priced row so the exactness assertion below covers it:
+        // a column dropped by the writer or the reader would show up there.
+        token_destination: priced.then(|| mint(7)),
     }
 }
 

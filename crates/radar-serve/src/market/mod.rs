@@ -809,6 +809,7 @@ fn to_fold_trade(row: &MarketTrade) -> market_fold::Trade {
         quote_mint: row.quote_mint.map(|m| m.to_string()),
         price: row.price,
         trader: row.trader.map(|a| a.to_string()),
+        token_destination: row.token_destination.map(|a| a.to_string()),
     }
 }
 
@@ -1714,6 +1715,7 @@ mod tests {
             quote_mint: Some(WSOL.parse().expect("a mint")),
             price: Some(2.0),
             trader: None,
+            token_destination: None,
         }
     }
 
@@ -2188,6 +2190,7 @@ mod tests {
             }),
             price,
             trader: None,
+            token_destination: None,
         }
     }
 
@@ -2459,6 +2462,7 @@ mod tests {
                 quote_mint: Some(WSOL.parse().expect("a mint")),
                 price: Some(2.0),
                 trader,
+                token_destination: None,
             }
         }
 

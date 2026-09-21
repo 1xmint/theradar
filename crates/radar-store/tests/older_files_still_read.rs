@@ -19,7 +19,8 @@
 use std::sync::Arc;
 
 use arrow::array::{
-    ArrayRef, BooleanBuilder, ListBuilder, StringBuilder, UInt32Builder, UInt64Builder,
+    ArrayRef, BooleanBuilder, Float64Builder, ListBuilder, StringBuilder, UInt32Builder,
+    UInt64Builder,
 };
 use arrow::datatypes::{DataType, Field, Schema};
 use arrow::record_batch::RecordBatch;
@@ -580,4 +581,102 @@ fn a_coverage_file_written_before_empty_ranges_still_reads_as_the_range_it_claim
     assert_eq!(coverage[0].status, Completion::Complete);
     assert_eq!(coverage[0].filter, None);
     assert_eq!(coverage[0].recorded_at, Slot(10_000));
+}
+
+/// The market-trades schema as it stood *before* `token_destination`.
+///
+/// Copied by hand for the reason the halves above give: the writer can only
+/// produce the current shape, and the point is to pin one that no longer
+/// exists.
+fn market_trades_schema_before_the_destination() -> Arc<Schema> {
+    Arc::new(Schema::new(vec![
+        Field::new("mint", DataType::Utf8, false),
+        Field::new("ts", DataType::Utf8, false),
+        Field::new("slot", DataType::UInt64, false),
+        Field::new("signature", DataType::Utf8, false),
+        Field::new("side", DataType::Utf8, false),
+        Field::new("token_amount", DataType::Float64, false),
+        Field::new("quote_amount", DataType::Float64, true),
+        Field::new("quote_mint", DataType::Utf8, true),
+        Field::new("price", DataType::Float64, true),
+        Field::new("trader", DataType::Utf8, true),
+    ]))
+}
+
+/// One recorded buy in that shape.
+fn write_old_market_trade_file(dir: &std::path::Path) {
+    let mut mint = StringBuilder::new();
+    let mut ts = StringBuilder::new();
+    let mut slot = UInt64Builder::new();
+    let mut signature = StringBuilder::new();
+    let mut side = StringBuilder::new();
+    let mut token_amount = Float64Builder::new();
+    let mut quote_amount = Float64Builder::new();
+    let mut quote_mint = StringBuilder::new();
+    let mut price = Float64Builder::new();
+    let mut trader = StringBuilder::new();
+
+    mint.append_value("So11111111111111111111111111111111111111112");
+    ts.append_value("2026-09-11 17:35:00.000000");
+    slot.append_value(9_000);
+    signature.append_value(
+        "4vJ9JU1bJJE96FbKtjmpqUEsHdSHgWLmXknzYqTBhtnLGWNMhLZmvHhZmc4mNMhCLzGxWDpqoBFeLbNvEZs3nvvW",
+    );
+    side.append_value("buy");
+    token_amount.append_value(0.056_626);
+    quote_amount.append_option(Some(0.000_01));
+    quote_mint.append_value("So11111111111111111111111111111111111111112");
+    price.append_option(Some(0.176_59));
+    trader.append_value("11111111111111111111111111111111");
+
+    let columns: Vec<ArrayRef> = vec![
+        Arc::new(mint.finish()),
+        Arc::new(ts.finish()),
+        Arc::new(slot.finish()),
+        Arc::new(signature.finish()),
+        Arc::new(side.finish()),
+        Arc::new(token_amount.finish()),
+        Arc::new(quote_amount.finish()),
+        Arc::new(quote_mint.finish()),
+        Arc::new(price.finish()),
+        Arc::new(trader.finish()),
+    ];
+    let batch = RecordBatch::try_new(market_trades_schema_before_the_destination(), columns)
+        .expect("the old shape is valid");
+
+    let table = dir.join(Table::MarketTrades.dir());
+    std::fs::create_dir_all(&table).expect("mkdir");
+    let file =
+        std::fs::File::create(table.join("slot_000000009000_g0001.parquet")).expect("create");
+    let mut writer = ArrowWriter::try_new(file, batch.schema(), None).expect("writer");
+    writer.write(&batch).expect("write");
+    writer.close().expect("close");
+}
+
+#[test]
+fn a_market_trade_file_written_before_the_destination_column_still_reads() {
+    // `token_destination` was added on 2026-09-20 so a signed-in wallet could
+    // find its own buys on the four rows in five that name no trader at all.
+    // Every trade recorded before that date lacks the column.
+    //
+    // Re-apply the bug by reading it with the erroring accessor instead of
+    // `optional_str_col`: the whole recorded tape then fails as corrupt, and
+    // the coin pages, the holders view and the wallet history all go dark at
+    // once on a store that is fine.
+    let dir = tempfile::tempdir().expect("tempdir");
+    write_old_market_trade_file(dir.path());
+
+    let trades = Reader::open(dir.path())
+        .read_market_trades(AsOf::at(Slot(20_000)))
+        .expect("a file written before the column existed is still a valid file");
+
+    assert_eq!(trades.len(), 1);
+    assert_eq!(
+        trades[0].token_destination, None,
+        "a column the file never had is not measured, and must not read as a destination"
+    );
+    assert!(
+        trades[0].trader.is_some(),
+        "the rest of the row must survive the missing column untouched"
+    );
 }
