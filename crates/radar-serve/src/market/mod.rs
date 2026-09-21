@@ -2880,6 +2880,46 @@ mod tests {
                 "newest first, so a limit keeps the newest rather than whichever came back first"
             );
         }
+
+        #[test]
+        fn a_list_that_exactly_fills_the_limit_was_not_cut_off() {
+            // The boundary either side of "there is more". Saying a full page
+            // was truncated when it was not sends a reader looking for trades
+            // that do not exist.
+            let mint = a_mint();
+            let trades: Vec<MarketTrade> = (0..3)
+                .map(|i| {
+                    trade(
+                        A_MINT,
+                        &format!("2026-09-18 00:0{i}:00"),
+                        i,
+                        MarketSide::Sell,
+                        Some(wallet()),
+                        None,
+                    )
+                })
+                .collect();
+            let folded = wallet_history(&trades, &mint, &wallet(), 3).expect("this coin traded");
+            assert_eq!(folded.rows.len(), 3, "all three are this wallet's");
+            assert!(
+                !folded.truncated,
+                "exactly as many trades as the limit is a complete list, not a cut-off one"
+            );
+        }
+
+        #[test]
+        fn the_two_kinds_of_match_are_named_differently_in_the_response() {
+            // The response's only way of saying how a trade was tied to the
+            // wallet. If both rendered alike, a derived match would read as
+            // the tape naming the wallet outright, which it never did.
+            assert_eq!(Matched::Trader.as_str(), "trader");
+            assert_eq!(Matched::ReceivingAccount.as_str(), "receiving_account");
+            assert_ne!(
+                Matched::Trader.as_str(),
+                Matched::ReceivingAccount.as_str(),
+                "a row the tape named and a row derived from an address must not read the same"
+            );
+        }
     }
 
     mod net_positions_tests {
