@@ -95,6 +95,17 @@ export function explorerUrl(address: string): string {
 }
 
 /**
+ * The explorer page for a transaction.
+ *
+ * Separate from `explorerUrl` because the explorer has separate pages, and a
+ * signature handed to `/account/` renders a "not found" that reads as though
+ * the trade never happened.
+ */
+export function transactionUrl(signature: string): string {
+  return `https://solscan.io/tx/${encodeURIComponent(signature)}`;
+}
+
+/**
  * Reads the server's `YYYY-MM-DD HH:MM:SS[.ffffff]` stamp as the UTC moment it
  * is.
  *

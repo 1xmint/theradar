@@ -162,6 +162,12 @@ export const market = {
     get<Holders>(`/v1/market/holders/${encodeURIComponent(mint)}${holdersSearch(query)}`, signal),
   launches: (query: LaunchesQuery = {}, signal?: AbortSignal) =>
     get<Launches>(`/v1/market/launches${launchesSearch(query)}`, signal),
+  // Public and identity-free like the rest of this object: the wallet is a
+  // query parameter, not a session token. The tape is public chain data, and
+  // asking about an address proves nothing about owning it -- which is why
+  // this sends no bearer token and the server reads no customer store.
+  history: (mint: string, query: HistoryQuery, signal?: AbortSignal) =>
+    get<OwnTrades>(`/v1/market/history/${encodeURIComponent(mint)}${historySearch(query)}`, signal),
 };
 
 /**
@@ -496,4 +502,63 @@ export interface Launches {
    * Radar recorded recently".
    */
   complete: boolean;
+}
+
+export interface HistoryQuery {
+  wallet: string;
+  limit?: number | undefined;
+}
+
+function historySearch(query: HistoryQuery): string {
+  const params = new URLSearchParams();
+  params.set("wallet", query.wallet);
+  if (query.limit !== undefined) params.set("limit", String(query.limit));
+  return `?${params.toString()}`;
+}
+
+/** How a stored trade was tied to the wallet that asked for it. */
+export type MatchedBy = "trader" | "receiving_account";
+
+/**
+ * One of the reader's own trades, as `/v1/market/history/{mint}` sends it.
+ *
+ * **No `trader` field, deliberately.** The row is already known to be this
+ * wallet's, and on four buys in five the tape does not name a trader at all
+ * -- `matched_by` says which happened, and a `trader` column here would be
+ * empty on most buys for reasons the screen could not explain.
+ */
+export interface OwnTrade {
+  ts: string;
+  slot: number;
+  signature: string;
+  side: TradeSide;
+  token_amount: number;
+  quote_amount: number | null;
+  price: number | null;
+  matched_by: MatchedBy;
+}
+
+/** What `/v1/market/history/{mint}` returns under `fold`. */
+export interface OwnTradesFold {
+  fact: "wallet_trades_in_window";
+  /** Always `false`. The server states plainly that this can never be all of
+   *  a wallet's trades, and the screen repeats it rather than implying
+   *  otherwise by staying quiet. */
+  complete: boolean;
+  /** More of this wallet's trades were found than `limit` returned. */
+  truncated: boolean;
+  /** Trades of this coin naming neither a wallet nor a receiving account, so
+   *  they could belong to anyone -- including this reader. Load-bearing: zero
+   *  rows with a non-zero count here is not "you made no trades". */
+  unattributable_trades: number;
+  trades: OwnTrade[];
+}
+
+export interface OwnTrades {
+  mint: string;
+  wallet: string;
+  fold: OwnTradesFold;
+  /** The server's own sentence about what this list cannot include. Rendered,
+   *  not summarised. */
+  caveat: string;
 }
