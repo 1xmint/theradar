@@ -1103,6 +1103,9 @@ mod tests {
         assert!(is_public(
             "/v1/market/holders/So11111111111111111111111111111111111111112"
         ));
+        assert!(is_public(
+            "/v1/market/history/So11111111111111111111111111111111111111112"
+        ));
         assert!(is_public("/v1/market/launches"));
 
         for private in [
@@ -1197,6 +1200,10 @@ mod tests {
             ),
             (
                 "/v1/market/holders/So11111111111111111111111111111111111111112",
+                Audience::Public,
+            ),
+            (
+                "/v1/market/history/So11111111111111111111111111111111111111112",
                 Audience::Public,
             ),
             ("/v1/market/launches", Audience::Public),

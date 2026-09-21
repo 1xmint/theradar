@@ -1587,6 +1587,230 @@ pub async fn holders(
     .into_response()
 }
 
+/// `/v1/market/history/{mint}` query parameters.
+#[derive(Debug, Deserialize)]
+pub struct HistoryParams {
+    wallet: Option<String>,
+    limit: Option<usize>,
+}
+
+/// Trades returned when the caller names no limit.
+pub(super) const DEFAULT_HISTORY_LIMIT: usize = 50;
+/// The most trades one history request returns.
+pub(super) const MAX_HISTORY_LIMIT: usize = 500;
+
+/// How a stored trade was tied to the wallet that asked for it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Matched {
+    /// The row named the wallet outright.
+    Trader,
+    /// The row named no wallet, but the mint was paid into the wallet's own
+    /// associated token account.
+    ReceivingAccount,
+}
+
+impl Matched {
+    /// The word the response carries, so a reader can tell the two apart.
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Trader => "trader",
+            Self::ReceivingAccount => "receiving_account",
+        }
+    }
+}
+
+/// What [`wallet_history`] folded a mint's trades into for one wallet.
+///
+/// `Some` with empty [`Self::rows`] means the coin traded and none of it was
+/// this wallet's; [`wallet_history`] returns `None` when the coin has no
+/// trades here at all. Those are different facts and the route says so
+/// differently (rule 9).
+pub(crate) struct WalletHistory {
+    /// The wallet's trades, newest first, with how each was matched.
+    pub(crate) rows: Vec<(MarketTrade, Matched)>,
+    /// Trades of this mint that name neither a wallet nor a receiving
+    /// account, so they could belong to anyone -- including this wallet.
+    ///
+    /// **This is the number that keeps the view honest.** A buy paid in
+    /// native SOL leaves no authority for the tape's query to read, and if it
+    /// also names no receiving account there is nothing left to match on.
+    /// Reporting the matched rows without this count would render a missing
+    /// trade exactly like a trade never made.
+    pub(crate) unattributable: usize,
+    /// Whether more of the wallet's trades were found than `limit` returned.
+    pub(crate) truncated: bool,
+}
+
+/// Every trade of `mint` in `trades` that belongs to `wallet`, newest first.
+///
+/// Two different matches, because the tape carries two different things. A
+/// sell names its trader: the seller signs the transfer of the mint, so the
+/// authority column holds the wallet. A buy usually does not -- measured at
+/// four in five on 2026-09-20, research 0037 -- because a buy paid in native
+/// SOL writes no token-transfer row to read an authority from. What the buy
+/// does carry is the account the mint was paid into, and that address is
+/// derivable from the wallet: an associated token account is a
+/// program-derived address of the wallet, the token program and the mint. So
+/// the wallet's own accounts are worked out here, locally, and buys are
+/// matched against them.
+///
+/// **The derivation only runs forwards.** There is no way to take an account
+/// from the tape and ask who owns it, so this never identifies a wallet it
+/// was not given. Both token programs are derived, since the tape does not
+/// record which one a mint uses.
+///
+/// A trade matching neither is counted in [`WalletHistory::unattributable`]
+/// when it could belong to anyone -- no trader and no receiving account --
+/// and simply omitted when it names someone else.
+#[must_use]
+pub(crate) fn wallet_history(
+    trades: &[MarketTrade],
+    mint: &Address,
+    wallet: &Address,
+    limit: usize,
+) -> Option<WalletHistory> {
+    let of_this_mint: Vec<&MarketTrade> = trades.iter().filter(|row| row.mint == *mint).collect();
+    if of_this_mint.is_empty() {
+        return None;
+    }
+
+    // Both programs, because the tape records the trade and not the mint's
+    // own owner. A derivation can fail for a seed that lands on the curve;
+    // one that does simply contributes no account to match against.
+    let own_accounts: Vec<Address> = [
+        radar_pumpfun::token::SPL_TOKEN_PROGRAM,
+        radar_pumpfun::token::TOKEN_2022_PROGRAM,
+    ]
+    .iter()
+    .filter_map(|program| radar_pumpfun::pda::associated_token_account(wallet, mint, program))
+    .collect();
+
+    let mut rows: Vec<(MarketTrade, Matched)> = Vec::new();
+    let mut unattributable = 0usize;
+    for row in &of_this_mint {
+        if row.trader == Some(*wallet) {
+            rows.push(((*row).clone(), Matched::Trader));
+        } else if row
+            .token_destination
+            .is_some_and(|dest| own_accounts.contains(&dest))
+        {
+            rows.push(((*row).clone(), Matched::ReceivingAccount));
+        } else if row.trader.is_none() && row.token_destination.is_none() {
+            unattributable += 1;
+        }
+    }
+
+    // Newest first, ties broken by the signature so the order never depends
+    // on the order the rows happened to be read in.
+    rows.sort_by(|a, b| {
+        b.0.ts
+            .cmp(&a.0.ts)
+            .then_with(|| b.0.signature.to_string().cmp(&a.0.signature.to_string()))
+    });
+    let truncated = rows.len() > limit;
+    rows.truncate(limit);
+
+    Some(WalletHistory {
+        rows,
+        unattributable,
+        truncated,
+    })
+}
+
+/// `/v1/market/history/{mint}?wallet=...`: one wallet's trades in one coin,
+/// from the recorded tape alone.
+///
+/// **Public, and identity-free like every other route here.** The wallet is a
+/// query parameter, not a session: the tape is public chain data, this reads
+/// no customer store and carries no `Tenant`. The wallet the caller names is
+/// used only to derive addresses to match on.
+///
+/// **Zero CryptoHouse queries**, and no network call of any kind. The address
+/// derivation is arithmetic.
+///
+/// The response always carries `unattributable_trades`, because the honest
+/// answer to "are these all my trades in this coin" is no, and the reason is
+/// countable -- see [`wallet_history`].
+pub async fn history(
+    State(state): State<Arc<crate::AppState>>,
+    Path(mint): Path<String>,
+    Query(params): Query<HistoryParams>,
+) -> Response {
+    let mint = match parse_mint(&mint) {
+        Ok(m) => m,
+        Err(r) => return *r,
+    };
+    let Some(raw_wallet) = params.wallet.as_deref() else {
+        return bad_request("name the wallet to look up, as ?wallet=<base58 address>");
+    };
+    let Ok(wallet) = raw_wallet.parse::<Address>() else {
+        return bad_request("wallet must be a base58-encoded Solana address");
+    };
+
+    let watermark = match crate::watermark_of(&state) {
+        Ok(w) => w,
+        Err(e) => return e.into_response(),
+    };
+    let as_of = AsOf::at(watermark);
+    let snapshot = match snapshot_for(&state.market_snapshot, &state.store, as_of) {
+        Ok(Some(s)) => s,
+        Ok(None) => {
+            return Degradation::NotCollected(
+                "the market snapshot has not been built yet; check back shortly",
+            )
+            .into_response();
+        }
+        Err(e) => return Degradation::from_store_error(&e).into_response(),
+    };
+    if !snapshot.collected() {
+        return Degradation::NotCollected(
+            "the market-tape collector has not produced anything for this store yet",
+        )
+        .into_response();
+    }
+
+    let limit = params
+        .limit
+        .unwrap_or(DEFAULT_HISTORY_LIMIT)
+        .clamp(1, MAX_HISTORY_LIMIT);
+    let Some(folded) = wallet_history(snapshot.trades(), &mint, &wallet, limit) else {
+        return Degradation::NotCollected(
+            "Radar has recorded no trades of this coin in its window",
+        )
+        .into_response();
+    };
+
+    let rows: Vec<Value> = folded
+        .rows
+        .iter()
+        .map(|(row, matched)| {
+            json!({
+                "ts": row.ts,
+                "slot": row.slot.get(),
+                "signature": row.signature.to_string(),
+                "side": row.side,
+                "token_amount": row.token_amount,
+                "quote_amount": row.quote_amount,
+                "price": row.price,
+                "matched_by": matched.as_str(),
+            })
+        })
+        .collect();
+    Json(json!({
+        "mint": mint.to_string(),
+        "wallet": wallet.to_string(),
+        "fold": {
+            "fact": "wallet_trades_in_window",
+            "complete": false,
+            "truncated": folded.truncated,
+            "unattributable_trades": folded.unattributable,
+            "trades": rows,
+        },
+        "caveat": "Only trades Radar recorded, and only those it can tie to this wallet. A sell names its seller; a buy is matched by the account it was paid into, worked out from this wallet. A buy routed through any other account is not here, and is counted in unattributable_trades along with every other trade this tape can attribute to nobody.",
+    }))
+    .into_response()
+}
+
 /// `/v1/market/launches` query parameters.
 #[derive(Debug, Deserialize)]
 pub struct LaunchesParams {
@@ -2435,6 +2659,227 @@ mod tests {
             None
         );
         assert!(cache.peek().is_none());
+    }
+
+    /// `wallet_history`: a wallet's own trades in one coin, from the tape.
+    mod wallet_history_tests {
+        use super::*;
+
+        const WALLET: [u8; 32] = [3u8; 32];
+        const STRANGER: [u8; 32] = [4u8; 32];
+        const OTHER_MINT: &str = "9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin";
+
+        fn wallet() -> Address {
+            Address::new(WALLET)
+        }
+
+        fn a_mint() -> Address {
+            A_MINT.parse().expect("a mint")
+        }
+
+        /// The wallet's own associated token account for the mint, derived
+        /// the same way the fold derives it.
+        fn own_account(mint: &Address) -> Address {
+            radar_pumpfun::pda::associated_token_account(
+                &wallet(),
+                mint,
+                &radar_pumpfun::token::SPL_TOKEN_PROGRAM,
+            )
+            .expect("the wallet's associated account derives")
+        }
+
+        fn trade(
+            mint: &str,
+            ts: &str,
+            sig: u8,
+            side: MarketSide,
+            trader: Option<Address>,
+            token_destination: Option<Address>,
+        ) -> MarketTrade {
+            MarketTrade {
+                mint: mint.parse().expect("a mint"),
+                ts: ts.to_owned(),
+                slot: radar_types::Slot(1),
+                signature: radar_types::Signature::new([sig; 64]),
+                side,
+                token_amount: 5.0,
+                quote_amount: Some(2.0),
+                quote_mint: Some(WSOL.parse().expect("a mint")),
+                price: Some(2.0),
+                trader,
+                token_destination,
+            }
+        }
+
+        #[test]
+        fn a_coin_this_tape_never_traded_is_not_an_empty_history() {
+            // "You made no trades here" and "Radar has never seen this coin
+            // trade" are opposite facts, and the route renders them
+            // differently only because this returns `None` rather than an
+            // empty list (rule 9).
+            let trades = [trade(
+                OTHER_MINT,
+                "2026-09-18 00:00:00",
+                1,
+                MarketSide::Buy,
+                Some(wallet()),
+                None,
+            )];
+            assert!(
+                wallet_history(&trades, &a_mint(), &wallet(), 20).is_none(),
+                "a coin with no trades in the snapshot must not read as a wallet with none"
+            );
+        }
+
+        #[test]
+        fn a_coin_that_traded_without_this_wallet_gives_an_empty_list_not_nothing() {
+            let trades = [trade(
+                A_MINT,
+                "2026-09-18 00:00:00",
+                1,
+                MarketSide::Sell,
+                Some(Address::new(STRANGER)),
+                None,
+            )];
+            let folded = wallet_history(&trades, &a_mint(), &wallet(), 20)
+                .expect("the coin traded, so this is not an absence of the coin");
+            assert!(folded.rows.is_empty(), "none of it was this wallet's");
+            assert_eq!(
+                folded.unattributable, 0,
+                "a trade naming another wallet is attributed, just not here"
+            );
+        }
+
+        #[test]
+        fn a_sell_is_found_by_the_trader_and_a_buy_by_the_account_it_was_paid_into() {
+            // The whole point of the column. Four buys in five name no
+            // trader, so a view built on `trader` alone would show this
+            // wallet its sell and hide its buy -- and a hidden trade looks
+            // exactly like a trade never made.
+            let mint = a_mint();
+            let trades = [
+                trade(
+                    A_MINT,
+                    "2026-09-18 00:00:00",
+                    1,
+                    MarketSide::Buy,
+                    None,
+                    Some(own_account(&mint)),
+                ),
+                trade(
+                    A_MINT,
+                    "2026-09-18 00:01:00",
+                    2,
+                    MarketSide::Sell,
+                    Some(wallet()),
+                    None,
+                ),
+            ];
+            let folded = wallet_history(&trades, &mint, &wallet(), 20).expect("this coin traded");
+            assert_eq!(folded.rows.len(), 2, "both halves are this wallet's");
+            assert_eq!(
+                folded.rows[0].1,
+                Matched::Trader,
+                "newest first, and the sell is the newer of the two"
+            );
+            assert_eq!(
+                folded.rows[1].1,
+                Matched::ReceivingAccount,
+                "the buy names no trader and is found by the account it was paid into"
+            );
+        }
+
+        #[test]
+        fn another_wallets_receiving_account_is_not_this_wallets_trade() {
+            // Re-applying the bug the other way: matching on any destination
+            // at all, rather than on this wallet's derived accounts, would
+            // hand every traderless buy in the coin to whoever asked.
+            let mint = a_mint();
+            let theirs = radar_pumpfun::pda::associated_token_account(
+                &Address::new(STRANGER),
+                &mint,
+                &radar_pumpfun::token::SPL_TOKEN_PROGRAM,
+            )
+            .expect("their associated account derives");
+            let trades = [trade(
+                A_MINT,
+                "2026-09-18 00:00:00",
+                1,
+                MarketSide::Buy,
+                None,
+                Some(theirs),
+            )];
+            let folded = wallet_history(&trades, &mint, &wallet(), 20).expect("this coin traded");
+            assert!(
+                folded.rows.is_empty(),
+                "a buy paid into someone else's account is not this wallet's: {:?}",
+                folded.rows.len()
+            );
+            assert_eq!(
+                folded.unattributable, 0,
+                "it names an account, so it is attributable -- to someone else"
+            );
+        }
+
+        #[test]
+        fn a_trade_naming_neither_is_counted_rather_than_silently_dropped() {
+            // The number that keeps the view honest. This trade could be the
+            // wallet's; nothing on the row can say. Dropping it without
+            // counting it would let the view claim completeness it does not
+            // have.
+            let mint = a_mint();
+            let trades = [
+                trade(
+                    A_MINT,
+                    "2026-09-18 00:00:00",
+                    1,
+                    MarketSide::Buy,
+                    None,
+                    None,
+                ),
+                trade(
+                    A_MINT,
+                    "2026-09-18 00:01:00",
+                    2,
+                    MarketSide::Sell,
+                    Some(wallet()),
+                    None,
+                ),
+            ];
+            let folded = wallet_history(&trades, &mint, &wallet(), 20).expect("this coin traded");
+            assert_eq!(folded.rows.len(), 1, "only the sell can be tied to anyone");
+            assert_eq!(
+                folded.unattributable, 1,
+                "the traderless, destinationless buy is counted, not dropped in silence"
+            );
+        }
+
+        #[test]
+        fn more_trades_than_the_limit_says_so_rather_than_ending_quietly() {
+            let mint = a_mint();
+            let trades: Vec<MarketTrade> = (0..5)
+                .map(|i| {
+                    trade(
+                        A_MINT,
+                        &format!("2026-09-18 00:0{i}:00"),
+                        i,
+                        MarketSide::Sell,
+                        Some(wallet()),
+                        None,
+                    )
+                })
+                .collect();
+            let folded = wallet_history(&trades, &mint, &wallet(), 2).expect("this coin traded");
+            assert_eq!(folded.rows.len(), 2, "the limit is honoured");
+            assert!(
+                folded.truncated,
+                "a cut-off list must say it was cut off, never just end"
+            );
+            assert_eq!(
+                folded.rows[0].0.ts, "2026-09-18 00:04:00",
+                "newest first, so a limit keeps the newest rather than whichever came back first"
+            );
+        }
     }
 
     mod net_positions_tests {

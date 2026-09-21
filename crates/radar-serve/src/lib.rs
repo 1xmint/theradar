@@ -189,6 +189,7 @@ pub fn app(state: Arc<AppState>) -> Router {
         .route("/v1/market/coins", get(market::coins))
         .route("/v1/market/token/{mint}", get(market::token))
         .route("/v1/market/holders/{mint}", get(market::holders))
+        .route("/v1/market/history/{mint}", get(market::history))
         .route("/v1/market/launches", get(market::launches))
         .route("/mcp", post(mcp_endpoint))
         // Anything else is either a built asset or a route the interface owns.
