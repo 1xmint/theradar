@@ -14,8 +14,9 @@ password, so it is the owner's step. Item 3's "newly launched" list merged as #2
 item 3's `SHORTLIST` widening as the only unbuilt part of Phase B, and it waits
 on the owner. **Both of those are now deployed** -- `/health` reported build
 `2d7f91d` on 2026-09-23, which is #266 and so carries #261 and #263 with it.
-Phase C item 3 is merged-pending as #271 and item 4's trades half as #272; C
-items 1 and 2 are not built, and nothing in D or E is.
+Phase C item 3 (#271) and item 4's trades half (#283, which replaced #272) are
+merged and **deployed** -- `/health` reports build `871c6ce` since 2026-09-23.
+C items 1 and 2 are not built, and nothing in D or E is.
 **Date:** 2026-09-18, handback extended 2026-09-23.
 **Branch:** none; each item lands on `main` as its own pull request.
 **Inspected base:** `c8fca0e` (`Remove the bot from Radar: it lives in realorrug
@@ -351,13 +352,22 @@ and #270. Two of those change what runs: #269 touches the collector's query
 (`radar-backfill/src/market/query.rs`) and `radar-serve/src/customer.rs`, and
 #270 adds to the `radar consider` CLI. #267 and #268 are documents only.
 
-**Next action, in order.** Merge #271, retarget #272 to `main` and merge it,
-then deploy. Until the deploy, the "Yours" tab on radar.heyvera.org will ask a
-route the live binary does not have -- and because unknown paths fall through
-to the single-page app rather than answering 404, that arrives at the panel as
-a parse failure, not as a refusal it has words for. Nothing about the panel is
-verified against the real site yet; that is the evidence Phase C item 4 still
-owes, per "Verification, every phase" above.
+**That next action is done, 2026-09-23.** #271 squash-merged as `6705d17`.
+Deleting its branch closed #272 automatically, and GitHub will not reopen a
+pull request whose base branch is gone, so the same two commits were rebased
+onto `main` and opened as #283, which merged as `871c6ce`. The release build
+for that commit was installed by `sudo radar-deploy`; `/health` reports
+`871c6ce` and the artifact's sha256 matched `BUILD-INFO.txt` on the box.
+
+**Verified against the real site**, which is what "Verification, every phase"
+asks for. `/v1/market/history/{mint}` answers JSON rather than the single-page
+app's shell, so the panel now gets refusals it has words for: a mint outside
+the snapshot returns 503 `not_collected` with a message, and a collected mint
+(`SKRbvo6...`) returns 200 with no trades for the wallet and
+`unattributable_trades: 15` -- the case the panel must not report as "you made
+no trades". The shipped interface bundle contains the panel's own strings, so
+the tab is live. Not checked: nobody has driven the tab in a browser while
+signed in with a wallet that actually traded one of these coins.
 
 **Still the owner's, unchanged:** whether to pay for more CryptoHouse
 allowance, which 0036 frames with numbers. The recommendation on the table is
