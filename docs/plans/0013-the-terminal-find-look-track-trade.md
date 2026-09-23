@@ -12,8 +12,11 @@ deployed** -- the box's `radar-serve` restart needs an interactive sudo
 password, so it is the owner's step. Item 3's "newly launched" list merged as #263
 (`/v1/market/launches`, a "New" tab), also **not yet deployed**. That leaves
 item 3's `SHORTLIST` widening as the only unbuilt part of Phase B, and it waits
-on the owner. Nothing in C to E is built.
-**Date:** 2026-09-18.
+on the owner. **Both of those are now deployed** -- `/health` reported build
+`2d7f91d` on 2026-09-23, which is #266 and so carries #261 and #263 with it.
+Phase C item 3 is merged-pending as #271 and item 4's trades half as #272; C
+items 1 and 2 are not built, and nothing in D or E is.
+**Date:** 2026-09-18, handback extended 2026-09-23.
 **Branch:** none; each item lands on `main` as its own pull request.
 **Inspected base:** `c8fca0e` (`Remove the bot from Radar: it lives in realorrug
 now (#253)`) plus `feat/live-stream` at `fd01f40`, read on 2026-09-18.
@@ -280,3 +283,84 @@ step Phase C was waiting on never existed.
 **Do not:** build Phase D before Phase C is live; put a CryptoHouse query on a
 request path; hold a key or a fee on the server side of a swap; start the
 private trader or the edge measurement from this plan.
+
+
+**Phase C item 3 is built and green, 2026-09-20 to 09-23, unmerged.**
+[#271](https://github.com/1xmint/theradar/pull/271) (`per-wallet-trade-history`,
+base `main`) adds a public `GET /v1/market/history/{mint}?wallet=`. It filters
+the snapshot's trades **forward** from the wallet: the tape names the trader on
+only one trade in five (research 0037, measured 2026-09-20), so for the rest it
+derives the wallet's own associated token account for the mint and matches buys
+that were paid into it. It never inverts an account back to an owner, which
+that derivation cannot do. Every row says which of the two happened,
+`matched_by: "trader"` or `"receiving_account"`, and whatever still matches
+neither comes back as a count, `unattributable_trades`, never as silence. The
+route sits under `/v1/market/`, so it is `Audience::Public` and identity-free
+by the prefix match at `access.rs:632`; the wallet is a query parameter, not a
+session, and the route reads no customer store.
+
+CI named four surviving mutants on the first push and `7f8e8a8` killed all
+four: two unit tests in `market/mod.rs` (the two `Matched::as_str` words, and
+the boundary where a list exactly filling the limit is **not** truncated) and
+a new end-to-end test file,
+[`crates/radar-serve/tests/wallet_history_from_the_tape.rs`](../../crates/radar-serve/tests/wallet_history_from_the_tape.rs),
+because the not-collected gate lives in the handler rather than the fold. That
+last test asserts the message contains `"collector"`: all three of the route's
+`NotCollected` answers share one status and one `error` code, so only the
+sentence tells them apart. Proved by re-applying all three bugs and watching
+exactly those four tests fail. Run 35548436825, all 14 checks green.
+
+**Phase C item 4's trades half is built and green, 2026-09-23, unmerged.**
+[#272](https://github.com/1xmint/theradar/pull/272) (`your-trades-panel`) is
+stacked on #271 and must be retargeted to `main` after #271 lands. It adds a
+"Yours" tab to the terminal. Item 4 as the plan writes it needs items 1 and 2
+-- the watchlist and the browser-read positions -- and neither exists, so this
+is the trades column only, which is what item 3 unblocked.
+
+Five ways for it to be empty, five different sentences, which is the whole
+point of the item: not signed in, none of yours, this coin has no recorded
+trades at all, Radar could not look, and Radar could not be reached. Four of
+those are facts about Radar rather than about the reader's trading.
+`yourTradesRefusal` in `web/src/honesty.ts` reads the server's own message to
+tell the three `not_collected` refusals apart, exactly as `launchesEmptyMessage`
+already does. The load-bearing case is zero rows with a non-zero
+`unattributable_trades`: that reads "none of the trades Radar could attribute
+are yours, but N of this coin name nobody at all", never "you made no trades".
+Rule 9 on a screen, and the reason this item is worth its own line in the plan.
+
+Two pieces landed outside the panel. `useWalletAddress` in `web/src/Wallet.tsx`
+is a `useSyncExternalStore` over the stored session returning the address
+string only -- the browser fires `storage` for *other* tabs, so signing in here
+told this tab's panels nothing, hence the custom event. It deliberately does
+not return the bearer token: nothing needing a wallet address needs the
+credential with it, and handing both to every caller is how a public request
+quietly starts carrying one. `transactionUrl` in `web/src/format.ts` is new
+because `explorerUrl` builds an `/account/` link, and a signature given to that
+page renders "not found", which reads as though the trade never happened.
+
+Verified by re-applying four bugs: collapsing the five empty sentences into one
+(9 tests failed), linking a signature through the account page (1), dropping
+the unattributable warning beside a full list (1), and rendering both match
+kinds with the same word (1). Restored, `Tests 124 passed (124)` and `tsc -b`
+clean; `MIN_WEB_TESTS` raised 113 to 124. All 14 checks green on both PRs as of
+2026-09-23.
+
+**The earlier "next action" is done and is superseded.** #261 and #263 are
+deployed. What is live is four merged commits behind `main`: #267, #268, #269
+and #270. Two of those change what runs: #269 touches the collector's query
+(`radar-backfill/src/market/query.rs`) and `radar-serve/src/customer.rs`, and
+#270 adds to the `radar consider` CLI. #267 and #268 are documents only.
+
+**Next action, in order.** Merge #271, retarget #272 to `main` and merge it,
+then deploy. Until the deploy, the "Yours" tab on radar.heyvera.org will ask a
+route the live binary does not have -- and because unknown paths fall through
+to the single-page app rather than answering 404, that arrives at the panel as
+a parse failure, not as a refusal it has words for. Nothing about the panel is
+verified against the real site yet; that is the evidence Phase C item 4 still
+owes, per "Verification, every phase" above.
+
+**Still the owner's, unchanged:** whether to pay for more CryptoHouse
+allowance, which 0036 frames with numbers. The recommendation on the table is
+to read one day of `radar-follow` refusal counts first (`radar/outcomes.log`
+and `radar/decisions.log`); that clock started 2026-09-20, so a day of it
+exists now.
