@@ -30,7 +30,7 @@
 //! it — which is exactly as true of a cookie without `HttpOnly`, and the same
 //! is true of the wallet extension sitting alongside it.
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 
 import {
   detect,
@@ -90,6 +90,59 @@ export function storedSession(
   return null;
 }
 
+/**
+ * Broadcast when this tab signs in or out.
+ *
+ * The browser fires `storage` for *other* tabs only, so a panel in this tab
+ * would keep showing "connect a wallet" until something else re-rendered it.
+ * One custom event closes that gap without lifting the session into a context
+ * every component would then have to be wrapped in.
+ */
+const SESSION_EVENT = "radar.wallet.session";
+
+function announce(): void {
+  try {
+    window.dispatchEvent(new Event(SESSION_EVENT));
+  } catch {
+    // No window, or events disabled. The control still works; only panels
+    // elsewhere miss the update, and a reload fixes those.
+  }
+}
+
+/**
+ * The signed-in address, or `null`, re-read whenever it changes.
+ *
+ * Returns the **address string** rather than the session object on purpose:
+ * `useSyncExternalStore` compares snapshots by identity, and `storedSession`
+ * parses fresh JSON on every call, so returning the object would re-render
+ * forever.
+ *
+ * The token is not returned at all. Nothing that needs a wallet address needs
+ * the bearer token with it, and handing both to every caller is how a public
+ * request quietly starts carrying a credential.
+ */
+export function useWalletAddress(): string | null {
+  return useSyncExternalStore(subscribeToSession, readAddress, readNothing);
+}
+
+function subscribeToSession(onChange: () => void): () => void {
+  window.addEventListener(SESSION_EVENT, onChange);
+  window.addEventListener("storage", onChange);
+  return () => {
+    window.removeEventListener(SESSION_EVENT, onChange);
+    window.removeEventListener("storage", onChange);
+  };
+}
+
+function readAddress(): string | null {
+  return storedSession()?.address ?? null;
+}
+
+/** On the server there is no storage and so nobody is signed in. */
+function readNothing(): string | null {
+  return null;
+}
+
 /** What to tell the customer about a failure. */
 export function explain(error: SignInError): string {
   switch (error.kind) {
@@ -122,6 +175,9 @@ export function Wallet() {
       // Unstorable. The session still works for this page's lifetime, which is
       // better than refusing to sign in because it cannot be remembered.
     }
+    // Outside the try: a panel elsewhere should re-read the session whether or
+    // not it could be written down.
+    announce();
   }, [state]);
 
   const connect = useCallback(async () => {
@@ -144,6 +200,7 @@ export function Wallet() {
     } catch {
       // Already unreadable, so already gone as far as this page is concerned.
     }
+    announce();
     setState({ kind: "signed-out" });
   }, []);
 

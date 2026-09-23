@@ -302,3 +302,74 @@ export function isNarrowerThanRequested(
 ): boolean {
   return coveredFrom > requestedFrom || coveredTo < requestedTo;
 }
+
+/**
+ * Why "your trades in this coin" is empty -- five different facts that all
+ * render as no rows.
+ *
+ * This is [`emptyTapeMessage`]'s problem with three more ways to be empty,
+ * and the reason plan 0013 names it as its own item. A reader looking at a
+ * blank panel is owed the difference between "you did not trade this coin",
+ * "Radar cannot see who traded it", and "Radar could not look at all" --
+ * and the third one twice over, because a store nobody has collected into
+ * and a coin nobody has traded are also different.
+ *
+ * `unattributable` is the count the server sends with every answer: trades
+ * of this coin that name neither a wallet nor a receiving account, so they
+ * could belong to anyone, this reader included. **Zero rows with a non-zero
+ * count is not "you made no trades"** -- it is "none of the trades that can
+ * be attributed are yours, and some cannot be attributed at all". Rule 9,
+ * on a screen.
+ */
+export type YourTrades =
+  | { kind: "signed-out" }
+  | { kind: "none-of-yours"; unattributable: number }
+  | { kind: "coin-not-recorded" }
+  | { kind: "could-not-look"; detail: string }
+  | { kind: "unreachable"; detail: string };
+
+export function yourTradesMessage(state: YourTrades): string {
+  switch (state.kind) {
+    case "signed-out":
+      return "Connect a wallet to see your own trades in this coin. Radar is not hiding them -- it has not been told which wallet is yours.";
+    case "none-of-yours":
+      if (state.unattributable === 0) {
+        return "None of the trades Radar recorded for this coin are yours.";
+      }
+      return `None of the trades Radar could attribute are yours, but ${countOfTrades(
+        state.unattributable,
+      )} of this coin name nobody at all. Any of those could be yours -- the tape does not say.`;
+    case "coin-not-recorded":
+      return "Radar has recorded no trades of this coin at all, so it has nothing of yours to show either. That is a fact about what this instance has seen.";
+    case "could-not-look":
+      return `Radar could not look${
+        state.detail ? `: ${state.detail}` : ""
+      }. This says nothing about whether you have traded this coin.`;
+    case "unreachable":
+      return `Could not reach Radar${
+        state.detail ? `: ${state.detail}` : ""
+      }. Your trades, if you made any, are still there -- this is a connection problem, not an answer.`;
+  }
+}
+
+/**
+ * Which of the two refusals the server sent.
+ *
+ * `/v1/market/history` answers `not_collected` for three different reasons and
+ * only the message tells them apart, exactly as `launchesEmptyMessage` reads
+ * the server's own words rather than guessing. One of the three -- this coin
+ * has no trades in the window -- is a fact about the coin. The other two, an
+ * unbuilt snapshot and a collector that has never run, are facts about this
+ * instance, and both mean Radar could not look.
+ */
+export function yourTradesRefusal(detail: string): YourTrades {
+  if (detail.includes("recorded no trades of this coin")) {
+    return { kind: "coin-not-recorded" };
+  }
+  return { kind: "could-not-look", detail };
+}
+
+/** "one trade" / "four trades" -- so the sentence above reads as English. */
+function countOfTrades(n: number): string {
+  return n === 1 ? "one trade" : `${n} trades`;
+}
