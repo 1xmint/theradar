@@ -350,6 +350,12 @@ impl Tape {
             quote_mint: Some(fill.quote_mint),
             price: Some(fill.price),
             trader: Some(fill.trader),
+            // Not recorded here, and nothing is lost by that. The column
+            // exists so a wallet can find buys whose trader is missing, and
+            // this path always has the trader: the live decoder reads the
+            // venue's own fill, which names the buyer, rather than inferring a
+            // direction from SPL transfer rows the way the backfill fold must.
+            token_destination: None,
         });
         if coin.trades.len() > TRADES_PER_MINT {
             coin.trades.pop_front();

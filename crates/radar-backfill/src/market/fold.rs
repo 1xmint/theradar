@@ -151,6 +151,25 @@ pub struct Trade {
     /// The wallet identified as the trader, when the pool side of the trade
     /// could be told apart from it.
     pub trader: Option<String>,
+    /// The token account the mint arrived at, when the row named one.
+    ///
+    /// **Not the trader, and it must never be written into that field.** This
+    /// is an associated token account, not a wallet: it is *owned* by a wallet,
+    /// and an SPL transfer row carries no way to get from one to the other.
+    ///
+    /// It is kept because the journey the other way is free. A wallet's
+    /// associated account for a mint is derived locally
+    /// (`radar_pumpfun::pda::associated_token_account`), so a signed-in wallet
+    /// can find its own buys by matching this field, and that is the only
+    /// reason this column exists -- see `docs/research/0037`, which measured
+    /// four buys in five arriving with no trader at all.
+    ///
+    /// On a [`Side::Sell`] this is the pool's account rather than the seller's,
+    /// and on a [`Side::Unknown`] nothing about it is established. Both are
+    /// stored anyway: it is a fact the row carried, and dropping it on the
+    /// side's say-so would make the column unreadable whenever the side was
+    /// later re-decided.
+    pub token_destination: Option<String>,
 }
 
 /// How often each token account appears as an end of a trade in this window.
@@ -233,6 +252,8 @@ fn trade_from_row(row: &TapeRow, seen: &HashMap<&str, u64>) -> Option<Trade> {
         quote_mint,
         price,
         trader,
+        token_destination: (!row.token_destination.is_empty())
+            .then(|| row.token_destination.clone()),
     })
 }
 
@@ -854,6 +875,60 @@ mod tests {
         assert!(
             trades.iter().all(|t| t.trader.is_some()),
             "each resolved side names the wallet on the other end"
+        );
+    }
+
+    /// The receiving account is carried through, and never as the trader.
+    ///
+    /// This is the whole reason the column exists. Four buys in five arrive
+    /// with no trader on them, and the only way a signed-in wallet can find
+    /// its own is to derive its associated account for the mint and match it
+    /// here. A fold that dropped this field, or that quietly copied it into
+    /// `trader`, would either lose those buys or report an account as if it
+    /// were a wallet -- and an account is owned by a wallet, not equal to one.
+    #[test]
+    fn the_receiving_account_is_kept_apart_from_the_trader() {
+        let pool = "VAULT11111111111111111111111111111111111111";
+        let buyer = "BUYER111111111111111111111111111111111111";
+        let mut rows = Vec::new();
+        let mut buy = row("b", "2026-09-11 00:00:01", WSOL, "10000");
+        buy.token_source = pool.to_owned();
+        buy.token_destination = buyer.to_owned();
+        rows.push(buy);
+        // A second leg so the vault is recognisable as one.
+        let mut other = row("c", "2026-09-11 00:00:02", WSOL, "10000");
+        other.token_source = pool.to_owned();
+        other.token_destination = "BUYER222222222222222222222222222222222222".to_owned();
+        rows.push(other);
+
+        let trades = fold_tape(&rows);
+        // Newest first, so pick the row by its signature rather than position.
+        let first = trades
+            .iter()
+            .find(|t| t.signature == "b")
+            .expect("the buy is in the fold");
+        assert_eq!(
+            first.token_destination.as_deref(),
+            Some(buyer),
+            "the account the mint arrived at must be carried through: {trades:?}"
+        );
+        assert_ne!(
+            first.trader.as_deref(),
+            Some(buyer),
+            "a token account is not a wallet and must never be stored as the trader"
+        );
+    }
+
+    /// A row naming no destination stores none, rather than an empty string.
+    #[test]
+    fn a_row_with_no_destination_stores_no_destination() {
+        let mut r = row("d", "2026-09-11 00:00:03", WSOL, "10000");
+        r.token_destination = String::new();
+        let trades = fold_tape(&[r]);
+        assert_eq!(
+            trades.first().and_then(|t| t.token_destination.clone()),
+            None,
+            "an empty column is an absence, not an account named by the empty string"
         );
     }
 

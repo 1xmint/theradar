@@ -53,6 +53,7 @@ fn market_trade(mint: &str, slot: u64, ts: &str) -> MarketTrade {
         quote_mint: Some(WSOL.parse().expect("a mint")),
         price: Some(2.0),
         trader: None,
+        token_destination: None,
     }
 }
 

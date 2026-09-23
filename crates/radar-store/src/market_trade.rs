@@ -119,6 +119,18 @@ pub struct MarketTrade {
     /// [`MarketSide::Unknown`], and independently possible even when a quote
     /// leg was found: a trade can be priced without its trader being known.
     pub trader: Option<Address>,
+    /// The token account the mint arrived at, when the row named one.
+    ///
+    /// **A token account, not a wallet.** See
+    /// `radar_backfill::market::fold::Trade::token_destination`, which this
+    /// mirrors: it is stored so a signed-in wallet can derive its own
+    /// associated account and find the buys that carry no trader, and it must
+    /// never be read as [`Self::trader`].
+    ///
+    /// Added after the table already held rows, so every file written before
+    /// it reads back as `None` -- which is correct, and is not the same as a
+    /// trade whose row named no destination.
+    pub token_destination: Option<Address>,
 }
 
 #[cfg(test)]

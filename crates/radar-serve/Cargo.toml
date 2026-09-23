@@ -26,6 +26,11 @@ radar-customer.workspace = true
 radar-model.workspace = true
 radar-instruments.workspace = true
 radar-research.workspace = true
+# Address derivation only, on the request path and nothing else. A wallet's
+# associated token account for a mint is a PDA, so `/v1/market/history` can
+# work out locally which account a signed-in wallet's buys were paid into --
+# no query, no network, no key.
+radar-pumpfun.workspace = true
 radar-risk.workspace = true
 ring = { version = "0.17", default-features = false }
 thiserror.workspace = true
