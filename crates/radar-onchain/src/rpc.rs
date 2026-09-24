@@ -41,7 +41,7 @@ pub const TOKEN_PROGRAM_ID: &str = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
 /// The Token-2022 program. A distinct program id, not an upgrade of the one
 /// above — a wallet's Token-2022 holdings live in accounts this id owns, and
 /// are invisible to a `getTokenAccountsByOwner` call scoped to the other one.
-pub const TOKEN_2022_PROGRAM_ID: &str = "TokenzQdBNbLqP5VEhdkAS6EPFLC1PE9w6NCZt4Kwh2";
+pub const TOKEN_2022_PROGRAM_ID: &str = "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb";
 
 /// Why a read could not be completed.
 #[derive(Debug, thiserror::Error)]

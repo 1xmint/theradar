@@ -595,6 +595,24 @@ mod tests {
     }
 
     #[test]
+    fn the_token_programs_read_are_the_ones_mainnet_runs() {
+        // Every other test here answers from a fake transport that never
+        // looks at the program id, so a mistyped one passed them all and
+        // failed every live read: the node answered INVALID_PARAMS. These are
+        // checked against `radar_pumpfun::token`'s byte constants, which the
+        // decoder's own tests pin against real mainnet accounts.
+        let parse = |id: &str| id.parse::<Address>().expect("a program id parses");
+        assert_eq!(
+            parse(radar_onchain::rpc::TOKEN_PROGRAM_ID),
+            radar_pumpfun::token::SPL_TOKEN_PROGRAM
+        );
+        assert_eq!(
+            parse(radar_onchain::rpc::TOKEN_2022_PROGRAM_ID),
+            radar_pumpfun::token::TOKEN_2022_PROGRAM
+        );
+    }
+
+    #[test]
     fn the_host_of_an_endpoint_never_carries_a_key_or_a_path() {
         assert_eq!(
             host_of("https://mainnet.helius-rpc.com/?api-key=secret"),
