@@ -284,7 +284,18 @@ licence-headers:
 # rather than freezing at the server's own count (item 5); `honesty.test.ts`
 # gained a case that the "holds no tokens" sentence compares the wallet's raw
 # lamport integer, never the formatted `ui_amount` string (item 4).
-export MIN_WEB_TESTS := "151"
+#
+# 151 -> 177 on 2026-09-24: plan 0013 phase E.2 / 9-11-0019, chart tools.
+# `indicators.test.ts` (16 cases, new file) proves the rubric -- an SMA/EMA
+# whose lookback exceeds the available bars is absent in full, not truncated
+# and not zero-seeded, and every point before its window fills is absent too
+# -- plus exact-value fixtures, indicator labelling, and the indicator-choice
+# storage round-trip/corrupt-discard/throw-survival cases. `drawings.test.ts`
+# (10 cases, new file) covers the visitor's own horizontal and trend lines:
+# storage round-trip, per-mint separation, clearing one mint leaves another's
+# lines untouched, and a corrupt entry is discarded in full rather than
+# repaired -- the same rule `Wallet.test.tsx` already holds `storedSession` to.
+export MIN_WEB_TESTS := "177"
 
 # The public site at cabalhunter.org. Lower because it has five pages, and it
 # exists for the same reason MIN_WEB_TESTS does: `vitest run` exits zero when it
