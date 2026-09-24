@@ -559,3 +559,42 @@ Two things this surfaced, neither a code fault:
   `/etc/radar/radar.env`, so reads go to `api.mainnet-beta.solana.com` from
   the same IP as the two backfill jobs. Under load, visitors will see `busy`
   or "could not look". A private RPC URL there is the owner's edit.
+
+**Phase D, web half — draft PR opened, 2026-09-24.** Built in worktree
+`plan-0013-d-trade-web` against the server contract items 2 and 3 above
+describe (`GET /v1/market/quote`, `POST /v1/customer/swap`, `/health`'s
+`trading` field), authored in parallel with, not against a running instance
+of, the server side of this same phase (`plan-0013-d-swap-server`) -- see the
+PR body for the exact request/response shapes assumed. Two dark switches gate
+`TradePanel`/`Terms.tsx`: `legal.ts`'s `TERMS_APPROVED` (hardcoded `false`,
+with a test that any `[PLACEHOLDER]` bracket left in `TERMS_TEXT` forces it
+false) and `/health`'s `trading` field (`useHealth.ts`'s `useTrading()`);
+both must be true before either renders real content, so on `main` today the
+panel stays inert regardless of what the server reports. Signing:
+`@solana/web3.js` added, scoped to `sign.ts`'s single
+`VersionedTransaction.deserialize()` call, chosen over the Wallet Standard
+discovery registry (a bigger departure from `siws.ts`'s existing
+injected-provider pattern than this warranted) and over Phantom's
+undocumented-for-v0 bs58 `request()` path -- `sign.ts`'s own doc comment and
+`PROGRESS-d-web.md` in that worktree carry the full reasoning.
+
+**Gap, not fixed here:** `/terms` is wired into `App.tsx`'s real routing but
+deliberately left out of `routes.ts`'s `ROUTES` table, because that table is
+cross-checked by `routes.test.ts` against `crates/radar-serve/src/access.rs`'s
+`audience_of`, which this worktree did not touch (Rust crates are out of
+scope for a web-only phase); `access.rs` has no classification for `/terms`
+yet. Add it to both in the same change, once `/terms` gets a real server-side
+audience.
+
+**Not checked:** a real quote or swap against a live server -- the parallel
+`plan-0013-d-swap-server` branch building those two routes was still in
+progress as this branch was written, so the shapes in `api.ts` (`Quote`,
+`SwapResponse`) and the refusal codes in `honesty.ts`'s
+`swapRefusalMessage` are contract, not observation; cross-check both once
+that branch lands. `MIN_WEB_TESTS` raised 151 to 210 by a static count
+(`it`/`it.each` cases counted by hand, since this worktree was told not to
+run the web suite locally) against an estimated real total near 219 -- CI's
+first run of this branch has the true number and the floor should move to
+match it. Rehearsal on a throwaway wallet with a real, deployed server (item
+5 above) has not happened and should gate the merge, the same as every other
+phase in this plan required a real-site check before being called done.

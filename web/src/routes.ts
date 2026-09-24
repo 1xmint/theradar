@@ -62,6 +62,15 @@ export const ROUTES = [
     path: "/token/:mint",
     audience: "customer",
   },
+  // `/terms` (see `Terms.tsx` and `App.tsx`) is deliberately **not** listed
+  // here yet. This table's whole point is `routes.test.ts`'s cross-check
+  // against the server's `access::audience_of`, which this worktree must not
+  // edit -- trading itself, and everything the swap feature needs from the
+  // server, is a parallel phase's crate change. Listing `/terms` here today
+  // would fail that test against a classification that does not exist yet,
+  // the same failure mode this module's own doc comment warns about, just
+  // pointed at a route that legitimately has no server-side answer during
+  // this phase. Add it here in the same change that adds it to `access.rs`.
 ] as const satisfies readonly Route[];
 
 /** The path to one token's terminal view. */

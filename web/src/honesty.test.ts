@@ -31,6 +31,9 @@ import {
   partitionReasons,
   pct,
   positionsMessage,
+  roundTripCostBps,
+  roundTripCostCaption,
+  swapRefusalMessage,
 } from "./honesty";
 
 describe("median", () => {
@@ -409,5 +412,74 @@ describe("isNarrowerThanRequested", () => {
 
   it("catches an end clipped earlier than requested", () => {
     expect(isNarrowerThanRequested(100, 200, 100, 180)).toBe(true);
+  });
+});
+
+describe("roundTripCostBps", () => {
+  it("doubles the quoted price impact", () => {
+    expect(roundTripCostBps(40)).toBe(80);
+  });
+
+  it("is null when the quote reported no impact -- not a free round trip", () => {
+    expect(roundTripCostBps(null)).toBeNull();
+  });
+
+  it("is zero, not null, when the quote reported zero impact", () => {
+    // Zero is a fact the route reported; null is that it reported nothing.
+    // Collapsing them would either claim a free round trip that was never
+    // measured, or throw away a real, reported zero.
+    expect(roundTripCostBps(0)).toBe(0);
+  });
+});
+
+describe("roundTripCostCaption", () => {
+  it("states the estimate as a plain sentence, in percent", () => {
+    const caption = roundTripCostCaption(40);
+    expect(caption).toContain("0.8%");
+    expect(caption.toLowerCase()).toContain("buying and selling straight back");
+  });
+
+  it("says plainly that no estimate exists rather than claiming a free round trip", () => {
+    const caption = roundTripCostCaption(null);
+    expect(caption.toLowerCase()).toContain("cannot estimate");
+    expect(caption).not.toContain("0.0%");
+  });
+});
+
+describe("swapRefusalMessage", () => {
+  it("gives every documented refusal code its own, distinct sentence", () => {
+    const codes = [
+      "no_session",
+      "unscoped",
+      "busy",
+      "trading_off",
+      "no_route",
+      "unreadable_route",
+      "bad_request",
+      "slippage_too_wide",
+    ];
+    const texts = codes.map((code) => swapRefusalMessage(code, "server detail"));
+    expect(new Set(texts).size).toBe(texts.length);
+  });
+
+  it("folds every wallet-session refusal into the same sign-in-again sentence", () => {
+    const sessionCodes = ["no_session", "session_invalid", "session_expired", "not_a_wallet"];
+    const texts = sessionCodes.map((code) => swapRefusalMessage(code, "irrelevant detail"));
+    for (const text of texts) {
+      expect(text).toBe(texts[0]);
+      expect(text.toLowerCase()).toContain("sign in");
+    }
+  });
+
+  it("passes the server's detail through for an unrecognised code", () => {
+    expect(swapRefusalMessage("some_new_code", "a fact from the server")).toBe(
+      "a fact from the server",
+    );
+  });
+
+  it("includes the server's detail for a bad_request", () => {
+    expect(swapRefusalMessage("bad_request", "amount must be positive")).toContain(
+      "amount must be positive",
+    );
   });
 });

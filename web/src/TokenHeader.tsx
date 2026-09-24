@@ -20,8 +20,11 @@ import { CoinImage } from "./CoinImage";
 import { MarketFigure } from "./Figures";
 import {formatAge, formatCompactUsd, formatPrice, formatSolAmount, shortenAddress} from "./format";
 import { isWalletSessionRefusal, positionsMessage, watchlistMessage, watchlistToggleFailure } from "./honesty";
+import { TERMS_APPROVED } from "./legal";
 import { tokenPath } from "./routes";
+import { TradePanel } from "./TradePanel";
 import type { Load } from "./useApi";
+import { useTrading } from "./useHealth";
 import { usePositions } from "./usePositions";
 import { useWatchlist } from "./useWatchlist";
 
@@ -48,12 +51,31 @@ function valueLabel(
 
 export function TokenHeader({ load }: { load: Load<MarketToken> }) {
   const watchlist = useWatchlist();
-  const positions = usePositions();
+  const trading = useTrading();
+  // Bumped after a trade sends, to force `usePositions` to re-read the chain
+  // -- see `usePositions.ts`'s `refreshKey` doc comment and `TradePanel`'s
+  // `onTraded` prop below.
+  const [positionsNonce, setPositionsNonce] = useState(0);
+  const positions = usePositions(positionsNonce);
+  // Both switches, independently: an approved-but-off feature and an
+  // on-but-unapproved one must each still ship dark. See `legal.ts`'s doc
+  // comment for why this lives in code rather than a config flag.
+  const tradingLive = TERMS_APPROVED && trading;
   return (
     <aside className="flex h-full flex-col border-l border-[var(--color-line)] bg-[var(--color-surface)]">
       <div className="border-b border-[var(--color-line)] p-3">
         <Header load={load} watchlist={watchlist} />
       </div>
+      {tradingLive && load.state === "ready" && (
+        <div className="border-b border-[var(--color-line)] p-3">
+          <TradePanel
+            mint={load.value.mint}
+            symbol={load.value.symbol}
+            positions={positions}
+            onTraded={() => setPositionsNonce((n) => n + 1)}
+          />
+        </div>
+      )}
       <div className="border-b border-[var(--color-line)] p-3">
         <WatchlistPanel watchlist={watchlist} />
       </div>

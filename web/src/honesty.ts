@@ -503,3 +503,74 @@ export function positionsMessage(state: PositionsState): string {
       }. This says nothing about what the wallet holds.`;
   }
 }
+
+// --- trading's honesty rules -------------------------------------------------
+//
+// `/v1/market/quote` and `/v1/customer/swap` are ADR 0024's ground: Radar
+// builds the transaction, only the visitor's wallet signs it, and the screen
+// has to say what it actually knows -- an estimate is not a promise, a quote
+// is not a fill, and a refusal from the server needs the same wallet-session
+// split `isWalletSessionRefusal` already gives watchlist and positions.
+
+/**
+ * A rough estimate of what buying and selling straight back would cost, in
+ * basis points -- twice one quote's price impact, since a round trip pays
+ * that impact once on the way in and again on the way out.
+ *
+ * **An estimate from a single quote, not a measurement of a real round
+ * trip.** The market moves between two legs of an actual trade, and the
+ * second leg's impact would be computed against a different pool state than
+ * this quote saw -- doubling one side's impact is the cheapest honest proxy
+ * for "about how much", not a promise of the true cost.
+ *
+ * `null` when the quote reported no price impact at all: the contract's
+ * `impact_bps` is nullable for a route with no venue that computes one, and
+ * `0` would claim a round trip that costs nothing, which is not the same
+ * fact as "unknown".
+ */
+export function roundTripCostBps(impactBps: number | null): number | null {
+  if (impactBps === null) return null;
+  return impactBps * 2;
+}
+
+/** The sentence shown beside the quote for [`roundTripCostBps`]. */
+export function roundTripCostCaption(impactBps: number | null): string {
+  const cost = roundTripCostBps(impactBps);
+  if (cost === null) {
+    return "Radar cannot estimate a round-trip cost for this route -- no price impact was reported.";
+  }
+  return `Buying and selling straight back would cost about ${(cost / 100).toFixed(1)}% in price impact alone, before Solana's own network fee.`;
+}
+
+/**
+ * The sentence for a refusal from `/v1/market/quote` or `/v1/customer/swap`.
+ *
+ * Every code the contract documents gets its own sentence. An unrecognised
+ * code falls back to the server's own `detail` rather than a generic "could
+ * not trade" -- the same reasoning `partitionReasons` gives for an
+ * unrecognised strategy reason: showing an unfamiliar fact is the safe
+ * direction to be wrong in, hiding one is not.
+ */
+export function swapRefusalMessage(reason: string, detail: string): string {
+  if (isWalletSessionRefusal(reason)) {
+    return "Your wallet session is no longer valid. Sign in with your wallet again.";
+  }
+  switch (reason) {
+    case "unscoped":
+      return "Radar could not tell which wallet this request was for.";
+    case "busy":
+      return "Radar is rate-limiting trade requests; try again shortly.";
+    case "trading_off":
+      return "Trading is turned off right now.";
+    case "no_route":
+      return "No route exists for this trade right now. Try a smaller amount or a different token.";
+    case "unreadable_route":
+      return "Radar could not read a usable route for this trade. This says nothing about the token -- Radar could not look.";
+    case "bad_request":
+      return `Radar rejected that request: ${detail}`;
+    case "slippage_too_wide":
+      return "That slippage tolerance is wider than Radar allows.";
+    default:
+      return detail;
+  }
+}
