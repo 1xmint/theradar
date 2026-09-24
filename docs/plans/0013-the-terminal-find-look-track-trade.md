@@ -555,10 +555,10 @@ Two things this surfaced, neither a code fault:
   or "could not look". A private RPC URL there is the owner's edit.
 
 **Phase D's server half is built, 2026-09-24, PR open as a draft, not yet
-reviewed or merged.** [ADR 0024](../adr/0024-a-signed-in-wallet-may-ask-radar-to-build-a-swap.md)
-is written first, as item D.1 requires: Radar assembles an unsigned
-transaction and never holds a key that could sign or send it, never adds a
-fee, and persists and logs nothing about the request. Item D.2 is
+reviewed or merged.** Builds on [ADR 0024](../adr/0024-radar-builds-a-visitors-swap-and-only-their-wallet-signs-it.md)
+(#291, merged): Radar assembles an unsigned transaction and never holds a key
+that could sign or send it, never adds a fee, and persists and logs nothing
+about the request. Item D.2 is
 `GET /v1/market/quote`, public and unscoped; item D.3's server half is
 `POST /v1/customer/swap`, behind `Tenant`, returning a base64 unsigned v0
 transaction naming the session wallet as fee payer. Both routes are one new

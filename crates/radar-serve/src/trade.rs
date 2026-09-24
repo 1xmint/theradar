@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //! `GET /v1/market/quote` and `POST /v1/customer/swap`: pricing and building a
 //! Jupiter-routed Solana swap. Plan 0013 Phase D, [ADR
-//! 0024](../../../docs/adr/0024-a-signed-in-wallet-may-ask-radar-to-build-a-swap.md).
+//! 0024](../../../docs/adr/0024-radar-builds-a-visitors-swap-and-only-their-wallet-signs-it.md).
 //!
 //! **This module still does not execute anything.** [`crate::AppState::trading`]
 //! calls [`radar_exec::route::Router`], which prices and — for the customer
