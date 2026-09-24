@@ -285,15 +285,26 @@ licence-headers:
 # gained a case that the "holds no tokens" sentence compares the wallet's raw
 # lamport integer, never the formatted `ui_amount` string (item 4).
 #
-# 151 -> 222 on 2026-09-24: `TradePanel.tsx` (buy/sell from the terminal) and
+# 151 -> 177 on 2026-09-24: plan 0013 phase E.2 / 9-11-0019, chart tools.
+# `indicators.test.ts` (16 cases, new file) proves the rubric -- an SMA/EMA
+# whose lookback exceeds the available bars is absent in full, not truncated
+# and not zero-seeded, and every point before its window fills is absent too
+# -- plus exact-value fixtures, indicator labelling, and the indicator-choice
+# storage round-trip/corrupt-discard/throw-survival cases. `drawings.test.ts`
+# (10 cases, new file) covers the visitor's own horizontal and trend lines:
+# storage round-trip, per-mint separation, clearing one mint leaves another's
+# lines untouched, and a corrupt entry is discarded in full rather than
+# repaired -- the same rule `Wallet.test.tsx` already holds `storedSession` to.
+#
+# 177 -> 248 on 2026-09-24: `TradePanel.tsx` (buy/sell from the terminal) and
 # its test file, `TradePanel.test.tsx` -- amount and slippage validation, the
 # debounced live quote, a review step built from `/v1/customer/swap`'s own
 # response rather than the live quote, 60-second staleness, a wallet decline
 # read as "cancelled" rather than an error, and every documented refusal code
 # -- plus `sign.test.ts` (a refused popup is a cancel, a failed send is not)
-# and `/terms` in the routes cross-check. 222 is the count CI's run of ce1e511
-# reported.
-export MIN_WEB_TESTS := "222"
+# and `/terms` in the routes cross-check. CI's run of ce1e511
+# counted 222 before E.2 merged; E.2's 26 cases bring it to 248.
+export MIN_WEB_TESTS := "248"
 
 # The public site at cabalhunter.org. Lower because it has five pages, and it
 # exists for the same reason MIN_WEB_TESTS does: `vitest run` exits zero when it
