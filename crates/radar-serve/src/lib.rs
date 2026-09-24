@@ -29,6 +29,8 @@ mod ops;
 pub mod privy;
 pub mod share;
 pub mod siws;
+pub mod tenant;
+mod watchlist;
 pub mod x402;
 
 use core::convert::Infallible;
@@ -39,7 +41,7 @@ use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{Html, IntoResponse, Response};
-use axum::routing::{get, post};
+use axum::routing::{get, post, put};
 use axum::{Json, Router};
 use futures_util::Stream;
 use radar_asof::AsOf;
@@ -152,6 +154,14 @@ pub struct AppState {
     /// one synchronously the one time a test asks. See [`market::Snapshot`]'s
     /// own doc comment for why this exists at all.
     pub market_snapshot: market::SnapshotCache,
+    /// Where each signed-in wallet's own saved state lives, or `None` when this
+    /// instance keeps none.
+    ///
+    /// Tier 2 of plan 0012. Reached only through a [`tenant::Tenant`], so a route
+    /// can read the calling wallet's folder and no other. `None` refuses every
+    /// `/v1/customer/watchlist` request rather than keeping lists in memory,
+    /// where a restart would empty them without saying so.
+    pub customers: Option<tenant::Customers>,
 }
 
 /// Builds the router.
@@ -180,6 +190,13 @@ pub fn app(state: Arc<AppState>) -> Router {
         .route("/v1/customer/wallet", get(customer_wallet))
         .route("/v1/events", get(events))
         .route("/v1/customer/events", get(customer_events))
+        // The signed-in wallet's own list, and nobody else's -- not the
+        // operator's either. Tier 2 of plan 0012; see `tenant`.
+        .route("/v1/customer/watchlist", get(watchlist::list))
+        .route(
+            "/v1/customer/watchlist/{mint}",
+            put(watchlist::watch).delete(watchlist::unwatch),
+        )
         .route("/v1/instruments", get(list_instruments))
         .route("/v1/instruments/{name}", post(call_instrument))
         // Public market data -- tier 1 of plan 0012. No identity, and none of
@@ -336,6 +353,9 @@ async fn guard(
     // reader told only "denied" cannot tell a private instance from a broken
     // login, and the two want opposite responses.
     let mut not_admitted: Option<String> = None;
+    // Set when a bearer token was offered as a wallet session and did not
+    // verify. It explains a refusal; it never admits anything.
+    let mut session_refused: Option<radar_customer::session::Invalid> = None;
 
     // A customer token is tried first, and only where the route is product.
     // `accepts_customer` is false for every operator route, so a valid customer
@@ -355,26 +375,40 @@ async fn guard(
         // that ships, and a bearer token is one or the other -- the two formats
         // cannot be confused, because a session token is two base64url parts
         // separated by a dot with no header, and a JWT has three.
-        if let Ok(session) =
-            radar_customer::session::verify(&token, &state.customer_salt, now_unix())
-        {
-            // The address is the identity. It goes in the same `Customer` the
-            // Privy path produces, so admission, metering and every handler
-            // downstream work unchanged and there is one notion of "who is
-            // calling" rather than two that can disagree.
-            //
-            // The two namespaces cannot collide: a Privy subject is
-            // `did:privy:...` and this is base58.
-            let customer = customer::Customer {
-                did: session.address.to_string(),
-                session: session.expires_at.to_string(),
-            };
-            if state.admission.admits(&customer.did) {
-                let mut request = request;
-                request.extensions_mut().insert(customer);
-                return next.run(request).await;
+        match tenant::Tenant::verify(&token, &state.customer_salt, now_unix()) {
+            Ok(tenant) => {
+                // The address is the identity. It goes in the same `Customer`
+                // the Privy path produces, so admission, metering and every
+                // handler downstream work unchanged and there is one notion of
+                // "who is calling" rather than two that can disagree.
+                //
+                // The two namespaces cannot collide: a Privy subject is
+                // `did:privy:...` and this is base58.
+                let customer = customer::Customer {
+                    did: tenant.address().to_string(),
+                    session: tenant.expires_at().to_string(),
+                };
+                if state.admission.admits(&customer.did) {
+                    // The `Tenant` too, and only here: this is the one place a
+                    // wallet has both proved itself and been admitted, so its
+                    // presence on a request is that proof. Per-wallet storage
+                    // is reached through it and through nothing else.
+                    let mut request = request;
+                    request.extensions_mut().insert(customer);
+                    request.extensions_mut().insert(tenant);
+                    return next.run(request).await;
+                }
+                not_admitted = Some(customer.did);
             }
-            not_admitted = Some(customer.did);
+            // Kept, and used only if nothing else lets the request in: an
+            // expired wallet session then says "expired" rather than "no
+            // Cloudflare Access assertion", which sent people to the wrong door.
+            //
+            // Only a token shaped like a session -- one dot -- is blamed on the
+            // session. A Privy JWT has two, and telling someone who signed in by
+            // email to "sign in with your wallet again" is the wrong door too.
+            Err(why) if token.matches('.').count() == 1 => session_refused = Some(why),
+            Err(_) => {}
         }
 
         // And now Privy, which is the branch that actually needs the
@@ -427,12 +461,23 @@ async fn guard(
         if let Some(did) = not_admitted {
             return private(&did);
         }
-        return next.run(request).await;
+        return next
+            .run(with_session_refusal(request, session_refused))
+            .await;
     };
 
     let Some(token) = access::token_from(request.headers()) else {
         if let Some(did) = not_admitted {
             return private(&did);
+        }
+        if let Some(why) = &session_refused {
+            return tenant::refused(why);
+        }
+        // Nothing offered at all. On a customer route the missing thing is a
+        // wallet session, not an operator's Cloudflare login; saying the
+        // latter sends a customer somewhere they can never get in.
+        if audience.accepts_customer() {
+            return tenant::no_session();
         }
         return denied(&access::Denied::Missing);
     };
@@ -446,15 +491,38 @@ async fn guard(
     });
 
     match verified {
-        Ok(_) => next.run(request).await,
-        Err(why) => match not_admitted {
+        // The operator is let in, and carries no `Tenant`: a route that reads
+        // one wallet's own state refuses the operator like anyone else. The
+        // owner's decision of 2026-09-23 -- nobody reads a wallet's list but
+        // that wallet.
+        Ok(_) => {
+            next.run(with_session_refusal(request, session_refused))
+                .await
+        }
+        Err(why) => match (not_admitted, session_refused) {
             // The admission problem is the more useful diagnosis: the operator
             // check failing is expected for a customer, and reporting that
             // instead would send them to Cloudflare.
-            Some(did) => private(&did),
-            None => denied(&why),
+            (Some(did), _) => private(&did),
+            (None, Some(session)) => tenant::refused(&session),
+            (None, None) => denied(&why),
         },
     }
+}
+
+/// The request, carrying why its wallet session was refused, if one was.
+///
+/// For a request let in some other way -- by an operator login, or on an
+/// instance with the operator check off -- so a route that needs a
+/// [`tenant::Tenant`] can say "your session expired" instead of "no session".
+fn with_session_refusal(
+    mut request: axum::extract::Request,
+    refused: Option<radar_customer::session::Invalid>,
+) -> axum::extract::Request {
+    if let Some(why) = refused {
+        request.extensions_mut().insert(tenant::SessionRefused(why));
+    }
+    request
 }
 
 /// Refuses a verified identity this instance does not admit.

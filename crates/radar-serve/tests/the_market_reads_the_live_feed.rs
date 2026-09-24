@@ -46,6 +46,7 @@ fn router(live: Arc<Live>) -> axum::Router {
         challenges: None,
         market: radar_serve::market::Market::with_live(live),
         market_snapshot: radar_serve::market::SnapshotCache::new(),
+        customers: None,
     }))
 }
 

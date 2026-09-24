@@ -116,6 +116,7 @@ fn customer_lane() -> Result<
         radar_serve::admission::Admission,
         radar_serve::share::Shares,
         Vec<u8>,
+        radar_serve::tenant::Customers,
     ),
     String,
 > {
@@ -135,6 +136,11 @@ fn customer_lane() -> Result<
     let salt = env("RADAR_CUSTOMER_SALT")
         .map(String::into_bytes)
         .unwrap_or_default();
+    // Each signed-in wallet's own folder, under the same state directory. Not
+    // optional either: a watchlist kept nowhere would accept a coin and lose it
+    // at the next deploy.
+    let customers = radar_serve::tenant::Customers::open(&env)
+        .map_err(|why| format!("wallet watchlists need a state directory: {why}"))?;
     Ok((
         admission,
         radar_serve::share::Shares::restored(
@@ -143,6 +149,7 @@ fn customer_lane() -> Result<
             radar_serve::chat::today_utc(),
         ),
         salt,
+        customers,
     ))
 }
 
@@ -310,7 +317,7 @@ async fn main() -> ExitCode {
     let x402 = x402::Config::from_env();
     let (agent, agent_note) = configure_agent();
 
-    let (admission, shares, customer_salt) = match customer_lane() {
+    let (admission, shares, customer_salt, customers) = match customer_lane() {
         Ok(lane) => lane,
         Err(why) => return refused(&why),
     };
@@ -321,7 +328,6 @@ async fn main() -> ExitCode {
         Ok(feed) => feed,
         Err(why) => return refused(&why),
     };
-
     let state = Arc::new(AppState {
         admission,
         shares,
@@ -346,6 +352,7 @@ async fn main() -> ExitCode {
             .map(radar_serve::challenges::Challenges::new),
         market,
         market_snapshot: radar_serve::market::SnapshotCache::with_background_refresh(),
+        customers: Some(customers),
     });
 
     // Off the request path, per the market module's own doc comment: every

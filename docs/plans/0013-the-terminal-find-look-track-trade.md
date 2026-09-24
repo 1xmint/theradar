@@ -374,3 +374,38 @@ allowance, which 0036 frames with numbers. The recommendation on the table is
 to read one day of `radar-follow` refusal counts first (`radar/outcomes.log`
 and `radar/decisions.log`); that clock started 2026-09-20, so a day of it
 exists now.
+
+**Phase C item 1 is built, 2026-09-23, unmerged and awaiting review.** The
+owner decided the one question this item raised, on 2026-09-23: **nobody reads
+a wallet's saved state through Radar but that wallet** -- the operator
+included. There is no operator read path, so there is no second way past the
+boundary.
+
+What exists: `GET /v1/customer/watchlist`, and `PUT` / `DELETE
+/v1/customer/watchlist/{mint}`, in
+[`watchlist.rs`](../../crates/radar-serve/src/watchlist.rs), all behind a
+`Tenant` from
+[`tenant.rs`](../../crates/radar-serve/src/tenant.rs). A `Tenant` is made only
+by verifying a wallet session token; the guard puts one on a request only after
+the session verified *and* the wallet was admitted. A `TenantStore` is made only
+from a `Tenant` and has no method that takes a wallet address; a coin is its own
+type. A query string on these routes is refused (`400 unscoped`) rather than
+ignored, so an address guess is told it does not work. Lists live at
+`<RADAR_STATE_DIR>/customers/<address>/watchlist.json`, at most 100 coins, and
+a list that exists but cannot be read is reported as unreadable, never as empty,
+and is never overwritten.
+
+Three departures from 0012's text, each argued in `tenant.rs`'s module comment:
+the constructor takes a verified token rather than the guard's `Customer`,
+whose fields are public and so could be written for anyone; the storage is one
+JSON file per wallet in the state directory rather than `radar-store`'s
+slot-partitioned Parquet writer, which cannot remove a row; and there is no
+watermark, because a watchlist is the wallet's own instruction rather than an
+observation of the chain.
+
+One wording change outside the new routes: a request to a customer route that
+carries no credential, or an expired or forged wallet session, now says so
+(`no_session`, `session_expired`, `session_invalid`) instead of "no Cloudflare
+Access assertion". Who gets in is unchanged.
+
+Not done in this item: the star button and the watchlist tab, which are item 4.

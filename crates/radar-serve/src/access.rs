@@ -661,8 +661,21 @@ pub fn audience_of(path: &str) -> Audience {
     //
     // Nothing in the interface calls these now -- the pages that read them were
     // deleted with the research document the terminal replaced.
-    let customer =
-        path == "/v1/customer/wallet" || path == "/v1/customer/events" || path == "/v1/chat";
+    //
+    // The watchlist is `Customer` so a wallet session can reach it. That also
+    // lets an operator's login through this guard, as for the other customer
+    // routes -- and the handler then refuses the operator, because it reads
+    // only through a `Tenant` and only a verified wallet session carries one.
+    // The owner's decision of 2026-09-23: nobody reads a wallet's list but that
+    // wallet. One coin per request, so `/watchlist/a/b` is not a customer path.
+    let one_coin = path
+        .strip_prefix("/v1/customer/watchlist/")
+        .is_some_and(|mint| !mint.is_empty() && !mint.contains('/'));
+    let customer = path == "/v1/customer/wallet"
+        || path == "/v1/customer/events"
+        || path == "/v1/chat"
+        || path == "/v1/customer/watchlist"
+        || one_coin;
     if customer {
         return Audience::Customer;
     }
@@ -1404,6 +1417,18 @@ mod tests {
         assert_eq!(audience_of("/v1/customer/siws/verify"), Audience::Public);
         assert_eq!(audience_of("/v1/customer/wallet"), Audience::Customer);
         assert_eq!(audience_of("/v1/customer/events"), Audience::Customer);
+        assert_eq!(audience_of("/v1/customer/watchlist"), Audience::Customer);
+        assert_eq!(
+            audience_of("/v1/customer/watchlist/So11111111111111111111111111111111111111112"),
+            Audience::Customer
+        );
+        // One coin, not a path under it, and not an empty one.
+        assert_eq!(audience_of("/v1/customer/watchlist/"), Audience::Operator);
+        assert_eq!(
+            audience_of("/v1/customer/watchlist/a/b"),
+            Audience::Operator
+        );
+        assert_eq!(audience_of("/v1/customer/watchlists"), Audience::Operator);
         // And the prefix itself grants nothing.
         assert_eq!(audience_of("/v1/customer/"), Audience::Operator);
         assert_eq!(

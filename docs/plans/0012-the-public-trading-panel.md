@@ -676,6 +676,14 @@ Each verified by **re-applying the wrong behaviour** and watching a named test
 fail. **Reviewer**: the data-isolation boundary; the most senior review in the
 plan.
 
+*Built 2026-09-23 with three departures from the text above, argued in
+[`tenant.rs`](../../crates/radar-serve/src/tenant.rs)'s module comment and
+recorded in [plan 0013's handback](0013-the-terminal-find-look-track-trade.md#handback):
+a `Tenant` is built from a verified session token rather than from `Customer`,
+whose public fields would let any handler write one for any wallet; the list is
+one JSON file per wallet under the state directory rather than a `radar-store`
+table; and no watermark gates it.*
+
 **9-11-0012 — the scoped reads.** Implementer. Blocks on 9-11-0011. A wallet's own
 trades from CryptoHouse filtered on that wallet **under a time bound**, and
 current balances from RPC under a `Budget`; both cached keyed on the tenant **and**
