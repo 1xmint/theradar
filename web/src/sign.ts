@@ -114,7 +114,40 @@ export async function signAndSend(
   try {
     const { signature } = await provider.signAndSendTransaction(transaction);
     return { ok: true, signature };
-  } catch {
-    return { ok: false, error: { kind: "declined" } };
+  } catch (cause) {
+    return { ok: false, error: sendError(cause) };
   }
+}
+
+/**
+ * EIP-1193's "user rejected the request" code, which Phantom and Solflare
+ * both use for a closed or refused popup.
+ */
+const USER_REJECTED = 4001;
+
+/**
+ * A refused popup is `declined`; anything else is `failed`, with the wallet's
+ * own words.
+ *
+ * Unlike signing a message, this call also *sends*: a wallet can accept the
+ * visitor's approval and then fail to submit (an expired blockhash, a failed
+ * simulation, a dropped connection). Reading that as "cancelled" would tell
+ * someone who approved a trade that they backed out of it, and they might
+ * approve it again. So only the rejection code reads as a choice.
+ */
+function sendError(cause: unknown): SendError {
+  if (
+    cause !== null &&
+    typeof cause === "object" &&
+    (cause as { code?: unknown }).code === USER_REJECTED
+  ) {
+    return { kind: "declined" };
+  }
+  const message =
+    cause instanceof Error
+      ? cause.message
+      : cause !== null && typeof cause === "object" && "message" in cause
+        ? String((cause as { message: unknown }).message)
+        : String(cause);
+  return { kind: "failed", detail: `Your wallet could not send this trade: ${message}` };
 }

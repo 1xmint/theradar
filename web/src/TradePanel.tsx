@@ -25,7 +25,9 @@ import { roundTripCostCaption, swapRefusalMessage } from "./honesty";
 import { transactionUrl } from "./format";
 import { useQuote } from "./useQuote";
 import { useWalletToken } from "./Wallet";
-import { signAndSend, type SigningProvider } from "./sign";
+// Types only: erased at build time, so this line loads nothing. The module
+// itself is imported where it is used, below.
+import type { SigningProvider } from "./sign";
 import { detect } from "./siws";
 import type { PositionsLoad } from "./usePositions";
 import { NOTICE_TEXT } from "./legal";
@@ -174,6 +176,13 @@ export function TradePanel({ mint, symbol, positions, onTraded }: TradePanelProp
     // `WalletProvider` (sign-in) and `SigningProvider` (this call) are two
     // narrow interfaces over the same real injected object -- see siws.ts's
     // and sign.ts's doc comments for why neither declares the other's method.
+    //
+    // Imported here rather than at the top because `sign.ts` pulls in
+    // `@solana/web3.js`, and a static import would put that library in the
+    // entry bundle every visitor downloads -- against its 120 kB budget, for a
+    // button most visitors never press. Vite splits a dynamic import into its
+    // own chunk, fetched on the first approval.
+    const { signAndSend } = await import("./sign");
     const result = await signAndSend(provider as unknown as SigningProvider, response.transaction);
     if (result.ok) {
       setReview({ kind: "sent", signature: result.signature });

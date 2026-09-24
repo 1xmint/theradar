@@ -622,6 +622,9 @@ pub fn audience_of(path: &str) -> Audience {
         || path == "/evidence"
         || path == "/wallet"
         || path == "/ask"
+        // The terms of use (ADR 0024). Public because terms a visitor cannot
+        // read before signing in are terms nobody agreed to.
+        || path == "/terms"
         || path.starts_with("/token/")
         // Public market data -- tier 1 of plan 0012. Facts about the chain
         // that belong to nobody: the trade tape, candles, the coin list, a
@@ -1102,6 +1105,7 @@ mod tests {
         assert!(is_public("/evidence"));
         assert!(is_public("/wallet"));
         assert!(is_public("/ask"));
+        assert!(is_public("/terms"));
         assert!(is_public(
             "/token/So11111111111111111111111111111111111111112"
         ));
@@ -1199,6 +1203,7 @@ mod tests {
             ("/evidence", Audience::Public),
             ("/wallet", Audience::Public),
             ("/ask", Audience::Public),
+            ("/terms", Audience::Public),
             (
                 "/token/So11111111111111111111111111111111111111112",
                 Audience::Public,

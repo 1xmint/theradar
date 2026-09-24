@@ -47,11 +47,39 @@ describe("signAndSend", () => {
   it("reads as cancelled, not an error, when the wallet rejects the popup", async () => {
     const provider: SigningProvider = {
       signAndSendTransaction: async () => {
-        throw new Error("User rejected the request");
+        throw Object.assign(new Error("User rejected the request"), { code: 4001 });
       },
     };
     const result = await signAndSend(provider, fakeTransactionBase64());
     expect(result).toEqual({ ok: false, error: { kind: "declined" } });
+  });
+
+  it("reads as a failure, not a cancel, when the wallet approved but could not send", async () => {
+    // The dangerous confusion: someone told "cancelled" after approving may
+    // approve again and trade twice.
+    const provider: SigningProvider = {
+      signAndSendTransaction: async () => {
+        throw Object.assign(new Error("Blockhash not found"), { code: -32003 });
+      },
+    };
+    const result = await signAndSend(provider, fakeTransactionBase64());
+    expect(result).toEqual({
+      ok: false,
+      error: { kind: "failed", detail: "Your wallet could not send this trade: Blockhash not found" },
+    });
+  });
+
+  it("keeps a non-Error rejection's message", async () => {
+    const provider: SigningProvider = {
+      signAndSendTransaction: async () => {
+        throw { code: 500, message: "internal" };
+      },
+    };
+    const result = await signAndSend(provider, fakeTransactionBase64());
+    expect(result).toEqual({
+      ok: false,
+      error: { kind: "failed", detail: "Your wallet could not send this trade: internal" },
+    });
   });
 
   it("does not call the wallet at all when the bytes are not a real transaction", async () => {
