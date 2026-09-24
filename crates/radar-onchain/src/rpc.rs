@@ -70,6 +70,28 @@ impl From<Exhausted> for RpcError {
     }
 }
 
+impl RpcError {
+    /// The variant name, with none of the payload a `Display` or `Debug`
+    /// impl would carry.
+    ///
+    /// [`Self::Transport`] wraps whatever the underlying HTTP client's error
+    /// message says, and that message can itself name the endpoint it failed
+    /// to reach -- exactly the value a log line must not carry (an operator's
+    /// `RADAR_RPC` is configuration, not something to hand to whoever reads
+    /// the logs). A caller that wants to log a failed read's *kind* alongside
+    /// host-only context (e.g. a `host_of(endpoint)` helper) uses this instead
+    /// of `{self}` or `{self:?}`.
+    #[must_use]
+    pub const fn kind(&self) -> &'static str {
+        match self {
+            Self::Transport(_) => "transport",
+            Self::Node(_) => "node",
+            Self::Malformed(_) => "malformed",
+            Self::Stopped(_) => "stopped",
+        }
+    }
+}
+
 /// One confirmed signature, as `getSignaturesForAddress` returns it.
 #[derive(Clone, Debug, Deserialize)]
 pub struct SignatureInfo {
@@ -235,8 +257,14 @@ struct BalanceEnvelope {
 pub struct Balance {
     /// Lamports. One SOL is 1e9 of these.
     pub lamports: u64,
-    /// The slot the node read this at, when the node said.
-    pub slot: Option<Slot>,
+    /// The slot the node read this at.
+    ///
+    /// Never `None`: unlike [`AccountRead::slot`], a caller of `balance` has no
+    /// other figure to fall back on, and a missing context here has exactly one
+    /// honest reading -- refuse the call, rather than hand back slot 0, which
+    /// is a real slot that this balance was never read at. See
+    /// [`RpcClient::balance`].
+    pub slot: Slot,
 }
 
 #[derive(Deserialize)]
@@ -252,6 +280,7 @@ struct TokenAmount {
 #[derive(Deserialize)]
 struct TokenAccountInfo {
     mint: String,
+    owner: String,
     #[serde(rename = "tokenAmount")]
     token_amount: TokenAmount,
 }
@@ -278,7 +307,11 @@ struct TokenAccountEntry {
 
 #[derive(Deserialize)]
 struct TokenAccountsEnvelope {
-    value: Option<Vec<TokenAccountEntry>>,
+    /// Never `Option`. A node that cannot list a wallet's token accounts has
+    /// not told us the wallet holds nothing -- it has failed to answer, and
+    /// `serde` refusing a missing or `null` list here (rather than a caller
+    /// silently defaulting it to empty) is what makes that failure visible.
+    value: Vec<TokenAccountEntry>,
     context: Option<AccountContext>,
 }
 
@@ -287,7 +320,7 @@ struct TokenAccountsEnvelope {
 #[derive(Clone, Debug)]
 pub struct TokenAccount {
     /// The token this account holds.
-    pub mint: String,
+    pub mint: Address,
     /// The raw base-unit balance. Never a wallet's *value* — that needs
     /// `decimals` and a price, neither of which this call carries.
     pub amount: u128,
@@ -600,16 +633,23 @@ impl RpcClient {
     /// # Errors
     ///
     /// [`RpcError`] on transport, node or shape failures, or when the budget is
-    /// spent.
+    /// spent. A node that omits `context` (so the slot this balance was read at
+    /// cannot be known) is [`Malformed`](RpcError::Malformed) rather than a
+    /// balance defaulted to slot 0 -- slot 0 is a real slot, decades before this
+    /// balance existed, and a caller checking it against an explorer would find
+    /// a wrong answer that looks like a right one.
     pub fn balance(&self, budget: &mut Budget, address: &Address) -> Result<Balance, RpcError> {
         let result: BalanceEnvelope = self.call(
             budget,
             "getBalance",
             &serde_json::json!([address.to_string()]),
         )?;
+        let context = result
+            .context
+            .ok_or_else(|| RpcError::Malformed("getBalance returned no context/slot".to_owned()))?;
         Ok(Balance {
             lamports: result.value,
-            slot: result.context.map(|c| Slot(c.slot)),
+            slot: Slot(context.slot),
         })
     }
 
@@ -622,13 +662,20 @@ impl RpcClient {
     ///
     /// A wallet with no accounts under this program answers with an empty
     /// list, not an error — that is a genuine, complete answer, and different
-    /// from a read that failed to complete at all.
+    /// from a read that failed to complete at all. A missing or `null` list is
+    /// the other case: the node failed to answer, and [`TokenAccountsEnvelope`]
+    /// has no `Option` for a caller to default away -- `serde` refuses it
+    /// before this method ever sees it.
     ///
     /// # Errors
     ///
     /// [`RpcError`] on transport, node or shape failures, or when the budget is
     /// spent. An amount the node reported that does not parse as an integer is
     /// [`Malformed`](RpcError::Malformed) rather than dropped or read as zero.
+    /// So is a mint that does not parse as an [`Address`], and an account whose
+    /// reported `owner` is not the wallet asked about -- a node that returned
+    /// someone else's account under this call is answering a different
+    /// question than the one asked, not a wallet with an odd holding.
     pub fn token_accounts_by_owner(
         &self,
         budget: &mut Budget,
@@ -645,9 +692,22 @@ impl RpcClient {
             ]),
         )?;
         let slot = result.context.map(|c| Slot(c.slot));
+        let owner_string = owner.to_string();
         let mut accounts = Vec::new();
-        for entry in result.value.unwrap_or_default() {
+        for entry in result.value {
             let info = entry.account.data.parsed.info;
+            if info.owner != owner_string {
+                return Err(RpcError::Malformed(format!(
+                    "a token account reported owner {:?}, not the wallet asked about",
+                    info.owner
+                )));
+            }
+            let mint: Address = info.mint.parse().map_err(|_| {
+                RpcError::Malformed(format!(
+                    "token account mint {:?} was not an address",
+                    info.mint
+                ))
+            })?;
             let amount: u128 = info.token_amount.amount.parse().map_err(|_| {
                 RpcError::Malformed(format!(
                     "token account amount {:?} was not an integer",
@@ -655,7 +715,7 @@ impl RpcClient {
                 ))
             })?;
             accounts.push(TokenAccount {
-                mint: info.mint,
+                mint,
                 amount,
                 decimals: info.token_amount.decimals,
             });
@@ -1210,26 +1270,47 @@ mod tests {
             .balance(&mut budget(), &Address::new([1u8; 32]))
             .expect("a balance");
         assert_eq!(got.lamports, 1_500_000_000);
-        assert_eq!(got.slot, Some(Slot(77)));
+        assert_eq!(got.slot, Slot(77));
+    }
+
+    #[test]
+    fn a_balance_with_no_context_is_malformed_rather_than_slot_zero() {
+        // Rule 9 again, at getBalance: slot 0 is a real slot, decades before
+        // this balance existed, and it would check out on an explorer as a
+        // wrong answer that looks like a right one.
+        let c = client(&[r#"{"jsonrpc":"2.0","id":1,"result":{"value":1500000000}}"#]);
+        let err = c
+            .balance(&mut budget(), &Address::new([1u8; 32]))
+            .expect_err("no context means no slot to report");
+        assert!(matches!(err, RpcError::Malformed(_)), "{err:?}");
+    }
+
+    fn owned_token_account(mint: &str, owner: &str, amount: &str, decimals: u8) -> String {
+        format!(
+            r#"{{"account":{{"data":{{"parsed":{{"info":{{"mint":"{mint}","owner":"{owner}","tokenAmount":{{"amount":"{amount}","decimals":{decimals}}}}}}}}}}}}}"#
+        )
     }
 
     #[test]
     fn token_accounts_parse_the_jsonparsed_shape() {
-        let one = r#"{"account":{"data":{"parsed":{"info":{"mint":"MintOne","tokenAmount":{"amount":"1000","decimals":6}}}}}}"#;
-        let two = r#"{"account":{"data":{"parsed":{"info":{"mint":"MintTwo","tokenAmount":{"amount":"250","decimals":9}}}}}}"#;
+        let wallet = Address::new([1u8; 32]);
+        let mint_one = Address::new([2u8; 32]);
+        let mint_two = Address::new([3u8; 32]);
+        let one = owned_token_account(&mint_one.to_string(), &wallet.to_string(), "1000", 6);
+        let two = owned_token_account(&mint_two.to_string(), &wallet.to_string(), "250", 9);
         let body = format!(
             r#"{{"jsonrpc":"2.0","id":1,"result":{{"context":{{"slot":5}},"value":[{one},{two}]}}}}"#
         );
         let c = client(&[&body]);
         let got = c
-            .token_accounts_by_owner(&mut budget(), &Address::new([1u8; 32]), TOKEN_PROGRAM_ID)
+            .token_accounts_by_owner(&mut budget(), &wallet, TOKEN_PROGRAM_ID)
             .expect("a read");
         assert_eq!(got.slot, Some(Slot(5)));
         assert_eq!(got.accounts.len(), 2);
-        assert_eq!(got.accounts[0].mint, "MintOne");
+        assert_eq!(got.accounts[0].mint, mint_one);
         assert_eq!(got.accounts[0].amount, 1000);
         assert_eq!(got.accounts[0].decimals, 6);
-        assert_eq!(got.accounts[1].mint, "MintTwo");
+        assert_eq!(got.accounts[1].mint, mint_two);
         assert_eq!(got.accounts[1].amount, 250);
     }
 
@@ -1243,17 +1324,95 @@ mod tests {
     }
 
     #[test]
-    fn a_non_integer_token_amount_is_refused_rather_than_read_as_zero() {
-        let c = client(&[concat!(
-            r#"{"jsonrpc":"2.0","id":1,"result":{"context":{"slot":5},"value":["#,
-            r#"{"account":{"data":{"parsed":{"info":{"mint":"MintOne","#,
-            r#""tokenAmount":{"amount":"not-a-number","decimals":6}}}}}}"#,
-            r#"]}}"#,
-        )]);
-        let err = c
+    fn a_missing_token_account_list_is_malformed_not_empty() {
+        // The list is how a wallet is reported to hold nothing. A node that
+        // fails to send it at all must not read the same way as one that sent
+        // an empty list -- that would report "holds nothing" for "could not
+        // check".
+        let no_value = client(&[r#"{"jsonrpc":"2.0","id":1,"result":{"context":{"slot":1}}}"#]);
+        let err = no_value
             .token_accounts_by_owner(&mut budget(), &Address::new([1u8; 32]), TOKEN_PROGRAM_ID)
+            .expect_err("no value field at all");
+        assert!(matches!(err, RpcError::Malformed(_)), "{err:?}");
+
+        let null_value =
+            client(&[r#"{"jsonrpc":"2.0","id":1,"result":{"context":{"slot":1},"value":null}}"#]);
+        let err = null_value
+            .token_accounts_by_owner(&mut budget(), &Address::new([1u8; 32]), TOKEN_PROGRAM_ID)
+            .expect_err("an explicit null value");
+        assert!(matches!(err, RpcError::Malformed(_)), "{err:?}");
+    }
+
+    #[test]
+    fn a_non_integer_token_amount_is_refused_rather_than_read_as_zero() {
+        let wallet = Address::new([1u8; 32]);
+        let entry = owned_token_account(
+            &Address::new([2u8; 32]).to_string(),
+            &wallet.to_string(),
+            "not-a-number",
+            6,
+        );
+        let body = format!(
+            r#"{{"jsonrpc":"2.0","id":1,"result":{{"context":{{"slot":5}},"value":[{entry}]}}}}"#
+        );
+        let c = client(&[&body]);
+        let err = c
+            .token_accounts_by_owner(&mut budget(), &wallet, TOKEN_PROGRAM_ID)
             .expect_err("an unparseable amount");
         assert!(matches!(err, RpcError::Malformed(_)), "{err:?}");
+    }
+
+    #[test]
+    fn a_bad_mint_is_refused_rather_than_read_as_a_string() {
+        let wallet = Address::new([1u8; 32]);
+        let entry = owned_token_account("not-a-valid-mint!!", &wallet.to_string(), "10", 6);
+        let body = format!(
+            r#"{{"jsonrpc":"2.0","id":1,"result":{{"context":{{"slot":5}},"value":[{entry}]}}}}"#
+        );
+        let c = client(&[&body]);
+        let err = c
+            .token_accounts_by_owner(&mut budget(), &wallet, TOKEN_PROGRAM_ID)
+            .expect_err("an unparseable mint");
+        assert!(matches!(err, RpcError::Malformed(_)), "{err:?}");
+    }
+
+    #[test]
+    fn a_token_account_reporting_a_different_owner_is_refused() {
+        // A node answering "getTokenAccountsByOwner(wallet A)" with an account
+        // whose parsed `owner` is wallet B is answering a different question,
+        // not describing an odd holding of A's.
+        let wallet = Address::new([1u8; 32]);
+        let someone_else = Address::new([9u8; 32]);
+        let entry = owned_token_account(
+            &Address::new([2u8; 32]).to_string(),
+            &someone_else.to_string(),
+            "10",
+            6,
+        );
+        let body = format!(
+            r#"{{"jsonrpc":"2.0","id":1,"result":{{"context":{{"slot":5}},"value":[{entry}]}}}}"#
+        );
+        let c = client(&[&body]);
+        let err = c
+            .token_accounts_by_owner(&mut budget(), &wallet, TOKEN_PROGRAM_ID)
+            .expect_err("owner mismatch");
+        assert!(matches!(err, RpcError::Malformed(_)), "{err:?}");
+    }
+
+    #[test]
+    fn kind_names_the_variant_never_the_payload_a_transport_error_may_carry() {
+        // A `ureq` transport error's own message can name the endpoint it
+        // failed to reach -- exactly what a log line must not carry. `kind()`
+        // is the safe alternative to `{self}`/`{self:?}`: this pins that it
+        // reports only the variant, regardless of what the payload says.
+        let transport =
+            RpcError::Transport("https://secret-node.example/rpc: dns error".to_owned());
+        let node = RpcError::Node("boom".to_owned());
+        let malformed = RpcError::Malformed("bad shape".to_owned());
+        assert_eq!(transport.kind(), "transport");
+        assert!(!transport.kind().contains("secret-node"));
+        assert_eq!(node.kind(), "node");
+        assert_eq!(malformed.kind(), "malformed");
     }
 
     #[test]

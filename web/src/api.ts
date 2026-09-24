@@ -266,10 +266,15 @@ export interface PositionsToken {
   amount: string;
   decimals: number;
   ui_amount: string;
-  /** Null exactly when `priced` is false -- a mint Radar does not track,
-   *  never a price of zero. */
-  price_usd: number | null;
-  value_usd: number | null;
+  /** In `quote`'s asset, never dollars -- `MarketTrade.price` is
+   *  `quote_amount / token_amount`, and the quote asset is wSOL, USDC or
+   *  USDT, never USD. Null exactly when `priced` is false -- a mint Radar
+   *  does not track, never a price of zero. */
+  price: number | null;
+  /** Which asset `price` and `value` are denominated in. Null exactly when
+   *  `price` is. */
+  quote: "SOL" | "USDC" | "USDT" | null;
+  value: number | null;
   priced: boolean;
 }
 
@@ -277,9 +282,13 @@ export interface PositionsToken {
 export interface PositionsSol {
   lamports: number;
   ui_amount: string;
-  price_usd: number | null;
-  value_usd: number | null;
+  price: number | null;
+  quote: "SOL" | "USDC" | "USDT" | null;
+  value: number | null;
   priced: boolean;
+  /** Set exactly when `priced` is false: SOL is priced only off a wSOL trade
+   *  quoted in USDC or USDT, and this is why none was found. */
+  price_reason: string | null;
 }
 
 /**
@@ -314,6 +323,14 @@ async function positionsRequest(token: string, signal?: AbortSignal): Promise<Po
       body?.reason ?? "unknown",
       body?.error ?? response.statusText,
     );
+  }
+  if (body === null) {
+    // A 2xx with a body that did not parse as JSON is not an empty-but-valid
+    // answer -- it is a read that failed silently. Casting `null` to
+    // `Positions` would hand every caller a wallet with no `tokens` array,
+    // indistinguishable from "this wallet holds nothing," which is exactly
+    // the wrong answer to a read that did not actually happen.
+    throw new PositionsError(response.status, "could_not_read", "the response body was not JSON");
   }
   return body as unknown as Positions;
 }

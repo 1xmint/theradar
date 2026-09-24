@@ -137,9 +137,13 @@ half:
    as complete). Priced from `/v1/market/token`'s own pricing function, not
    the HTTP route; an untracked mint is `priced: false` with a null price,
    never 0. A per-wallet cache (30 s TTL, 2048 wallets, keyed only by the
-   verified address) plus a global cap (60 RPC calls/minute, reserved 3 at a
-   time per view) keep one visitor's reads from starving another's, since this
-   quota is now Radar's own rather than free on each visitor's IP.
+   verified address), a global cap (60 RPC calls/minute across every wallet,
+   reserved 3 at a time per view), and -- fixed 2026-09-24 after review found
+   the global cap alone let one busy wallet exhaust the whole minute's budget
+   -- a per-wallet cap of its own (at most 2 fresh reads, 6 calls, per wallet
+   per rolling 60 s, refused the same `503 busy` over it) keep one visitor's
+   reads from starving another's, since this quota is now Radar's own rather
+   than free on each visitor's IP.
 3. **History: from the store only.** "Your trades in this coin" filters
    `MarketTrades` by the signed-in wallet. **The check this item asked for is
    done, and the answer blocks the item:** the tape carries the trader on one
@@ -457,12 +461,19 @@ or deployed.** `GET /v1/customer/positions` in
 exactly like the watchlist. New methods on `radar-onchain`'s `RpcClient`
 (`balance`, `token_accounts_by_owner`) run inside `spawn_blocking`, since the
 client is `ureq`-based and blocking. Response:
-`{wallet, slot, read_at, age_seconds, sol: {...}, tokens: [{mint, program,
-amount, decimals, ui_amount, price_usd, value_usd, priced}]}`, `amount` as a
-raw-integer string so it never crosses the wire through a float. Same-mint
-accounts are summed with a checked add (overflow refuses rather than wraps);
-zero balances are dropped; an untracked mint prices as `priced: false` with
-a null `price_usd`, never `0`. Per-wallet cache: 30 s TTL, 2048 wallets,
+`{wallet, slot, read_at, age_seconds, sol: {lamports, ui_amount, price, quote,
+value, priced, price_reason}, tokens: [{mint, program, amount, decimals,
+ui_amount, price, quote, value, priced}]}`, `amount` as a raw-integer string
+so it never crosses the wire through a float. **Corrected 2026-09-24:** a
+review finding (`MarketTrade.price` is the trade's own quote-asset price --
+wSOL, USDC or USDT -- never USD) meant `price_usd`/`value_usd` never belonged
+in this shape; they are `price`/`value`, paired with `quote`
+(`"SOL"`|`"USDC"`|`"USDT"`|`null`), a number is never presented as dollars
+unless `quote` says so, and SOL itself carries `price_reason` when nothing in
+the tape prices it. Same-mint accounts are summed with a checked add
+(overflow refuses rather than wraps); zero balances are dropped; an untracked
+mint prices as `priced: false` with a null `price`, never `0`. Per-wallet
+cache: 30 s TTL, 2048 wallets,
 keyed only by the verified address -- a cached answer keeps its original
 `slot` while `age_seconds` grows. Global cap: 60 RPC calls/minute across all
 wallets (one view costs 3), reserved atomically before the first call; over
@@ -470,12 +481,21 @@ the cap and not cached refuses `503 busy` without touching the RPC.
 A failed program read refuses the whole answer `502 unreadable_chain` rather
 than a partial list. New integration test file
 [`a_wallets_positions_are_read_and_priced_by_radar.rs`](../../crates/radar-serve/tests/a_wallets_positions_are_read_and_priced_by_radar.rs)
-(9 tests, no network -- a fake `Transport`), covering wallet isolation, the
-`unscoped` query-string refusal, all four wallet-session refusals plus the
-failed-email-login case, the one-program-failure refusal, the cache's fixed
-slot and growing age, the cap's `busy` refusal without calling the
-transport, an untracked mint's `priced: false`, and same-mint summing with
-zero-balance dropping.
+(now 11 tests, no network -- a fake `Transport`), covering wallet isolation,
+the `unscoped` query-string refusal, three wallet-session refusals
+(`no_session`, `session_expired`, `session_invalid`) plus the
+failed-email-login case (which itself reads as `no_session`, not a fourth,
+distinct refusal), the one-program-failure refusal, the cache's fixed slot
+and growing age, the cap's `busy` refusal without calling the transport, an
+untracked mint's `priced: false`, same-mint summing with zero-balance
+dropping, a SOL-quoted and a USDC-quoted trade priced and labelled
+correctly, and the `Cache-Control: private, no-store` header. **Corrected
+2026-09-24:** the original text here claimed "all four wallet-session
+refusals," but `not_a_wallet` -- the refusal a real, Privy-configured
+email-login session gets -- is not exercised by this test, nor by
+`a_watchlist_is_seen_only_by_its_wallet.rs`'s equivalent test; both fakes
+stop at a token shaped like a Privy one, not a working Privy verification,
+so `not_a_wallet` remains untested in both places.
 
 On the web side: a `PositionsPanel` beside `WatchlistPanel` in
 `TokenHeader.tsx`, backed by `usePositions.ts` (mirrors `useWatchlist.ts`,

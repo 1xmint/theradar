@@ -3,7 +3,7 @@
 //! launch, and the shortened mint -- never the word "unknown" -- when it did
 //! not. `CoinImage` fetches nothing here because these tokens carry no `uri`.
 
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { MarketToken } from "./api";
@@ -70,7 +70,15 @@ function positionsBody(): unknown {
     slot: 1,
     read_at: 0,
     age_seconds: 0,
-    sol: { lamports: 0, ui_amount: "0", price_usd: null, value_usd: null, priced: false },
+    sol: {
+      lamports: 0,
+      ui_amount: "0.000000000",
+      price: null,
+      quote: null,
+      value: null,
+      priced: false,
+      price_reason: null,
+    },
     tokens: [],
   };
 }
@@ -299,7 +307,15 @@ describe("TokenHeader positions", () => {
       slot: 1,
       read_at: 0,
       age_seconds: 0,
-      sol: { lamports: 0, ui_amount: "0", price_usd: null, value_usd: null, priced: false },
+      sol: {
+        lamports: 0,
+        ui_amount: "0.000000000",
+        price: null,
+        quote: null,
+        value: null,
+        priced: false,
+        price_reason: null,
+      },
       tokens: [],
     });
     render(<TokenHeader load={ready(token())} />);
@@ -314,12 +330,20 @@ describe("TokenHeader positions", () => {
       slot: 1,
       read_at: 0,
       age_seconds: 0,
-      sol: { lamports: 1_500_000_000, ui_amount: "1.5", price_usd: null, value_usd: null, priced: false },
+      sol: {
+        lamports: 1_500_000_000,
+        ui_amount: "1.500000000",
+        price: null,
+        quote: null,
+        value: null,
+        priced: false,
+        price_reason: "no SOL/USDC or SOL/USDT trade in the tape",
+      },
       tokens: [],
     });
     render(<TokenHeader load={ready(token())} />);
 
-    expect(await screen.findByText(/holds no tokens.*1\.5 SOL/i)).toBeTruthy();
+    expect(await screen.findByText(/holds no tokens.*1\.500000000 SOL/i)).toBeTruthy();
   });
 
   it("marks an untracked mint as unpriced rather than $0, and links the tracked one", async () => {
@@ -329,7 +353,15 @@ describe("TokenHeader positions", () => {
       slot: 7,
       read_at: 0,
       age_seconds: 3,
-      sol: { lamports: 0, ui_amount: "0", price_usd: null, value_usd: null, priced: false },
+      sol: {
+        lamports: 0,
+        ui_amount: "0.000000000",
+        price: null,
+        quote: null,
+        value: null,
+        priced: false,
+        price_reason: null,
+      },
       tokens: [
         {
           mint: MINT,
@@ -337,8 +369,9 @@ describe("TokenHeader positions", () => {
           amount: "1000000",
           decimals: 6,
           ui_amount: "1",
-          price_usd: null,
-          value_usd: null,
+          price: null,
+          quote: null,
+          value: null,
           priced: false,
         },
       ],
@@ -348,6 +381,83 @@ describe("TokenHeader positions", () => {
     expect(await screen.findByText("Radar does not price this coin")).toBeTruthy();
     const shortMint = `${MINT.slice(0, 4)}…${MINT.slice(-4)}`;
     expect(screen.getByRole("link", { name: shortMint }).getAttribute("href")).toBe(`/token/${MINT}`);
+  });
+
+  it("shows a SOL row priced in SOL terms, never as a dollar figure, alongside a priced USDC token", async () => {
+    signIn();
+    stubPositions({
+      wallet: WALLET,
+      slot: 9,
+      read_at: 0,
+      age_seconds: 1,
+      sol: {
+        lamports: 2_000_000_000,
+        ui_amount: "2.000000000",
+        price: 150.5,
+        quote: "USDC",
+        value: 301,
+        priced: true,
+        price_reason: null,
+      },
+      tokens: [
+        {
+          mint: MINT,
+          program: "token",
+          amount: "1000000",
+          decimals: 6,
+          ui_amount: "1",
+          price: 0.5,
+          quote: "USDC",
+          value: 0.5,
+          priced: true,
+        },
+      ],
+    });
+    render(<TokenHeader load={ready(token())} />);
+
+    // Item 11: SOL gets its own row whenever lamports > 0, even though there
+    // are other tokens too.
+    expect(await screen.findByText("SOL")).toBeTruthy();
+    expect(screen.getByText("2.000000000")).toBeTruthy();
+    // A USDC-quoted value is shown as a dollar figure.
+    expect(screen.getByText("$301.00")).toBeTruthy();
+  });
+
+  it("shows a SOL-quoted value as SOL, never with a dollar sign", async () => {
+    signIn();
+    stubPositions({
+      wallet: WALLET,
+      slot: 11,
+      read_at: 0,
+      age_seconds: 1,
+      sol: {
+        lamports: 1_000_000_000,
+        ui_amount: "1.000000000",
+        price: null,
+        quote: null,
+        value: null,
+        priced: false,
+        price_reason: "no route to price SOL itself in this tape",
+      },
+      tokens: [
+        {
+          mint: MINT,
+          program: "token",
+          amount: "2000000",
+          decimals: 6,
+          ui_amount: "2",
+          price: 0.25,
+          quote: "SOL",
+          value: 0.5,
+          priced: true,
+        },
+      ],
+    });
+    render(<TokenHeader load={ready(token())} />);
+
+    expect(await screen.findByText("0.5000 SOL")).toBeTruthy();
+    // Unpriced SOL shows its own reason, not a silent absence.
+    expect(screen.getByText("no route to price SOL itself in this tape")).toBeTruthy();
   });
 
   it("tells a session refusal apart from a chain read Radar could not complete", async () => {
@@ -372,5 +482,45 @@ describe("TokenHeader positions", () => {
     render(<TokenHeader load={ready(token())} />);
 
     expect(await screen.findByText(/rate-limiting balance reads/i)).toBeTruthy();
+  });
+
+  it("keeps ticking the displayed age instead of freezing it at the server's own count (item 5)", async () => {
+    signIn();
+    vi.useFakeTimers();
+    try {
+      stubPositions({
+        wallet: WALLET,
+        slot: 1,
+        read_at: 0,
+        age_seconds: 10,
+        sol: {
+          lamports: 0,
+          ui_amount: "0.000000000",
+          price: null,
+          quote: null,
+          value: null,
+          priced: false,
+          price_reason: null,
+        },
+        tokens: [],
+      });
+      render(<TokenHeader load={ready(token())} />);
+
+      // Flush the initial positions fetch without letting wall-clock time pass.
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      expect(screen.getByText("as of 10s ago")).toBeTruthy();
+
+      // 15s pass (three 5s ticks) with no new read. The label must grow past
+      // the server's original count -- a label frozen at "10s ago" forever
+      // would be the bug this test exists to catch.
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(15_000);
+      });
+      expect(screen.getByText("as of 25s ago")).toBeTruthy();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

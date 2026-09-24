@@ -17,15 +17,15 @@ use std::sync::Mutex;
 use std::time::Duration;
 
 use axum::body::Body;
-use axum::http::{Method, Request, StatusCode};
+use axum::http::{Method, Request, StatusCode, header};
 use http_body_util::BodyExt;
 use radar_customer::session::{LIFETIME_SECONDS, issue};
 use radar_instruments::Registry;
 use radar_onchain::rpc::{RpcClient, Transport};
 use radar_serve::positions::Positions;
 use radar_serve::{AppState, app};
-use radar_store::Reader;
-use radar_types::Address;
+use radar_store::{Completion, Coverage, MarketSide, MarketTrade, ObservedSlots, Reader, Table};
+use radar_types::{Address, Signature, Slot};
 use serde_json::Value;
 use tower::ServiceExt;
 
@@ -84,12 +84,12 @@ fn empty_token_accounts_json(slot: u64) -> String {
     format!(r#"{{"jsonrpc":"2.0","id":1,"result":{{"context":{{"slot":{slot}}},"value":[]}}}}"#)
 }
 
-fn token_accounts_json(slot: u64, accounts: &[(&str, &str, u8)]) -> String {
+fn token_accounts_json(slot: u64, owner: &Address, accounts: &[(&str, &str, u8)]) -> String {
     let entries: Vec<String> = accounts
         .iter()
         .map(|(mint, amount, decimals)| {
             format!(
-                r#"{{"account":{{"data":{{"parsed":{{"info":{{"mint":"{mint}","tokenAmount":{{"amount":"{amount}","decimals":{decimals}}}}}}}}}}}}}"#
+                r#"{{"account":{{"data":{{"parsed":{{"info":{{"mint":"{mint}","owner":"{owner}","tokenAmount":{{"amount":"{amount}","decimals":{decimals}}}}}}}}}}}}}"#
             )
         })
         .collect();
@@ -122,12 +122,23 @@ fn positions_from(responses: Vec<String>) -> Positions {
 /// unrelated to a wallet session, and every route this file exercises is
 /// reached the same way regardless of it.
 fn router(positions: Option<Positions>) -> axum::Router {
+    router_with_store(
+        positions,
+        Reader::open(std::env::temp_dir().join("radar-positions-test")),
+    )
+}
+
+/// Like [`router`], but against a caller-supplied store -- used by the one
+/// test that needs the market tape seeded with real trades (a fresh
+/// `tempfile::tempdir()`, never the shared fixed path the other tests use,
+/// so seeded trades never leak into a test that assumes an empty store).
+fn router_with_store(positions: Option<Positions>, store: Reader) -> axum::Router {
     app(Arc::new(AppState {
         admission: radar_serve::admission::Admission::Open,
         shares: radar_serve::share::Shares::new(radar_serve::share::Allowance::per_day(100)),
         customer_salt: SALT.to_vec(),
         registry: Registry::new(),
-        store: Reader::open(std::env::temp_dir().join("radar-positions-test")),
+        store,
         x402: None,
         chat: None,
         access: radar_serve::access::Mode::Off,
@@ -300,9 +311,10 @@ async fn one_programs_failed_read_refuses_the_whole_answer() {
     // already succeeded. Re-apply a fold that returns whatever programs did
     // answer and this passes with a one-program list instead of a failure.
     let who = wallet(1);
+    let mint_one = wallet(50).to_string();
     let responses = view(
         balance_json(5, 1_000_000_000),
-        token_accounts_json(5, &[("MintOne", "1000", 6)]),
+        token_accounts_json(5, &who, &[(&mint_one, "1000", 6)]),
         node_error_json(),
     );
     let router = router(Some(positions_from(responses)));
@@ -341,7 +353,9 @@ async fn a_cached_answer_keeps_its_slot_while_its_age_grows() {
     tokio::time::sleep(Duration::from_millis(1_100)).await;
 
     // Served from cache: the fake transport has nothing left to give, so a
-    // second live read would panic, not merely answer wrong.
+    // second live read would panic inside `spawn_blocking` -- surfacing as a
+    // `JoinError` and a 502 `unreadable_chain`, not as an answer that merely
+    // reads wrong.
     let (status, second) = call(&router, Method::GET, "/v1/customer/positions", Some(&token)).await;
     assert_eq!(status, StatusCode::OK, "{second}");
     assert_eq!(
@@ -386,8 +400,10 @@ async fn the_cap_refuses_busy_without_calling_the_transport() {
         assert_eq!(status, StatusCode::OK, "wallet {i}: {body}");
     }
 
-    // The transport has nothing left: if this reserved and called anyway, it
-    // would panic inside the handler rather than answer `busy`.
+    // The transport has nothing left: if this reserved and called anyway, the
+    // fake would panic inside `spawn_blocking`, which the handler turns into
+    // a 502 `unreadable_chain` -- not the `busy` this test expects -- so a
+    // wrong reservation decision still fails loudly rather than reading wrong.
     let (status, body) = call(
         &router,
         Method::GET,
@@ -405,9 +421,10 @@ async fn a_mint_radar_does_not_track_is_priced_false_never_zero() {
     // `None` for anything, which is the same state a mint outside Radar's
     // coverage looks like -- this holding must say so, not print `0`.
     let who = wallet(1);
+    let untracked_mint = wallet(51).to_string();
     let responses = view(
         balance_json(1, 0),
-        token_accounts_json(1, &[("UntrackedMint111111111111111111111111111", "500", 6)]),
+        token_accounts_json(1, &who, &[(&untracked_mint, "500", 6)]),
         empty_token_accounts_json(1),
     );
     let router = router(Some(positions_from(responses)));
@@ -423,21 +440,25 @@ async fn a_mint_radar_does_not_track_is_priced_false_never_zero() {
     let tokens = body["tokens"].as_array().expect("a token list");
     assert_eq!(tokens.len(), 1);
     assert_eq!(tokens[0]["priced"], false);
-    assert!(tokens[0]["price_usd"].is_null(), "{body}");
-    assert!(tokens[0]["value_usd"].is_null(), "{body}");
+    assert!(tokens[0]["price"].is_null(), "{body}");
+    assert!(tokens[0]["value"].is_null(), "{body}");
+    assert!(tokens[0]["quote"].is_null(), "{body}");
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn same_mint_accounts_are_summed_and_zero_balances_are_dropped() {
     let who = wallet(1);
+    let same_mint = wallet(52).to_string();
+    let zero_mint = wallet(53).to_string();
     let responses = view(
         balance_json(1, 0),
         token_accounts_json(
             1,
+            &who,
             &[
-                ("SameMint11111111111111111111111111111111", "1000", 6),
-                ("SameMint11111111111111111111111111111111", "2000", 6),
-                ("ZeroMint111111111111111111111111111111111", "0", 6),
+                (&same_mint, "1000", 6),
+                (&same_mint, "2000", 6),
+                (&zero_mint, "0", 6),
             ],
         ),
         empty_token_accounts_json(1),
@@ -458,10 +479,7 @@ async fn same_mint_accounts_are_summed_and_zero_balances_are_dropped() {
         1,
         "the zero-balance mint must be dropped: {body}"
     );
-    assert_eq!(
-        tokens[0]["mint"],
-        "SameMint11111111111111111111111111111111"
-    );
+    assert_eq!(tokens[0]["mint"], same_mint);
     assert_eq!(tokens[0]["amount"], "3000", "two accounts of one mint sum");
 }
 
@@ -477,4 +495,163 @@ async fn an_unconfigured_instance_refuses_rather_than_forges_an_empty_answer() {
     .await;
     assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
     assert_eq!(body["reason"], "not_configured");
+}
+
+const WSOL_MINT: &str = "So11111111111111111111111111111111111111112";
+const USDC_MINT: &str = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
+
+/// One priced trade, shaped like `radar_backfill`'s decoder writes it.
+fn priced_trade(mint: Address, quote_mint: &str, ts: &str, price: f64) -> MarketTrade {
+    MarketTrade {
+        mint,
+        ts: ts.to_owned(),
+        slot: Slot(100),
+        signature: Signature::new([9u8; 64]),
+        side: MarketSide::Unknown,
+        token_amount: 1.0,
+        quote_amount: Some(price),
+        quote_mint: Some(quote_mint.parse().expect("a valid quote mint")),
+        price: Some(price),
+        trader: None,
+        token_destination: None,
+    }
+}
+
+/// A store seeded with real market trades and a `MarketTrades` coverage row,
+/// so `market::prices_of`'s `snapshot.collected()` check passes -- unlike
+/// `router`'s shared, always-empty fixture store, this is a fresh directory
+/// per test, so seeded trades never leak into a test that assumes an empty
+/// tape.
+fn seeded_store(trades: &[MarketTrade]) -> (tempfile::TempDir, Reader) {
+    let dir = tempfile::tempdir().expect("a temporary directory");
+    {
+        let mut writer =
+            radar_store::Writer::open(dir.path().to_str().expect("a utf-8 path"), 20_000)
+                .expect("a writer");
+        for trade in trades {
+            writer
+                .append_market_trade(trade.clone())
+                .expect("a market trade appends");
+        }
+        writer
+            .append_coverage(Coverage {
+                recorded_at: Slot(100),
+                table: Table::MarketTrades,
+                filter: None,
+                observed: ObservedSlots::Nothing,
+                source: "test".to_owned(),
+                decoder_version: "test".to_owned(),
+                status: Completion::Complete,
+            })
+            .expect("coverage appends");
+        writer.flush().expect("the writer flushes");
+    }
+    let reader = Reader::open(dir.path().to_str().expect("a utf-8 path"));
+    (dir, reader)
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_sol_quoted_trade_and_a_usdc_quoted_trade_are_never_priced_alike() {
+    // Item 1: `MarketTrade.price` is always in the trade's own quote asset,
+    // never dollars. One held mint's newest trade is quoted in wSOL, the
+    // other's in USDC -- if `quote` were dropped or hard-coded, these two
+    // would come back reading the same.
+    let who = wallet(1);
+    let sol_quoted_mint = wallet(60);
+    let usdc_quoted_mint = wallet(61);
+    // A later, unrelated trade so the two trades under test are never the
+    // single newest row in the store -- see `within_window`'s half-open
+    // upper bound, exclusive of the snapshot's own newest timestamp.
+    let sentinel_mint = wallet(62);
+
+    let trades = vec![
+        priced_trade(
+            sol_quoted_mint,
+            WSOL_MINT,
+            "2020-01-01 00:00:01.000000",
+            0.5,
+        ),
+        priced_trade(
+            usdc_quoted_mint,
+            USDC_MINT,
+            "2020-01-01 00:00:01.000000",
+            4.0,
+        ),
+        // Prices SOL itself: a wSOL trade quoted in USDC.
+        priced_trade(
+            WSOL_MINT.parse().expect("wSOL parses"),
+            USDC_MINT,
+            "2020-01-01 00:00:01.000000",
+            180.0,
+        ),
+        priced_trade(sentinel_mint, USDC_MINT, "2020-01-01 00:00:05.000000", 1.0),
+    ];
+    let (_dir, store) = seeded_store(&trades);
+
+    let responses = view(
+        balance_json(100, 1_500_000_000),
+        token_accounts_json(
+            100,
+            &who,
+            &[
+                (&sol_quoted_mint.to_string(), "1000000", 6),
+                (&usdc_quoted_mint.to_string(), "2000000", 6),
+            ],
+        ),
+        empty_token_accounts_json(100),
+    );
+    let router = router_with_store(Some(positions_from(responses)), store);
+
+    let (status, body) = call(
+        &router,
+        Method::GET,
+        "/v1/customer/positions",
+        Some(&session(&who)),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    let tokens = body["tokens"].as_array().expect("a token list");
+    let sol_quoted = tokens
+        .iter()
+        .find(|t| t["mint"] == sol_quoted_mint.to_string())
+        .expect("the wSOL-quoted mint is in the list");
+    assert_eq!(sol_quoted["quote"], "SOL", "{body}");
+    assert_eq!(sol_quoted["priced"], true, "{body}");
+    assert!(sol_quoted["price"].as_f64().is_some(), "{body}");
+
+    let usdc_quoted = tokens
+        .iter()
+        .find(|t| t["mint"] == usdc_quoted_mint.to_string())
+        .expect("the USDC-quoted mint is in the list");
+    assert_eq!(usdc_quoted["quote"], "USDC", "{body}");
+    assert_eq!(usdc_quoted["priced"], true, "{body}");
+
+    assert_eq!(
+        body["sol"]["quote"], "USDC",
+        "SOL itself is priced off a wSOL trade quoted in USDC: {body}"
+    );
+    assert_eq!(body["sol"]["priced"], true, "{body}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn positions_are_never_served_with_a_header_a_shared_cache_would_keep() {
+    // Item 13: per-wallet data must never be reusable from a shared cache.
+    let router = router(Some(positions_from(view(
+        balance_json(1, 0),
+        empty_token_accounts_json(1),
+        empty_token_accounts_json(1),
+    ))));
+    let request = Request::builder()
+        .method(Method::GET)
+        .uri("/v1/customer/positions")
+        .header("authorization", format!("Bearer {}", session(&wallet(1))))
+        .body(Body::empty())
+        .expect("a well-formed request");
+    let response = router.oneshot(request).await.expect("the router answers");
+    assert_eq!(
+        response.headers().get(header::CACHE_CONTROL),
+        Some(&header::HeaderValue::from_static("private, no-store")),
+        "positions must never be cached by anything shared"
+    );
 }

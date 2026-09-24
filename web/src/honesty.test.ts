@@ -241,8 +241,8 @@ describe("launchesEmptyMessage", () => {
 
 describe("positionsMessage", () => {
   const signedOut = positionsMessage({ kind: "signed-out" });
-  const emptyNoSol = positionsMessage({ kind: "empty", solUiAmount: "0" });
-  const emptyWithSol = positionsMessage({ kind: "empty", solUiAmount: "1.5" });
+  const emptyNoSol = positionsMessage({ kind: "empty", solLamports: 0, solUiAmount: "0.000000000" });
+  const emptyWithSol = positionsMessage({ kind: "empty", solLamports: 1_500_000_000, solUiAmount: "1.500000000" });
   const sessionRefused = positionsMessage({ kind: "session-refused" });
   const busy = positionsMessage({ kind: "busy" });
   const couldNotLook = positionsMessage({ kind: "could-not-look", detail: "502: bad gateway" });
@@ -274,7 +274,21 @@ describe("positionsMessage", () => {
 
   it("adds the SOL balance only when it is non-zero", () => {
     expect(emptyNoSol).not.toContain("SOL");
-    expect(emptyWithSol).toContain("1.5 SOL");
+    expect(emptyWithSol).toContain("1.500000000 SOL");
+  });
+
+  it("compares the raw lamport integer, not the formatted ui_amount string (item 4)", () => {
+    // A wallet with dust-level SOL formatted as "0.000000000" must not read
+    // as holding SOL: the old check compared `solUiAmount !== "0"`, which a
+    // nine-decimal-place "0.000000000" (never the bare string "0") always
+    // passed, wrongly claiming a truly empty wallet "holds 0.000000000 SOL".
+    const zeroLamportsFormattedLong = positionsMessage({
+      kind: "empty",
+      solLamports: 0,
+      solUiAmount: "0.000000000",
+    });
+    expect(zeroLamportsFormattedLong).toBe("This wallet holds no tokens");
+    expect(zeroLamportsFormattedLong).not.toContain("SOL");
   });
 
   it("tells a session refusal apart from an invitation to sign in", () => {

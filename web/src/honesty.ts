@@ -473,7 +473,7 @@ export function watchlistToggleFailure(reason: string, detail: string): string {
  */
 export type PositionsState =
   | { kind: "signed-out" }
-  | { kind: "empty"; solUiAmount: string | null }
+  | { kind: "empty"; solLamports: number; solUiAmount: string }
   | { kind: "session-refused" }
   | { kind: "busy" }
   | { kind: "could-not-look"; detail: string };
@@ -485,7 +485,12 @@ export function positionsMessage(state: PositionsState): string {
       // no-op failure mode, the same fix.
       return "Connect a wallet to see what it holds. Radar reads a wallet's balances only after it signs in.";
     case "empty":
-      return state.solUiAmount && state.solUiAmount !== "0"
+      // Fix (item 4): compared against the *raw* lamport integer, never
+      // against `ui_amount`'s formatted string -- "0.000000000" is not the
+      // string "0", so the old `!== "0"` check called a wallet with no SOL
+      // "holds ... SOL" as soon as the server started sending nine decimal
+      // places instead of a bare "0".
+      return state.solLamports > 0
         ? `This wallet holds no tokens. It holds ${state.solUiAmount} SOL.`
         : "This wallet holds no tokens";
     case "session-refused":

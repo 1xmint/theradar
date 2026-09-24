@@ -364,3 +364,21 @@ async fn a_failed_email_login_is_not_blamed_on_a_wallet_session() {
     assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
     assert_eq!(body["reason"], "no_session", "{body}");
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_watchlist_is_never_served_with_a_header_a_shared_cache_would_keep() {
+    // Item 13: per-wallet data must never be reusable from a shared cache.
+    let (_dir, router) = with_lists();
+    let request = Request::builder()
+        .method(Method::GET)
+        .uri("/v1/customer/watchlist")
+        .header("authorization", format!("Bearer {}", session(&wallet(1))))
+        .body(Body::empty())
+        .expect("a well-formed request");
+    let response = router.oneshot(request).await.expect("the router answers");
+    assert_eq!(
+        response.headers().get(axum::http::header::CACHE_CONTROL),
+        Some(&axum::http::HeaderValue::from_static("private, no-store")),
+        "a watchlist must never be cached by anything shared"
+    );
+}

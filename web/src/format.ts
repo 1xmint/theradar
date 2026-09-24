@@ -22,6 +22,15 @@ export function formatPrice(value: number): string {
   return `$${value.toPrecision(3)}`;
 }
 
+/** A SOL-quoted amount, e.g. a position's value when Radar only has a
+ *  wSOL-quoted trade to price it against. Never prefixed with "$" -- a
+ *  SOL-quoted number is not a dollar figure, and labelling it as one is
+ *  exactly the review finding this formatter exists to prevent (see
+ *  positions.rs and `.positions-fixes.md` item 1). */
+export function formatSolAmount(value: number): string {
+  return value.toFixed(4);
+}
+
 /** A large quantity -- market cap, liquidity, volume -- compacted to K/M/B. */
 export function formatCompactUsd(value: number): string {
   const sign = value < 0 ? "-" : "";

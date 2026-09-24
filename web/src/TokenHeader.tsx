@@ -13,16 +13,38 @@
 //! the list underneath it without a second request.
 
 import type { ReactNode } from "react";
+import { useEffect, useState } from "react";
 import { Link } from "wouter";
 import type { MarketToken } from "./api";
 import { CoinImage } from "./CoinImage";
 import { MarketFigure } from "./Figures";
-import {formatAge, formatCompactUsd, formatPrice, shortenAddress} from "./format";
+import {formatAge, formatCompactUsd, formatPrice, formatSolAmount, shortenAddress} from "./format";
 import { isWalletSessionRefusal, positionsMessage, watchlistMessage, watchlistToggleFailure } from "./honesty";
 import { tokenPath } from "./routes";
 import type { Load } from "./useApi";
 import { usePositions } from "./usePositions";
 import { useWatchlist } from "./useWatchlist";
+
+/** A quote-aware value label: "$12.34" for USDC/USDT, "0.1234 SOL" for SOL --
+ *  and never a "$" in front of a SOL-quoted number (`.positions-fixes.md`
+ *  item 1: `MarketTrade.price` is the trade's own quote asset, not USD, so a
+ *  SOL-quoted amount labelled with "$" would be a wrong number stated as a
+ *  fact). */
+function formatQuotedValue(value: number, quote: "SOL" | "USDC" | "USDT"): string {
+  return quote === "SOL" ? `${formatSolAmount(value)} SOL` : formatCompactUsd(value);
+}
+
+/** The value cell for a priced token or SOL row, or `unpriced` when Radar has
+ *  no route to price it -- never `$0`/`0 SOL`, which would read as a real
+ *  amount rather than an absence of one. */
+function valueLabel(
+  entry: { priced: boolean; value: number | null; quote: "SOL" | "USDC" | "USDT" | null },
+  unpriced: string,
+): string {
+  return entry.priced && entry.value !== null && entry.quote !== null
+    ? formatQuotedValue(entry.value, entry.quote)
+    : unpriced;
+}
 
 export function TokenHeader({ load }: { load: Load<MarketToken> }) {
   const watchlist = useWatchlist();
@@ -281,6 +303,24 @@ function WatchlistPanel({ watchlist }: { watchlist: ReturnType<typeof useWatchli
  * -- collapsing them into one sentence would lose that difference.
  */
 function PositionsPanel({ positions }: { positions: ReturnType<typeof usePositions> }) {
+  // Item 5: `age_seconds` is how stale the answer already was the instant it
+  // arrived -- rendering it once and leaving it on screen would freeze a
+  // reader's clock at (say) "12s ago" no matter how long the tab stays open.
+  // `arrivedAt` is the wall-clock moment *this* answer (identified by its
+  // slot + read_at, so a genuinely fresh answer resets it) showed up; `now`
+  // ticks every 5s purely to force a re-render, so the displayed age keeps
+  // growing between reads instead of standing still.
+  const readyKey = positions.state === "ready" ? `${positions.value.slot}:${positions.value.read_at}` : null;
+  const [arrivedAt, setArrivedAt] = useState<number>(() => Date.now());
+  const [now, setNow] = useState<number>(() => Date.now());
+  useEffect(() => {
+    if (readyKey !== null) setArrivedAt(Date.now());
+  }, [readyKey]);
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 5_000);
+    return () => clearInterval(id);
+  }, []);
+
   if (positions.state === "loading") {
     return <p className="text-xs text-[var(--color-dim)]">Reading this wallet's holdings…</p>;
   }
@@ -299,6 +339,13 @@ function PositionsPanel({ positions }: { positions: ReturnType<typeof usePositio
   }
 
   const { sol, tokens, age_seconds } = positions.value;
+  const elapsedSeconds = Math.max(0, (now - arrivedAt) / 1000);
+  const displayedAge = age_seconds + elapsedSeconds;
+  // Item 11: a SOL row whenever the wallet actually holds SOL, alongside any
+  // SPL tokens it holds too. When there are no SPL tokens at all, the
+  // "holds no tokens" sentence below already states the SOL balance (item
+  // 4), so this row is not duplicated there.
+  const hasSol = sol.lamports > 0;
 
   return (
     <div>
@@ -306,17 +353,28 @@ function PositionsPanel({ positions }: { positions: ReturnType<typeof usePositio
         <h2 className="text-[10px] font-medium uppercase tracking-wide text-[var(--color-dim)]">
           Holdings
         </h2>
-        <span className="text-[10px] text-[var(--color-dim)]">as of {formatAge(age_seconds)} ago</span>
+        <span className="text-[10px] text-[var(--color-dim)]">as of {formatAge(displayedAge)} ago</span>
       </div>
       {tokens.length === 0 ? (
         <p className="text-xs text-[var(--color-dim)]">
           {positionsMessage({
             kind: "empty",
+            solLamports: sol.lamports,
             solUiAmount: sol.ui_amount,
           })}
         </p>
       ) : (
         <ul className="space-y-1">
+          {hasSol && (
+            <li className="flex items-baseline justify-between gap-2 text-xs">
+              <span className="truncate font-mono text-[var(--color-text)]">SOL</span>
+              <span className="shrink-0 tabular-nums text-[var(--color-dim)]">
+                <span>{sol.ui_amount}</span>
+                {" · "}
+                <span>{valueLabel(sol, sol.price_reason ?? "Radar does not price this")}</span>
+              </span>
+            </li>
+          )}
           {tokens.map((token) => (
             <li key={token.mint} className="flex items-baseline justify-between gap-2 text-xs">
               <Link
@@ -328,11 +386,7 @@ function PositionsPanel({ positions }: { positions: ReturnType<typeof usePositio
               <span className="shrink-0 tabular-nums text-[var(--color-dim)]">
                 <span>{token.ui_amount}</span>
                 {" · "}
-                <span>
-                  {token.priced && token.value_usd !== null
-                    ? formatCompactUsd(token.value_usd)
-                    : "Radar does not price this coin"}
-                </span>
+                <span>{valueLabel(token, "Radar does not price this coin")}</span>
               </span>
             </li>
           ))}
