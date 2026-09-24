@@ -3,7 +3,7 @@
 //! launch, and the shortened mint -- never the word "unknown" -- when it did
 //! not. `CoinImage` fetches nothing here because these tokens carry no `uri`.
 
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { MarketToken } from "./api";
@@ -55,6 +55,43 @@ function watchlistBody(coins: string[], limit = 100): unknown {
   return { wallet: WALLET, coins, limit };
 }
 
+/**
+ * An empty, fully-shaped `/v1/customer/positions` body.
+ *
+ * `TokenHeader` now reads both the watchlist and positions on sign-in, so
+ * every fetch stub below must answer both routes. This is the "nothing
+ * held" answer -- a stub that instead reused `watchlistBody`'s shape for a
+ * positions request would hand `PositionsPanel` a body with no `tokens`
+ * array and crash it, which is exactly what caught this the first time.
+ */
+function positionsBody(): unknown {
+  return {
+    wallet: WALLET,
+    slot: 1,
+    read_at: 0,
+    age_seconds: 0,
+    sol: {
+      lamports: 0,
+      ui_amount: "0.000000000",
+      price: null,
+      quote: null,
+      value: null,
+      priced: false,
+      price_reason: null,
+    },
+    tokens: [],
+  };
+}
+
+/** Routes a stubbed fetch by URL: positions gets its own empty body, and
+ *  everything else (the watchlist) falls through to `otherwise`. */
+function respond(
+  url: string | URL | Request,
+  otherwise: () => Response | Promise<Response>,
+): Response | Promise<Response> {
+  return String(url).includes("/customer/positions") ? jsonResponse(positionsBody()) : otherwise();
+}
+
 describe("TokenHeader", () => {
   it("shows the recorded name and symbol when the server sent them", () => {
     render(
@@ -98,7 +135,10 @@ describe("TokenHeader watchlist", () => {
 
   it("says the watchlist is empty for a signed-in wallet with nothing saved", async () => {
     signIn();
-    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse(watchlistBody([]))));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => respond(url, () => jsonResponse(watchlistBody([])))),
+    );
     render(<TokenHeader load={ready(token())} />);
 
     expect(await screen.findByText("Your watchlist is empty")).toBeTruthy();
@@ -120,7 +160,10 @@ describe("TokenHeader watchlist", () => {
 
   it("fills the star when the server's list already carries this mint", async () => {
     signIn();
-    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse(watchlistBody([MINT]))));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => respond(url, () => jsonResponse(watchlistBody([MINT])))),
+    );
     render(<TokenHeader load={ready(token())} />);
 
     const star = await screen.findByRole("button", { name: /remove from your watchlist/i });
@@ -129,10 +172,12 @@ describe("TokenHeader watchlist", () => {
 
   it("toggles by calling PUT then DELETE against the mint's own path with the bearer token", async () => {
     signIn();
-    const fetcher = vi.fn(async (_url: string, init?: RequestInit) => {
-      if (init?.method === "PUT") return jsonResponse(watchlistBody([MINT]));
-      if (init?.method === "DELETE") return jsonResponse(watchlistBody([]));
-      return jsonResponse(watchlistBody([]));
+    const fetcher = vi.fn(async (url: string, init?: RequestInit) => {
+      return respond(url, () => {
+        if (init?.method === "PUT") return jsonResponse(watchlistBody([MINT]));
+        if (init?.method === "DELETE") return jsonResponse(watchlistBody([]));
+        return jsonResponse(watchlistBody([]));
+      });
     });
     vi.stubGlobal("fetch", fetcher);
     render(<TokenHeader load={ready(token())} />);
@@ -160,14 +205,16 @@ describe("TokenHeader watchlist", () => {
 
   it("says the list is full when the server refuses a 409, beside the star", async () => {
     signIn();
-    const fetcher = vi.fn(async (_url: string, init?: RequestInit) => {
-      if (init?.method === "PUT") {
-        return jsonResponse(
-          { error: "a watchlist holds at most 100 coins; remove one first", reason: "full" },
-          409,
-        );
-      }
-      return jsonResponse(watchlistBody([]));
+    const fetcher = vi.fn(async (url: string, init?: RequestInit) => {
+      return respond(url, () => {
+        if (init?.method === "PUT") {
+          return jsonResponse(
+            { error: "a watchlist holds at most 100 coins; remove one first", reason: "full" },
+            409,
+          );
+        }
+        return jsonResponse(watchlistBody([]));
+      });
     });
     vi.stubGlobal("fetch", fetcher);
     render(<TokenHeader load={ready(token())} />);
@@ -181,9 +228,11 @@ describe("TokenHeader watchlist", () => {
   it("sends one change for a double click, not the same change twice", async () => {
     signIn();
     let answer: (response: Response) => void = () => {};
-    const fetcher = vi.fn(async (_url: string, init?: RequestInit) => {
-      if (init?.method === "PUT") return new Promise<Response>((resolve) => (answer = resolve));
-      return jsonResponse(watchlistBody([]));
+    const fetcher = vi.fn(async (url: string, init?: RequestInit) => {
+      return respond(url, () => {
+        if (init?.method === "PUT") return new Promise<Response>((resolve) => (answer = resolve));
+        return jsonResponse(watchlistBody([]));
+      });
     });
     vi.stubGlobal("fetch", fetcher);
     render(<TokenHeader load={ready(token())} />);
@@ -202,9 +251,11 @@ describe("TokenHeader watchlist", () => {
 
   it("never sends a query string to a watchlist route", async () => {
     signIn();
-    const fetcher = vi.fn(async (_url: string, init?: RequestInit) => {
-      if (init?.method === "PUT") return jsonResponse(watchlistBody([MINT]));
-      return jsonResponse(watchlistBody([]));
+    const fetcher = vi.fn(async (url: string, init?: RequestInit) => {
+      return respond(url, () => {
+        if (init?.method === "PUT") return jsonResponse(watchlistBody([MINT]));
+        return jsonResponse(watchlistBody([]));
+      });
     });
     vi.stubGlobal("fetch", fetcher);
     render(<TokenHeader load={ready(token())} />);
@@ -215,6 +266,281 @@ describe("TokenHeader watchlist", () => {
 
     for (const [url] of fetcher.mock.calls as [string, RequestInit | undefined][]) {
       expect(String(url)).not.toContain("?");
+    }
+  });
+});
+
+//! The positions panel: the signed-in wallet's own on-chain holdings, read
+//! and priced by the server -- see `positions.rs` and `usePositions.ts`.
+
+describe("TokenHeader positions", () => {
+  afterEach(() => {
+    localStorage.clear();
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  /** Stubs `fetch` so `/v1/customer/positions` answers with `body`/`status`
+   *  and everything else (the watchlist, read alongside it) answers empty. */
+  function stubPositions(body: unknown, status = 200): void {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) =>
+        String(url).includes("/customer/positions")
+          ? jsonResponse(body, status)
+          : jsonResponse(watchlistBody([])),
+      ),
+    );
+  }
+
+  it("invites a stranger to connect a wallet before showing any holdings", () => {
+    render(<TokenHeader load={ready(token())} />);
+    expect(
+      screen.getByText(/connect a wallet to see what it holds/i),
+    ).toBeTruthy();
+  });
+
+  it("says a wallet with nothing on chain holds no tokens", async () => {
+    signIn();
+    stubPositions({
+      wallet: WALLET,
+      slot: 1,
+      read_at: 0,
+      age_seconds: 0,
+      sol: {
+        lamports: 0,
+        ui_amount: "0.000000000",
+        price: null,
+        quote: null,
+        value: null,
+        priced: false,
+        price_reason: null,
+      },
+      tokens: [],
+    });
+    render(<TokenHeader load={ready(token())} />);
+
+    expect(await screen.findByText("This wallet holds no tokens")).toBeTruthy();
+  });
+
+  it("says Radar could not read, never 'holds no tokens', when a 200 carries a body that is not JSON", async () => {
+    signIn();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) =>
+        String(url).includes("/customer/positions")
+          ? new Response("<html>gateway</html>", { status: 200, headers: { "content-type": "text/html" } })
+          : jsonResponse(watchlistBody([])),
+      ),
+    );
+    render(<TokenHeader load={ready(token())} />);
+
+    expect(await screen.findByText(/says nothing about what the wallet holds/i)).toBeTruthy();
+    expect(screen.queryByText(/holds no tokens/i)).toBeNull();
+  });
+
+  it("adds the SOL balance to the empty sentence rather than calling a wallet with SOL 'empty'", async () => {
+    signIn();
+    stubPositions({
+      wallet: WALLET,
+      slot: 1,
+      read_at: 0,
+      age_seconds: 0,
+      sol: {
+        lamports: 1_500_000_000,
+        ui_amount: "1.500000000",
+        price: null,
+        quote: null,
+        value: null,
+        priced: false,
+        price_reason: "no SOL/USDC or SOL/USDT trade in the tape",
+      },
+      tokens: [],
+    });
+    render(<TokenHeader load={ready(token())} />);
+
+    expect(await screen.findByText(/holds no tokens.*1\.500000000 SOL/i)).toBeTruthy();
+    // A wallet holding only SOL still gets its SOL row, with the reason Radar
+    // cannot price SOL -- the sentence alone would hide that reason.
+    expect(screen.getByText("SOL")).toBeTruthy();
+    expect(screen.getByText("no SOL/USDC or SOL/USDT trade in the tape")).toBeTruthy();
+  });
+
+  it("marks an untracked mint as unpriced rather than $0, and links the tracked one", async () => {
+    signIn();
+    stubPositions({
+      wallet: WALLET,
+      slot: 7,
+      read_at: 0,
+      age_seconds: 3,
+      sol: {
+        lamports: 0,
+        ui_amount: "0.000000000",
+        price: null,
+        quote: null,
+        value: null,
+        priced: false,
+        price_reason: null,
+      },
+      tokens: [
+        {
+          mint: MINT,
+          program: "token",
+          amount: "1000000",
+          decimals: 6,
+          ui_amount: "1",
+          price: null,
+          quote: null,
+          value: null,
+          priced: false,
+        },
+      ],
+    });
+    render(<TokenHeader load={ready(token())} />);
+
+    expect(await screen.findByText("Radar does not price this coin")).toBeTruthy();
+    const shortMint = `${MINT.slice(0, 4)}…${MINT.slice(-4)}`;
+    expect(screen.getByRole("link", { name: shortMint }).getAttribute("href")).toBe(`/token/${MINT}`);
+  });
+
+  it("shows a SOL row priced in SOL terms, never as a dollar figure, alongside a priced USDC token", async () => {
+    signIn();
+    stubPositions({
+      wallet: WALLET,
+      slot: 9,
+      read_at: 0,
+      age_seconds: 1,
+      sol: {
+        lamports: 2_000_000_000,
+        ui_amount: "2.000000000",
+        price: 150.5,
+        quote: "USDC",
+        value: 301,
+        priced: true,
+        price_reason: null,
+      },
+      tokens: [
+        {
+          mint: MINT,
+          program: "token",
+          amount: "1000000",
+          decimals: 6,
+          ui_amount: "1",
+          price: 0.5,
+          quote: "USDC",
+          value: 0.5,
+          priced: true,
+        },
+      ],
+    });
+    render(<TokenHeader load={ready(token())} />);
+
+    // Item 11: SOL gets its own row whenever lamports > 0, even though there
+    // are other tokens too.
+    expect(await screen.findByText("SOL")).toBeTruthy();
+    expect(screen.getByText("2.000000000")).toBeTruthy();
+    // A USDC-quoted value is shown as a dollar figure.
+    expect(screen.getByText("$301.00")).toBeTruthy();
+  });
+
+  it("shows a SOL-quoted value as SOL, never with a dollar sign", async () => {
+    signIn();
+    stubPositions({
+      wallet: WALLET,
+      slot: 11,
+      read_at: 0,
+      age_seconds: 1,
+      sol: {
+        lamports: 1_000_000_000,
+        ui_amount: "1.000000000",
+        price: null,
+        quote: null,
+        value: null,
+        priced: false,
+        price_reason: "no route to price SOL itself in this tape",
+      },
+      tokens: [
+        {
+          mint: MINT,
+          program: "token",
+          amount: "2000000",
+          decimals: 6,
+          ui_amount: "2",
+          price: 0.25,
+          quote: "SOL",
+          value: 0.5,
+          priced: true,
+        },
+      ],
+    });
+    render(<TokenHeader load={ready(token())} />);
+
+    expect(await screen.findByText("0.5000 SOL")).toBeTruthy();
+    // Unpriced SOL shows its own reason, not a silent absence.
+    expect(screen.getByText("no route to price SOL itself in this tape")).toBeTruthy();
+  });
+
+  it("tells a session refusal apart from a chain read Radar could not complete", async () => {
+    signIn();
+    stubPositions({ error: "session expired", reason: "session_expired" }, 403);
+    render(<TokenHeader load={ready(token())} />);
+    expect(
+      await screen.findByText(/sign in with your wallet again to see your holdings/i),
+    ).toBeTruthy();
+
+    vi.unstubAllGlobals();
+    stubPositions({ error: "the chain could not be read", reason: "unreadable_chain" }, 502);
+    render(<TokenHeader load={ready(token())} />);
+    expect(
+      await screen.findByText(/says nothing about what the wallet holds/i),
+    ).toBeTruthy();
+  });
+
+  it("says Radar is rate-limiting reads on a 503 busy, not that the read failed outright", async () => {
+    signIn();
+    stubPositions({ error: "rate limited", reason: "busy" }, 503);
+    render(<TokenHeader load={ready(token())} />);
+
+    expect(await screen.findByText(/rate-limiting balance reads/i)).toBeTruthy();
+  });
+
+  it("keeps ticking the displayed age instead of freezing it at the server's own count (item 5)", async () => {
+    signIn();
+    vi.useFakeTimers();
+    try {
+      stubPositions({
+        wallet: WALLET,
+        slot: 1,
+        read_at: 0,
+        age_seconds: 10,
+        sol: {
+          lamports: 0,
+          ui_amount: "0.000000000",
+          price: null,
+          quote: null,
+          value: null,
+          priced: false,
+          price_reason: null,
+        },
+        tokens: [],
+      });
+      render(<TokenHeader load={ready(token())} />);
+
+      // Flush the initial positions fetch without letting wall-clock time pass.
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      expect(screen.getByText("as of 10s ago")).toBeTruthy();
+
+      // 15s pass (three 5s ticks) with no new read. The label must grow past
+      // the server's original count -- a label frozen at "10s ago" forever
+      // would be the bug this test exists to catch.
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(15_000);
+      });
+      expect(screen.getByText("as of 25s ago")).toBeTruthy();
+    } finally {
+      vi.useRealTimers();
     }
   });
 });

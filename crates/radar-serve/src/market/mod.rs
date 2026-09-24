@@ -47,7 +47,7 @@
 
 pub mod live;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use axum::Json;
@@ -1393,6 +1393,94 @@ pub async fn token(
         "liquidity_reason": "pool reserves require a live account read, which this build does not perform",
     }))
     .into_response()
+}
+
+/// A mint's most recently traded price, and the asset it was quoted in.
+///
+/// `MarketTrade.price` is never dollars: it is `quote_amount / token_amount`
+/// in whatever asset the trade's other leg was (radar-store's
+/// `market_trade.rs:105-116`), and that asset is wSOL, USDC or USDT on this
+/// tape. Carrying `quote_mint` alongside the number is what stops a caller
+/// from ever labelling a SOL-quoted ratio a dollar amount -- see
+/// [`crate::positions`], the only caller, for how `quote_mint` becomes the
+/// response's `"SOL"`/`"USDC"`/`"USDT"` name.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Priced {
+    /// `quote_amount / token_amount` from the newest trade this pass found
+    /// for the mint, in `quote_mint` units -- never USD.
+    pub price: f64,
+    /// The asset `price` is denominated in.
+    pub quote_mint: Address,
+}
+
+/// Prices every mint in `mints` in one pass over the current snapshot's tape.
+///
+/// Computes the watermark and builds (or reuses) the snapshot exactly once,
+/// then walks `snapshot.trades()` a single time, keeping the newest-by-`ts`
+/// priced trade seen so far for each mint asked about -- no per-mint
+/// `watermark_of` or `filter_tape` call, so the cost of pricing a wallet's
+/// whole holding list does not grow with how many distinct mints it holds.
+///
+/// This is a different pricing path from [`token`]'s: `token` computes one
+/// mint's price inline, for the live-market page, and that logic is
+/// deliberately untouched here. A mint absent from the returned map is
+/// unpriced, for any of the reasons `price_of` used to collapse into `None`:
+/// a live feed with no pure price lookup, no snapshot built yet, an
+/// unreadable store, nothing collected, no trades in the window, or trades
+/// with no price recorded. [`crate::positions`], the only caller, treats
+/// every one of those alike -- it never fails a whole response over one
+/// mint's pricing gap.
+///
+/// Blocking: reads the store like [`Snapshot::build`] does. A caller on the
+/// async runtime must run this inside the same `spawn_blocking` closure as
+/// its RPC reads, not a separate one -- that is the point of doing pricing
+/// here rather than back on the executor.
+#[must_use]
+pub fn prices_of(state: &crate::AppState, mints: &[Address]) -> HashMap<Address, Priced> {
+    let mut out = HashMap::new();
+    // Same "no pure lookup on this path" reasoning as the old `price_of`.
+    if state.market.live().is_some() {
+        return out;
+    }
+    let Ok(watermark) = crate::watermark_of(state) else {
+        return out;
+    };
+    let as_of = AsOf::at(watermark);
+    let Ok(Some(snapshot)) = snapshot_for(&state.market_snapshot, &state.store, as_of) else {
+        return out;
+    };
+    if !snapshot.collected() {
+        return out;
+    }
+    let Some(to) = snapshot.newest_ts() else {
+        return out;
+    };
+    let from = reaching_back(to, DEFAULT_WINDOW_SECONDS);
+    let (from_s, to_s) = (from_epoch(from), from_epoch(to));
+    let wanted: HashSet<Address> = mints.iter().copied().collect();
+
+    // `ts` alongside each entry so a later, older trade for a mint already
+    // priced by a newer one cannot overwrite it -- the store is not read in
+    // any particular trade order, only this module's other readers
+    // (`filter_tape`) sort it, and this path deliberately does not call that.
+    let mut newest_ts: HashMap<Address, String> = HashMap::new();
+    for trade in snapshot.trades() {
+        if !wanted.contains(&trade.mint) || !within_window(&trade.ts, &from_s, &to_s) {
+            continue;
+        }
+        let (Some(price), Some(quote_mint)) = (trade.price, trade.quote_mint) else {
+            continue;
+        };
+        if newest_ts
+            .get(&trade.mint)
+            .is_some_and(|seen| seen.as_str() >= trade.ts.as_str())
+        {
+            continue;
+        }
+        newest_ts.insert(trade.mint, trade.ts.clone());
+        out.insert(trade.mint, Priced { price, quote_mint });
+    }
+    out
 }
 
 /// `/v1/market/holders/{mint}` query parameters.

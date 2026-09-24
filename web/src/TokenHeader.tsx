@@ -13,18 +13,42 @@
 //! the list underneath it without a second request.
 
 import type { ReactNode } from "react";
+import { useEffect, useState } from "react";
 import { Link } from "wouter";
 import type { MarketToken } from "./api";
 import { CoinImage } from "./CoinImage";
 import { MarketFigure } from "./Figures";
-import {formatCompactUsd, formatPrice, shortenAddress} from "./format";
-import { isWatchlistSessionRefusal, watchlistMessage, watchlistToggleFailure } from "./honesty";
+import {formatAge, formatCompactUsd, formatPrice, formatSolAmount, shortenAddress} from "./format";
+import { isWalletSessionRefusal, positionsMessage, watchlistMessage, watchlistToggleFailure } from "./honesty";
 import { tokenPath } from "./routes";
 import type { Load } from "./useApi";
+import { usePositions } from "./usePositions";
 import { useWatchlist } from "./useWatchlist";
+
+/** A quote-aware value label: "$12.34" for USDC/USDT, "0.1234 SOL" for SOL --
+ *  and never a "$" in front of a SOL-quoted number (`.positions-fixes.md`
+ *  item 1: `MarketTrade.price` is the trade's own quote asset, not USD, so a
+ *  SOL-quoted amount labelled with "$" would be a wrong number stated as a
+ *  fact). */
+function formatQuotedValue(value: number, quote: "SOL" | "USDC" | "USDT"): string {
+  return quote === "SOL" ? `${formatSolAmount(value)} SOL` : formatCompactUsd(value);
+}
+
+/** The value cell for a priced token or SOL row, or `unpriced` when Radar has
+ *  no route to price it -- never `$0`/`0 SOL`, which would read as a real
+ *  amount rather than an absence of one. */
+function valueLabel(
+  entry: { priced: boolean; value: number | null; quote: "SOL" | "USDC" | "USDT" | null },
+  unpriced: string,
+): string {
+  return entry.priced && entry.value !== null && entry.quote !== null
+    ? formatQuotedValue(entry.value, entry.quote)
+    : unpriced;
+}
 
 export function TokenHeader({ load }: { load: Load<MarketToken> }) {
   const watchlist = useWatchlist();
+  const positions = usePositions();
   return (
     <aside className="flex h-full flex-col border-l border-[var(--color-line)] bg-[var(--color-surface)]">
       <div className="border-b border-[var(--color-line)] p-3">
@@ -32,6 +56,9 @@ export function TokenHeader({ load }: { load: Load<MarketToken> }) {
       </div>
       <div className="border-b border-[var(--color-line)] p-3">
         <WatchlistPanel watchlist={watchlist} />
+      </div>
+      <div className="border-b border-[var(--color-line)] p-3">
+        <PositionsPanel positions={positions} />
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto p-3">
         <SignalsPlaceholder />
@@ -168,7 +195,7 @@ function WatchlistStar({
       load.state === "loading"
         ? "Reading your watchlist…"
         : watchlistMessage(
-            isWatchlistSessionRefusal(load.reason)
+            isWalletSessionRefusal(load.reason)
               ? { kind: "session-refused" }
               : { kind: "could-not-look", detail: load.detail },
           );
@@ -230,7 +257,7 @@ function WatchlistPanel({ watchlist }: { watchlist: ReturnType<typeof useWatchli
   }
 
   if (load.state === "failed") {
-    const message = isWatchlistSessionRefusal(load.reason)
+    const message = isWalletSessionRefusal(load.reason)
       ? watchlistMessage({ kind: "session-refused" })
       : watchlistMessage({ kind: "could-not-look", detail: load.detail });
     return <p className="text-xs text-[var(--color-warn)]">{message}</p>;
@@ -255,6 +282,113 @@ function WatchlistPanel({ watchlist }: { watchlist: ReturnType<typeof useWatchli
               >
                 {shortenAddress(coin)}
               </Link>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+/**
+ * The right rail's positions panel: what the signed-in wallet actually holds
+ * on chain right now, read and priced by Radar's own server -- never by the
+ * browser talking to Solana directly (see `positions.rs`'s module doc for
+ * why: the public RPC node refuses any request that carries a browser
+ * Origin header).
+ *
+ * Rule 9 again: `busy` (Radar is rate-limiting reads) and `could-not-look`
+ * (the chain read itself failed) are both "no holdings shown", but one says
+ * "wait" and the other says "this is not evidence of what the wallet holds"
+ * -- collapsing them into one sentence would lose that difference.
+ */
+function PositionsPanel({ positions }: { positions: ReturnType<typeof usePositions> }) {
+  // Item 5: `age_seconds` is how stale the answer already was the instant it
+  // arrived -- rendering it once and leaving it on screen would freeze a
+  // reader's clock at (say) "12s ago" no matter how long the tab stays open.
+  // `arrivedAt` is the wall-clock moment *this* answer (identified by its
+  // slot + read_at, so a genuinely fresh answer resets it) showed up; `now`
+  // ticks every 5s purely to force a re-render, so the displayed age keeps
+  // growing between reads instead of standing still.
+  const readyKey = positions.state === "ready" ? `${positions.value.slot}:${positions.value.read_at}` : null;
+  const [arrivedAt, setArrivedAt] = useState<number>(() => Date.now());
+  const [now, setNow] = useState<number>(() => Date.now());
+  useEffect(() => {
+    if (readyKey !== null) setArrivedAt(Date.now());
+  }, [readyKey]);
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 5_000);
+    return () => clearInterval(id);
+  }, []);
+
+  if (positions.state === "loading") {
+    return <p className="text-xs text-[var(--color-dim)]">Reading this wallet's holdings…</p>;
+  }
+
+  if (positions.state === "signed-out") {
+    return <p className="text-xs text-[var(--color-dim)]">{positionsMessage({ kind: "signed-out" })}</p>;
+  }
+
+  if (positions.state === "failed") {
+    const message = isWalletSessionRefusal(positions.reason)
+      ? positionsMessage({ kind: "session-refused" })
+      : positions.reason === "busy"
+        ? positionsMessage({ kind: "busy" })
+        : positionsMessage({ kind: "could-not-look", detail: positions.detail });
+    return <p className="text-xs text-[var(--color-warn)]">{message}</p>;
+  }
+
+  const { sol, tokens, age_seconds } = positions.value;
+  const elapsedSeconds = Math.max(0, (now - arrivedAt) / 1000);
+  const displayedAge = age_seconds + elapsedSeconds;
+  // A SOL row whenever the wallet actually holds SOL, whether or not it holds
+  // any SPL tokens: the row is where SOL's value, or the reason Radar cannot
+  // price it, is shown -- the "holds no tokens" sentence states only the
+  // amount.
+  const hasSol = sol.lamports > 0;
+
+  return (
+    <div>
+      <div className="mb-2 flex items-baseline justify-between">
+        <h2 className="text-[10px] font-medium uppercase tracking-wide text-[var(--color-dim)]">
+          Holdings
+        </h2>
+        <span className="text-[10px] text-[var(--color-dim)]">as of {formatAge(displayedAge)} ago</span>
+      </div>
+      {tokens.length === 0 && (
+        <p className="text-xs text-[var(--color-dim)]">
+          {positionsMessage({
+            kind: "empty",
+            solLamports: sol.lamports,
+            solUiAmount: sol.ui_amount,
+          })}
+        </p>
+      )}
+      {(hasSol || tokens.length > 0) && (
+        <ul className={tokens.length === 0 ? "mt-1 space-y-1" : "space-y-1"}>
+          {hasSol && (
+            <li className="flex items-baseline justify-between gap-2 text-xs">
+              <span className="truncate font-mono text-[var(--color-text)]">SOL</span>
+              <span className="shrink-0 tabular-nums text-[var(--color-dim)]">
+                <span>{sol.ui_amount}</span>
+                {" · "}
+                <span>{valueLabel(sol, sol.price_reason ?? "Radar does not price this")}</span>
+              </span>
+            </li>
+          )}
+          {tokens.map((token) => (
+            <li key={token.mint} className="flex items-baseline justify-between gap-2 text-xs">
+              <Link
+                href={tokenPath(token.mint)}
+                className="truncate font-mono text-[var(--color-text)] hover:text-[var(--color-dim)]"
+              >
+                {shortenAddress(token.mint)}
+              </Link>
+              <span className="shrink-0 tabular-nums text-[var(--color-dim)]">
+                <span>{token.ui_amount}</span>
+                {" · "}
+                <span>{valueLabel(token, "Radar does not price this coin")}</span>
+              </span>
             </li>
           ))}
         </ul>

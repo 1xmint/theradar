@@ -671,10 +671,15 @@ pub fn audience_of(path: &str) -> Audience {
     let one_coin = path
         .strip_prefix("/v1/customer/watchlist/")
         .is_some_and(|mint| !mint.is_empty() && !mint.contains('/'));
+    // The signed-in wallet's own Solana holdings -- Tier 2 again, behind the
+    // same `Tenant` as the watchlist, and `Customer` for the same reason: a
+    // wallet session must reach it, and the handler refuses an operator login
+    // for want of a `Tenant`.
     let customer = path == "/v1/customer/wallet"
         || path == "/v1/customer/events"
         || path == "/v1/chat"
         || path == "/v1/customer/watchlist"
+        || path == "/v1/customer/positions"
         || one_coin;
     if customer {
         return Audience::Customer;
@@ -1180,6 +1185,7 @@ mod tests {
             // The watermark only. `/v1/events` stays Operator because its
             // payload is the operator's store counts.
             ("/v1/customer/events", Audience::Customer),
+            ("/v1/customer/positions", Audience::Customer),
             // Public, unlike everything else under `/v1/customer/`. It is the
             // login bootstrap, read before a token exists.
             ("/v1/customer/config", Audience::Public),

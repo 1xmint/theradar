@@ -12,7 +12,7 @@ use std::sync::Arc;
 
 use axum::Json;
 use axum::extract::{Path, State};
-use axum::http::{StatusCode, Uri};
+use axum::http::{HeaderValue, StatusCode, Uri, header};
 use axum::response::{IntoResponse, Response};
 use serde_json::json;
 
@@ -63,7 +63,27 @@ pub(crate) async fn unwatch(
 }
 
 /// Runs `then` against the calling wallet's store, or says why there is none.
+///
+/// Every path out of this function is per-wallet data or a refusal of it, so
+/// the `Cache-Control` header (item 13: never let a shared cache -- a CDN, a
+/// corporate proxy -- keep one wallet's list and hand it to the next caller
+/// who asks) is applied once, here, rather than at each of the three routes
+/// that call it.
 fn with_store(
+    customers: Option<&Customers>,
+    tenant: &Tenant,
+    uri: &Uri,
+    then: impl FnOnce(&TenantStore<'_>) -> Response,
+) -> Response {
+    let mut response = with_store_inner(customers, tenant, uri, then);
+    response.headers_mut().insert(
+        header::CACHE_CONTROL,
+        HeaderValue::from_static("private, no-store"),
+    );
+    response
+}
+
+fn with_store_inner(
     customers: Option<&Customers>,
     tenant: &Tenant,
     uri: &Uri,

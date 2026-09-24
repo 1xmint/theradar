@@ -25,6 +25,10 @@ radar-backfill.workspace = true
 radar-customer.workspace = true
 radar-model.workspace = true
 radar-instruments.workspace = true
+# `RpcClient`, for `positions`: the signed-in wallet's own balances, read
+# server-side because the public Solana node refuses a request carrying a
+# browser Origin header.
+radar-onchain.workspace = true
 radar-research.workspace = true
 # Address derivation only, on the request path and nothing else. A wallet's
 # associated token account for a mint is a PDA, so `/v1/market/history` can

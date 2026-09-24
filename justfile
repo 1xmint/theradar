@@ -277,7 +277,14 @@ licence-headers:
 # (6) for the coin-names-from-launches feature -- the recorded name/symbol
 # shown with a shortened-mint fallback, the image placeholder, the ipfs://
 # rewrite, and the https-only gate on a creator-supplied image URL.
-export MIN_WEB_TESTS := "132"
+#
+# 146 -> 150 on 2026-09-24: PR #288's review fixes -- `TokenHeader.test.tsx`
+# gained the SOL-row-vs-USDC-row and SOL-quote-never-a-dollar-sign cases (item
+# 1/11) and a fake-timers case that the displayed holdings age keeps ticking
+# rather than freezing at the server's own count (item 5); `honesty.test.ts`
+# gained a case that the "holds no tokens" sentence compares the wallet's raw
+# lamport integer, never the formatted `ui_amount` string (item 4).
+export MIN_WEB_TESTS := "151"
 
 # The public site at cabalhunter.org. Lower because it has five pages, and it
 # exists for the same reason MIN_WEB_TESTS does: `vitest run` exits zero when it

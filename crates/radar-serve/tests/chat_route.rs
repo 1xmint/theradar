@@ -40,6 +40,8 @@ fn unconfigured() -> axum::Router {
         market: radar_serve::market::Market::new(),
         market_snapshot: radar_serve::market::SnapshotCache::new(),
         customers: None,
+
+        positions: None,
     }))
 }
 

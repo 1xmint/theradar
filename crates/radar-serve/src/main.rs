@@ -153,6 +153,46 @@ fn customer_lane() -> Result<
     ))
 }
 
+/// The state behind `/v1/customer/positions`, and the host it reads from for
+/// the startup log.
+///
+/// `RpcClient::from_vars` never fails to construct: `RADAR_RPC` unset falls
+/// back to the public node, which is a slower default rather than an unsafe
+/// one. So this instance always has positions configured -- `None` on
+/// [`AppState`] is reachable only in a test fixture that chooses not to wire
+/// it.
+fn positions_lane() -> (radar_serve::positions::Positions, String) {
+    let positions =
+        radar_serve::positions::Positions::new(radar_onchain::rpc::RpcClient::from_vars(&|k| {
+            std::env::var(k).ok()
+        }));
+    let note = positions.host();
+    (positions, note)
+}
+
+/// The startup line for the access mode, said plainly every start: an
+/// instance serving operational detail to anyone who can reach it should say
+/// so in its own logs.
+fn access_note(mode: &access::Mode) -> String {
+    match mode {
+        access::Mode::Enforce(config) => format!("verifying {} tokens", config.team_domain),
+        access::Mode::Off => "OFF — anyone who can reach this can read it".to_owned(),
+    }
+}
+
+/// The startup line for the customer lane. Not a warning: no customer lane
+/// means customer routes require operator identity, which is stricter than
+/// they will be -- but it is said every start so nobody has to guess which
+/// state this is.
+fn customer_note(mode: &customer::Mode) -> String {
+    match mode {
+        customer::Mode::Enforce(config) => {
+            format!("verifying Privy tokens for app {}", config.app_id)
+        }
+        customer::Mode::Off => "off — customer routes require operator identity".to_owned(),
+    }
+}
+
 /// The market routes' source: the live feed when one is configured, else the store.
 ///
 /// Off unless `RADAR_STREAM_ENDPOINT` is set, and a malformed setting refuses to
@@ -328,6 +368,7 @@ async fn main() -> ExitCode {
         Ok(feed) => feed,
         Err(why) => return refused(&why),
     };
+    let (positions, positions_note) = positions_lane();
     let state = Arc::new(AppState {
         admission,
         shares,
@@ -353,6 +394,7 @@ async fn main() -> ExitCode {
         market,
         market_snapshot: radar_serve::market::SnapshotCache::with_background_refresh(),
         customers: Some(customers),
+        positions: Some(positions),
     });
 
     // Off the request path, per the market module's own doc comment: every
@@ -373,34 +415,17 @@ async fn main() -> ExitCode {
             "off (set RADAR_X402_PAY_TO and RADAR_X402_FACILITATOR to enable)"
         }
     );
-    println!(
-        "  access     : {}",
-        match &access {
-            access::Mode::Enforce(config) => format!("verifying {} tokens", config.team_domain),
-            // Said plainly, every start. An instance serving operational detail
-            // to anyone who can reach it should say so in its own logs.
-            access::Mode::Off => "OFF — anyone who can reach this can read it".to_owned(),
-        }
-    );
+    println!("  access     : {}", access_note(&access));
     println!("  admission  : {admission_note}");
     println!("  chat share : {share_note}");
-    println!(
-        "  customers  : {}",
-        match &customer {
-            customer::Mode::Enforce(config) =>
-                format!("verifying Privy tokens for app {}", config.app_id),
-            // Not a warning. No customer lane means customer routes require
-            // operator identity, which is stricter than they will be -- but it
-            // is said every start so nobody has to guess which state this is.
-            customer::Mode::Off => "off — customer routes require operator identity".to_owned(),
-        }
-    );
+    println!("  customers  : {}", customer_note(&customer));
     // Separate from the line above, because the two can disagree and the
     // disagreement is the interesting state: an instance that verifies customer
     // tokens but cannot read their wallets will sign people in and then fail
     // every wallet lookup, and an operator should see that at start rather than
     // from a support message.
     println!("  wallets    : {privy_note}");
+    println!("  positions  : reading balances from {positions_note}");
     println!("  agent      : {agent_note}");
     println!("  market feed: {feed_note}");
     println!("  listening  : http://{bind}");

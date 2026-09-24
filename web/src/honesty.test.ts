@@ -24,11 +24,13 @@ import {
   holdersBasisCaption,
   isNarrowerThanRequested,
   isPossiblyCapped,
+  isWalletSessionRefusal,
   launchesEmptyMessage,
   median,
   netOfCost,
   partitionReasons,
   pct,
+  positionsMessage,
 } from "./honesty";
 
 describe("median", () => {
@@ -234,6 +236,82 @@ describe("launchesEmptyMessage", () => {
     expect(
       launchesEmptyMessage("the market snapshot has not been built yet; check back shortly"),
     ).toContain("the market snapshot has not been built yet");
+  });
+});
+
+describe("positionsMessage", () => {
+  const signedOut = positionsMessage({ kind: "signed-out" });
+  const emptyNoSol = positionsMessage({ kind: "empty", solLamports: 0, solUiAmount: "0.000000000" });
+  const emptyWithSol = positionsMessage({ kind: "empty", solLamports: 1_500_000_000, solUiAmount: "1.500000000" });
+  const sessionRefused = positionsMessage({ kind: "session-refused" });
+  const busy = positionsMessage({ kind: "busy" });
+  const couldNotLook = positionsMessage({ kind: "could-not-look", detail: "502: bad gateway" });
+
+  it("gives every reason its own sentence", () => {
+    // The five ways this panel can show something other than a wallet's real
+    // holdings must never collide -- a reader who sees "no holdings" should
+    // be able to tell "you have none" from "Radar couldn't check" from "try
+    // again shortly" without reading a status code.
+    const all = [signedOut, emptyNoSol, emptyWithSol, sessionRefused, busy, couldNotLook];
+    expect(new Set(all).size).toBe(all.length);
+  });
+
+  it("says nothing about what the wallet holds when the chain read failed", () => {
+    // Rule 9: a failed read is not an empty holding. This sentence must not
+    // read as though it already knows the answer is zero.
+    expect(couldNotLook.toLowerCase()).not.toContain("holds no tokens");
+    expect(couldNotLook).toContain("says nothing about what the wallet holds");
+  });
+
+  it("folds the server's own detail into the could-not-look sentence", () => {
+    expect(couldNotLook).toContain("502: bad gateway");
+  });
+
+  it("names the rate limit rather than reusing the could-not-look wording", () => {
+    expect(busy.toLowerCase()).toContain("rate-limiting");
+    expect(busy).not.toBe(couldNotLook);
+  });
+
+  it("adds the SOL balance only when it is non-zero", () => {
+    expect(emptyNoSol).not.toContain("SOL");
+    expect(emptyWithSol).toContain("1.500000000 SOL");
+  });
+
+  it("compares the raw lamport integer, not the formatted ui_amount string (item 4)", () => {
+    // A wallet with dust-level SOL formatted as "0.000000000" must not read
+    // as holding SOL: the old check compared `solUiAmount !== "0"`, which a
+    // nine-decimal-place "0.000000000" (never the bare string "0") always
+    // passed, wrongly claiming a truly empty wallet "holds 0.000000000 SOL".
+    const zeroLamportsFormattedLong = positionsMessage({
+      kind: "empty",
+      solLamports: 0,
+      solUiAmount: "0.000000000",
+    });
+    expect(zeroLamportsFormattedLong).toBe("This wallet holds no tokens");
+    expect(zeroLamportsFormattedLong).not.toContain("SOL");
+  });
+
+  it("tells a session refusal apart from an invitation to sign in", () => {
+    expect(sessionRefused).not.toBe(signedOut);
+    expect(sessionRefused.toLowerCase()).toContain("again");
+  });
+});
+
+describe("isWalletSessionRefusal", () => {
+  it("covers every reason tenant.rs's Tenant extractor can refuse with", () => {
+    // One list, shared by the watchlist and positions alike -- a route that
+    // gains a new wallet-session refusal reason and forgets to add it here
+    // would silently mislabel that refusal as "Radar could not look".
+    expect(isWalletSessionRefusal("no_session")).toBe(true);
+    expect(isWalletSessionRefusal("session_invalid")).toBe(true);
+    expect(isWalletSessionRefusal("session_expired")).toBe(true);
+    expect(isWalletSessionRefusal("not_a_wallet")).toBe(true);
+  });
+
+  it("does not treat a fact about the read itself as a session problem", () => {
+    expect(isWalletSessionRefusal("busy")).toBe(false);
+    expect(isWalletSessionRefusal("unreadable_chain")).toBe(false);
+    expect(isWalletSessionRefusal("not_configured")).toBe(false);
   });
 });
 
