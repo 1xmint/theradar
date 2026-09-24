@@ -184,10 +184,16 @@ session: four refusals, four different messages.
    `radar-exec` router code (`crates/radar-exec/src/route.rs:243-590`), which
    already quotes Jupiter both ways or refuses (#231). Per-IP limit so a
    visitor cannot burn Jupiter's allowance for everyone.
-3. Swap: the browser asks Jupiter for the unsigned transaction, shows the
-   visitor exactly what they pay, receive, and the worst-case price, and only
-   then calls the wallet's sign-and-send. Extend `Wallet.tsx`; sign-in code in
-   `siws.ts` stays sign-in only.
+3. Swap: **amended 2026-09-24 by
+   [ADR 0024](../adr/0024-radar-builds-a-visitors-swap-and-only-their-wallet-signs-it.md)**
+   -- the browser cannot ask Jupiter (fee, key, and CSP, each on record), so
+   Radar's server builds the unsigned v0 transaction from Jupiter's `/build`
+   for the signed-in wallet only, behind `Tenant`, for every coin Jupiter
+   routes. The browser shows the visitor exactly what they pay, receive, and
+   the worst-case price, and only then calls the wallet's sign-and-send.
+   Extend `Wallet.tsx`; sign-in code in `siws.ts` stays sign-in only. The
+   button ships off behind a server switch until the owner approves a drafted
+   terms page and notice.
 4. Guard rails on the screen: slippage cap with a sane default, a refusal
    when the quote is stale or the coin has no route, the round-trip cost shown
    as a cost (`honesty.ts` already separates cost from gain).
