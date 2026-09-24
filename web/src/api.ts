@@ -237,6 +237,87 @@ async function watchlistRequest(
  * one here would ask for a refusal these functions have no way to recover
  * from silently.
  */
+/**
+ * A refusal from `/v1/customer/positions` -- the same `{error, reason}` shape
+ * [`WatchlistError`] reads, from the same [`crate::tenant::refusal`] helper
+ * on the server, so this is a second class rather than a shared one only
+ * because the two routes' reason codes do not entirely overlap (`busy` and
+ * `unreadable_chain` are this route's own, `full` is the watchlist's).
+ */
+export class PositionsError extends Error {
+  constructor(
+    readonly status: number,
+    readonly reason: string,
+    readonly detail: string,
+  ) {
+    super(`${status} ${reason}: ${detail}`);
+    this.name = "PositionsError";
+  }
+}
+
+/** One held mint, exactly as `/v1/customer/positions` sends it under `tokens`.
+ *  `amount` is the raw integer, as a string -- never passed through a float
+ *  on the wire -- and `ui_amount` is the `decimals`-adjusted string the
+ *  server already computed. */
+export interface PositionsToken {
+  mint: string;
+  /** `"token"` or `"token-2022"`, whichever program the account belongs to. */
+  program: string;
+  amount: string;
+  decimals: number;
+  ui_amount: string;
+  /** Null exactly when `priced` is false -- a mint Radar does not track,
+   *  never a price of zero. */
+  price_usd: number | null;
+  value_usd: number | null;
+  priced: boolean;
+}
+
+/** The wallet's native SOL balance, in the same shape as one [`PositionsToken`]. */
+export interface PositionsSol {
+  lamports: number;
+  ui_amount: string;
+  price_usd: number | null;
+  value_usd: number | null;
+  priced: boolean;
+}
+
+/**
+ * `/v1/customer/positions`'s shape, exactly: the wallet it belongs to, the
+ * slot its balances were read at, when that read happened, and how long ago
+ * that was. `slot` and `read_at` stay fixed while an answer is served from
+ * the server's own 30-second cache -- `age_seconds` is the field that grows.
+ */
+export interface Positions {
+  wallet: string;
+  slot: number;
+  read_at: number;
+  age_seconds: number;
+  sol: PositionsSol;
+  tokens: PositionsToken[];
+}
+
+async function positionsRequest(token: string, signal?: AbortSignal): Promise<Positions> {
+  const response = await fetch("/v1/customer/positions", {
+    signal: signal ?? null,
+    headers: { authorization: `Bearer ${token}`, accept: "application/json" },
+  });
+  let body: { error?: string; reason?: string } | null = null;
+  try {
+    body = (await response.json()) as { error?: string; reason?: string };
+  } catch {
+    // A non-JSON body is itself informative: something upstream answered.
+  }
+  if (!response.ok) {
+    throw new PositionsError(
+      response.status,
+      body?.reason ?? "unknown",
+      body?.error ?? response.statusText,
+    );
+  }
+  return body as unknown as Positions;
+}
+
 export const customer = {
   watchlist: {
     list: (token: string, signal?: AbortSignal) =>
@@ -245,6 +326,13 @@ export const customer = {
       watchlistRequest("PUT", `/v1/customer/watchlist/${encodeURIComponent(mint)}`, token),
     unwatch: (token: string, mint: string) =>
       watchlistRequest("DELETE", `/v1/customer/watchlist/${encodeURIComponent(mint)}`, token),
+  },
+  positions: {
+    /** **Never a query string** -- see `TokenHeader.tsx`'s `PositionsPanel` /
+     *  `positions.rs`'s own note: the wallet this reads is always the bearer
+     *  token's, and the server refuses `unscoped` rather than reading one as
+     *  a parameter. */
+    get: (token: string, signal?: AbortSignal) => positionsRequest(token, signal),
   },
 };
 

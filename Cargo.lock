@@ -1590,6 +1590,7 @@ dependencies = [
  "radar-customer",
  "radar-instruments",
  "radar-model",
+ "radar-onchain",
  "radar-pumpfun",
  "radar-research",
  "radar-risk",

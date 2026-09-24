@@ -105,6 +105,8 @@ fn router(keys: Keys) -> axum::Router {
         market: radar_serve::market::Market::new(),
         market_snapshot: radar_serve::market::SnapshotCache::new(),
         customers: None,
+
+        positions: None,
         privy: None,
     }))
 }
@@ -217,6 +219,8 @@ async fn the_wallet_route_refuses_a_request_carrying_no_customer_identity() {
         market: radar_serve::market::Market::new(),
         market_snapshot: radar_serve::market::SnapshotCache::new(),
         customers: None,
+
+        positions: None,
         privy: None,
     }));
 
@@ -298,6 +302,8 @@ async fn a_wallet_session_opens_the_product_on_an_instance_with_no_privy() {
         market: radar_serve::market::Market::new(),
         market_snapshot: radar_serve::market::SnapshotCache::new(),
         customers: None,
+
+        positions: None,
         privy: None,
     }));
 
@@ -363,6 +369,8 @@ async fn an_allowlist_admits_the_wallet_it_names_and_no_other() {
             market: radar_serve::market::Market::new(),
             market_snapshot: radar_serve::market::SnapshotCache::new(),
             customers: None,
+
+            positions: None,
             privy: None,
         }))
     };

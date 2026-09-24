@@ -416,12 +416,16 @@ export function watchlistMessage(state: WatchlistState): string {
 }
 
 /**
- * Which of `/v1/customer/watchlist`'s refusal reasons are the caller's
- * session, not a fact about this instance -- mirrors `tenant::refused`
+ * Which refusal reasons mean the caller's wallet session, not a fact about
+ * this instance or about the wallet's data -- mirrors `tenant::refused`
  * (`no_session`, `session_invalid`, `session_expired`) plus `not_a_wallet`,
  * the fourth way a request can carry no usable wallet session.
+ *
+ * Shared by every route behind `Tenant` -- the watchlist and positions alike
+ * -- so this list is written once. A second copy is how it would drift: one
+ * route's refusal list gains a reason the other's silently misses.
  */
-export function isWatchlistSessionRefusal(reason: string): boolean {
+export function isWalletSessionRefusal(reason: string): boolean {
   return (
     reason === "no_session" ||
     reason === "session_invalid" ||
@@ -444,8 +448,53 @@ export function watchlistToggleFailure(reason: string, detail: string): string {
   if (reason === "full") {
     return "Your watchlist already holds as many coins as Radar will keep for one wallet. Remove one before adding another.";
   }
-  if (isWatchlistSessionRefusal(reason)) {
+  if (isWalletSessionRefusal(reason)) {
     return "Your wallet session is no longer valid. Sign in with your wallet again.";
   }
   return `Radar could not save that: ${detail}`;
+}
+
+// --- positions' honesty rules ------------------------------------------------
+//
+// `/v1/customer/positions` reads the signed-in wallet's own on-chain
+// holdings. It shares the watchlist's wallet-session refusals (above) but has
+// its own way to be empty or unreadable: `busy` and `could-not-look` are both
+// "Radar did not answer with holdings", but the fix for one is "wait", and
+// the fix for the other is "nothing you can do" -- so they keep separate
+// sentences rather than folding into one.
+
+/**
+ * Why the positions panel would show something other than the wallet's real
+ * holdings.
+ *
+ * `empty` carries the SOL balance because a wallet can hold SOL and no SPL
+ * tokens at all -- "holds no tokens" without it would read as "holds
+ * nothing", which is a different, and possibly false, claim.
+ */
+export type PositionsState =
+  | { kind: "signed-out" }
+  | { kind: "empty"; solUiAmount: string | null }
+  | { kind: "session-refused" }
+  | { kind: "busy" }
+  | { kind: "could-not-look"; detail: string };
+
+export function positionsMessage(state: PositionsState): string {
+  switch (state.kind) {
+    case "signed-out":
+      // Mirrors `watchlistMessage`'s "signed-out" sentence: the same silent
+      // no-op failure mode, the same fix.
+      return "Connect a wallet to see what it holds. Radar reads a wallet's balances only after it signs in.";
+    case "empty":
+      return state.solUiAmount && state.solUiAmount !== "0"
+        ? `This wallet holds no tokens. It holds ${state.solUiAmount} SOL.`
+        : "This wallet holds no tokens";
+    case "session-refused":
+      return "Your wallet session is no longer valid. Sign in with your wallet again to see your holdings.";
+    case "busy":
+      return "Radar is rate-limiting balance reads; try again shortly.";
+    case "could-not-look":
+      return `Radar could not read the chain for this wallet${
+        state.detail ? `: ${state.detail}` : ""
+      }. This says nothing about what the wallet holds.`;
+  }
 }

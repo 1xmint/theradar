@@ -11,7 +11,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { customer, WatchlistError, type Watchlist } from "./api";
-import { isWatchlistSessionRefusal } from "./honesty";
+import { isWalletSessionRefusal } from "./honesty";
 import { useWalletToken } from "./Wallet";
 
 /** What the watchlist read is doing right now. */
@@ -88,7 +88,7 @@ export function useWatchlist(): UseWatchlist {
         // is showing came from a session the server no longer honours. Every
         // other refusal (full, not_a_coin, a server fault) is a fact about
         // this one change, not about the list already on screen.
-        if (failure.state === "failed" && isWatchlistSessionRefusal(failure.reason)) {
+        if (failure.state === "failed" && isWalletSessionRefusal(failure.reason)) {
           setLoad(failure);
         } else if (failure.state === "failed") {
           setToggleError({ reason: failure.reason, detail: failure.detail });

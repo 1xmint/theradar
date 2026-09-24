@@ -121,11 +121,25 @@ half:
 1. `Tenant` + `TenantStore` and the watchlist, exactly per 0012 task
    9-11-0011 (per-wallet directory from the verified address; the seven-item
    rubric; independent review, because it is the isolation boundary).
-2. **Positions: the browser reads its own balances** from a public Solana RPC
-   (`getTokenAccountsByOwner`). The request leaves from the visitor's IP, so
-   our quota is untouched, and isolation is free: nobody can ask for another
-   wallet's view through us because we never serve one. Price each holding
-   from `/v1/market/token`.
+2. **Positions: the server reads the signed-in wallet's own balances.**
+   Redesigned 2026-09-24, replacing the original "the browser reads its own
+   balances" plan above: measured 2026-09-24, the public Solana node refuses
+   every request that carries a browser Origin header --
+   `curl -H "Origin: https://radar.heyvera.org" https://api.mainnet-beta.solana.com`
+   with `getBalance` or `getTokenAccountsByOwner` answers
+   `{"error":{"code":403,"message":"Access forbidden"}}`; the same request
+   with no Origin succeeds; publicnode answers "Request blocked"; drpc wants a
+   paid plan. So the server reads instead, behind `Tenant` exactly like the
+   watchlist (no address, path, or query parameter -- a query string is
+   refused `unscoped`, same as the watchlist): native SOL plus both the Token
+   and Token-2022 programs' `getTokenAccountsByOwner`, all three or none (a
+   partial read is refused as `unreadable_chain`, never a partial list dressed
+   as complete). Priced from `/v1/market/token`'s own pricing function, not
+   the HTTP route; an untracked mint is `priced: false` with a null price,
+   never 0. A per-wallet cache (30 s TTL, 2048 wallets, keyed only by the
+   verified address) plus a global cap (60 RPC calls/minute, reserved 3 at a
+   time per view) keep one visitor's reads from starving another's, since this
+   quota is now Radar's own rather than free on each visitor's IP.
 3. **History: from the store only.** "Your trades in this coin" filters
    `MarketTrades` by the signed-in wallet. **The check this item asked for is
    done, and the answer blocks the item:** the tape carries the trader on one
@@ -432,4 +446,46 @@ one-address allowlist. Their two folders stay on the box with empty lists. Not
 checked live: an expired session, which takes twelve hours to make; CI's
 `no_session_an_expired_one_and_a_forged_one_each_say_which` covers it.
 
-**Next:** item 2, the browser reading its own balances.
+**Item 2's original design ("the browser reads its own balances") is
+superseded, 2026-09-24.** The owner approved a server-side read instead;
+see item 2's text above for the design and the 403-Origin measurements that
+forced the change.
+
+**Phase C item 2 is built, 2026-09-24, PR open as a draft, not yet reviewed
+or deployed.** `GET /v1/customer/positions` in
+[`positions.rs`](../../crates/radar-serve/src/positions.rs), behind `Tenant`
+exactly like the watchlist. New methods on `radar-onchain`'s `RpcClient`
+(`balance`, `token_accounts_by_owner`) run inside `spawn_blocking`, since the
+client is `ureq`-based and blocking. Response:
+`{wallet, slot, read_at, age_seconds, sol: {...}, tokens: [{mint, program,
+amount, decimals, ui_amount, price_usd, value_usd, priced}]}`, `amount` as a
+raw-integer string so it never crosses the wire through a float. Same-mint
+accounts are summed with a checked add (overflow refuses rather than wraps);
+zero balances are dropped; an untracked mint prices as `priced: false` with
+a null `price_usd`, never `0`. Per-wallet cache: 30 s TTL, 2048 wallets,
+keyed only by the verified address -- a cached answer keeps its original
+`slot` while `age_seconds` grows. Global cap: 60 RPC calls/minute across all
+wallets (one view costs 3), reserved atomically before the first call; over
+the cap and not cached refuses `503 busy` without touching the RPC.
+A failed program read refuses the whole answer `502 unreadable_chain` rather
+than a partial list. New integration test file
+[`a_wallets_positions_are_read_and_priced_by_radar.rs`](../../crates/radar-serve/tests/a_wallets_positions_are_read_and_priced_by_radar.rs)
+(9 tests, no network -- a fake `Transport`), covering wallet isolation, the
+`unscoped` query-string refusal, all four wallet-session refusals plus the
+failed-email-login case, the one-program-failure refusal, the cache's fixed
+slot and growing age, the cap's `busy` refusal without calling the
+transport, an untracked mint's `priced: false`, and same-mint summing with
+zero-balance dropping.
+
+On the web side: a `PositionsPanel` beside `WatchlistPanel` in
+`TokenHeader.tsx`, backed by `usePositions.ts` (mirrors `useWatchlist.ts`,
+read-only). `isWatchlistSessionRefusal` in `honesty.ts` is now
+`isWalletSessionRefusal`, shared by both routes rather than duplicated. Five
+distinct sentences in `honesty.ts`'s `positionsMessage`: an invitation to
+connect when signed out; "This wallet holds no tokens" (plus the SOL balance
+when non-zero); a session-refusal sentence telling the reader to sign in
+again; a `busy` sentence naming the rate limit; and a could-not-look sentence
+that says plainly it is not evidence of what the wallet holds. `MIN_WEB_TESTS`
+raised 132 to 146 (`vitest run`: 146/146). Not yet done: independent review,
+merge, and a check against the real site with a wallet that actually holds
+tokens.

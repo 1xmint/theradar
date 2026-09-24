@@ -26,6 +26,7 @@ pub mod link;
 pub mod market;
 pub mod mcp;
 mod ops;
+pub mod positions;
 pub mod privy;
 pub mod share;
 pub mod siws;
@@ -162,6 +163,16 @@ pub struct AppState {
     /// `/v1/customer/watchlist` request rather than keeping lists in memory,
     /// where a restart would empty them without saying so.
     pub customers: Option<tenant::Customers>,
+    /// The signed-in wallet's own on-chain Solana holdings, or `None` when this
+    /// instance cannot read the chain.
+    ///
+    /// Tier 2 of plan 0012, item 2 of plan 0013's Phase C -- redesigned
+    /// 2026-09-24 from a browser-reads-RPC shape to this one, because the
+    /// public Solana node refuses any request carrying a browser `Origin`
+    /// header. Reached only through a [`tenant::Tenant`], exactly like
+    /// [`Self::customers`]: a route can read the calling wallet's own balances
+    /// and no other wallet's.
+    pub positions: Option<positions::Positions>,
 }
 
 /// Builds the router.
@@ -197,6 +208,10 @@ pub fn app(state: Arc<AppState>) -> Router {
             "/v1/customer/watchlist/{mint}",
             put(watchlist::watch).delete(watchlist::unwatch),
         )
+        // The signed-in wallet's own on-chain holdings, read server-side. See
+        // `positions`'s module doc for why this replaced a browser-reads-RPC
+        // design.
+        .route("/v1/customer/positions", get(positions::get))
         .route("/v1/instruments", get(list_instruments))
         .route("/v1/instruments/{name}", post(call_instrument))
         // Public market data -- tier 1 of plan 0012. No identity, and none of

@@ -63,6 +63,7 @@ fn router(customers: Option<Customers>, access: radar_serve::access::Mode) -> ax
         market_snapshot: radar_serve::market::SnapshotCache::new(),
         customers,
         privy: None,
+        positions: None,
     }))
 }
 

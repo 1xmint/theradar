@@ -127,6 +127,8 @@ fn state_at(dir: &std::path::Path) -> Arc<AppState> {
         market: radar_serve::market::Market::new(),
         market_snapshot: radar_serve::market::SnapshotCache::new(),
         customers: None,
+
+        positions: None,
     })
 }
 

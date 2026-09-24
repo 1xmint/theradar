@@ -1395,6 +1395,38 @@ pub async fn token(
     .into_response()
 }
 
+/// The price Radar has for one mint, computed exactly as [`token`] computes
+/// its own `price` field above — reused directly so a change to that pricing
+/// logic cannot silently miss this caller.
+///
+/// `None` covers every "cannot price" case alike: a live feed with no pure
+/// price lookup, no snapshot built yet, an unreadable store, nothing
+/// collected, no trades in the window, or trades with no price recorded.
+/// [`crate::positions`] only needs "priced or not" for a mint it holds, and
+/// must never fail its whole response over one mint's pricing gap — so every
+/// reason collapses to the same answer here, on purpose.
+pub fn price_of(state: &crate::AppState, mint: Address) -> Option<f64> {
+    // The live feed has no pure price lookup today, only `live::token`, which
+    // builds a whole `Response`. Reusing it here would mean building and
+    // discarding a response just to read one field, so this mint is reported
+    // unpriced until a pure lookup exists on that path.
+    if state.market.live().is_some() {
+        return None;
+    }
+    let watermark = crate::watermark_of(state).ok()?;
+    let as_of = AsOf::at(watermark);
+    let snapshot = snapshot_for(&state.market_snapshot, &state.store, as_of).ok()??;
+    if !snapshot.collected() {
+        return None;
+    }
+    let to = snapshot.newest_ts()?;
+    let from = reaching_back(to, DEFAULT_WINDOW_SECONDS);
+    let (from_s, to_s) = (from_epoch(from), from_epoch(to));
+    filter_tape(snapshot.trades(), mint, &from_s, &to_s)
+        .iter()
+        .find_map(|t| t.price)
+}
+
 /// `/v1/market/holders/{mint}` query parameters.
 #[derive(Debug, Deserialize)]
 pub struct HoldersParams {

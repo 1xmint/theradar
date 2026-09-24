@@ -35,6 +35,14 @@ use crate::budget::{Budget, Exhausted};
 /// deployment points this at Helius.
 pub const DEFAULT_RPC: &str = "https://api.mainnet-beta.solana.com";
 
+/// The SPL Token program.
+pub const TOKEN_PROGRAM_ID: &str = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA";
+
+/// The Token-2022 program. A distinct program id, not an upgrade of the one
+/// above — a wallet's Token-2022 holdings live in accounts this id owns, and
+/// are invisible to a `getTokenAccountsByOwner` call scoped to the other one.
+pub const TOKEN_2022_PROGRAM_ID: &str = "TokenzQdBNbLqP5VEhdkAS6EPFLC1PE9w6NCZt4Kwh2";
+
 /// Why a read could not be completed.
 #[derive(Debug, thiserror::Error)]
 pub enum RpcError {
@@ -214,6 +222,87 @@ pub struct AccountRead {
     pub data: Vec<u8>,
     /// The slot the node served it at, when the node said.
     pub slot: Option<Slot>,
+}
+
+#[derive(Deserialize)]
+struct BalanceEnvelope {
+    value: u64,
+    context: Option<AccountContext>,
+}
+
+/// A native SOL balance, with the slot it was read at.
+#[derive(Clone, Copy, Debug)]
+pub struct Balance {
+    /// Lamports. One SOL is 1e9 of these.
+    pub lamports: u64,
+    /// The slot the node read this at, when the node said.
+    pub slot: Option<Slot>,
+}
+
+#[derive(Deserialize)]
+struct TokenAmount {
+    /// The raw base-unit amount, as the node writes it: a string, never a
+    /// number. Rule 9's shape lives here too — a `u64` field would parse a
+    /// truncated float silently on some nodes' large-balance responses; a
+    /// string that fails to parse is caught instead of guessed at.
+    amount: String,
+    decimals: u8,
+}
+
+#[derive(Deserialize)]
+struct TokenAccountInfo {
+    mint: String,
+    #[serde(rename = "tokenAmount")]
+    token_amount: TokenAmount,
+}
+
+#[derive(Deserialize)]
+struct TokenAccountParsed {
+    info: TokenAccountInfo,
+}
+
+#[derive(Deserialize)]
+struct TokenAccountData {
+    parsed: TokenAccountParsed,
+}
+
+#[derive(Deserialize)]
+struct TokenAccountAccount {
+    data: TokenAccountData,
+}
+
+#[derive(Deserialize)]
+struct TokenAccountEntry {
+    account: TokenAccountAccount,
+}
+
+#[derive(Deserialize)]
+struct TokenAccountsEnvelope {
+    value: Option<Vec<TokenAccountEntry>>,
+    context: Option<AccountContext>,
+}
+
+/// One SPL token account, as `getTokenAccountsByOwner` (`jsonParsed`) reports
+/// it.
+#[derive(Clone, Debug)]
+pub struct TokenAccount {
+    /// The token this account holds.
+    pub mint: String,
+    /// The raw base-unit balance. Never a wallet's *value* — that needs
+    /// `decimals` and a price, neither of which this call carries.
+    pub amount: u128,
+    /// How many base units make one whole token.
+    pub decimals: u8,
+}
+
+/// Several token accounts read in one call, at one slot.
+#[derive(Clone, Debug)]
+pub struct TokenAccountsRead {
+    /// The slot the node read these at, when the node said.
+    pub slot: Option<Slot>,
+    /// One entry per account the owner holds under the program asked about.
+    /// Several entries can share a mint — the caller sums them.
+    pub accounts: Vec<TokenAccount>,
 }
 
 /// How a JSON-RPC body gets to a node and back.
@@ -504,6 +593,74 @@ impl RpcClient {
             &serde_json::json!([address.to_string(), { "encoding": "base64" }]),
         )?;
         Ok(result.value.and_then(|a| a.owner))
+    }
+
+    /// Reads a wallet's native SOL balance.
+    ///
+    /// # Errors
+    ///
+    /// [`RpcError`] on transport, node or shape failures, or when the budget is
+    /// spent.
+    pub fn balance(&self, budget: &mut Budget, address: &Address) -> Result<Balance, RpcError> {
+        let result: BalanceEnvelope = self.call(
+            budget,
+            "getBalance",
+            &serde_json::json!([address.to_string()]),
+        )?;
+        Ok(Balance {
+            lamports: result.value,
+            slot: result.context.map(|c| Slot(c.slot)),
+        })
+    }
+
+    /// Reads every token account a wallet holds under one token program.
+    ///
+    /// Called once per program: [`TOKEN_PROGRAM_ID`] and
+    /// [`TOKEN_2022_PROGRAM_ID`] are two distinct programs, and an account
+    /// under one is invisible to a call scoped to the other. A wallet with
+    /// both must be read twice to see its whole holding, by construction.
+    ///
+    /// A wallet with no accounts under this program answers with an empty
+    /// list, not an error — that is a genuine, complete answer, and different
+    /// from a read that failed to complete at all.
+    ///
+    /// # Errors
+    ///
+    /// [`RpcError`] on transport, node or shape failures, or when the budget is
+    /// spent. An amount the node reported that does not parse as an integer is
+    /// [`Malformed`](RpcError::Malformed) rather than dropped or read as zero.
+    pub fn token_accounts_by_owner(
+        &self,
+        budget: &mut Budget,
+        owner: &Address,
+        program_id: &str,
+    ) -> Result<TokenAccountsRead, RpcError> {
+        let result: TokenAccountsEnvelope = self.call(
+            budget,
+            "getTokenAccountsByOwner",
+            &serde_json::json!([
+                owner.to_string(),
+                { "programId": program_id },
+                { "encoding": "jsonParsed" }
+            ]),
+        )?;
+        let slot = result.context.map(|c| Slot(c.slot));
+        let mut accounts = Vec::new();
+        for entry in result.value.unwrap_or_default() {
+            let info = entry.account.data.parsed.info;
+            let amount: u128 = info.token_amount.amount.parse().map_err(|_| {
+                RpcError::Malformed(format!(
+                    "token account amount {:?} was not an integer",
+                    info.token_amount.amount
+                ))
+            })?;
+            accounts.push(TokenAccount {
+                mint: info.mint,
+                amount,
+                decimals: info.token_amount.decimals,
+            });
+        }
+        Ok(TokenAccountsRead { slot, accounts })
     }
 
     /// Walks back through an address's signatures to the oldest one.
@@ -1042,6 +1199,61 @@ mod tests {
             matches!(&refused, RpcError::Malformed(why) if why.contains("asked for 3")),
             "{refused:?}",
         );
+    }
+
+    #[test]
+    fn a_balance_carries_the_slot_it_was_read_at() {
+        let c = client(&[
+            r#"{"jsonrpc":"2.0","id":1,"result":{"context":{"slot":77},"value":1500000000}}"#,
+        ]);
+        let got = c
+            .balance(&mut budget(), &Address::new([1u8; 32]))
+            .expect("a balance");
+        assert_eq!(got.lamports, 1_500_000_000);
+        assert_eq!(got.slot, Some(Slot(77)));
+    }
+
+    #[test]
+    fn token_accounts_parse_the_jsonparsed_shape() {
+        let one = r#"{"account":{"data":{"parsed":{"info":{"mint":"MintOne","tokenAmount":{"amount":"1000","decimals":6}}}}}}"#;
+        let two = r#"{"account":{"data":{"parsed":{"info":{"mint":"MintTwo","tokenAmount":{"amount":"250","decimals":9}}}}}}"#;
+        let body = format!(
+            r#"{{"jsonrpc":"2.0","id":1,"result":{{"context":{{"slot":5}},"value":[{one},{two}]}}}}"#
+        );
+        let c = client(&[&body]);
+        let got = c
+            .token_accounts_by_owner(&mut budget(), &Address::new([1u8; 32]), TOKEN_PROGRAM_ID)
+            .expect("a read");
+        assert_eq!(got.slot, Some(Slot(5)));
+        assert_eq!(got.accounts.len(), 2);
+        assert_eq!(got.accounts[0].mint, "MintOne");
+        assert_eq!(got.accounts[0].amount, 1000);
+        assert_eq!(got.accounts[0].decimals, 6);
+        assert_eq!(got.accounts[1].mint, "MintTwo");
+        assert_eq!(got.accounts[1].amount, 250);
+    }
+
+    #[test]
+    fn a_wallet_with_no_accounts_under_a_program_is_an_empty_list_not_an_error() {
+        let c = client(&[r#"{"jsonrpc":"2.0","id":1,"result":{"context":{"slot":5},"value":[]}}"#]);
+        let got = c
+            .token_accounts_by_owner(&mut budget(), &Address::new([1u8; 32]), TOKEN_PROGRAM_ID)
+            .expect("a read");
+        assert!(got.accounts.is_empty());
+    }
+
+    #[test]
+    fn a_non_integer_token_amount_is_refused_rather_than_read_as_zero() {
+        let c = client(&[concat!(
+            r#"{"jsonrpc":"2.0","id":1,"result":{"context":{"slot":5},"value":["#,
+            r#"{"account":{"data":{"parsed":{"info":{"mint":"MintOne","#,
+            r#""tokenAmount":{"amount":"not-a-number","decimals":6}}}}}}"#,
+            r#"]}}"#,
+        )]);
+        let err = c
+            .token_accounts_by_owner(&mut budget(), &Address::new([1u8; 32]), TOKEN_PROGRAM_ID)
+            .expect_err("an unparseable amount");
+        assert!(matches!(err, RpcError::Malformed(_)), "{err:?}");
     }
 
     #[test]

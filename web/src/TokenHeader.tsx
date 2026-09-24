@@ -17,14 +17,16 @@ import { Link } from "wouter";
 import type { MarketToken } from "./api";
 import { CoinImage } from "./CoinImage";
 import { MarketFigure } from "./Figures";
-import {formatCompactUsd, formatPrice, shortenAddress} from "./format";
-import { isWatchlistSessionRefusal, watchlistMessage, watchlistToggleFailure } from "./honesty";
+import {formatAge, formatCompactUsd, formatPrice, shortenAddress} from "./format";
+import { isWalletSessionRefusal, positionsMessage, watchlistMessage, watchlistToggleFailure } from "./honesty";
 import { tokenPath } from "./routes";
 import type { Load } from "./useApi";
+import { usePositions } from "./usePositions";
 import { useWatchlist } from "./useWatchlist";
 
 export function TokenHeader({ load }: { load: Load<MarketToken> }) {
   const watchlist = useWatchlist();
+  const positions = usePositions();
   return (
     <aside className="flex h-full flex-col border-l border-[var(--color-line)] bg-[var(--color-surface)]">
       <div className="border-b border-[var(--color-line)] p-3">
@@ -32,6 +34,9 @@ export function TokenHeader({ load }: { load: Load<MarketToken> }) {
       </div>
       <div className="border-b border-[var(--color-line)] p-3">
         <WatchlistPanel watchlist={watchlist} />
+      </div>
+      <div className="border-b border-[var(--color-line)] p-3">
+        <PositionsPanel positions={positions} />
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto p-3">
         <SignalsPlaceholder />
@@ -168,7 +173,7 @@ function WatchlistStar({
       load.state === "loading"
         ? "Reading your watchlist…"
         : watchlistMessage(
-            isWatchlistSessionRefusal(load.reason)
+            isWalletSessionRefusal(load.reason)
               ? { kind: "session-refused" }
               : { kind: "could-not-look", detail: load.detail },
           );
@@ -230,7 +235,7 @@ function WatchlistPanel({ watchlist }: { watchlist: ReturnType<typeof useWatchli
   }
 
   if (load.state === "failed") {
-    const message = isWatchlistSessionRefusal(load.reason)
+    const message = isWalletSessionRefusal(load.reason)
       ? watchlistMessage({ kind: "session-refused" })
       : watchlistMessage({ kind: "could-not-look", detail: load.detail });
     return <p className="text-xs text-[var(--color-warn)]">{message}</p>;
@@ -255,6 +260,80 @@ function WatchlistPanel({ watchlist }: { watchlist: ReturnType<typeof useWatchli
               >
                 {shortenAddress(coin)}
               </Link>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+/**
+ * The right rail's positions panel: what the signed-in wallet actually holds
+ * on chain right now, read and priced by Radar's own server -- never by the
+ * browser talking to Solana directly (see `positions.rs`'s module doc for
+ * why: the public RPC node refuses any request that carries a browser
+ * Origin header).
+ *
+ * Rule 9 again: `busy` (Radar is rate-limiting reads) and `could-not-look`
+ * (the chain read itself failed) are both "no holdings shown", but one says
+ * "wait" and the other says "this is not evidence of what the wallet holds"
+ * -- collapsing them into one sentence would lose that difference.
+ */
+function PositionsPanel({ positions }: { positions: ReturnType<typeof usePositions> }) {
+  if (positions.state === "loading") {
+    return <p className="text-xs text-[var(--color-dim)]">Reading this wallet's holdings…</p>;
+  }
+
+  if (positions.state === "signed-out") {
+    return <p className="text-xs text-[var(--color-dim)]">{positionsMessage({ kind: "signed-out" })}</p>;
+  }
+
+  if (positions.state === "failed") {
+    const message = isWalletSessionRefusal(positions.reason)
+      ? positionsMessage({ kind: "session-refused" })
+      : positions.reason === "busy"
+        ? positionsMessage({ kind: "busy" })
+        : positionsMessage({ kind: "could-not-look", detail: positions.detail });
+    return <p className="text-xs text-[var(--color-warn)]">{message}</p>;
+  }
+
+  const { sol, tokens, age_seconds } = positions.value;
+
+  return (
+    <div>
+      <div className="mb-2 flex items-baseline justify-between">
+        <h2 className="text-[10px] font-medium uppercase tracking-wide text-[var(--color-dim)]">
+          Holdings
+        </h2>
+        <span className="text-[10px] text-[var(--color-dim)]">as of {formatAge(age_seconds)} ago</span>
+      </div>
+      {tokens.length === 0 ? (
+        <p className="text-xs text-[var(--color-dim)]">
+          {positionsMessage({
+            kind: "empty",
+            solUiAmount: sol.ui_amount,
+          })}
+        </p>
+      ) : (
+        <ul className="space-y-1">
+          {tokens.map((token) => (
+            <li key={token.mint} className="flex items-baseline justify-between gap-2 text-xs">
+              <Link
+                href={tokenPath(token.mint)}
+                className="truncate font-mono text-[var(--color-text)] hover:text-[var(--color-dim)]"
+              >
+                {shortenAddress(token.mint)}
+              </Link>
+              <span className="shrink-0 tabular-nums text-[var(--color-dim)]">
+                <span>{token.ui_amount}</span>
+                {" · "}
+                <span>
+                  {token.priced && token.value_usd !== null
+                    ? formatCompactUsd(token.value_usd)
+                    : "Radar does not price this coin"}
+                </span>
+              </span>
             </li>
           ))}
         </ul>

@@ -277,7 +277,7 @@ licence-headers:
 # (6) for the coin-names-from-launches feature -- the recorded name/symbol
 # shown with a shortened-mint fallback, the image placeholder, the ipfs://
 # rewrite, and the https-only gate on a creator-supplied image URL.
-export MIN_WEB_TESTS := "132"
+export MIN_WEB_TESTS := "146"
 
 # The public site at cabalhunter.org. Lower because it has five pages, and it
 # exists for the same reason MIN_WEB_TESTS does: `vitest run` exits zero when it
