@@ -344,3 +344,22 @@ async fn a_bad_coin_and_a_damaged_list_are_refused_not_emptied() {
     assert_eq!(body["reason"], "unreadable");
     assert!(body.get("coins").is_none(), "{body}");
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_failed_email_login_is_not_blamed_on_a_wallet_session() {
+    // A Privy token has three parts, a wallet session two. One that fails on an
+    // instance without Privy is not a wallet session that went wrong, so it
+    // must not send the person to "sign in with your wallet again". Re-apply by
+    // recording every failed bearer token as a refused session: this says
+    // session_invalid.
+    let (_dir, router) = with_lists();
+    let (status, body) = call(
+        &router,
+        Method::GET,
+        "/v1/customer/watchlist",
+        Some("eyJhbGciOiJFUzI1NiJ9.eyJzdWIiOiJkaWQ6cHJpdnk6eCJ9.c2ln"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+    assert_eq!(body["reason"], "no_session", "{body}");
+}

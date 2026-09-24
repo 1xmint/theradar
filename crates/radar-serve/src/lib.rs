@@ -403,7 +403,12 @@ async fn guard(
             // Kept, and used only if nothing else lets the request in: an
             // expired wallet session then says "expired" rather than "no
             // Cloudflare Access assertion", which sent people to the wrong door.
-            Err(why) => session_refused = Some(why),
+            //
+            // Only a token shaped like a session -- one dot -- is blamed on the
+            // session. A Privy JWT has two, and telling someone who signed in by
+            // email to "sign in with your wallet again" is the wrong door too.
+            Err(why) if token.matches('.').count() == 1 => session_refused = Some(why),
+            Err(_) => {}
         }
 
         // And now Privy, which is the branch that actually needs the

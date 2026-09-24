@@ -130,27 +130,32 @@ pub(crate) struct SessionRefused(pub(crate) Invalid);
 impl<S: Send + Sync> FromRequestParts<S> for Tenant {
     type Rejection = Response;
 
-    async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Response> {
-        if let Some(tenant) = parts.extensions.get::<Self>() {
-            return Ok(tenant.clone());
-        }
-        if let Some(SessionRefused(why)) = parts.extensions.get::<SessionRefused>() {
-            return Err(refused(why));
-        }
-        if parts
+    // Nothing here waits: the guard already did the checking, and this only
+    // reads what it left on the request.
+    fn from_request_parts(
+        parts: &mut Parts,
+        _state: &S,
+    ) -> impl Future<Output = Result<Self, Response>> + Send {
+        let answer = if let Some(tenant) = parts.extensions.get::<Self>() {
+            Ok(tenant.clone())
+        } else if let Some(SessionRefused(why)) = parts.extensions.get::<SessionRefused>() {
+            Err(refused(why))
+        } else if parts
             .extensions
             .get::<crate::customer::Customer>()
             .is_some()
         {
             // Signed in, by email rather than by wallet. Privy's identity carries
             // no address, and a watchlist belongs to a wallet.
-            return Err(refusal(
+            Err(refusal(
                 StatusCode::FORBIDDEN,
                 "not_a_wallet",
                 "a watchlist belongs to a wallet, and this session is not a wallet's; sign in with your wallet",
-            ));
-        }
-        Err(no_session())
+            ))
+        } else {
+            Err(no_session())
+        };
+        std::future::ready(answer)
     }
 }
 
@@ -405,8 +410,12 @@ impl TenantStore<'_> {
         })
         .map_err(|why| Unavailable::Unwritable(why.to_string()))?;
         // Written aside and renamed, so a process killed mid-write leaves the
-        // previous list rather than half of one.
-        let temporary = self.dir.join("watchlist.json.tmp");
+        // previous list rather than half of one. Named for this process: the
+        // lock above covers only this one, and during a deploy the old and new
+        // servers overlap, so a shared name could interleave their writes.
+        let temporary = self
+            .dir
+            .join(format!("watchlist.json.{}.tmp", std::process::id()));
         std::fs::write(&temporary, encoded).map_err(unwritable)?;
         std::fs::rename(&temporary, self.file()).map_err(unwritable)?;
         Ok(coins)
@@ -461,10 +470,12 @@ mod tests {
 
     async fn extract(
         extensions: impl FnOnce(&mut axum::http::Extensions),
-    ) -> Result<Tenant, Response> {
+    ) -> Result<Tenant, Box<Response>> {
         let (mut parts, ()) = axum::http::Request::new(()).into_parts();
         extensions(&mut parts.extensions);
-        Tenant::from_request_parts(&mut parts, &()).await
+        Tenant::from_request_parts(&mut parts, &())
+            .await
+            .map_err(Box::new)
     }
 
     async fn reason(refused: Response) -> (StatusCode, String) {
@@ -502,13 +513,13 @@ mod tests {
         .await
         .expect_err("a Privy customer is not a wallet");
         assert_eq!(
-            reason(privy).await,
+            reason(*privy).await,
             (StatusCode::FORBIDDEN, "not_a_wallet".into())
         );
 
         let nothing = extract(|_| {}).await.expect_err("no tenant");
         assert_eq!(
-            reason(nothing).await,
+            reason(*nothing).await,
             (StatusCode::FORBIDDEN, "no_session".into())
         );
 
@@ -518,7 +529,7 @@ mod tests {
         .await
         .expect_err("expired");
         assert_eq!(
-            reason(expired).await,
+            reason(*expired).await,
             (StatusCode::FORBIDDEN, "session_expired".into())
         );
     }
@@ -661,6 +672,29 @@ mod tests {
             std::fs::read(store.file()).expect("still there"),
             b"{ not json",
             "a damaged list must be left for someone to look at"
+        );
+    }
+
+    #[test]
+    fn a_list_that_cannot_be_read_at_all_is_not_taken_for_an_empty_one() {
+        // Rule 9 again, one step earlier: the file is there but reading it
+        // fails, here because it is not text. Re-apply by answering every read
+        // error with an empty list, as only "not found" should be: the list
+        // then reads as "watching nothing" and the next add writes over it.
+        let (_dir, customers) = customers();
+        let store = customers.store(&tenant(1)).expect("placed");
+        store.watch(coin(1)).expect("saves");
+        std::fs::write(store.file(), [0xff, 0xfe, 0xfd]).expect("damages");
+
+        assert!(matches!(store.watchlist(), Err(Unavailable::Unreadable(_))));
+        assert!(matches!(
+            store.watch(coin(2)),
+            Err(Unavailable::Unreadable(_))
+        ));
+        assert_eq!(
+            std::fs::read(store.file()).expect("still there"),
+            [0xff, 0xfe, 0xfd],
+            "an unreadable list must be left for someone to look at"
         );
     }
 }
