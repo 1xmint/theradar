@@ -285,18 +285,14 @@ licence-headers:
 # gained a case that the "holds no tokens" sentence compares the wallet's raw
 # lamport integer, never the formatted `ui_amount` string (item 4).
 #
-# 151 -> 210 on 2026-09-24: `TradePanel.tsx` (buy/sell from the terminal) and
+# 151 -> 222 on 2026-09-24: `TradePanel.tsx` (buy/sell from the terminal) and
 # its test file, `TradePanel.test.tsx` -- amount and slippage validation, the
 # debounced live quote, a review step built from `/v1/customer/swap`'s own
 # response rather than the live quote, 60-second staleness, a wallet decline
-# read as "cancelled" rather than an error, and every documented refusal code.
-# This number is a static count (`grep`-counted `it`/`it.each` cases, with
-# each `it.each` array's length worked out by hand) rather than one read off
-# a live run: this change was authored in a worktree under instructions not
-# to run the web test suite locally, only `npx tsc --noEmit`. The real count
-# this worktree's own convention calls for is CI's first run of this branch;
-# it should read higher than 210 and this floor can be raised to match once
-# that number is known, the same way every earlier entry above was.
+# read as "cancelled" rather than an error, and every documented refusal code
+# -- plus `sign.test.ts` (a refused popup is a cancel, a failed send is not)
+# and `/terms` in the routes cross-check. 222 is the count CI's run of ce1e511
+# reported.
 export MIN_WEB_TESTS := "222"
 
 # The public site at cabalhunter.org. Lower because it has five pages, and it
