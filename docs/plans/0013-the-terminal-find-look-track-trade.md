@@ -16,7 +16,8 @@ on the owner. **Both of those are now deployed** -- `/health` reported build
 `2d7f91d` on 2026-09-23, which is #266 and so carries #261 and #263 with it.
 Phase C item 3 (#271) and item 4's trades half (#283, which replaced #272) are
 merged and **deployed** -- `/health` reports build `871c6ce` since 2026-09-23.
-C items 1 and 2 are not built, and nothing in D or E is.
+C item 1 (#285, the watchlist) is merged and **deployed** -- `/health` reports
+build `7554bb8` since 2026-09-23. C item 2 is not built, and nothing in D or E is.
 **Date:** 2026-09-18, handback extended 2026-09-23.
 **Branch:** none; each item lands on `main` as its own pull request.
 **Inspected base:** `c8fca0e` (`Remove the bot from Radar: it lives in realorrug
@@ -375,7 +376,7 @@ to read one day of `radar-follow` refusal counts first (`radar/outcomes.log`
 and `radar/decisions.log`); that clock started 2026-09-20, so a day of it
 exists now.
 
-**Phase C item 1 is built, 2026-09-23, unmerged and awaiting review.** The
+**Phase C item 1 is built, 2026-09-23, reviewed, merged and deployed.** The
 owner decided the one question this item raised, on 2026-09-23: **nobody reads
 a wallet's saved state through Radar but that wallet** -- the operator
 included. There is no operator read path, so there is no second way past the
@@ -409,3 +410,26 @@ carries no credential, or an expired or forged wallet session, now says so
 Access assertion". Who gets in is unchanged.
 
 Not done in this item: the star button and the watchlist tab, which are item 4.
+
+**Item 1 is merged and live, 2026-09-23.** Independent review (Opus) failed
+the first push on one gap -- no test reached the branch where a list's file
+exists but cannot be read at all, so treating that as an empty list would have
+survived -- and passed the second, which adds that test. It also moved two
+smaller things: a failed email login on these routes is no longer told to
+"sign in with your wallet again", and the file written before the rename is
+named per process, because old and new servers overlap during a deploy. #285
+squash-merged as `7554bb8`; the release build's sha256 matched
+`BUILD-INFO.txt`, `sudo radar-deploy` installed it, and `/health` reports
+`7554bb8`.
+
+**Verified against the real site with two wallets** made for the check and
+signed in through `/v1/customer/siws`: A saved a coin and read it back; B's
+list was empty; B naming A in a query got `400 unscoped`; B deleting the same
+coin emptied only B's list, and A's still held it; no session got
+`no_session`; A's token with one character changed got `session_invalid`. Both
+fresh wallets were admitted, so wallet sign-in on the box is no longer the
+one-address allowlist. Their two folders stay on the box with empty lists. Not
+checked live: an expired session, which takes twelve hours to make; CI's
+`no_session_an_expired_one_and_a_forged_one_each_say_which` covers it.
+
+**Next:** item 2, the browser reading its own balances.
