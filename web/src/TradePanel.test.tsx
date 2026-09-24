@@ -15,7 +15,7 @@
 //! `sign.test.ts`'s job, and this file only needs to control whether it
 //! resolves, declines, or fails.
 
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { Positions, PositionsToken, Quote, SwapResponse } from "./api";
@@ -32,6 +32,10 @@ function signIn() {
     "radar.wallet.session",
     JSON.stringify({ token: "tok-1", address: "WalletAddr111111111111111111111111111111", expiresInSeconds: 3600 }),
   );
+  // A signed-in visitor has a wallet extension; without one on `window`,
+  // `detect()` finds nothing and approving stops at "No wallet extension
+  // found" before `signAndSend` (mocked above) is ever reached.
+  vi.stubGlobal("solana", {});
 }
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -271,8 +275,9 @@ describe("TradePanel review and send flow", () => {
     // review card; only the swap response's own quote (4750000 -> "4.75")
     // does -- the review step must show what the transaction actually
     // contains, not whatever the debounced live quote has ticked to since.
-    expect(screen.getByText("4.75")).toBeTruthy();
-    expect(screen.queryByText("4.9")).toBeNull();
+    const card = screen.getByRole("region", { name: "Trade review" });
+    expect(within(card).getByText("4.75")).toBeTruthy();
+    expect(within(card).queryByText("4.9")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Approve in wallet" }));
     expect(await screen.findByText("Sent to your wallet.")).toBeTruthy();
     expect(screen.getByRole("link", { name: "View on Solscan" }).getAttribute("href")).toContain("SIG123");

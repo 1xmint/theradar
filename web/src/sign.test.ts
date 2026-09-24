@@ -1,4 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
+// @vitest-environment node
+//
+// Node, not jsdom: jsdom swaps in its own `Uint8Array`, and
+// `@solana/web3.js`'s byte layouts check `instanceof Uint8Array` against it,
+// so every serialise and deserialise throws "b must be a Uint8Array" -- a
+// test-environment artefact, not what a browser does. Nothing here needs a DOM.
 import { Keypair, MessageV0, SystemProgram, VersionedTransaction } from "@solana/web3.js";
 import { describe, expect, it } from "vitest";
 import { signAndSend, type SigningProvider } from "./sign";

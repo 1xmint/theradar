@@ -297,7 +297,7 @@ licence-headers:
 # this worktree's own convention calls for is CI's first run of this branch;
 # it should read higher than 210 and this floor can be raised to match once
 # that number is known, the same way every earlier entry above was.
-export MIN_WEB_TESTS := "210"
+export MIN_WEB_TESTS := "222"
 
 # The public site at cabalhunter.org. Lower because it has five pages, and it
 # exists for the same reason MIN_WEB_TESTS does: `vitest run` exits zero when it

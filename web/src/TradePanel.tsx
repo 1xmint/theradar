@@ -310,7 +310,11 @@ export function TradePanel({ mint, symbol, positions, onTraded }: TradePanelProp
       {review.kind === "building" && <p className="text-[var(--color-dim)]">Building the transaction…</p>}
 
       {(review.kind === "built" || review.kind === "sending" || review.kind === "declined") && (
-        <div className="flex flex-col gap-2 rounded-md border border-[var(--color-line)] p-2">
+        <div
+          role="region"
+          aria-label="Trade review"
+          className="flex flex-col gap-2 rounded-md border border-[var(--color-line)] p-2"
+        >
           <p className="font-semibold">Review before you approve</p>
           <div className="flex justify-between">
             <span className="text-[var(--color-dim)]">You pay</span>
