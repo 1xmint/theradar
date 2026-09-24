@@ -178,6 +178,28 @@ describe("TokenHeader watchlist", () => {
     expect(await screen.findByText(/remove one before adding another/i)).toBeTruthy();
   });
 
+  it("sends one change for a double click, not the same change twice", async () => {
+    signIn();
+    let answer: (response: Response) => void = () => {};
+    const fetcher = vi.fn(async (_url: string, init?: RequestInit) => {
+      if (init?.method === "PUT") return new Promise<Response>((resolve) => (answer = resolve));
+      return jsonResponse(watchlistBody([]));
+    });
+    vi.stubGlobal("fetch", fetcher);
+    render(<TokenHeader load={ready(token())} />);
+
+    const addStar = await screen.findByRole("button", { name: /add to your watchlist/i });
+    fireEvent.click(addStar);
+    fireEvent.click(addStar);
+    answer(jsonResponse(watchlistBody([MINT])));
+    await screen.findByRole("button", { name: /remove from your watchlist/i });
+
+    const changes = (fetcher.mock.calls as [string, RequestInit | undefined][]).filter(
+      ([, init]) => init?.method === "PUT" || init?.method === "DELETE",
+    );
+    expect(changes).toHaveLength(1);
+  });
+
   it("never sends a query string to a watchlist route", async () => {
     signIn();
     const fetcher = vi.fn(async (_url: string, init?: RequestInit) => {

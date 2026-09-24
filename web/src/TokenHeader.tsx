@@ -18,7 +18,7 @@ import type { MarketToken } from "./api";
 import { CoinImage } from "./CoinImage";
 import { MarketFigure } from "./Figures";
 import {formatCompactUsd, formatPrice, shortenAddress} from "./format";
-import { watchlistMessage, watchlistToggleFailure } from "./honesty";
+import { isWatchlistSessionRefusal, watchlistMessage, watchlistToggleFailure } from "./honesty";
 import { tokenPath } from "./routes";
 import type { Load } from "./useApi";
 import { useWatchlist } from "./useWatchlist";
@@ -147,7 +147,7 @@ function WatchlistStar({
   mint: string;
   watchlist: ReturnType<typeof useWatchlist>;
 }) {
-  const { load, toggleError, toggle } = watchlist;
+  const { load, toggleError, toggle, pending } = watchlist;
 
   if (load.state === "signed-out") {
     return (
@@ -168,7 +168,7 @@ function WatchlistStar({
       load.state === "loading"
         ? "Reading your watchlist…"
         : watchlistMessage(
-            isSessionRefusal(load.reason)
+            isWatchlistSessionRefusal(load.reason)
               ? { kind: "session-refused" }
               : { kind: "could-not-look", detail: load.detail },
           );
@@ -193,6 +193,7 @@ function WatchlistStar({
       <button
         type="button"
         onClick={() => void toggle(mint)}
+        disabled={pending}
         title={label}
         aria-label={label}
         aria-pressed={watching}
@@ -206,15 +207,6 @@ function WatchlistStar({
         </span>
       )}
     </span>
-  );
-}
-
-function isSessionRefusal(reason: string): boolean {
-  return (
-    reason === "no_session" ||
-    reason === "session_invalid" ||
-    reason === "session_expired" ||
-    reason === "not_a_wallet"
   );
 }
 
@@ -238,7 +230,7 @@ function WatchlistPanel({ watchlist }: { watchlist: ReturnType<typeof useWatchli
   }
 
   if (load.state === "failed") {
-    const message = isSessionRefusal(load.reason)
+    const message = isWatchlistSessionRefusal(load.reason)
       ? watchlistMessage({ kind: "session-refused" })
       : watchlistMessage({ kind: "could-not-look", detail: load.detail });
     return <p className="text-xs text-[var(--color-warn)]">{message}</p>;

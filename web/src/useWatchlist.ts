@@ -11,6 +11,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { customer, WatchlistError, type Watchlist } from "./api";
+import { isWatchlistSessionRefusal } from "./honesty";
 import { useWalletToken } from "./Wallet";
 
 /** What the watchlist read is doing right now. */
@@ -35,6 +36,10 @@ export interface UseWatchlist {
   toggleError: { reason: string; detail: string } | null;
   /** Adds `mint` if the last read did not have it, removes it otherwise. */
   toggle: (mint: string) => Promise<void>;
+  /** A change is on its way to the server. The star waits for its answer:
+   *  a second click decided from the pre-change list would send the same
+   *  change again rather than undo it. */
+  pending: boolean;
 }
 
 export function useWatchlist(): UseWatchlist {
@@ -42,6 +47,7 @@ export function useWatchlist(): UseWatchlist {
   const [load, setLoad] = useState<WatchlistLoad>(
     token ? { state: "loading" } : { state: "signed-out" },
   );
+  const [pending, setPending] = useState(false);
   const [toggleError, setToggleError] = useState<{ reason: string; detail: string } | null>(
     null,
   );
@@ -70,6 +76,7 @@ export function useWatchlist(): UseWatchlist {
       if (!token) return;
       const watching = load.state === "ready" && load.value.coins.includes(mint);
       setToggleError(null);
+      setPending(true);
       try {
         const value = watching
           ? await customer.watchlist.unwatch(token, mint)
@@ -81,23 +88,19 @@ export function useWatchlist(): UseWatchlist {
         // is showing came from a session the server no longer honours. Every
         // other refusal (full, not_a_coin, a server fault) is a fact about
         // this one change, not about the list already on screen.
-        if (
-          failure.state === "failed" &&
-          (failure.reason === "no_session" ||
-            failure.reason === "session_invalid" ||
-            failure.reason === "session_expired" ||
-            failure.reason === "not_a_wallet")
-        ) {
+        if (failure.state === "failed" && isWatchlistSessionRefusal(failure.reason)) {
           setLoad(failure);
         } else if (failure.state === "failed") {
           setToggleError({ reason: failure.reason, detail: failure.detail });
         }
+      } finally {
+        setPending(false);
       }
     },
     [token, load],
   );
 
-  return { load, toggleError, toggle };
+  return { load, toggleError, toggle, pending };
 }
 
 function failureFrom(e: unknown): WatchlistLoad {
