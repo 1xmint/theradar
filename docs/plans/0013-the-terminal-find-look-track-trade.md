@@ -17,7 +17,10 @@ on the owner. **Both of those are now deployed** -- `/health` reported build
 Phase C item 3 (#271) and item 4's trades half (#283, which replaced #272) are
 merged and **deployed** -- `/health` reports build `871c6ce` since 2026-09-23.
 C item 1 (#285, the watchlist) is merged and **deployed** -- `/health` reports
-build `7554bb8` since 2026-09-23. C item 2 is not built, and nothing in D or E is.
+build `7554bb8` since 2026-09-23. Item 4's watchlist star and panel (#287) and
+item 2, positions (#288, then the #289 fix), are merged and **deployed** --
+`/health` reports build `d0aba33` since 2026-09-24. **Phase C is built and
+live.** Nothing in D or E is built.
 **Date:** 2026-09-18, handback extended 2026-09-23.
 **Branch:** none; each item lands on `main` as its own pull request.
 **Inspected base:** `c8fca0e` (`Remove the bot from Radar: it lives in realorrug
@@ -510,3 +513,43 @@ that says plainly it is not evidence of what the wallet holds. `MIN_WEB_TESTS`
 raised 132 to 146 (`vitest run`: 146/146). Not yet done: independent review,
 merge, and a check against the real site with a wallet that actually holds
 tokens.
+
+**Item 2 is merged and live, 2026-09-24, after a one-line fix.** Independent
+review (Opus) passed #288, which squash-merged as `0dbaadc` with
+`MIN_WEB_TESTS` at 151 and was deployed. On the real site every read then
+refused `502 unreadable_chain`: `TOKEN_2022_PROGRAM_ID` in
+`radar-onchain/src/rpc.rs` was mistyped (`...PE9w6NCZt4Kwh2`, no account on
+mainnet), and the public node answers `getTokenAccountsByOwner` with it as
+`INVALID_PARAMS`. Every test passed because the fake `Transport` never looks
+at the program id, and review read past it. #289 corrects it to
+`TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb` (checked from the box:
+`getAccountInfo` answers an executable program) and adds
+`the_token_programs_read_are_the_ones_mainnet_runs`, which pins both ids to
+`radar_pumpfun::token`'s byte constants, themselves pinned against real
+accounts. It squash-merged as `d0aba33`; the release build's sha256 matched
+`BUILD-INFO.txt`, `sudo radar-deploy` installed it, and `/health` reports
+`d0aba33`.
+
+**Verified against the real site with two fresh wallets** signed in through
+`/v1/customer/siws`: A and B each read `200` with their own address, an empty
+`tokens` list and zero lamports; B naming A in a query got `400 unscoped`; B
+naming A in the path was refused by Cloudflare Access before it reached Radar;
+no session got `no_session`; A's token with one character changed got
+`session_invalid`; A's second read two seconds later was the cached answer
+(same `slot`, `age_seconds: 2`); every answer carried `Cache-Control:
+private, no-store`. Not checked live: a wallet that actually holds tokens
+(both wallets were empty, and funding one is the owner's call), and an expired
+session (CI covers it).
+
+Two things this surfaced, neither a code fault:
+
+- **SOL itself is unpriced on the live box.** The answer reads "no wrapped-SOL
+  trade quoted in USDC or USDT was found in Radar's pricing window": the tape
+  held no wSOL trade against a dollar coin, so nothing prices SOL in dollars.
+  Balances are right; only SOL's dollar value is missing. Recording such a
+  pair would widen what the tape collects, which is the owner's decision
+  (Phase B item 3).
+- **Positions reads through the public node.** `RADAR_RPC` is not set in
+  `/etc/radar/radar.env`, so reads go to `api.mainnet-beta.solana.com` from
+  the same IP as the two backfill jobs. Under load, visitors will see `busy`
+  or "could not look". A private RPC URL there is the owner's edit.
