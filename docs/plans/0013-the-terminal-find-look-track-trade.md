@@ -184,10 +184,16 @@ session: four refusals, four different messages.
    `radar-exec` router code (`crates/radar-exec/src/route.rs:243-590`), which
    already quotes Jupiter both ways or refuses (#231). Per-IP limit so a
    visitor cannot burn Jupiter's allowance for everyone.
-3. Swap: the browser asks Jupiter for the unsigned transaction, shows the
-   visitor exactly what they pay, receive, and the worst-case price, and only
-   then calls the wallet's sign-and-send. Extend `Wallet.tsx`; sign-in code in
-   `siws.ts` stays sign-in only.
+3. Swap: **amended 2026-09-24 by
+   [ADR 0024](../adr/0024-radar-builds-a-visitors-swap-and-only-their-wallet-signs-it.md)**
+   -- the browser cannot ask Jupiter (fee, key, and CSP, each on record), so
+   Radar's server builds the unsigned v0 transaction from Jupiter's `/build`
+   for the signed-in wallet only, behind `Tenant`, for every coin Jupiter
+   routes. The browser shows the visitor exactly what they pay, receive, and
+   the worst-case price, and only then calls the wallet's sign-and-send.
+   Extend `Wallet.tsx`; sign-in code in `siws.ts` stays sign-in only. The
+   button ships off behind a server switch until the owner approves a drafted
+   terms page and notice.
 4. Guard rails on the screen: slippage cap with a sane default, a refusal
    when the quote is stale or the coin has no route, the round-trip cost shown
    as a cost (`honesty.ts` already separates cost from gain).
@@ -594,3 +600,58 @@ Item D.3's browser half (the terminal actually calling these routes, showing
 the visitor what they pay and receive, then invoking the wallet's
 sign-and-send) and item D.5 (independent review before real money moves) are
 not part of this change.
+
+**Phase E item 2 (9-11-0019, chart tools) is built, 2026-09-24, PR open, not
+yet reviewed or deployed.** Two pure modules back the chart: `indicators.ts`
+(SMA 20/50/200 and EMA 12/26/50 over price, plus a volume SMA 20, since
+`Candle.volume` already exists and this is a smoothed read of it rather than a
+new data source) and `drawings.ts` (horizontal price lines and two-point trend
+lines). Both are wired into `CandleChart.tsx` as toggle chips and a small
+drawing toolbar (`+ Line`, `+ Trend`, `Clear lines`) alongside the existing
+interval selector and crosshair from item 1 (9-11-0018).
+
+0012 P6's rubric -- an indicator whose lookback exceeds the available bars is
+absent, not truncated and not zero-seeded -- holds by construction: `sma` and
+`ema` only write a value at index `i` once `i >= lookback - 1`, so every index
+before the window fills, and every index at all when the series is shorter
+than the lookback, stays `null`. There is no separate "not enough data" branch
+to get wrong. Proved by reasoning rather than by running vitest (forbidden by
+this task): re-applying a zero-seeded `ema` (folding in `0` for missing prior
+values instead of leaving the index `null`) makes
+`indicators.test.ts`'s `"is absent -- not zero-seeded -- before its seed
+window fills"` fail, because it asserts `result[0]` and `result[1]` are
+`null` and a zero-seeded version would put a number there instead.
+Re-applying a truncated/partial-window `sma` (averaging however many bars
+exist) makes `"is absent in full, not truncated, when the lookback exceeds
+every bar there is"` fail the same way, since `sma([1, 2, 3], 5)` would come
+back as `[null, null, 1.2]` (zero-seeded) or `[null, null, 2]` (truncated to
+the 3 bars on hand) instead of `[null, null, null]`. When every choice is
+absent for lack of history the panel says so in words, naming the lookback
+and what the interval actually has (`"20-bar average needs 20 bars; this
+interval has 7."`), never a leading zero or a partial number.
+
+Drawings persist per mint in `localStorage` only (`radar.chart.drawings.
+<mint>`), labelled on screen as "your lines, kept in this browser," and are
+never sent to the server -- `drawings.ts` never calls `fetch`. Indicator
+choices persist the same way, one shared key (`radar.chart.indicators`)
+rather than per mint, since only drawings are the plan's per-mint promise.
+Both follow `Wallet.tsx`'s `storedSession` pattern exactly: every read and
+write is wrapped in try/catch, and a stored value that fails validation --
+even one bad entry in an otherwise-valid list -- is discarded whole and
+removed, never filtered down to its valid-looking remainder. Switching
+timeframe recomputes every indicator from the newly selected interval's own
+candles (the recompute effect depends on `[candles, indicatorChoices]`), so
+there is no carry-over from the previous interval and nothing is
+extrapolated.
+
+The trend line is an ordinary two-point `LineSeries`, not a custom
+`ISeriesPrimitive`: lightweight-charts v5's plugin-examples trend line needs
+hand-rolled canvas pane-view rendering that is reference code, not a
+first-class export, and would add real risk for no vitest coverage a plugin
+could earn back. Two points sorted by time is fully within the public v5 API
+(`addSeries(LineSeries, ...)`, `createPriceLine`), needs no new dependency,
+and keeps the data model itself unit-tested even though rendering, like
+`CandleChart.tsx`'s other rendering, is not. `indicators.test.ts` and
+`drawings.test.ts` add 26 cases; `MIN_WEB_TESTS` raised 151 to 177. No new
+dependency. Not yet done: independent review, merge, and a check against the
+real site with a coin that has enough history for every lookback to resolve.
