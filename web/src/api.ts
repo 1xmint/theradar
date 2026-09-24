@@ -171,6 +171,84 @@ export const market = {
 };
 
 /**
+ * A refusal from `/v1/customer/watchlist*`.
+ *
+ * `tenant::refusal` sends `{"error": <sentence>, "reason": <code>}` -- the
+ * mirror image of the `{error, message}` shape `get` above reads, and the
+ * `reason` code is load-bearing here in a way `get`'s callers never needed:
+ * the star button and the watchlist panel each switch on *which* refusal
+ * this is (`full` beside the star, a session reason everywhere), not just on
+ * whether one happened. Carrying the code as its own field, rather than
+ * parsing it back out of a sentence, is the same reasoning `OwnTrade` gives
+ * for not re-deriving `matched_by` from prose.
+ */
+export class WatchlistError extends Error {
+  constructor(
+    readonly status: number,
+    readonly reason: string,
+    readonly detail: string,
+  ) {
+    super(`${status} ${reason}: ${detail}`);
+    this.name = "WatchlistError";
+  }
+}
+
+/** `/v1/customer/watchlist`'s shape, exactly: the wallet it belongs to, its
+ *  coins, and the ceiling `tenant::WATCHLIST_LIMIT` enforces. */
+export interface Watchlist {
+  wallet: string;
+  coins: string[];
+  limit: number;
+}
+
+async function watchlistRequest(
+  method: "GET" | "PUT" | "DELETE",
+  path: string,
+  token: string,
+  signal?: AbortSignal,
+): Promise<Watchlist> {
+  const response = await fetch(path, {
+    method,
+    signal: signal ?? null,
+    headers: { authorization: `Bearer ${token}`, accept: "application/json" },
+  });
+  let body: { error?: string; reason?: string } | null = null;
+  try {
+    body = (await response.json()) as { error?: string; reason?: string };
+  } catch {
+    // A non-JSON body is itself informative: something upstream answered.
+  }
+  if (!response.ok) {
+    throw new WatchlistError(
+      response.status,
+      body?.reason ?? "unknown",
+      body?.error ?? response.statusText,
+    );
+  }
+  return body as unknown as Watchlist;
+}
+
+/**
+ * The signed-in wallet's own watchlist: `/v1/customer/watchlist`.
+ *
+ * **Never a query string.** `tenant::with_store` refuses one on sight rather
+ * than reading it as a wallet address to look up -- the wallet these
+ * functions read is always the bearer token, never a parameter, and adding
+ * one here would ask for a refusal these functions have no way to recover
+ * from silently.
+ */
+export const customer = {
+  watchlist: {
+    list: (token: string, signal?: AbortSignal) =>
+      watchlistRequest("GET", "/v1/customer/watchlist", token, signal),
+    watch: (token: string, mint: string) =>
+      watchlistRequest("PUT", `/v1/customer/watchlist/${encodeURIComponent(mint)}`, token),
+    unwatch: (token: string, mint: string) =>
+      watchlistRequest("DELETE", `/v1/customer/watchlist/${encodeURIComponent(mint)}`, token),
+  },
+};
+
+/**
  * One row of the live coin list, exactly as `/v1/market/coins` sends it.
  *
  * **Rewritten 2026-09-11 to match the server rather than a guess at it.** The

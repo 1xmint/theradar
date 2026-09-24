@@ -373,3 +373,79 @@ export function yourTradesRefusal(detail: string): YourTrades {
 function countOfTrades(n: number): string {
   return n === 1 ? "one trade" : `${n} trades`;
 }
+
+// --- the watchlist's honesty rules ------------------------------------------
+//
+// `/v1/customer/watchlist` is per-wallet storage, not a market read, and it
+// has its own way to be empty: no wallet at all, a wallet with nothing saved,
+// and Radar failing to look. `yourTradesMessage` above keeps "none of yours"
+// apart from "could not look" for the same reason -- an empty watchlist and
+// an unreadable one both render zero rows, and only the words say which.
+
+/**
+ * Why the watchlist star or panel would show something other than the
+ * wallet's real list.
+ *
+ * `session-refused` is its own case rather than folded into `could-not-look`:
+ * the fix for one is "sign in with your wallet again", and the fix for the
+ * other is "try again later" -- two different instructions that a single
+ * sentence cannot give both of.
+ */
+export type WatchlistState =
+  | { kind: "signed-out" }
+  | { kind: "empty" }
+  | { kind: "session-refused" }
+  | { kind: "could-not-look"; detail: string };
+
+export function watchlistMessage(state: WatchlistState): string {
+  switch (state.kind) {
+    case "signed-out":
+      // The star's silent-no-op failure mode this exists to prevent: a click
+      // that does nothing looks exactly like a broken button unless it says
+      // why.
+      return "Connect a wallet to keep a watchlist. Radar keeps one list per wallet, and there is none to show until you sign in.";
+    case "empty":
+      return "Your watchlist is empty";
+    case "session-refused":
+      return "Your wallet session is no longer valid. Sign in with your wallet again to see your watchlist.";
+    case "could-not-look":
+      return `Radar could not read your watchlist${
+        state.detail ? `: ${state.detail}` : ""
+      }. This says nothing about which coins you are watching.`;
+  }
+}
+
+/**
+ * Which of `/v1/customer/watchlist`'s refusal reasons are the caller's
+ * session, not a fact about this instance -- mirrors `tenant::refused`
+ * (`no_session`, `session_invalid`, `session_expired`) plus `not_a_wallet`,
+ * the fourth way a request can carry no usable wallet session.
+ */
+export function isWatchlistSessionRefusal(reason: string): boolean {
+  return (
+    reason === "no_session" ||
+    reason === "session_invalid" ||
+    reason === "session_expired" ||
+    reason === "not_a_wallet"
+  );
+}
+
+/**
+ * Why adding or removing a coin did not stick -- shown beside the star
+ * rather than replacing the list underneath it, because a failed *change* is
+ * not evidence the *read* that already succeeded was wrong.
+ *
+ * `full` gets its own sentence for the reason `Unavailable::Full` gives on
+ * the server: "remove one first" is an instruction, and folding it into a
+ * generic failure message would print a fact without the action that follows
+ * from it.
+ */
+export function watchlistToggleFailure(reason: string, detail: string): string {
+  if (reason === "full") {
+    return "Your watchlist already holds as many coins as Radar will keep for one wallet. Remove one before adding another.";
+  }
+  if (isWatchlistSessionRefusal(reason)) {
+    return "Your wallet session is no longer valid. Sign in with your wallet again.";
+  }
+  return `Radar could not save that: ${detail}`;
+}

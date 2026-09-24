@@ -138,6 +138,30 @@ function readAddress(): string | null {
   return storedSession()?.address ?? null;
 }
 
+/**
+ * The signed-in session's bearer token, or `null`, re-read whenever it
+ * changes.
+ *
+ * A string, not the session object, for the same identity reason
+ * [`useWalletAddress`] returns a string: `useSyncExternalStore` compares
+ * snapshots with `Object.is`, and a fresh object every render would never
+ * compare equal to itself.
+ *
+ * Kept separate from [`useWalletAddress`] rather than folded into one hook
+ * returning the whole session: most callers only need the address to decide
+ * *whether* to ask, and handing every caller a bearer token on top is how a
+ * component that never sends a request quietly starts carrying a credential.
+ * Only a request that actually authenticates as this wallet -- the watchlist
+ * calls -- needs this one.
+ */
+export function useWalletToken(): string | null {
+  return useSyncExternalStore(subscribeToSession, readToken, readNothing);
+}
+
+function readToken(): string | null {
+  return storedSession()?.token ?? null;
+}
+
 /** On the server there is no storage and so nobody is signed in. */
 function readNothing(): string | null {
   return null;
