@@ -34,6 +34,7 @@
 //! impact, and *before* signing because a trade that does not pay for itself
 //! should never reach the process that holds the key.
 
+pub mod assemble;
 pub mod customer_signing;
 pub mod economics;
 pub mod pipeline;
@@ -41,8 +42,9 @@ pub mod route;
 pub mod signer_client;
 pub mod submit;
 
+pub use assemble::AssembledTransaction;
 pub use economics::{Costs, Economics, FailureRisk};
 pub use pipeline::{Attempt, Outcome, execute};
-pub use route::{Credentials, Quote, QuoteRequest, Route, RouteError, Router};
+pub use route::{Build, Credentials, Quote, QuoteRequest, Route, RouteError, Router};
 pub use signer_client::StreamSigner;
 pub use submit::{Finality, SubmitError, Submitter};

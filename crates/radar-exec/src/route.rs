@@ -532,8 +532,10 @@ impl Router {
 
     /// Asks what `request` would get.
     ///
-    /// One GET. Nothing is signed, nothing is submitted, and the instructions
-    /// in the answer are read for their lookup-table count and then dropped.
+    /// One GET, at this router's configured slippage. Nothing is signed,
+    /// nothing is submitted, and the instructions in the answer are read for
+    /// their lookup-table count and then dropped. See [`Self::build`] for the
+    /// same call kept instead of dropped.
     ///
     /// # Errors
     ///
@@ -542,6 +544,50 @@ impl Router {
     /// [`RouteError::Unavailable`] for transport and rate limits, and
     /// [`RouteError::Malformed`] when the answer is not one this module reads.
     pub fn quote(&self, request: &QuoteRequest) -> Result<Quote, RouteError> {
+        let body = self.fetch_body(request, self.slippage_bps)?;
+        Quote::from_response(&body, request)
+    }
+
+    /// [`Self::quote`], at `slippage_bps` rather than this router's configured
+    /// default.
+    ///
+    /// Split out for `GET /v1/market/quote` (plan 0013 Phase D, ADR 0024),
+    /// which accepts slippage as an optional request parameter rather than a
+    /// per-instance setting — the same reason [`Self::build`] takes it
+    /// per-call instead of using [`Self::with_slippage_bps`].
+    ///
+    /// # Errors
+    ///
+    /// The same as [`Self::quote`].
+    pub fn quote_at(&self, request: &QuoteRequest, slippage_bps: u32) -> Result<Quote, RouteError> {
+        let body = self.fetch_body(request, slippage_bps)?;
+        Quote::from_response(&body, request)
+    }
+
+    /// Asks what `request` would get, at `slippage_bps`, and compiles the
+    /// unsigned transaction the same answer describes.
+    ///
+    /// Exactly one Jupiter call: `/build` already returns the quote fields and
+    /// the raw instructions together, so this reads both out of the one body
+    /// rather than asking twice. `slippage_bps` is per-call rather than
+    /// [`Self::with_slippage_bps`]'s per-router setting, because a customer
+    /// route accepts it as a request parameter (bounded by its own caller).
+    ///
+    /// # Errors
+    ///
+    /// The same as [`Self::quote`], plus [`RouteError::Malformed`] if the
+    /// response cannot be assembled into a transaction — see
+    /// [`crate::assemble::assemble`].
+    pub fn build(&self, request: &QuoteRequest, slippage_bps: u32) -> Result<Build, RouteError> {
+        let body = self.fetch_body(request, slippage_bps)?;
+        let quote = Quote::from_response(&body, request)?;
+        let transaction = crate::assemble::assemble(&body, request.taker)?;
+        Ok(Build { quote, transaction })
+    }
+
+    /// The one GET both [`Self::quote`] and [`Self::build`] make, returning
+    /// the raw response body for each to read its own way.
+    fn fetch_body(&self, request: &QuoteRequest, slippage_bps: u32) -> Result<String, RouteError> {
         let input = QuoteRequest::wire_mint(request.input).to_string();
         let output = QuoteRequest::wire_mint(request.output).to_string();
 
@@ -553,7 +599,7 @@ impl Router {
             .query("outputMint", &output)
             .query("amount", request.amount.to_string())
             .query("taker", request.taker.to_string())
-            .query("slippageBps", self.slippage_bps.to_string())
+            .query("slippageBps", slippage_bps.to_string())
             .call();
 
         let mut response = match response {
@@ -581,8 +627,18 @@ impl Router {
                 request.amount,
             ));
         }
-        Quote::from_response(&body, request)
+        Ok(body)
     }
+}
+
+/// A priced quote and the unsigned transaction that would fill it, from one
+/// Jupiter call. See [`Router::build`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Build {
+    /// The same quote [`Router::quote`] would have returned for this request.
+    pub quote: Quote,
+    /// The unsigned v0 transaction, fee payer set to the request's `taker`.
+    pub transaction: crate::assemble::AssembledTransaction,
 }
 
 /// Converts a percentage string to basis points, treating unreadable as maximal.

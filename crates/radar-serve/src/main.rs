@@ -170,6 +170,31 @@ fn positions_lane() -> (radar_serve::positions::Positions, String) {
     (positions, note)
 }
 
+/// Whether this instance builds or prices swaps at all.
+///
+/// Unlike [`positions_lane`], `None` here *is* the shipped state: `RADAR_TRADE`
+/// defaults off (plan 0013 Phase D, ADR 0024, AGENTS rule 8), and pricing a
+/// swap needs a Jupiter credential that has no safe fallback the way a public
+/// RPC node is a safe fallback for reading balances. `RADAR_TRADE=on` with no
+/// credential refuses to **start**, rather than mounting both routes to answer
+/// `trading_off` for a reason that is actually a misconfiguration.
+///
+/// # Errors
+///
+/// The message to print and refuse startup with.
+fn trading_lane() -> Result<(Option<radar_serve::trade::Trading>, String), String> {
+    let rpc = radar_onchain::rpc::RpcClient::from_vars(&|k| std::env::var(k).ok());
+    let get = |k: &str| std::env::var(k).ok();
+    match radar_serve::trade::from_vars(&get, rpc) {
+        Ok(Some(trading)) => Ok((Some(trading), "on".to_owned())),
+        Ok(None) => Ok((
+            None,
+            "off — set RADAR_TRADE=on to build and price swaps".to_owned(),
+        )),
+        Err(why) => Err(why),
+    }
+}
+
 /// The startup line for the access mode, said plainly every start: an
 /// instance serving operational detail to anyone who can reach it should say
 /// so in its own logs.
@@ -369,6 +394,10 @@ async fn main() -> ExitCode {
         Err(why) => return refused(&why),
     };
     let (positions, positions_note) = positions_lane();
+    let (trading, trading_note) = match trading_lane() {
+        Ok(lane) => lane,
+        Err(why) => return refused(&why),
+    };
     let state = Arc::new(AppState {
         admission,
         shares,
@@ -395,6 +424,7 @@ async fn main() -> ExitCode {
         market_snapshot: radar_serve::market::SnapshotCache::with_background_refresh(),
         customers: Some(customers),
         positions: Some(positions),
+        trading,
     });
 
     // Off the request path, per the market module's own doc comment: every
@@ -426,6 +456,7 @@ async fn main() -> ExitCode {
     // from a support message.
     println!("  wallets    : {privy_note}");
     println!("  positions  : reading balances from {positions_note}");
+    println!("  trading    : {trading_note}");
     println!("  agent      : {agent_note}");
     println!("  market feed: {feed_note}");
     println!("  listening  : http://{bind}");
@@ -438,7 +469,17 @@ async fn main() -> ExitCode {
         }
     };
 
-    if let Err(e) = axum::serve(listener, app(state)).await {
+    // `into_make_service_with_connect_info` rather than the plain service: the
+    // per-visitor rate limit on `/v1/market/quote` falls back to the
+    // connection's own peer address when `CF-Connecting-IP` is absent (see
+    // `trade`'s module doc comment), and that fallback only exists as
+    // `ConnectInfo<SocketAddr>` when the server is told to record it.
+    if let Err(e) = axum::serve(
+        listener,
+        app(state).into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .await
+    {
         eprintln!("server stopped: {e}");
         return ExitCode::FAILURE;
     }

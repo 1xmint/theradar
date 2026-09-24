@@ -156,6 +156,7 @@ fn router_with_store(positions: Option<Positions>, store: Reader) -> axum::Route
         market_snapshot: radar_serve::market::SnapshotCache::new(),
         customers: None,
         positions,
+        trading: None,
     }))
 }
 

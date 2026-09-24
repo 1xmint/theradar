@@ -141,6 +141,7 @@ fn router(allowance: Allowance, keys: Keys) -> (axum::Router, Arc<AtomicBool>) {
         customers: None,
 
         positions: None,
+        trading: None,
     }));
     (router, reached)
 }

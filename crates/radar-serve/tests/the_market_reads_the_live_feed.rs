@@ -49,6 +49,7 @@ fn router(live: Arc<Live>) -> axum::Router {
         customers: None,
 
         positions: None,
+        trading: None,
     }))
 }
 

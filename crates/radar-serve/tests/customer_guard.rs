@@ -107,6 +107,7 @@ fn router(keys: Keys) -> axum::Router {
         customers: None,
 
         positions: None,
+        trading: None,
         privy: None,
     }))
 }
@@ -221,6 +222,7 @@ async fn the_wallet_route_refuses_a_request_carrying_no_customer_identity() {
         customers: None,
 
         positions: None,
+        trading: None,
         privy: None,
     }));
 
@@ -304,6 +306,7 @@ async fn a_wallet_session_opens_the_product_on_an_instance_with_no_privy() {
         customers: None,
 
         positions: None,
+        trading: None,
         privy: None,
     }));
 
@@ -371,6 +374,7 @@ async fn an_allowlist_admits_the_wallet_it_names_and_no_other() {
             customers: None,
 
             positions: None,
+            trading: None,
             privy: None,
         }))
     };

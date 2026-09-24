@@ -680,6 +680,10 @@ pub fn audience_of(path: &str) -> Audience {
         || path == "/v1/chat"
         || path == "/v1/customer/watchlist"
         || path == "/v1/customer/positions"
+        // Plan 0013 Phase D, ADR 0024: builds an unsigned transaction naming
+        // the signed-in wallet as fee payer. Behind the same `Tenant` as
+        // `positions` and `watchlist`, for the same reason.
+        || path == "/v1/customer/swap"
         || one_coin;
     if customer {
         return Audience::Customer;
