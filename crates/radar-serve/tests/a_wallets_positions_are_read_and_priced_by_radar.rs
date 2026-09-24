@@ -635,6 +635,89 @@ async fn a_sol_quoted_trade_and_a_usdc_quoted_trade_are_never_priced_alike() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn the_newest_trade_in_the_window_prices_a_mint_whatever_order_the_store_holds_them() {
+    // `market::prices_of` reads the tape in store order, not trade order: one
+    // mint's trades are appended oldest first and the other's newest first,
+    // so whichever order the store gives back, only a "keep the newer one"
+    // comparison prices both at their later trade. A mint whose only trade
+    // is older than the pricing window is unpriced, not priced off it. SOL
+    // whose only trade is quoted in wSOL itself is unpriced, since a SOL
+    // price in SOL says nothing.
+    let who = wallet(1);
+    let ascending_mint = wallet(70);
+    let descending_mint = wallet(71);
+    let stale_mint = wallet(72);
+    let sentinel_mint = wallet(73);
+
+    let trades = vec![
+        priced_trade(ascending_mint, USDC_MINT, "2020-01-01 00:00:01.000000", 1.0),
+        priced_trade(ascending_mint, USDC_MINT, "2020-01-01 00:00:02.000000", 2.0),
+        priced_trade(
+            descending_mint,
+            USDC_MINT,
+            "2020-01-01 00:00:02.000000",
+            20.0,
+        ),
+        priced_trade(
+            descending_mint,
+            USDC_MINT,
+            "2020-01-01 00:00:01.000000",
+            10.0,
+        ),
+        // An hour before the newest trade: outside the 30-minute window.
+        priced_trade(stale_mint, USDC_MINT, "2019-12-31 23:00:05.000000", 7.0),
+        priced_trade(
+            WSOL_MINT.parse().expect("wSOL parses"),
+            WSOL_MINT,
+            "2020-01-01 00:00:01.000000",
+            1.0,
+        ),
+        priced_trade(sentinel_mint, USDC_MINT, "2020-01-01 00:00:05.000000", 1.0),
+    ];
+    let (_dir, store) = seeded_store(&trades);
+
+    let responses = view(
+        balance_json(100, 1_500_000_000),
+        token_accounts_json(
+            100,
+            &who,
+            &[
+                (&ascending_mint.to_string(), "1000000", 6),
+                (&descending_mint.to_string(), "1000000", 6),
+                (&stale_mint.to_string(), "1000000", 6),
+            ],
+        ),
+        empty_token_accounts_json(100),
+    );
+    let router = router_with_store(Some(positions_from(responses)), store);
+
+    let (status, body) = call(
+        &router,
+        Method::GET,
+        "/v1/customer/positions",
+        Some(&session(&who)),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    let tokens = body["tokens"].as_array().expect("a token list");
+    let find = |mint: Address| {
+        tokens
+            .iter()
+            .find(|t| t["mint"] == mint.to_string())
+            .expect("the held mint is in the list")
+    };
+    assert_eq!(find(ascending_mint)["price"], 2.0, "{body}");
+    assert_eq!(find(descending_mint)["price"], 20.0, "{body}");
+    assert_eq!(find(stale_mint)["priced"], false, "{body}");
+    assert!(find(stale_mint)["price"].is_null(), "{body}");
+
+    assert_eq!(body["sol"]["priced"], false, "{body}");
+    assert!(body["sol"]["price"].is_null(), "{body}");
+    assert!(body["sol"]["price_reason"].is_string(), "{body}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn positions_are_never_served_with_a_header_a_shared_cache_would_keep() {
     // Item 13: per-wallet data must never be reusable from a shared cache.
     let router = router(Some(positions_from(view(

@@ -323,6 +323,22 @@ describe("TokenHeader positions", () => {
     expect(await screen.findByText("This wallet holds no tokens")).toBeTruthy();
   });
 
+  it("says Radar could not read, never 'holds no tokens', when a 200 carries a body that is not JSON", async () => {
+    signIn();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) =>
+        String(url).includes("/customer/positions")
+          ? new Response("<html>gateway</html>", { status: 200, headers: { "content-type": "text/html" } })
+          : jsonResponse(watchlistBody([])),
+      ),
+    );
+    render(<TokenHeader load={ready(token())} />);
+
+    expect(await screen.findByText(/says nothing about what the wallet holds/i)).toBeTruthy();
+    expect(screen.queryByText(/holds no tokens/i)).toBeNull();
+  });
+
   it("adds the SOL balance to the empty sentence rather than calling a wallet with SOL 'empty'", async () => {
     signIn();
     stubPositions({
@@ -344,6 +360,10 @@ describe("TokenHeader positions", () => {
     render(<TokenHeader load={ready(token())} />);
 
     expect(await screen.findByText(/holds no tokens.*1\.500000000 SOL/i)).toBeTruthy();
+    // A wallet holding only SOL still gets its SOL row, with the reason Radar
+    // cannot price SOL -- the sentence alone would hide that reason.
+    expect(screen.getByText("SOL")).toBeTruthy();
+    expect(screen.getByText("no SOL/USDC or SOL/USDT trade in the tape")).toBeTruthy();
   });
 
   it("marks an untracked mint as unpriced rather than $0, and links the tracked one", async () => {

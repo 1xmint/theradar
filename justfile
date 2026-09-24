@@ -284,7 +284,7 @@ licence-headers:
 # rather than freezing at the server's own count (item 5); `honesty.test.ts`
 # gained a case that the "holds no tokens" sentence compares the wallet's raw
 # lamport integer, never the formatted `ui_amount` string (item 4).
-export MIN_WEB_TESTS := "150"
+export MIN_WEB_TESTS := "151"
 
 # The public site at cabalhunter.org. Lower because it has five pages, and it
 # exists for the same reason MIN_WEB_TESTS does: `vitest run` exits zero when it

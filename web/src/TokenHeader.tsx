@@ -341,10 +341,10 @@ function PositionsPanel({ positions }: { positions: ReturnType<typeof usePositio
   const { sol, tokens, age_seconds } = positions.value;
   const elapsedSeconds = Math.max(0, (now - arrivedAt) / 1000);
   const displayedAge = age_seconds + elapsedSeconds;
-  // Item 11: a SOL row whenever the wallet actually holds SOL, alongside any
-  // SPL tokens it holds too. When there are no SPL tokens at all, the
-  // "holds no tokens" sentence below already states the SOL balance (item
-  // 4), so this row is not duplicated there.
+  // A SOL row whenever the wallet actually holds SOL, whether or not it holds
+  // any SPL tokens: the row is where SOL's value, or the reason Radar cannot
+  // price it, is shown -- the "holds no tokens" sentence states only the
+  // amount.
   const hasSol = sol.lamports > 0;
 
   return (
@@ -355,7 +355,7 @@ function PositionsPanel({ positions }: { positions: ReturnType<typeof usePositio
         </h2>
         <span className="text-[10px] text-[var(--color-dim)]">as of {formatAge(displayedAge)} ago</span>
       </div>
-      {tokens.length === 0 ? (
+      {tokens.length === 0 && (
         <p className="text-xs text-[var(--color-dim)]">
           {positionsMessage({
             kind: "empty",
@@ -363,8 +363,9 @@ function PositionsPanel({ positions }: { positions: ReturnType<typeof usePositio
             solUiAmount: sol.ui_amount,
           })}
         </p>
-      ) : (
-        <ul className="space-y-1">
+      )}
+      {(hasSol || tokens.length > 0) && (
+        <ul className={tokens.length === 0 ? "mt-1 space-y-1" : "space-y-1"}>
           {hasSol && (
             <li className="flex items-baseline justify-between gap-2 text-xs">
               <span className="truncate font-mono text-[var(--color-text)]">SOL</span>

@@ -223,78 +223,62 @@ impl Positions {
     /// Reserves `want` calls against this wallet's own share and the global
     /// budget, both as rolling one-minute windows.
     ///
-    /// The global check runs first. If it refuses, nothing is charged
-    /// anywhere. If it allows but the wallet's own share is then spent, the
-    /// global reservation is **not** unwound: a wallet racing its own cap is
-    /// the rare case, and worst case this makes the global window empty out
-    /// slightly sooner than calls were actually made against it -- the safe
-    /// direction to be wrong in.
+    /// Both windows are checked before either is charged, with both locks held
+    /// (always global first, then wallets, so two reservations cannot deadlock).
+    /// A request the wallet's own share refuses therefore spends nothing from
+    /// the global window: one wallet firing many requests at once is refused
+    /// by its own share without using up the minute for every other wallet.
     fn reserve(&self, wallet: Address, want: u32) -> bool {
-        {
-            let mut global = self
-                .global_calls
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-            if !reserve_in(
-                &mut global,
-                want,
-                MAX_CALLS_PER_MINUTE,
-                Duration::from_secs(60),
-            ) {
-                return false;
-            }
-        }
+        let window = Duration::from_secs(60);
+        let now = Instant::now();
+        let mut global = self
+            .global_calls
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let mut wallets = self
             .wallet_calls
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        if wallets.len() >= CACHE_CAPACITY && !wallets.contains_key(&wallet) {
-            // Bound this map the way the answer cache is bounded: drop any
-            // wallet whose reservations have all rolled out of the window --
-            // exactly the set that is safe to forget.
-            let now = Instant::now();
-            wallets.retain(|_, calls| {
-                while calls
-                    .front()
-                    .is_some_and(|t| now.duration_since(*t) >= Duration::from_secs(60))
-                {
-                    calls.pop_front();
-                }
-                !calls.is_empty()
-            });
+        prune(&mut global, now, window);
+        // Forget every wallet whose reservations have all rolled out of the
+        // window. Each reservation is also charged to the global window, so
+        // at most MAX_CALLS_PER_MINUTE wallets survive this: the work is
+        // bounded, and so is the map, with no capacity rule of its own. A
+        // refused wallet is never inserted.
+        wallets.retain(|_, calls| {
+            prune(calls, now, window);
+            !calls.is_empty()
+        });
+        let none = VecDeque::new();
+        let mine = wallets.get(&wallet).unwrap_or(&none);
+        if !fits(&global, want, MAX_CALLS_PER_MINUTE)
+            || !fits(mine, want, MAX_CALLS_PER_WALLET_PER_MINUTE)
+        {
+            return false;
         }
         let entry = wallets.entry(wallet).or_default();
-        reserve_in(
-            entry,
-            want,
-            MAX_CALLS_PER_WALLET_PER_MINUTE,
-            Duration::from_secs(60),
-        )
+        for _ in 0..want {
+            global.push_back(now);
+            entry.push_back(now);
+        }
+        true
     }
 }
 
-/// Prunes reservations older than `window` from `calls`, then reserves `want`
-/// more if the result still fits within `cap`.
-///
-/// Pruning and the room check read the same snapshot of `calls`, so this
-/// function alone is the atomic step; the caller must hold `calls` behind
-/// whatever lock keeps two racing reservations from interleaving.
-fn reserve_in(calls: &mut VecDeque<Instant>, want: u32, cap: u32, window: Duration) -> bool {
-    let now = Instant::now();
+/// Drops reservations older than `window` from the front of `calls`.
+fn prune(calls: &mut VecDeque<Instant>, now: Instant, window: Duration) {
     while calls
         .front()
         .is_some_and(|t| now.duration_since(*t) >= window)
     {
         calls.pop_front();
     }
+}
+
+/// Whether `want` more reservations still fit under `cap`.
+fn fits(calls: &VecDeque<Instant>, want: u32, cap: u32) -> bool {
     let used = u32::try_from(calls.len()).unwrap_or(u32::MAX);
-    if used.saturating_add(want) > cap {
-        return false;
-    }
-    for _ in 0..want {
-        calls.push_back(now);
-    }
-    true
+    used.saturating_add(want) <= cap
 }
 
 /// `host:port` (or just the host) of an endpoint, with no path, query or
@@ -470,8 +454,11 @@ fn priced(
         if summed.amount == 0 {
             continue;
         }
+        // A price whose quote this route cannot name is dropped, never sent
+        // beside `quote: null`: a number with no currency is not a price.
         let (price, quote_mint) = prices
             .get(&mint)
+            .filter(|p| quote_name(p.quote_mint).is_some())
             .map_or((None, None), |p| (Some(p.price), Some(p.quote_mint)));
         tokens.push(Holding {
             mint: mint.to_string(),
@@ -718,10 +705,15 @@ mod tests {
         for _ in 0..(MAX_CALLS_PER_WALLET_PER_MINUTE / CALLS_PER_VIEW) {
             assert!(positions.reserve(a, CALLS_PER_VIEW));
         }
-        assert!(
-            !positions.reserve(a, CALLS_PER_VIEW),
-            "wallet A has spent its own share"
-        );
+        // Many refused attempts at once, as a wallet firing requests in
+        // parallel would make: each must be refused without charging the
+        // global window, or twenty of them would spend it for everyone.
+        for _ in 0..(MAX_CALLS_PER_MINUTE / CALLS_PER_VIEW) {
+            assert!(
+                !positions.reserve(a, CALLS_PER_VIEW),
+                "wallet A has spent its own share"
+            );
+        }
         assert!(
             positions.reserve(b, CALLS_PER_VIEW),
             "wallet B's share is untouched by wallet A's"

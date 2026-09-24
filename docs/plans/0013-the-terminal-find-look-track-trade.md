@@ -141,8 +141,9 @@ half:
    reserved 3 at a time per view), and -- fixed 2026-09-24 after review found
    the global cap alone let one busy wallet exhaust the whole minute's budget
    -- a per-wallet cap of its own (at most 2 fresh reads, 6 calls, per wallet
-   per rolling 60 s, refused the same `503 busy` over it) keep one visitor's
-   reads from starving another's, since this quota is now Radar's own rather
+   per rolling 60 s, refused the same `503 busy` over it; both windows are
+   checked before either is charged, so a refused read spends nothing) keep
+   one visitor's reads from starving another's, since this quota is now Radar's own rather
    than free on each visitor's IP.
 3. **History: from the store only.** "Your trades in this coin" filters
    `MarketTrades` by the signed-in wallet. **The check this item asked for is
