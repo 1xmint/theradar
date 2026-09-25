@@ -32,6 +32,7 @@ import { Wallet } from "./Wallet";
 
 import { Agent } from "./Agent";
 import { Terminal } from "./Terminal";
+import { Terms } from "./Terms";
 
 export function App() {
   return (
@@ -45,6 +46,11 @@ export function App() {
       <Route path="/ask">
         <SimpleShell>
           <Agent alwaysShow />
+        </SimpleShell>
+      </Route>
+      <Route path="/terms">
+        <SimpleShell>
+          <Terms />
         </SimpleShell>
       </Route>
       <Route>

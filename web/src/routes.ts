@@ -62,6 +62,13 @@ export const ROUTES = [
     path: "/token/:mint",
     audience: "customer",
   },
+  {
+    // The terms of use. Rendered only once the owner has approved them and
+    // trading is on (see `Terms.tsx`), but classified now so a direct link
+    // never meets the operator check.
+    path: "/terms",
+    audience: "customer",
+  },
 ] as const satisfies readonly Route[];
 
 /** The path to one token's terminal view. */

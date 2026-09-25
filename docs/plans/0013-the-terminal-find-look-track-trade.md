@@ -601,6 +601,38 @@ the visitor what they pay and receive, then invoking the wallet's
 sign-and-send) and item D.5 (independent review before real money moves) are
 not part of this change.
 
+**Phase D, web half — draft PR opened, 2026-09-24.** Built in worktree
+`plan-0013-d-trade-web` against the server contract items 2 and 3 above
+describe (`GET /v1/market/quote`, `POST /v1/customer/swap`, `/health`'s
+`trading` field), authored in parallel with, not against a running instance
+of, the server side of this same phase (`plan-0013-d-swap-server`) -- see the
+PR body for the exact request/response shapes assumed. Two dark switches gate
+`TradePanel`/`Terms.tsx`: `legal.ts`'s `TERMS_APPROVED` (hardcoded `false`,
+with a test that any `[PLACEHOLDER]` bracket left in `TERMS_TEXT` forces it
+false) and `/health`'s `trading` field (`useHealth.ts`'s `useTrading()`);
+both must be true before either renders real content, so on `main` today the
+panel stays inert regardless of what the server reports. Signing:
+`@solana/web3.js` added, scoped to `sign.ts`'s single
+`VersionedTransaction.deserialize()` call, chosen over the Wallet Standard
+discovery registry (a bigger departure from `siws.ts`'s existing
+injected-provider pattern than this warranted) and over Phantom's
+undocumented-for-v0 bs58 `request()` path; `sign.ts`'s doc comment carries
+the reasoning. `TradePanel` imports `sign.ts` dynamically, so the library is
+a separate chunk fetched on the first approval, not part of the entry bundle.
+Only the wallet's rejection code (4001) reads as "cancelled"; any other
+wallet error is shown as a failure, because a visitor told "cancelled" after
+approving might approve twice. `/terms` is classified `Public` in
+`access.rs` and listed in `ROUTES`, so a direct link reaches the shell.
+
+**Not checked:** a real quote or swap against a live server -- the parallel
+`plan-0013-d-swap-server` branch building those two routes was still in
+progress as this branch was written, so the shapes in `api.ts` (`Quote`,
+`SwapResponse`) and the refusal codes in `honesty.ts`'s
+`swapRefusalMessage` are contract, not observation; cross-check both once
+that branch lands. Rehearsal on a throwaway wallet with a real, deployed server (item
+5 above) has not happened and should gate the merge, the same as every other
+phase in this plan required a real-site check before being called done.
+
 **Phase E item 2 (9-11-0019, chart tools) is built, 2026-09-24, PR open, not
 yet reviewed or deployed.** Two pure modules back the chart: `indicators.ts`
 (SMA 20/50/200 and EMA 12/26/50 over price, plus a volume SMA 20, since

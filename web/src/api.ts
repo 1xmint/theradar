@@ -112,6 +112,23 @@ export const agent = {
 };
 
 /**
+ * `/health`'s shape, narrowed to the one field the interface reads:
+ * whether trading is switched on. ADR 0024's second dark switch -- the first
+ * is `legal.ts`'s `TERMS_APPROVED` -- and `TradePanel` renders only when
+ * both agree. Everything else `/health` reports is operational detail this
+ * customer-facing bundle has no reason to parse.
+ */
+export interface Health {
+  trading: boolean;
+}
+
+/** Public, unauthenticated, and read on every load of a token page -- the
+ *  panel's second dark switch (see [`Health`]). A failed read is treated as
+ *  "not trading" by every caller, never as "assume it's on": the safe
+ *  direction to be wrong in is the one that keeps the button hidden. */
+export const health = (signal?: AbortSignal) => get<Health>("/health", signal);
+
+/**
  * The market surface: `/v1/market/*`.
  *
  * Answers "what is this token doing right now" from a venue read — price,
@@ -168,7 +185,111 @@ export const market = {
   // this sends no bearer token and the server reads no customer store.
   history: (mint: string, query: HistoryQuery, signal?: AbortSignal) =>
     get<OwnTrades>(`/v1/market/history/${encodeURIComponent(mint)}${historySearch(query)}`, signal),
+  /** Public and rate-limited per-IP (ADR 0024: "courtesy only, not a
+   *  security boundary") -- a quote costs the caller nothing to ask for and
+   *  commits nobody to anything. */
+  quote: (query: QuoteQuery, signal?: AbortSignal) => quoteRequest(query, signal),
 };
+
+/**
+ * A refusal from `/v1/market/quote` or `/v1/customer/swap` -- one class for
+ * both, unlike `WatchlistError` / `PositionsError`'s separate classes,
+ * because the two routes share the same refusal vocabulary: `busy`,
+ * `trading_off`, `no_route`, `unreadable_route`, `bad_request` and
+ * `slippage_too_wide` can come from either, and `swapRefusalMessage` in
+ * `honesty.ts` reads the same `reason` code regardless of which route sent
+ * it. Only `/v1/customer/swap` can additionally send a wallet-session
+ * refusal (`no_session` and friends) -- `isWalletSessionRefusal` already
+ * handles those without needing to know which route asked.
+ */
+export class SwapError extends Error {
+  constructor(
+    readonly status: number,
+    readonly reason: string,
+    readonly detail: string,
+  ) {
+    super(`${status} ${reason}: ${detail}`);
+    this.name = "SwapError";
+  }
+}
+
+async function quoteRequest(query: QuoteQuery, signal?: AbortSignal): Promise<Quote> {
+  const response = await fetch(`/v1/market/quote${quoteSearch(query)}`, {
+    signal: signal ?? null,
+    headers: { accept: "application/json" },
+  });
+  let body: { error?: string; reason?: string } | null = null;
+  try {
+    body = (await response.json()) as { error?: string; reason?: string };
+  } catch {
+    // A non-JSON body is itself informative: something upstream answered.
+  }
+  if (!response.ok) {
+    throw new SwapError(response.status, body?.reason ?? "unknown", body?.error ?? response.statusText);
+  }
+  if (body === null) {
+    throw new SwapError(response.status, "could_not_read", "the response body was not JSON");
+  }
+  return body as unknown as Quote;
+}
+
+/** Which side of a swap: paying SOL for the token, or paying the token for
+ *  SOL. Its own type rather than reusing [`TradeSide`] -- that type's third
+ *  member, `"unknown"`, describes a trade Radar could not attribute, which
+ *  has no meaning for a swap the visitor is about to build. */
+export type SwapSide = "buy" | "sell";
+
+/**
+ * `/v1/market/quote`'s answer, and the `quote` field `/v1/customer/swap`
+ * echoes back inside its own response -- one shape, because the transaction
+ * `/v1/customer/swap` builds is built from exactly this quote, and showing
+ * the review step anything but these same numbers would show numbers the
+ * transaction does not actually contain.
+ *
+ * Amounts are u64 base units as decimal strings, never floats, matching
+ * every other on-chain amount this file carries (`PositionsToken.amount`).
+ * `in_decimals` / `out_decimals` are nullable: a mint Radar's route has no
+ * decimals for renders as raw base units with a label, never a guessed
+ * conversion (`TradePanel.tsx`).
+ */
+export interface Quote {
+  mint: string;
+  side: SwapSide;
+  in_mint: string;
+  out_mint: string;
+  in_amount: string;
+  out_amount: string;
+  /** The floor: what the trade receives if it fills at the worst price the
+   *  slippage tolerance allows. The number this screen makes prominent --
+   *  `out_amount` is an estimate, this is the guarantee. */
+  worst_out: string;
+  in_decimals: number | null;
+  out_decimals: number | null;
+  slippage_bps: number;
+  /** Null when no venue in the route reports one -- not zero impact. */
+  impact_bps: number | null;
+  venues: string[];
+  quoted_at: number;
+}
+
+export interface QuoteQuery {
+  mint: string;
+  side: SwapSide;
+  amount: string;
+  slippage_bps?: number;
+}
+
+function quoteSearch(query: QuoteQuery): string {
+  const params = new URLSearchParams({
+    mint: query.mint,
+    side: query.side,
+    amount: query.amount,
+  });
+  if (query.slippage_bps !== undefined) {
+    params.set("slippage_bps", String(query.slippage_bps));
+  }
+  return `?${params.toString()}`;
+}
 
 /**
  * A refusal from `/v1/customer/watchlist*`.
@@ -335,6 +456,58 @@ async function positionsRequest(token: string, signal?: AbortSignal): Promise<Po
   return body as unknown as Positions;
 }
 
+export interface SwapRequest {
+  mint: string;
+  side: SwapSide;
+  amount: string;
+  slippage_bps?: number;
+}
+
+/**
+ * `/v1/customer/swap`'s answer: an unsigned, base64-encoded v0
+ * `VersionedTransaction` whose fee payer is the signed-in wallet, built from
+ * exactly the nested `quote` -- never a promise that it will land, and never
+ * signed or sent by anything on this server (ADR 0024). `sign.ts` is the one
+ * place that turns `transaction` into bytes and hands them to a wallet.
+ */
+export interface SwapResponse {
+  transaction: string;
+  last_valid_block_height: number;
+  quote: Quote;
+}
+
+async function swapRequest(token: string, body: SwapRequest): Promise<SwapResponse> {
+  const response = await fetch("/v1/customer/swap", {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${token}`,
+      "content-type": "application/json",
+      accept: "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+  let parsed: { error?: string; reason?: string } | null = null;
+  try {
+    parsed = (await response.json()) as { error?: string; reason?: string };
+  } catch {
+    // A non-JSON body is itself informative: something upstream answered.
+  }
+  if (!response.ok) {
+    throw new SwapError(
+      response.status,
+      parsed?.reason ?? "unknown",
+      parsed?.error ?? response.statusText,
+    );
+  }
+  if (parsed === null) {
+    // Mirrors `positionsRequest`'s defensive branch: a 2xx with a body that
+    // did not parse as JSON is a read that failed silently, not a swap with
+    // no transaction in it.
+    throw new SwapError(response.status, "could_not_read", "the response body was not JSON");
+  }
+  return parsed as unknown as SwapResponse;
+}
+
 export const customer = {
   watchlist: {
     list: (token: string, signal?: AbortSignal) =>
@@ -351,6 +524,10 @@ export const customer = {
      *  a parameter. */
     get: (token: string, signal?: AbortSignal) => positionsRequest(token, signal),
   },
+  /** Builds an unsigned swap transaction for the signed-in wallet to review
+   *  and sign itself. Never a query string, for the same reason as
+   *  `positions.get` -- the wallet is always the bearer token's. */
+  swap: (token: string, body: SwapRequest) => swapRequest(token, body),
 };
 
 /**
