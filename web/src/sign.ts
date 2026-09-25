@@ -89,16 +89,20 @@ function fromBase64(encoded: string): Uint8Array {
  * is translating the server's bytes into the shape the wallet's own method
  * expects.
  *
- * A decline and every other failure are told apart the same way
- * `siws.ts`'s `signMessage` call already does it: there is no error code
- * that distinguishes "the visitor closed the popup" from anything else a
- * wallet can throw, so a rejected promise here always reads as `declined`
- * -- closing the popup is the ordinary case, not a fault, and calling it an
- * error would tell someone who chose not to trade that something went wrong.
+ * Before the wallet sees anything, the transaction is checked to be one the
+ * signed-in wallet alone can sign: `expectedPayer` pays the fee and is the
+ * only signature asked for. The server already builds it that way (ADR
+ * 0024); this is the second lock, so a server bug can never put someone
+ * else's signer in front of the visitor.
+ *
+ * A refused popup (wallet error code 4001) reads as `declined`; every other
+ * rejection reads as `failed` -- see [`sendError`] for why that line matters
+ * more here than it does for signing in.
  */
 export async function signAndSend(
   provider: SigningProvider,
   transactionBase64: string,
+  expectedPayer: string,
 ): Promise<{ ok: true; signature: string } | { ok: false; error: SendError }> {
   let transaction: VersionedTransaction;
   try {
@@ -109,6 +113,26 @@ export async function signAndSend(
     // "cancelled", which would tell a visitor they backed out of something
     // they never got the chance to see.
     return { ok: false, error: { kind: "failed", detail: String(cause) } };
+  }
+
+  const payer = transaction.message.staticAccountKeys[0];
+  if (payer === undefined || payer.toBase58() !== expectedPayer) {
+    return {
+      ok: false,
+      error: {
+        kind: "failed",
+        detail: "This trade was built for a different wallet than the one signed in. Nothing was sent.",
+      },
+    };
+  }
+  if (transaction.message.header.numRequiredSignatures !== 1) {
+    return {
+      ok: false,
+      error: {
+        kind: "failed",
+        detail: "This trade asks for a signature besides yours. Nothing was sent.",
+      },
+    };
   }
 
   try {

@@ -24,7 +24,7 @@ import { amountErrorMessage, toBaseUnits } from "./amounts";
 import { roundTripCostCaption, swapRefusalMessage } from "./honesty";
 import { transactionUrl } from "./format";
 import { useQuote } from "./useQuote";
-import { useWalletToken } from "./Wallet";
+import { useWalletAddress, useWalletToken } from "./Wallet";
 // Types only: erased at build time, so this line loads nothing. The module
 // itself is imported where it is used, below.
 import type { SigningProvider } from "./sign";
@@ -43,9 +43,10 @@ export interface TradePanelProps {
   /** The right rail's own positions read, reused rather than fetched again --
    *  see `TokenHeader.tsx`, which owns the single `usePositions` call. */
   positions: PositionsLoad;
-  /** Called once a trade actually lands, so the caller can refresh its own
-   *  positions read. Not called on a decline or a failure -- nothing changed
-   *  on chain in either of those. */
+  /** Called once the wallet reports the trade sent -- not confirmed; it may
+   *  still land a few seconds later, or not at all -- so the caller can
+   *  refresh its own positions read. Not called on a decline or a failure:
+   *  nothing was sent in either of those. */
   onTraded: () => void;
 }
 
@@ -101,6 +102,7 @@ function formatBaseUnits(raw: string, decimals: number | null): string {
 
 export function TradePanel({ mint, symbol, positions, onTraded }: TradePanelProps) {
   const token = useWalletToken();
+  const address = useWalletAddress();
   const label = symbol ?? "this token";
 
   const [side, setSide] = useState<SwapSide>("buy");
@@ -110,10 +112,12 @@ export function TradePanel({ mint, symbol, positions, onTraded }: TradePanelProp
   const [now, setNow] = useState(() => Date.now());
 
   // A stale review must never be sent silently: whatever was built for a
-  // different side or amount is thrown away the moment either changes.
+  // different side, amount or slippage is thrown away the moment any of them
+  // changes. Slippage especially: a transaction built at 5% must not be
+  // approvable after the field (and the live quote beside it) says 0.5%.
   useEffect(() => {
     setReview({ kind: "idle" });
-  }, [side, amountInput, mint]);
+  }, [side, amountInput, slippageInput, mint]);
 
   // Only ticks while a built transaction exists, so the 60s staleness check
   // below has a clock to compare against.
@@ -164,6 +168,16 @@ export function TradePanel({ mint, symbol, positions, onTraded }: TradePanelProp
   }
 
   async function approve(response: SwapResponse, builtAt: number) {
+    // The button hides once the build is a minute old, but it is checked
+    // again here: a hidden button is a display, and this is the send.
+    if (Date.now() - builtAt > STALE_MS) {
+      setNow(Date.now());
+      return;
+    }
+    if (address === null) {
+      setReview({ kind: "failed", message: "Your wallet session ended. Sign in again to trade." });
+      return;
+    }
     const provider = detect();
     if (!provider) {
       setReview({
@@ -183,7 +197,11 @@ export function TradePanel({ mint, symbol, positions, onTraded }: TradePanelProp
     // button most visitors never press. Vite splits a dynamic import into its
     // own chunk, fetched on the first approval.
     const { signAndSend } = await import("./sign");
-    const result = await signAndSend(provider as unknown as SigningProvider, response.transaction);
+    const result = await signAndSend(
+      provider as unknown as SigningProvider,
+      response.transaction,
+      address,
+    );
     if (result.ok) {
       setReview({ kind: "sent", signature: result.signature });
       onTraded();

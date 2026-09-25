@@ -112,4 +112,10 @@ describe("amountErrorMessage", () => {
   it("names the token in the over-max message", () => {
     expect(amountErrorMessage({ kind: "over-max" }, "BONK")).toContain("BONK");
   });
+
+  it("refuses an amount past u64 rather than sending one the server can only reject", () => {
+    expect(toBaseUnits("18446744073709551615", 0)).toEqual({ ok: true, baseUnits: "18446744073709551615" });
+    expect(toBaseUnits("18446744073709551616", 0)).toEqual({ ok: false, error: { kind: "too-large" } });
+    expect(toBaseUnits("18446744073.709551616", 9)).toEqual({ ok: false, error: { kind: "too-large" } });
+  });
 });

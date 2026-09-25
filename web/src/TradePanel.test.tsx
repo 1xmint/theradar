@@ -284,6 +284,25 @@ describe("TradePanel review and send flow", () => {
     expect(onTraded).toHaveBeenCalledTimes(1);
   });
 
+  it("throws a built transaction away when the slippage changes, so it cannot be approved at the old one", async () => {
+    vi.mocked(signAndSend).mockClear();
+    signIn();
+    mockFetch((url) => {
+      const u = String(url);
+      if (u.includes("/v1/market/quote")) return jsonResponse(quoteBody());
+      if (u.includes("/v1/customer/swap")) return jsonResponse(swapBody());
+      return jsonResponse({ error: "unexpected" }, 404);
+    });
+    render(<TradePanel mint={MINT} symbol="FOO" positions={positionsReady()} onTraded={vi.fn()} />);
+    typeAmount("1");
+    await buildReview();
+    expect(await screen.findByRole("button", { name: "Approve in wallet" })).toBeTruthy();
+    fireEvent.change(screen.getByDisplayValue("100"), { target: { value: "50" } });
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Approve in wallet" })).toBeNull());
+    expect(screen.queryByRole("region", { name: "Trade review" })).toBeNull();
+    expect(vi.mocked(signAndSend)).not.toHaveBeenCalled();
+  });
+
   it("treats a wallet decline as cancelled, not an error, and keeps the built transaction", async () => {
     signIn();
     const onTraded = vi.fn();

@@ -19,7 +19,8 @@ export type AmountError =
   | { kind: "negative" }
   | { kind: "zero" }
   | { kind: "too-many-decimals"; max: number }
-  | { kind: "over-max" };
+  | { kind: "over-max" }
+  | { kind: "too-large" };
 
 export type AmountResult =
   | { ok: true; baseUnits: string }
@@ -71,11 +72,16 @@ export function toBaseUnits(
   const value = BigInt(`${whole}${fracPadded}`);
 
   if (value === 0n) return { ok: false, error: { kind: "zero" } };
+  // The wire contract's amounts are u64; past that the server can only refuse.
+  if (value > U64_MAX) return { ok: false, error: { kind: "too-large" } };
   if (maxBaseUnits !== undefined && value > BigInt(maxBaseUnits)) {
     return { ok: false, error: { kind: "over-max" } };
   }
   return { ok: true, baseUnits: value.toString() };
 }
+
+/** The largest amount the wire contract (a u64) can carry. */
+const U64_MAX = 18_446_744_073_709_551_615n;
 
 /** The sentence for an [`AmountError`], for the field it was typed into. */
 export function amountErrorMessage(error: AmountError, symbol: string): string {
@@ -92,5 +98,7 @@ export function amountErrorMessage(error: AmountError, symbol: string): string {
       return `${symbol} has ${error.max} decimal place${error.max === 1 ? "" : "s"}; that is more than it can hold.`;
     case "over-max":
       return `You do not have that much ${symbol}.`;
+    case "too-large":
+      return "That amount is larger than any token supply can be.";
   }
 }

@@ -303,8 +303,11 @@ licence-headers:
 # read as "cancelled" rather than an error, and every documented refusal code
 # -- plus `sign.test.ts` (a refused popup is a cancel, a failed send is not)
 # and `/terms` in the routes cross-check. CI's run of ce1e511
-# counted 222 before E.2 merged; E.2's 26 cases bring it to 248.
-export MIN_WEB_TESTS := "248"
+# counted 222 before E.2 merged; E.2's 26 cases bring it to 248. The review
+# fixes add 4 more (252): a build is discarded when slippage changes, the
+# wallet is never shown a transaction paid for by, or needing a signature
+# from, anyone but the signed-in wallet, and amounts past u64 are refused.
+export MIN_WEB_TESTS := "252"
 
 # The public site at cabalhunter.org. Lower because it has five pages, and it
 # exists for the same reason MIN_WEB_TESTS does: `vitest run` exits zero when it
