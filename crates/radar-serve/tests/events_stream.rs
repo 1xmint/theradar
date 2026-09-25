@@ -75,6 +75,13 @@ fn state_with_a_store() -> (Arc<AppState>, tempfile::TempDir) {
     if let Some(tick) = radar_serve::Tick::read(&state, None) {
         state.ticker.publish(tick);
     }
+    // Same reasoning for `market_ticker`: no `market_snapshot_refresher` runs
+    // here either, and `/v1/market/events` now reads that ticker instead of
+    // `state.ticker` (PR #296 item 2), so a test that hits it needs this
+    // primed too or the stream waits forever for a publish nothing sends.
+    if let Ok(Some(watermark)) = Reader::watermark(&state.store) {
+        state.market_ticker.publish(watermark);
+    }
     (state, dir)
 }
 
@@ -288,11 +295,12 @@ async fn get_stream(state: &Arc<AppState>, path: &str) -> axum::http::Response<a
 
 /// Rubric 2: the public stream's payload carries no wallet identity.
 ///
-/// `/v1/market/events` is `Audience::Public` -- the same ticker `/v1/events`
-/// and `/v1/customer/events` read, projected down to the watermark alone. A
-/// wallet address of any kind on this route would mean the public terminal
-/// could see who else is looking, which nothing about "find, look, track" asks
-/// for.
+/// `/v1/market/events` is `Audience::Public`, projected down to the watermark
+/// alone -- since PR #296 item 2, off `AppState::market_ticker` (the market
+/// snapshot's own watermark) rather than the whole-store `AppState::ticker`
+/// `/v1/events` and `/v1/customer/events` share, but the shape served is the
+/// same either way: no wallet address of any kind, because a public terminal
+/// seeing who else is looking is not what "find, look, track" asks for.
 #[tokio::test]
 async fn the_public_stream_carries_no_wallet_or_address_field() {
     let (state, _dir) = state_with_a_store();
