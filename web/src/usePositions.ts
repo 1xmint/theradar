@@ -18,7 +18,13 @@ export type PositionsLoad =
   | { state: "ready"; value: Positions }
   | { state: "failed"; status: number; reason: string; detail: string };
 
-export function usePositions(): PositionsLoad {
+/**
+ * `refreshKey` is not read, only compared: bumping it (after a trade sends,
+ * for instance -- see `TradePanel.tsx`'s `onTraded`) forces the effect below
+ * to re-run and re-read the chain, the same wallet notwithstanding. Callers
+ * that never need a manual refresh can omit it entirely.
+ */
+export function usePositions(refreshKey: number = 0): PositionsLoad {
   const token = useWalletToken();
   const [load, setLoad] = useState<PositionsLoad>(
     token ? { state: "loading" } : { state: "signed-out" },
@@ -41,7 +47,7 @@ export function usePositions(): PositionsLoad {
         setLoad(failureFrom(e));
       });
     return () => controller.abort();
-  }, [token]);
+  }, [token, refreshKey]);
 
   return load;
 }

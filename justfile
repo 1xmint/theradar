@@ -295,7 +295,28 @@ licence-headers:
 # storage round-trip, per-mint separation, clearing one mint leaves another's
 # lines untouched, and a corrupt entry is discarded in full rather than
 # repaired -- the same rule `Wallet.test.tsx` already holds `storedSession` to.
-export MIN_WEB_TESTS := "177"
+#
+# 177 -> 248 on 2026-09-24: `TradePanel.tsx` (buy/sell from the terminal) and
+# its test file, `TradePanel.test.tsx` -- amount and slippage validation, the
+# debounced live quote, a review step built from `/v1/customer/swap`'s own
+# response rather than the live quote, 60-second staleness, a wallet decline
+# read as "cancelled" rather than an error, and every documented refusal code
+# -- plus `sign.test.ts` (a refused popup is a cancel, a failed send is not)
+# and `/terms` in the routes cross-check. CI's run of ce1e511
+# counted 222 before E.2 merged; E.2's 26 cases bring it to 248. The review
+# fixes add 4 more (252): a build is discarded when slippage changes, the
+# wallet is never shown a transaction paid for by, or needing a signature
+# from, anyone but the signed-in wallet, and amounts past u64 are refused.
+#
+# 252 -> 254 on 2026-09-25: independent review of the same swap flow found
+# the discard-on-change guard above was not enough -- it only covered a
+# built transaction that already exists; a build still in flight when an
+# input changes came back and set `built` anyway, so a transaction priced at
+# 500 bps could show "Approve in wallet" after the field said 50 bps. Two
+# `TradePanel.test.tsx` cases (the same race, one with slippage changed and
+# one with amount changed, using a deferred `/v1/customer/swap` promise)
+# prove neither shows the button nor calls `signAndSend`.
+export MIN_WEB_TESTS := "254"
 
 # The public site at cabalhunter.org. Lower because it has five pages, and it
 # exists for the same reason MIN_WEB_TESTS does: `vitest run` exits zero when it

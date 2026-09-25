@@ -1,0 +1,159 @@
+// SPDX-License-Identifier: Apache-2.0
+// @vitest-environment node
+//
+// Node, not jsdom: jsdom swaps in its own `Uint8Array`, and
+// `@solana/web3.js`'s byte layouts check `instanceof Uint8Array` against it,
+// so every serialise and deserialise throws "b must be a Uint8Array" -- a
+// test-environment artefact, not what a browser does. Nothing here needs a DOM.
+import { Keypair, MessageV0, PublicKey, SystemProgram, VersionedTransaction } from "@solana/web3.js";
+import { describe, expect, it } from "vitest";
+import { signAndSend, type SigningProvider } from "./sign";
+
+/** Base64, from bytes -- the same hand-rolled encoding `siws.ts` uses, so
+ *  this test exercises the same round trip `sign.ts`'s `fromBase64` decodes. */
+function toBase64(bytes: Uint8Array): string {
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary);
+}
+
+/** The wallet every fake transaction below is built for. */
+const WALLET = Keypair.generate().publicKey;
+
+/** A real, well-formed v0 transaction, base64-encoded, standing in for what
+ *  `/v1/customer/swap` would return, paid for by `payerKey`. */
+function fakeTransactionBase64(payerKey: PublicKey = WALLET): string {
+  const payer = { publicKey: payerKey };
+  const message = MessageV0.compile({
+    payerKey: payer.publicKey,
+    recentBlockhash: SystemProgram.programId.toBase58(),
+    instructions: [
+      SystemProgram.transfer({
+        fromPubkey: payer.publicKey,
+        toPubkey: payer.publicKey,
+        lamports: 1,
+      }),
+    ],
+  });
+  const transaction = new VersionedTransaction(message);
+  return toBase64(transaction.serialize());
+}
+
+describe("signAndSend", () => {
+  it("deserialises the server's bytes and hands the wallet a real VersionedTransaction", async () => {
+    let received: VersionedTransaction | null = null;
+    const provider: SigningProvider = {
+      signAndSendTransaction: async (transaction) => {
+        received = transaction;
+        return { signature: "5" + "1".repeat(87) };
+      },
+    };
+    const result = await signAndSend(provider, fakeTransactionBase64(), WALLET.toBase58());
+    expect(result).toEqual({ ok: true, signature: "5" + "1".repeat(87) });
+    expect(received).toBeInstanceOf(VersionedTransaction);
+  });
+
+  it("reads as cancelled, not an error, when the wallet rejects the popup", async () => {
+    const provider: SigningProvider = {
+      signAndSendTransaction: async () => {
+        throw Object.assign(new Error("User rejected the request"), { code: 4001 });
+      },
+    };
+    const result = await signAndSend(provider, fakeTransactionBase64(), WALLET.toBase58());
+    expect(result).toEqual({ ok: false, error: { kind: "declined" } });
+  });
+
+  it("reads as a failure, not a cancel, when the wallet approved but could not send", async () => {
+    // The dangerous confusion: someone told "cancelled" after approving may
+    // approve again and trade twice.
+    const provider: SigningProvider = {
+      signAndSendTransaction: async () => {
+        throw Object.assign(new Error("Blockhash not found"), { code: -32003 });
+      },
+    };
+    const result = await signAndSend(provider, fakeTransactionBase64(), WALLET.toBase58());
+    expect(result).toEqual({
+      ok: false,
+      error: { kind: "failed", detail: "Your wallet could not send this trade: Blockhash not found" },
+    });
+  });
+
+  it("keeps a non-Error rejection's message", async () => {
+    const provider: SigningProvider = {
+      signAndSendTransaction: async () => {
+        throw { code: 500, message: "internal" };
+      },
+    };
+    const result = await signAndSend(provider, fakeTransactionBase64(), WALLET.toBase58());
+    expect(result).toEqual({
+      ok: false,
+      error: { kind: "failed", detail: "Your wallet could not send this trade: internal" },
+    });
+  });
+
+  it("does not call the wallet at all when the bytes are not a real transaction", async () => {
+    let called = false;
+    const provider: SigningProvider = {
+      signAndSendTransaction: async () => {
+        called = true;
+        return { signature: "should-not-happen" };
+      },
+    };
+    const result = await signAndSend(provider, "not-valid-base64-transaction-bytes", WALLET.toBase58());
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.kind).toBe("failed");
+    expect(called).toBe(false);
+  });
+
+  it("tells a parse failure apart from a decline -- one is a bug, the other is a choice", async () => {
+    const provider: SigningProvider = {
+      signAndSendTransaction: async () => ({ signature: "irrelevant" }),
+    };
+    const parseFailure = await signAndSend(provider, "%%%not base64%%%", WALLET.toBase58());
+    expect(parseFailure.ok).toBe(false);
+    if (!parseFailure.ok) expect(parseFailure.error.kind).toBe("failed");
+  });
+
+  it("refuses, without calling the wallet, a transaction built for a different wallet", async () => {
+    let called = false;
+    const provider: SigningProvider = {
+      signAndSendTransaction: async () => {
+        called = true;
+        return { signature: "should-not-happen" };
+      },
+    };
+    const someoneElse = Keypair.generate().publicKey;
+    const result = await signAndSend(provider, fakeTransactionBase64(someoneElse), WALLET.toBase58());
+    expect(result).toEqual({
+      ok: false,
+      error: {
+        kind: "failed",
+        detail: "This trade was built for a different wallet than the one signed in. Nothing was sent.",
+      },
+    });
+    expect(called).toBe(false);
+  });
+
+  it("refuses, without calling the wallet, a transaction that asks for a second signer", async () => {
+    let called = false;
+    const provider: SigningProvider = {
+      signAndSendTransaction: async () => {
+        called = true;
+        return { signature: "should-not-happen" };
+      },
+    };
+    const other = Keypair.generate().publicKey;
+    const message = MessageV0.compile({
+      payerKey: WALLET,
+      recentBlockhash: SystemProgram.programId.toBase58(),
+      instructions: [SystemProgram.transfer({ fromPubkey: other, toPubkey: WALLET, lamports: 1 })],
+    });
+    const encoded = toBase64(new VersionedTransaction(message).serialize());
+    const result = await signAndSend(provider, encoded, WALLET.toBase58());
+    expect(result).toEqual({
+      ok: false,
+      error: { kind: "failed", detail: "This trade asks for a signature besides yours. Nothing was sent." },
+    });
+    expect(called).toBe(false);
+  });
+});
