@@ -28,12 +28,9 @@ import { TradeTape } from "./TradeTape";
 import { Wallet } from "./Wallet";
 import { YourTradesPanel } from "./YourTradesPanel";
 import { useApi } from "./useApi";
+import { useMarketTicker } from "./useMarketTicker";
 
 const COIN_LIST_LIMIT = 100;
-/** How often the coin list re-fetches. There is no push feed for the market
- *  surface (`/v1/customer/events` carries the decision-record watermark, not
- *  a market one), so "live" here means polled rather than pushed. */
-const REFRESH_MS = 15_000;
 
 type Tab = "trades" | "yours" | "holders" | "info" | "launches";
 
@@ -42,14 +39,13 @@ export function Terminal({ mint }: { mint?: string }) {
   const [sort, setSort] = useState<SortState>({ key: "volume", dir: "desc" });
   const [query, setQuery] = useState("");
   const [tab, setTab] = useState<Tab>("trades");
-  const [tick, setTick] = useState(0);
+  // Bumped on `/v1/market/events`, the shared ticker's public projection --
+  // see `useMarketTicker`'s own doc comment for why this replaced a blind
+  // 15s re-fetch timer, and for the fallback poll it keeps for when the
+  // stream itself is down.
+  const tick = useMarketTicker();
   const searchRef = useRef<HTMLInputElement | null>(null);
   const orderedRef = useRef<MarketCoin[]>([]);
-
-  useEffect(() => {
-    const id = window.setInterval(() => setTick((t) => t + 1), REFRESH_MS);
-    return () => window.clearInterval(id);
-  }, []);
 
   const sortHint = SORT_TO_QUERY[sort.key];
   const coinsLoad = useApi(

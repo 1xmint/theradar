@@ -65,6 +65,7 @@ fn router(customers: Option<Customers>, access: radar_serve::access::Mode) -> ax
         privy: None,
         positions: None,
         trading: None,
+        ticker: radar_serve::ticker::Ticker::new(),
     }))
 }
 

@@ -316,7 +316,15 @@ licence-headers:
 # `TradePanel.test.tsx` cases (the same race, one with slippage changed and
 # one with amount changed, using a deferred `/v1/customer/swap` promise)
 # prove neither shows the button nor calls `signAndSend`.
-export MIN_WEB_TESTS := "254"
+#
+# 254 -> 256 on 2026-09-25: plan 0013 phase E.1, the shared-ticker's web side.
+# `Terminal.tsx`'s blind `REFRESH_MS` timer is now `useMarketTicker`, which
+# listens on `/v1/market/events` instead. `useMarketTicker.test.ts` (2 cases,
+# new file) proves a streamed update is applied immediately, well under the
+# fallback poll's own interval, and that a stream error falls back to polling
+# (recovering, with the reconnect backoff observed, once the stream comes
+# back).
+export MIN_WEB_TESTS := "256"
 
 # The public site at cabalhunter.org. Lower because it has five pages, and it
 # exists for the same reason MIN_WEB_TESTS does: `vitest run` exits zero when it

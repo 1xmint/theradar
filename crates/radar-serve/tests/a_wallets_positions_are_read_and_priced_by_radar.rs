@@ -157,6 +157,7 @@ fn router_with_store(positions: Option<Positions>, store: Reader) -> axum::Route
         customers: None,
         positions,
         trading: None,
+        ticker: radar_serve::ticker::Ticker::new(),
     }))
 }
 

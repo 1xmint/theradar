@@ -112,6 +112,7 @@ fn router(admission: Admission, keys: Keys) -> axum::Router {
 
         positions: None,
         trading: None,
+        ticker: radar_serve::ticker::Ticker::new(),
     }))
 }
 

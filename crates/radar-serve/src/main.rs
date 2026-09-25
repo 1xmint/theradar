@@ -357,6 +357,85 @@ fn market_snapshot_refresher(state: Arc<AppState>) {
     });
 }
 
+/// Starts the task that keeps `state.ticker` current, off the request path.
+///
+/// See [`radar_serve::ticker`]'s own doc comment for why this exists: one read
+/// on `radar_serve::POLL`'s interval, published once, so every open
+/// `/v1/events`, `/v1/customer/events` and `/v1/market/events` connection
+/// reads the channel instead of the store. Mirrors
+/// [`market_snapshot_refresher`]'s shape -- an immediate first tick, the read
+/// off the async runtime via `spawn_blocking`, and a panicked tick simply
+/// tried again next interval rather than stopping the task.
+fn ticker_refresher(state: Arc<AppState>) {
+    tokio::spawn(async move {
+        let mut tick = tokio::time::interval(radar_serve::POLL);
+        tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        loop {
+            tick.tick().await;
+            let task_state = Arc::clone(&state);
+            let read = tokio::task::spawn_blocking(move || radar_serve::Tick::read(&task_state))
+                .await
+                .unwrap_or(None);
+            if let Some(value) = read {
+                state.ticker.publish(value);
+            }
+        }
+    });
+}
+
+/// Builds the shared [`AppState`], out of `main`'s own body so its startup
+/// sequence -- validate, then construct, then spawn the background readers --
+/// reads as a sequence of steps rather than one function long enough to hide
+/// among them. Every argument here is something `main` already produced by
+/// the time it calls this; nothing here reaches back into the environment
+/// itself.
+#[allow(clippy::too_many_arguments)]
+fn build_state(
+    store_dir: &str,
+    access: access::Mode,
+    customer: customer::Mode,
+    privy: Option<radar_serve::privy::Client>,
+    x402: Option<x402::Config>,
+    agent: Option<Chat>,
+    admission: radar_serve::admission::Admission,
+    shares: radar_serve::share::Shares,
+    customer_salt: Vec<u8>,
+    market: radar_serve::market::Market,
+    customers: radar_serve::tenant::Customers,
+    positions: radar_serve::positions::Positions,
+    trading: Option<radar_serve::trade::Trading>,
+) -> Arc<AppState> {
+    Arc::new(AppState {
+        admission,
+        shares,
+        customer_salt,
+        registry: registry(),
+        store: Reader::open(store_dir),
+        x402,
+        chat: agent,
+        access,
+        keys: access::KeyCache::new(),
+        customer,
+        customer_keys: customer::KeyCache::new(),
+        privy,
+        linker: radar_serve::link::Linker::new(),
+        scoreboard: radar_serve::cache::Cache::new(),
+        token: radar_serve::cache::Cache::new(),
+        // The domain a sign-in is bound to. Unset means no customer sign-in,
+        // rather than a guess: a wrong domain here would have wallets sign a
+        // message naming a site this is not, and the signature would then be
+        // valid somewhere Radar does not control.
+        challenges: radar_serve::siws::domain_from(std::env::var("RADAR_CUSTOMER_DOMAIN").ok())
+            .map(radar_serve::challenges::Challenges::new),
+        market,
+        market_snapshot: radar_serve::market::SnapshotCache::with_background_refresh(),
+        customers: Some(customers),
+        positions: Some(positions),
+        trading,
+        ticker: radar_serve::ticker::Ticker::new(),
+    })
+}
+
 #[tokio::main]
 async fn main() -> ExitCode {
     let store_dir = std::env::var("RADAR_STORE").unwrap_or_else(|_| "./data/store".to_owned());
@@ -412,34 +491,21 @@ async fn main() -> ExitCode {
         Ok(lane) => lane,
         Err(why) => return refused(&why),
     };
-    let state = Arc::new(AppState {
+    let state = build_state(
+        &store_dir,
+        access.clone(),
+        customer.clone(),
+        privy,
+        x402,
+        agent,
         admission,
         shares,
         customer_salt,
-        registry: registry(),
-        store: Reader::open(&store_dir),
-        x402,
-        chat: agent,
-        access: access.clone(),
-        keys: access::KeyCache::new(),
-        customer: customer.clone(),
-        customer_keys: customer::KeyCache::new(),
-        privy,
-        linker: radar_serve::link::Linker::new(),
-        scoreboard: radar_serve::cache::Cache::new(),
-        token: radar_serve::cache::Cache::new(),
-        // The domain a sign-in is bound to. Unset means no customer sign-in,
-        // rather than a guess: a wrong domain here would have wallets sign a
-        // message naming a site this is not, and the signature would then be
-        // valid somewhere Radar does not control.
-        challenges: radar_serve::siws::domain_from(std::env::var("RADAR_CUSTOMER_DOMAIN").ok())
-            .map(radar_serve::challenges::Challenges::new),
         market,
-        market_snapshot: radar_serve::market::SnapshotCache::with_background_refresh(),
-        customers: Some(customers),
-        positions: Some(positions),
+        customers,
+        positions,
         trading,
-    });
+    );
 
     // Off the request path, per the market module's own doc comment: every
     // route under `/v1/market/` used to read the store directly, up to twice
@@ -447,6 +513,9 @@ async fn main() -> ExitCode {
     // `state.market.live()` (the streamed feed) is untouched -- it never read
     // the store this way and this task never overwrites it.
     market_snapshot_refresher(Arc::clone(&state));
+
+    // The one background reader behind every SSE stream; see its own doc comment.
+    ticker_refresher(Arc::clone(&state));
 
     println!("radar-serve v{}", env!("CARGO_PKG_VERSION"));
     println!("  store      : {store_dir}");

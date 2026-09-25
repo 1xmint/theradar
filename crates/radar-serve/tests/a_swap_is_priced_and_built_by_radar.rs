@@ -249,6 +249,7 @@ fn router(trading: Option<Trading>) -> axum::Router {
         customers: None,
         positions: None,
         trading,
+        ticker: radar_serve::ticker::Ticker::new(),
     }))
 }
 

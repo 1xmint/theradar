@@ -50,6 +50,7 @@ fn router(live: Arc<Live>) -> axum::Router {
 
         positions: None,
         trading: None,
+        ticker: radar_serve::ticker::Ticker::new(),
     }))
 }
 

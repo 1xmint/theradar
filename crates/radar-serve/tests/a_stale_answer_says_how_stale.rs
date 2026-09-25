@@ -63,6 +63,7 @@ fn state_at(dir: &std::path::Path) -> Arc<AppState> {
 
         positions: None,
         trading: None,
+        ticker: radar_serve::ticker::Ticker::new(),
     })
 }
 

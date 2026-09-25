@@ -142,6 +142,7 @@ fn router(allowance: Allowance, keys: Keys) -> (axum::Router, Arc<AtomicBool>) {
 
         positions: None,
         trading: None,
+        ticker: radar_serve::ticker::Ticker::new(),
     }));
     (router, reached)
 }

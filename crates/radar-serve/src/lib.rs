@@ -31,6 +31,7 @@ pub mod privy;
 pub mod share;
 pub mod siws;
 pub mod tenant;
+pub mod ticker;
 pub mod trade;
 mod watchlist;
 pub mod x402;
@@ -51,6 +52,7 @@ use radar_instruments::{Context, Registry};
 use radar_store::Reader;
 use serde::Serialize;
 use serde_json::{Value, json};
+use tokio::sync::watch;
 
 /// Everything the server needs to answer.
 pub struct AppState {
@@ -185,6 +187,15 @@ pub struct AppState {
     /// `"trading"` boolean is the one place this fact lives rather than a
     /// route's own presence or absence saying it a second, inconsistent way.
     pub trading: Option<trade::Trading>,
+    /// The one background-polled read behind `/v1/events`,
+    /// `/v1/customer/events`, and `/v1/market/events`.
+    ///
+    /// `main.rs` starts the one task (`ticker_refresher`) that calls
+    /// [`Tick::read`] on [`POLL`] and publishes here; every stream handler
+    /// only [`ticker::Ticker::subscribe`]s. Before this field existed each
+    /// open connection polled the store itself, so reads grew with viewer
+    /// count -- see [`ticker`]'s module doc comment.
+    pub ticker: ticker::Ticker<Tick>,
 }
 
 /// Builds the router.
@@ -244,6 +255,12 @@ pub fn app(state: Arc<AppState>) -> Router {
         // a swap needs no wallet. See `trade`'s module doc comment for the
         // wire contract and for why it always answers rather than 404ing.
         .route("/v1/market/quote", get(trade::quote))
+        // The watermark alone, off the same shared ticker as `/v1/events` and
+        // `/v1/customer/events` -- so the terminal can stop polling
+        // `/v1/market/coins` blindly every 15s and re-fetch only when this
+        // moves. Public like every other `/v1/market/` route: no identity, no
+        // row counts, no wallet.
+        .route("/v1/market/events", get(market_events))
         .route("/mcp", post(mcp_endpoint))
         // Anything else is either a built asset or a route the interface owns.
         // Placed last so every named route above wins.
@@ -990,26 +1007,36 @@ struct DecisionParams {
     limit: Option<usize>,
 }
 
-/// How often the store is asked whether anything moved.
+/// How often the shared ticker asks the store whether anything moved.
 ///
 /// The recorder stays about five minutes behind the chain and the outcome and
 /// decision passes run hourly, so nothing here changes faster than this. Ten
 /// seconds is already far more often than the data does; it is short enough
-/// that a page feels live and long enough that a dozen open tabs cost nothing.
+/// that a page feels live and long enough that a dozen open tabs cost nothing
+/// -- and now that this is the *only* place that reads the store for this
+/// purpose (see [`ticker`]'s module doc comment), a dozen open tabs cost
+/// exactly what one does.
 ///
 /// Affordable only because reading a watermark stopped costing 3.4 seconds. At
 /// the old price this endpoint would have pinned a core on a box shared with
-/// two other production services.
-const POLL: Duration = Duration::from_secs(10);
+/// two other production services. `main.rs`'s `ticker_refresher` polls on this
+/// interval and publishes to [`AppState::ticker`]; nothing else may read the
+/// store on this timer's behalf.
+pub const POLL: Duration = Duration::from_secs(10);
 
-/// What an event carries.
+/// What the shared ticker carries.
 ///
 /// The watermark and the row counts, which is enough for a client to know
 /// *that* something changed and cheap enough to compute on a timer. What
 /// changed is a separate fetch, because sending the funnel every ten seconds
 /// would be sending the same bytes to a page that mostly did not need them.
+///
+/// `pub` only so [`AppState::ticker`] and `main.rs`'s refresher can name the
+/// type across the lib/bin boundary; its fields stay private; nothing here is
+/// or will become a wallet or an address -- see the module doc comment on
+/// [`AppState::market`] for why that boundary exists at all.
 #[derive(Clone, PartialEq, Eq, Debug, Serialize)]
-struct Tick {
+pub struct Tick {
     /// The store's watermark.
     as_of: u64,
     /// Row counts by table.
@@ -1018,7 +1045,12 @@ struct Tick {
 
 impl Tick {
     /// Reads the current state, or `None` if the store cannot answer.
-    fn read(state: &AppState) -> Option<Self> {
+    ///
+    /// Called from exactly one place at runtime -- `main.rs`'s
+    /// `ticker_refresher`, once per [`POLL`] -- and directly from tests that
+    /// need to drive [`AppState::ticker`] without a real background task.
+    #[must_use]
+    pub fn read(state: &AppState) -> Option<Self> {
         let watermark = Reader::watermark(&state.store).ok().flatten()?;
         let counts = api::store_counts(&state.store, AsOf::at(watermark)).ok()?;
         Some(Self {
@@ -1028,7 +1060,7 @@ impl Tick {
     }
 }
 
-/// A stream of changes to the store.
+/// A stream of changes to the store, for the operator.
 ///
 /// **Emits only when something actually moved.** A client that reconnects gets
 /// one immediate event so a fresh page is never blank, and after that silence
@@ -1038,29 +1070,25 @@ impl Tick {
 /// The keep-alive matters more than it looks. An idle event stream through a
 /// proxy is indistinguishable from a dead one, and both Caddy and the tunnel
 /// will close a connection that says nothing for long enough.
+///
+/// Subscribes to [`AppState::ticker`] rather than reading the store itself:
+/// this connection, and every other one open at the same time, share the one
+/// read [`Tick::read`] performs on [`POLL`].
 async fn events(
     State(state): State<Arc<AppState>>,
 ) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
-    changes(state, Tick::read)
+    ticks(state.ticker.subscribe(), |tick: &Tick| tick.clone())
 }
 
 /// The watermark, and nothing else.
 ///
-/// What a customer's page needs in order to know the store moved. Deliberately
-/// **not** [`Tick`], which carries row counts: those are the operator's view of
-/// the instance and there is no product reason for a customer to have them.
-#[derive(PartialEq, Eq, Debug, serde::Serialize)]
+/// What a customer's page (or the public terminal) needs in order to know the
+/// store moved. Deliberately **not** [`Tick`], which carries row counts: those
+/// are the operator's view of the instance and there is no product reason for
+/// a customer, let alone an anonymous visitor, to have them.
+#[derive(Clone, PartialEq, Eq, Debug, serde::Serialize)]
 struct Watermark {
     as_of: u64,
-}
-
-impl Watermark {
-    fn read(state: &AppState) -> Option<Self> {
-        Reader::watermark(&state.store)
-            .ok()
-            .flatten()
-            .map(|slot| Self { as_of: slot.get() })
-    }
 }
 
 /// A stream of changes, for a customer.
@@ -1076,45 +1104,81 @@ impl Watermark {
 /// this sends. Without it the funnel would keep rendering its first fetch
 /// forever on the day the customer lane switches on, and a page that cannot see
 /// changes must not look like a page where nothing has changed.
+///
+/// Projects the **same** [`Tick`] the operator stream reads off the **same**
+/// [`AppState::ticker`] subscription -- no second background reader, no second
+/// store read, just a smaller view of the one value already in memory.
 async fn customer_events(
     State(state): State<Arc<AppState>>,
 ) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
-    changes(state, Watermark::read)
+    ticks(state.ticker.subscribe(), |tick: &Tick| Watermark {
+        as_of: tick.as_of,
+    })
 }
 
-/// The machinery both change streams share.
+/// A stream of changes, for the public market surface.
 ///
-/// Extracted rather than copied, because the two properties worth having here
-/// are easy to lose in a second copy: the seed is `None` so a page that connects
-/// during a quiet minute is not blank, and the keep-alive is a comment rather
-/// than data so silence still means "nothing happened" instead of "this
-/// connection died".
-fn changes<T, F>(
-    state: Arc<AppState>,
-    read: F,
+/// The terminal's coin list used to re-fetch `/v1/market/coins` on a blind
+/// 15s timer (`REFRESH_MS` in `web/src/Terminal.tsx`). This is what it listens
+/// to instead: the same watermark [`customer_events`] sends, off the same
+/// shared ticker, so the browser re-fetches only when the store actually
+/// moved. `/v1/market/` is `Audience::Public` in [`access::audience_of`] for
+/// every route under it, this one included -- no identity, and (like every
+/// projection of [`Tick`]) no wallet or address, ever.
+async fn market_events(
+    State(state): State<Arc<AppState>>,
+) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
+    ticks(state.ticker.subscribe(), |tick: &Tick| Watermark {
+        as_of: tick.as_of,
+    })
+}
+
+/// The machinery every change stream shares.
+///
+/// Subscribes to the one channel [`AppState::ticker`] holds and reshapes each
+/// value seen with `project` -- reshaping is free, it runs on a value already
+/// in memory, and it is what lets `events`, `customer_events`, and
+/// `market_events` each see their own audience's slice of the one [`Tick`]
+/// [`main.rs`'s `ticker_refresher`] publishes, without any of them reading the
+/// store.
+///
+/// Two properties carried over unchanged from the polling design this
+/// replaced: a fresh subscriber sees the *current* value immediately rather
+/// than waiting for the next tick (`watch::Receiver::subscribe` starts holding
+/// whatever was last sent), and the keep-alive is a comment rather than data so
+/// silence still means "nothing happened" instead of "this connection died".
+fn ticks<U, P>(
+    rx: watch::Receiver<Option<Tick>>,
+    project: P,
 ) -> Sse<impl Stream<Item = Result<Event, Infallible>>>
 where
-    T: PartialEq + serde::Serialize + Send + 'static,
-    F: Fn(&AppState) -> Option<T> + Send + 'static,
+    U: PartialEq + Serialize + Send + 'static,
+    P: Fn(&Tick) -> U + Send + 'static,
 {
-    // `None` as the seed rather than the current state, so the first tick is
-    // always sent. A page that connected during a quiet minute would otherwise
-    // show nothing at all until the store moved.
-    let stream =
-        futures_util::stream::unfold((state, None::<T>, read), |(state, last, read)| async move {
+    let stream = futures_util::stream::unfold(
+        (rx, None::<U>, project),
+        |(mut rx, last, project)| async move {
             loop {
-                if let Some(tick) = read(&state)
-                    && last.as_ref() != Some(&tick)
+                let current = rx.borrow_and_update().as_ref().map(&project);
+                if let Some(value) = current
+                    && last.as_ref() != Some(&value)
                 {
                     let event = Event::default()
                         .event("store")
-                        .json_data(&tick)
+                        .json_data(&value)
                         .unwrap_or_else(|_| Event::default().comment("unserialisable"));
-                    return Some((Ok(event), (state, Some(tick), read)));
+                    return Some((Ok(event), (rx, Some(value), project)));
                 }
-                tokio::time::sleep(POLL).await;
+                // No new, distinct value yet: wait for the shared ticker's next
+                // publish rather than reading anything ourselves. A dropped
+                // sender (the process shutting down) ends the stream instead of
+                // spinning.
+                if rx.changed().await.is_err() {
+                    return None;
+                }
             }
-        });
+        },
+    );
 
     Sse::new(stream).keep_alive(
         KeepAlive::new()
