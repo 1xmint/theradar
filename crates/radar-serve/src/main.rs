@@ -353,8 +353,155 @@ fn market_snapshot_refresher(state: Arc<AppState>) {
             // A panicked tick took its memory with it; start over rather than
             // stop refreshing for the life of the process.
             refresher = done.unwrap_or_default();
+            // Publish the watermark of whatever `state.market_snapshot` now
+            // holds -- the thing `/v1/market/coins` and its siblings actually
+            // serve -- to `state.market_ticker`, so `/v1/market/events`
+            // reflects the snapshot's own change, not the whole store's. See
+            // `AppState::market_ticker`'s doc comment (PR #296 item 2).
+            // `Ticker::publish`'s own change-detection means a tick that
+            // rebuilt nothing (`Refresh::Skip`, an unchanged watermark)
+            // simply publishes nothing here either -- no need to branch on
+            // the `Refresh` value returned above to get that for free.
+            if let Some(snapshot) = state.market_snapshot.peek() {
+                state.market_ticker.publish(snapshot.watermark());
+            }
         }
     });
+}
+
+/// Starts the task that keeps `state.ticker` current, off the request path.
+///
+/// See [`radar_serve::ticker`]'s own doc comment for why this exists: one read
+/// on `radar_serve::POLL`'s interval, published once, so every open
+/// `/v1/events`, `/v1/customer/events` and `/v1/market/events` connection
+/// reads the channel instead of the store. Mirrors
+/// [`market_snapshot_refresher`]'s shape -- an immediate first tick, the read
+/// off the async runtime via `spawn_blocking`, and a panicked tick simply
+/// tried again next interval rather than stopping the task.
+fn ticker_refresher(state: Arc<AppState>) {
+    tokio::spawn(async move {
+        let mut tick = tokio::time::interval(radar_serve::POLL);
+        tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        // Set the moment a read fails and cleared the moment one next
+        // succeeds, so an outage logs one line when it starts and one when it
+        // ends rather than a line every ten seconds for as long as it lasts.
+        let mut failing = false;
+        // Fed to `Tick::read` as its `previous` fallback: a `store_counts`
+        // failure alone reuses these counts rather than losing the watermark
+        // publish entirely (PR #296 review "also do" (b) -- see `Tick::read`'s
+        // own doc comment for why counts-only staleness must not silence the
+        // customer/public streams, which never read `counts` in the first
+        // place).
+        let mut last: Option<radar_serve::Tick> = None;
+        loop {
+            tick.tick().await;
+            // Nobody is listening: skip `Tick::read`'s row counts entirely
+            // rather than paying for them on behalf of zero open `/v1/events`
+            // connections.
+            if state.ticker.receiver_count() == 0 {
+                continue;
+            }
+            let task_state = Arc::clone(&state);
+            let previous = last.clone();
+            let read = tokio::task::spawn_blocking(move || {
+                radar_serve::Tick::read(&task_state, previous.as_ref())
+            })
+            .await
+            .unwrap_or(None);
+            if let Some(value) = read {
+                if failing {
+                    eprintln!("radar-serve: ticker_refresher: store read recovered");
+                    failing = false;
+                }
+                last = Some(value.clone());
+                state.ticker.publish(value);
+            } else {
+                if should_log_read_failure(failing) {
+                    eprintln!(
+                        "radar-serve: ticker_refresher: store watermark read failed; \
+                         /v1/events and /v1/customer/events will not advance until it \
+                         recovers (/v1/market/events is unaffected -- it reads a separate \
+                         ticker fed by market_snapshot_refresher)"
+                    );
+                }
+                failing = true;
+            }
+        }
+    });
+}
+
+/// Whether a failed read should log, given whether the previous tick was
+/// already failing.
+///
+/// Pulled out of `ticker_refresher`'s loop so the exact decision it exists
+/// for -- log once when an outage starts, stay silent for every failed read
+/// after that -- has a test that does not need to capture stderr. Moving
+/// `failing = true` to run unconditionally after this check (rather than
+/// inside it, as it read before) changes nothing observable: the only path
+/// that ever set it back to `false` is the recovery branch above, so setting
+/// it to `true` again while it is already `true` is a no-op either way.
+#[must_use]
+fn should_log_read_failure(already_failing: bool) -> bool {
+    !already_failing
+}
+
+/// Builds the shared [`AppState`], out of `main`'s own body so its startup
+/// sequence -- validate, then construct, then spawn the background readers --
+/// reads as a sequence of steps rather than one function long enough to hide
+/// among them. Almost every argument here is something `main` already
+/// produced by the time it calls this -- the one exception is
+/// `RADAR_CUSTOMER_DOMAIN`, read directly from the environment a few lines
+/// below (for `challenges`) rather than threaded through as a parameter.
+#[allow(clippy::too_many_arguments)]
+fn build_state(
+    store_dir: &str,
+    access: access::Mode,
+    customer: customer::Mode,
+    privy: Option<radar_serve::privy::Client>,
+    x402: Option<x402::Config>,
+    agent: Option<Chat>,
+    admission: radar_serve::admission::Admission,
+    shares: radar_serve::share::Shares,
+    customer_salt: Vec<u8>,
+    market: radar_serve::market::Market,
+    customers: radar_serve::tenant::Customers,
+    positions: radar_serve::positions::Positions,
+    trading: Option<radar_serve::trade::Trading>,
+) -> Arc<AppState> {
+    Arc::new(AppState {
+        admission,
+        shares,
+        customer_salt,
+        registry: registry(),
+        store: Reader::open(store_dir),
+        x402,
+        chat: agent,
+        access,
+        keys: access::KeyCache::new(),
+        customer,
+        customer_keys: customer::KeyCache::new(),
+        privy,
+        linker: radar_serve::link::Linker::new(),
+        scoreboard: radar_serve::cache::Cache::new(),
+        token: radar_serve::cache::Cache::new(),
+        // The domain a sign-in is bound to. Unset means no customer sign-in,
+        // rather than a guess: a wrong domain here would have wallets sign a
+        // message naming a site this is not, and the signature would then be
+        // valid somewhere Radar does not control.
+        challenges: radar_serve::siws::domain_from(std::env::var("RADAR_CUSTOMER_DOMAIN").ok())
+            .map(radar_serve::challenges::Challenges::new),
+        market,
+        market_snapshot: radar_serve::market::SnapshotCache::with_background_refresh(),
+        customers: Some(customers),
+        positions: Some(positions),
+        trading,
+        ticker: radar_serve::ticker::Ticker::new(),
+        market_ticker: radar_serve::ticker::Ticker::new(),
+        market_semaphore: std::sync::Arc::new(tokio::sync::Semaphore::new(
+            radar_serve::MARKET_EVENTS_MAX_CONNECTIONS,
+        )),
+        market_visitors: std::sync::Arc::default(),
+    })
 }
 
 #[tokio::main]
@@ -412,34 +559,21 @@ async fn main() -> ExitCode {
         Ok(lane) => lane,
         Err(why) => return refused(&why),
     };
-    let state = Arc::new(AppState {
+    let state = build_state(
+        &store_dir,
+        access.clone(),
+        customer.clone(),
+        privy,
+        x402,
+        agent,
         admission,
         shares,
         customer_salt,
-        registry: registry(),
-        store: Reader::open(&store_dir),
-        x402,
-        chat: agent,
-        access: access.clone(),
-        keys: access::KeyCache::new(),
-        customer: customer.clone(),
-        customer_keys: customer::KeyCache::new(),
-        privy,
-        linker: radar_serve::link::Linker::new(),
-        scoreboard: radar_serve::cache::Cache::new(),
-        token: radar_serve::cache::Cache::new(),
-        // The domain a sign-in is bound to. Unset means no customer sign-in,
-        // rather than a guess: a wrong domain here would have wallets sign a
-        // message naming a site this is not, and the signature would then be
-        // valid somewhere Radar does not control.
-        challenges: radar_serve::siws::domain_from(std::env::var("RADAR_CUSTOMER_DOMAIN").ok())
-            .map(radar_serve::challenges::Challenges::new),
         market,
-        market_snapshot: radar_serve::market::SnapshotCache::with_background_refresh(),
-        customers: Some(customers),
-        positions: Some(positions),
+        customers,
+        positions,
         trading,
-    });
+    );
 
     // Off the request path, per the market module's own doc comment: every
     // route under `/v1/market/` used to read the store directly, up to twice
@@ -447,6 +581,9 @@ async fn main() -> ExitCode {
     // `state.market.live()` (the streamed feed) is untouched -- it never read
     // the store this way and this task never overwrites it.
     market_snapshot_refresher(Arc::clone(&state));
+
+    // The one background reader behind every SSE stream; see its own doc comment.
+    ticker_refresher(Arc::clone(&state));
 
     println!("radar-serve v{}", env!("CARGO_PKG_VERSION"));
     println!("  store      : {store_dir}");
@@ -502,7 +639,130 @@ async fn main() -> ExitCode {
 
 #[cfg(test)]
 mod tests {
-    use super::{bind_address, market_feed, trading_note};
+    use super::*;
+    use radar_store::Writer;
+    use radar_types::{Address, Signature, Slot};
+
+    /// A real, on-disk store with one row in it, wired into a fresh
+    /// [`AppState`] the same way `build_state` does -- built by hand rather
+    /// than through `build_state` itself, since that also demands a
+    /// `Customers` and a `Positions` this module has no need to construct.
+    /// Mirrors `tests/events_stream.rs`'s `state_with_a_store`, minus the
+    /// priming that helper does on `state.ticker`/`state.market_ticker`:
+    /// `ticker_refresher` publishing that value from a clean start is exactly
+    /// the behaviour under test here.
+    fn store_backed_state() -> (Arc<AppState>, tempfile::TempDir) {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let mut writer = Writer::open(dir.path(), 64).expect("open");
+        writer
+            .append(radar_store::Event::Launch(Box::new(radar_store::Launch {
+                envelope: radar_store::Envelope {
+                    slot: Slot(500),
+                    signature: Signature::new([7u8; 64]),
+                    tx_index: Some(0),
+                    instruction_index: 0,
+                    parent_index: None,
+                    success: Some(true),
+                },
+                origin: radar_store::Origin::known(Address::new([3u8; 32]), "create_v2"),
+                mint: Address::new([1u8; 32]),
+                creator: Address::new([2u8; 32]),
+                name: "t".to_owned(),
+                symbol: "T".to_owned(),
+                uri: String::new(),
+                dev_buy_lamports: None,
+            })))
+            .expect("append");
+        writer.flush().expect("flush");
+        let state = Arc::new(AppState {
+            admission: radar_serve::admission::Admission::Open,
+            shares: radar_serve::share::Shares::new(radar_serve::share::Allowance::per_day(100)),
+            customer_salt: vec![7u8; 32],
+            registry: Registry::new(),
+            store: Reader::open(dir.path()),
+            x402: None,
+            chat: None,
+            access: access::Mode::Off,
+            keys: access::KeyCache::new(),
+            customer: customer::Mode::Off,
+            customer_keys: customer::KeyCache::new(),
+            privy: None,
+            linker: radar_serve::link::Linker::new(),
+            scoreboard: radar_serve::cache::Cache::new(),
+            token: radar_serve::cache::Cache::new(),
+            challenges: None,
+            market: market::Market::new(),
+            market_snapshot: market::SnapshotCache::new(),
+            customers: None,
+            positions: None,
+            trading: None,
+            ticker: radar_serve::ticker::Ticker::new(),
+            market_ticker: radar_serve::ticker::Ticker::new(),
+            market_semaphore: std::sync::Arc::new(tokio::sync::Semaphore::new(
+                radar_serve::MARKET_EVENTS_MAX_CONNECTIONS,
+            )),
+            market_visitors: std::sync::Arc::default(),
+        });
+        (state, dir)
+    }
+
+    #[tokio::test]
+    async fn ticker_refresher_skips_the_store_read_when_nobody_is_subscribed() {
+        // Mutant `main.rs:401:46` (`receiver_count() == 0` -> `!=`) makes this
+        // task read and publish with zero listeners instead of skipping, so
+        // this fails under that mutant: `state.ticker` would hold the read
+        // instead of staying at `None`.
+        let (state, _dir) = store_backed_state();
+        assert_eq!(
+            state.ticker.receiver_count(),
+            0,
+            "nobody has subscribed yet"
+        );
+        ticker_refresher(Arc::clone(&state));
+
+        // The interval's first tick fires immediately, so the skip-or-read
+        // decision for it is made almost at once; this just gives the
+        // scheduler room to run that spawned task before we look.
+        tokio::time::sleep(Duration::from_millis(300)).await;
+
+        let mut rx = state.ticker.subscribe();
+        assert!(
+            rx.borrow_and_update().is_none(),
+            "zero subscribers must skip the read, not publish one anyway"
+        );
+    }
+
+    #[tokio::test]
+    async fn ticker_refresher_reads_and_publishes_when_a_subscriber_is_attached() {
+        // The other side of the same mutant: with a real listener already
+        // attached, `receiver_count() == 0` is false and the read must run.
+        // Under the `!=` mutant this hangs forever instead, which the
+        // timeout below turns into a clean failure rather than a stuck test.
+        let (state, _dir) = store_backed_state();
+        let mut rx = state.ticker.subscribe();
+        ticker_refresher(Arc::clone(&state));
+
+        tokio::time::timeout(Duration::from_secs(5), rx.changed())
+            .await
+            .expect("ticker_refresher must publish once a subscriber is attached")
+            .expect("the ticker's sender is still alive");
+        assert!(rx.borrow_and_update().is_some());
+    }
+
+    #[test]
+    fn should_log_read_failure_logs_only_on_the_first_failure_of_an_outage() {
+        // Mutant `main.rs:421:24` (delete `!`): without the negation this
+        // returns `true` only once `failing` is already `true`, i.e. the
+        // opposite of "log the first failure, stay quiet after."
+        assert!(
+            should_log_read_failure(false),
+            "the first failed read of an outage must log"
+        );
+        assert!(
+            !should_log_read_failure(true),
+            "a failure already logged this outage must stay silent"
+        );
+    }
 
     fn vars(pairs: &[(&'static str, &'static str)]) -> impl Fn(&str) -> Option<String> {
         let owned = pairs.to_vec();

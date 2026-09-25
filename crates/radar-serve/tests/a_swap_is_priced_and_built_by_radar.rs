@@ -249,6 +249,12 @@ fn router(trading: Option<Trading>) -> axum::Router {
         customers: None,
         positions: None,
         trading,
+        ticker: radar_serve::ticker::Ticker::new(),
+        market_ticker: radar_serve::ticker::Ticker::new(),
+        market_semaphore: std::sync::Arc::new(tokio::sync::Semaphore::new(
+            radar_serve::MARKET_EVENTS_MAX_CONNECTIONS,
+        )),
+        market_visitors: std::sync::Arc::default(),
     }))
 }
 

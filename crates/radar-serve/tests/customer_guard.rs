@@ -108,6 +108,12 @@ fn router(keys: Keys) -> axum::Router {
 
         positions: None,
         trading: None,
+        ticker: radar_serve::ticker::Ticker::new(),
+        market_ticker: radar_serve::ticker::Ticker::new(),
+        market_semaphore: std::sync::Arc::new(tokio::sync::Semaphore::new(
+            radar_serve::MARKET_EVENTS_MAX_CONNECTIONS,
+        )),
+        market_visitors: std::sync::Arc::default(),
         privy: None,
     }))
 }
@@ -223,6 +229,12 @@ async fn the_wallet_route_refuses_a_request_carrying_no_customer_identity() {
 
         positions: None,
         trading: None,
+        ticker: radar_serve::ticker::Ticker::new(),
+        market_ticker: radar_serve::ticker::Ticker::new(),
+        market_semaphore: std::sync::Arc::new(tokio::sync::Semaphore::new(
+            radar_serve::MARKET_EVENTS_MAX_CONNECTIONS,
+        )),
+        market_visitors: std::sync::Arc::default(),
         privy: None,
     }));
 
@@ -307,6 +319,12 @@ async fn a_wallet_session_opens_the_product_on_an_instance_with_no_privy() {
 
         positions: None,
         trading: None,
+        ticker: radar_serve::ticker::Ticker::new(),
+        market_ticker: radar_serve::ticker::Ticker::new(),
+        market_semaphore: std::sync::Arc::new(tokio::sync::Semaphore::new(
+            radar_serve::MARKET_EVENTS_MAX_CONNECTIONS,
+        )),
+        market_visitors: std::sync::Arc::default(),
         privy: None,
     }));
 
@@ -375,6 +393,12 @@ async fn an_allowlist_admits_the_wallet_it_names_and_no_other() {
 
             positions: None,
             trading: None,
+            ticker: radar_serve::ticker::Ticker::new(),
+            market_ticker: radar_serve::ticker::Ticker::new(),
+            market_semaphore: std::sync::Arc::new(tokio::sync::Semaphore::new(
+                radar_serve::MARKET_EVENTS_MAX_CONNECTIONS,
+            )),
+            market_visitors: std::sync::Arc::default(),
             privy: None,
         }))
     };

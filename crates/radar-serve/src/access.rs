@@ -1194,6 +1194,7 @@ mod tests {
             // payload is the operator's store counts.
             ("/v1/customer/events", Audience::Customer),
             ("/v1/customer/positions", Audience::Customer),
+            ("/v1/customer/swap", Audience::Customer),
             // Public, unlike everything else under `/v1/customer/`. It is the
             // login bootstrap, read before a token exists.
             ("/v1/customer/config", Audience::Public),
@@ -1235,6 +1236,12 @@ mod tests {
                 Audience::Public,
             ),
             ("/v1/market/launches", Audience::Public),
+            ("/v1/market/quote", Audience::Public),
+            // The shared ticker, projected to the watermark alone -- same
+            // audience as every other `/v1/market/` route, and the reason a
+            // new route rather than a wider `/v1/events` or
+            // `/v1/customer/events` audience: see `ticker`'s module doc.
+            ("/v1/market/events", Audience::Public),
             // The operator's surface. `/v1/store` and `/v1/events` are here on
             // purpose: store counts and a raw event stream are debugging tools,
             // not product.
