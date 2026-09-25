@@ -160,12 +160,14 @@ const MAX_CALLS_PER_VISITOR_PER_MINUTE: u32 = 6;
 /// idly re-pricing, so far fewer of them happen at once in practice, and this
 /// cap only needs enough headroom for a handful of wallets to each spend their
 /// own [`MAX_CALLS_PER_WALLET_PER_MINUTE`] share concurrently without the
-/// route as a whole ever asking Jupiter for more than this in a minute. Ten
-/// is a little under two wallets' worth of simultaneous full-tilt building —
-/// generous for this route's actual traffic shape, while still being a real
-/// ceiling separate from the quote route's, so a quiet swap route is never at
-/// the mercy of a busy quote one.
-const MAX_JUPITER_BUILD_CALLS_PER_MINUTE: u32 = 10;
+/// route as a whole ever asking Jupiter for more than this in a minute.
+/// Twenty-four is exactly four wallets' worth of simultaneous full-tilt
+/// building (4 × [`MAX_CALLS_PER_WALLET_PER_MINUTE`]'s 6), and 30 (the quote
+/// route's own cap) plus this 24 is 54 — still under Jupiter's free-tier
+/// budget of 60 calls a minute, so the two routes can both run at their own
+/// ceiling at once without either starving the other or the pair together
+/// tripping Jupiter's own limit.
+const MAX_JUPITER_BUILD_CALLS_PER_MINUTE: u32 = 24;
 
 /// The most calls one wallet may draw from the customer swap route in one
 /// rolling minute, regardless of room left in that route's own global budget.
@@ -488,9 +490,29 @@ fn render_quote(
     })
 }
 
+/// A fixed, address-free label for a routing failure's *kind* — never its
+/// body. `RouteError`'s `Display` can carry a visitor's own wallet address
+/// (`Malformed`, from `radar_exec::assemble`'s signer refusal), an upstream
+/// URL (`Unavailable`), or a raw response body (`Unauthorized`), and none of
+/// that belongs in a server log line. This match is exhaustive on purpose —
+/// with no wildcard arm, a new `RouteError` variant fails to compile here
+/// until it is given its own fixed label, rather than silently falling back
+/// to logging its `Display`.
+fn route_error_label(why: &RouteError) -> &'static str {
+    match why {
+        RouteError::NoRoute { .. } => "no_route",
+        RouteError::NotConfigured => "not_configured",
+        RouteError::Unauthorized { .. } => "unauthorized",
+        RouteError::Unavailable(_) => "unavailable",
+        RouteError::Malformed(_) => "malformed",
+        RouteError::Unverifiable(_) => "unverifiable",
+    }
+}
+
 /// Maps a routing failure to the refusal the wire contract names, logging
-/// only the error's kind — never its body, which for `Unauthorized` or
-/// `Unavailable` can echo request details back.
+/// only the error's kind (via [`route_error_label`]) — never its body, which
+/// for `Unauthorized` or `Unavailable` can echo request details, or for
+/// `Malformed`, a visitor's own wallet address, back.
 fn route_error_response(why: &RouteError) -> Response {
     match why {
         RouteError::NoRoute { .. } => refusal(
@@ -503,7 +525,10 @@ fn route_error_response(why: &RouteError) -> Response {
         | RouteError::Unavailable(_)
         | RouteError::Malformed(_)
         | RouteError::Unverifiable(_) => {
-            eprintln!("radar-serve: trade route failed: {why}");
+            eprintln!(
+                "radar-serve: trade route failed: {}",
+                route_error_label(why)
+            );
             refusal(
                 StatusCode::BAD_GATEWAY,
                 "unreadable_route",
@@ -846,5 +871,48 @@ mod tests {
     #[test]
     fn impact_bps_json_is_the_number_otherwise() {
         assert_eq!(impact_bps_json(123), json!(123));
+    }
+
+    /// Every `RouteError` variant must log as a fixed, hand-written label —
+    /// never its own `Display`, which for several variants carries request
+    /// details (an upstream URL or response body) or, for `Malformed`, can
+    /// carry a visitor's own wallet address (`radar_exec::assemble`'s signer
+    /// refusal). Each variant is built here with data that would fail this
+    /// test immediately if `route_error_label` ever fell back to `{why}`.
+    #[test]
+    fn route_error_label_is_a_fixed_string_for_every_variant() {
+        let cases: &[(RouteError, &str)] = &[
+            (
+                RouteError::NoRoute {
+                    mint: usdc().to_string(),
+                    size_lamports: 1,
+                },
+                "no_route",
+            ),
+            (RouteError::NotConfigured, "not_configured"),
+            (
+                RouteError::Unauthorized {
+                    status: 401,
+                    body: "secret-detail".to_owned(),
+                },
+                "unauthorized",
+            ),
+            (
+                RouteError::Unavailable("https://api.jup.ag/secret-detail".to_owned()),
+                "unavailable",
+            ),
+            (RouteError::Malformed(usdc().to_string()), "malformed"),
+            (
+                RouteError::Unverifiable("secret-detail".to_owned()),
+                "unverifiable",
+            ),
+        ];
+        for (err, expected_label) in cases {
+            assert_eq!(
+                route_error_label(err),
+                *expected_label,
+                "wrong label for {err:?}"
+            );
+        }
     }
 }

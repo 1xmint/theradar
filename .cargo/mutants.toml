@@ -398,26 +398,6 @@ exclude_re = [
     # `compact_u16`, `encode_url` and `decode_base64` above.
     'replace \| with \^ in write_shortvec',
 
-    # `Plan::build`'s `num_required_signatures`: `signer_writable.len() +
-    # signer_readonly.len()`. `classify_accounts` refuses (`RouteError::
-    # Malformed`) any instruction account that is a signer other than the
-    # taker, before it ever reaches `partition_accounts` -- so the taker is
-    # the only address `is_signer` can be true for. The taker is seeded
-    # `writable: true` and that flag is only ever OR'd, never cleared, so the
-    # taker always lands in `signer_writable`, never `signer_readonly`.
-    # `signer_readonly` is therefore always empty, `signer_readonly.len()` is
-    # always `0`, and `a + 0` and `a - 0` are the same number for every `a`.
-    #
-    # This is the pre-existing "cannot happen" comment a few lines above this
-    # one (`signer_writable.first() != Some(&taker)`), read the other way: the
-    # same invariant that pins index 0 also empties the readonly-signer list.
-    #
-    # **If `classify_accounts` ever admits a non-taker signer again -- the
-    # refusal added for the malformed-header bug in ADR 0024's swap-building
-    # work -- remove this line**: `signer_readonly` becomes reachable and this
-    # stops being equivalent.
-    'replace \+ with \- in Plan::build',
-
     # `radar-serve`'s `trading_lane`: the same argument as `Router::from_env`
     # above, applied to the same shape of problem. After splitting the pure
     # decision into `trading_note` (tested three ways: on keeps the value and

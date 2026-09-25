@@ -142,9 +142,10 @@ impl AssembledTransaction {
 ///
 /// [`RouteError::Malformed`] if the body does not parse, if any address or
 /// the blockhash is the wrong shape, if `tipInstruction` is present and
-/// non-null, or if compiling would need more than 256 distinct accounts (the
+/// non-null, if compiling would need more than 256 distinct accounts (the
 /// wire format's account index is a single byte, so this is a real limit and
-/// not a round-number guess).
+/// not a round-number guess), or if the finished transaction is over
+/// [`MAX_PACKET_BYTES`].
 pub fn assemble(body: &str, taker: Address) -> Result<AssembledTransaction, RouteError> {
     let parsed: BuildInstructions =
         serde_json::from_str(body).map_err(|e| RouteError::Malformed(e.to_string()))?;
@@ -183,9 +184,21 @@ pub fn assemble(body: &str, taker: Address) -> Result<AssembledTransaction, Rout
     let message = plan.encode_message(&instructions, blockhash)?;
 
     let mut wire = Vec::with_capacity(1 + 64 + message.len());
-    write_shortvec(&mut wire, 1); // one signature slot, for the fee payer
+    write_shortvec(&mut wire, 1)?; // one signature slot, for the fee payer
     wire.extend_from_slice(&[0u8; 64]); // zeroed: nothing here signs it
     wire.extend_from_slice(&message);
+
+    if wire.len() > MAX_PACKET_BYTES {
+        // Address-free on purpose, same reasoning as `classify_accounts`'s
+        // signer refusal just above in this module: this error can reach a
+        // log line (`radar-serve`'s `route_error_response`) or a refusal
+        // body, and a byte count is not visitor data.
+        return Err(RouteError::Malformed(format!(
+            "assembled transaction is {} bytes, over Solana's {MAX_PACKET_BYTES}-byte packet \
+             limit",
+            wire.len()
+        )));
+    }
 
     Ok(AssembledTransaction {
         wire,
@@ -193,6 +206,12 @@ pub fn assemble(body: &str, taker: Address) -> Result<AssembledTransaction, Rout
         fee_payer: taker,
     })
 }
+
+/// Solana's maximum packet size (`PACKET_DATA_SIZE`): a transaction serialized
+/// larger than this cannot be sent over the wire at all, wallet signature
+/// included. Checked here, against the exact bytes this module is about to
+/// hand back, rather than left for the wallet or the RPC node to discover.
+const MAX_PACKET_BYTES: usize = 1232;
 
 /// Where one account will be found in the compiled message: a plain static
 /// index, or an index into the v0 extended space a lookup table supplies.
@@ -274,9 +293,16 @@ fn classify_accounts(
                 // `num_required_signatures`), which is a malformed
                 // transaction handed to the wallet naming someone else as a
                 // signer -- refuse instead of building it.
-                return Err(RouteError::Malformed(format!(
-                    "route names {addr} as a signer, but the taker is {taker}"
-                )));
+                //
+                // The message is address-free on purpose: this refusal is
+                // surfaced to a visitor's session and logged by
+                // `radar-serve`'s `route_error_response`, and neither the
+                // visitor's own wallet nor the account Jupiter named belongs
+                // in a log line or an error body -- see that function's own
+                // doc comment.
+                return Err(RouteError::Malformed(
+                    "route names an account other than the taker as a signer".to_owned(),
+                ));
             }
             if seen.insert(addr) {
                 order.push(addr);
@@ -445,21 +471,37 @@ impl Plan {
             ));
         }
 
-        let num_required_signatures =
-            u8::try_from(signer_writable.len() + signer_readonly.len())
-                .map_err(|_| RouteError::Malformed("more than 256 signers".to_owned()))?;
+        // `classify_accounts` refuses (`RouteError::Malformed`) any account
+        // that is a signer other than `taker`, before any of it reaches
+        // `partition_accounts` -- so `taker` is the only address `is_signer`
+        // is ever true for, and the check just above already established it
+        // landed in `signer_writable`, not `signer_readonly`. One signer,
+        // and it is never readonly: `num_required_signatures` is `1`, plain,
+        // rather than a sum with a term that can only ever be `0` -- which
+        // is what let `signer_writable.len() + signer_readonly.len()` look
+        // like real arithmetic for a mutation test to flag when it was not.
+        debug_assert!(
+            signer_readonly.is_empty(),
+            "the taker is seeded signer+writable and no other address may be a signer; \
+             classify_accounts must have refused one that was"
+        );
+        let num_required_signatures: u8 = 1;
         let num_readonly_signed = u8::try_from(signer_readonly.len())
             .map_err(|_| RouteError::Malformed("more than 256 readonly signers".to_owned()))?;
         let num_readonly_unsigned = u8::try_from(static_readonly.len()).map_err(|_| {
             RouteError::Malformed("more than 256 readonly static accounts".to_owned())
         })?;
 
-        let mut static_keys = Vec::with_capacity(
-            signer_writable.len()
-                + signer_readonly.len()
-                + static_writable.len()
-                + static_readonly.len(),
-        );
+        // `order` names every account `classify_accounts` ever saw, and
+        // `static_keys` is a subset of it (whatever `partition_accounts` did
+        // not send to a lookup table) -- so its length is always a safe,
+        // if occasionally loose, upper bound. Sized this way rather than as
+        // a sum of the four partition lengths so there is no `+` here for a
+        // mutation test to flag: capacity is an allocator hint with no
+        // effect `static_keys.extend` below could ever make observable, so
+        // a wrong arithmetic operator on the old sum was never something a
+        // test could have caught by looking at the built transaction.
+        let mut static_keys = Vec::with_capacity(order.len());
         static_keys.extend(signer_writable);
         static_keys.extend(signer_readonly);
         static_keys.extend(static_writable);
@@ -511,14 +553,14 @@ impl Plan {
             self.num_readonly_unsigned,
         ];
 
-        write_shortvec(&mut out, self.static_keys.len());
+        write_shortvec(&mut out, self.static_keys.len())?;
         for key in &self.static_keys {
             out.extend_from_slice(key.as_bytes());
         }
 
         out.extend_from_slice(&blockhash);
 
-        write_shortvec(&mut out, instructions.len());
+        write_shortvec(&mut out, instructions.len())?;
         for ix in instructions {
             let program = parse_address(&ix.program_id)?;
             let program_index = self
@@ -529,7 +571,7 @@ impl Plan {
                 })?;
             out.push(program_index);
 
-            write_shortvec(&mut out, ix.accounts.len());
+            write_shortvec(&mut out, ix.accounts.len())?;
             for meta in &ix.accounts {
                 let addr = parse_address(&meta.pubkey)?;
                 let idx = self.virtual_index(addr).ok_or_else(|| {
@@ -548,16 +590,16 @@ impl Plan {
             let data = b64::decode(&ix.data).ok_or_else(|| {
                 RouteError::Malformed(format!("instruction data is not base64: {}", ix.data))
             })?;
-            write_shortvec(&mut out, data.len());
+            write_shortvec(&mut out, data.len())?;
             out.extend_from_slice(&data);
         }
 
-        write_shortvec(&mut out, self.lookups.len());
+        write_shortvec(&mut out, self.lookups.len())?;
         for lookup in &self.lookups {
             out.extend_from_slice(lookup.table.as_bytes());
-            write_shortvec(&mut out, lookup.writable.len());
+            write_shortvec(&mut out, lookup.writable.len())?;
             out.extend_from_slice(&lookup.writable);
-            write_shortvec(&mut out, lookup.readonly.len());
+            write_shortvec(&mut out, lookup.readonly.len())?;
             out.extend_from_slice(&lookup.readonly);
         }
 
@@ -580,6 +622,20 @@ const SHORTVEC_MAX_BYTES: usize = 3;
 /// Writes `n` as a shortvec (compact-u16): 7 bits per byte, continuation in
 /// the high bit, canonical (stops as soon as the remainder is zero).
 ///
+/// # Errors
+///
+/// [`RouteError::Malformed`] if `n` is over [`u16::MAX`]. Compact-u16 is, by
+/// name and by every caller's use of it here, an encoding of a *16-bit*
+/// count -- but three 7-bit bytes can represent values up to 2,097,151
+/// without ever tripping [`SHORTVEC_MAX_BYTES`]'s own bound. Without this
+/// guard a count that overran `u16` (a bug upstream of this function, since
+/// every real caller's count is independently bounded well under it) would
+/// still produce a well-formed-*looking* three-byte shortvec that decodes
+/// back to the wrong number of items on the other end -- silently, not as a
+/// truncation `SHORTVEC_MAX_BYTES` would catch. Refusing is the same choice
+/// `assemble` already makes for every other "this cannot happen, but if it
+/// does, say so" case.
+///
 /// Bounded by [`SHORTVEC_MAX_BYTES`] rather than `loop { .. }` on purpose: a
 /// single comparison flipped by mutation testing turned an unbounded loop
 /// into one that never returns for `n == 0` — a real, reached input (an
@@ -587,13 +643,18 @@ const SHORTVEC_MAX_BYTES: usize = 3;
 /// cargo-mutants can only report as a 60-second timeout rather than a caught
 /// mutant. Same shape as `radar_pumpfun::transaction::compact_u16`, which
 /// needed this exact bound first.
-fn write_shortvec(out: &mut Vec<u8>, mut n: usize) {
+fn write_shortvec(out: &mut Vec<u8>, mut n: usize) -> Result<(), RouteError> {
+    if n > usize::from(u16::MAX) {
+        return Err(RouteError::Malformed(
+            "count is over compact-u16's 16-bit range".to_owned(),
+        ));
+    }
     for _ in 0..SHORTVEC_MAX_BYTES {
         let byte = u8::try_from(n & 0x7f).unwrap_or(0);
         n >>= 7;
         if n == 0 {
             out.push(byte);
-            return;
+            return Ok(());
         }
         out.push(byte | 0x80);
     }
@@ -601,6 +662,7 @@ fn write_shortvec(out: &mut Vec<u8>, mut n: usize) {
         n == 0,
         "shortvec value truncated: does not fit in {SHORTVEC_MAX_BYTES} bytes"
     );
+    Ok(())
 }
 
 #[cfg(test)]
@@ -1044,6 +1106,52 @@ mod tests {
         );
     }
 
+    /// This refusal is surfaced to a visitor's session and logged verbatim by
+    /// `radar-serve`'s `route_error_response` (which only ever logs a fixed
+    /// label, never an error's `Display`, but the error body itself must
+    /// still be address-free as defense in depth). Neither the taker's own
+    /// wallet nor the account Jupiter incorrectly named as an extra signer
+    /// belongs in a log line, so the message text must not contain either
+    /// address's base58 form.
+    #[test]
+    fn the_extra_signer_refusal_does_not_log_either_wallet_address() {
+        let someone_else = Address::new([0x42; 32]);
+        let err = assemble(SOL_USDC, someone_else)
+            .expect_err("the fixture names TAKER as a signer, and someone_else is not TAKER");
+        let message = match &err {
+            super::RouteError::Malformed(m) => m,
+            other => panic!("expected Malformed, got {other:?}"),
+        };
+        assert!(
+            !message.contains(TAKER),
+            "message must not log the taker's address: {message}"
+        );
+        assert!(
+            !message.contains(someone_else.to_string().as_str()),
+            "message must not log the extra signer's address: {message}"
+        );
+    }
+
+    /// A transaction that would serialize larger than Solana's
+    /// [`super::MAX_PACKET_BYTES`] packet limit is refused rather than handed
+    /// back for a wallet (or an RPC node) to discover the hard way. Inflating
+    /// the swap instruction's own data is enough to push the fixture over the
+    /// limit without touching account counts or lookup tables.
+    #[test]
+    fn a_transaction_over_the_packet_limit_is_refused() {
+        let mut v: serde_json::Value = serde_json::from_str(SOL_USDC).unwrap();
+        let oversized_data = radar_types::b64::encode(&vec![0u8; 2000]);
+        v["swapInstruction"]["data"] = serde_json::Value::String(oversized_data);
+        let body = v.to_string();
+
+        let err = assemble(&body, taker())
+            .expect_err("2000 bytes of instruction data alone is over the 1232-byte packet limit");
+        assert!(
+            matches!(err, super::RouteError::Malformed(ref m) if m.contains("1232")),
+            "the refusal must name the packet limit, got {err}"
+        );
+    }
+
     /// `AssembledTransaction::to_base64` must encode exactly the compiled
     /// wire bytes -- not merely return *some* non-empty string. Decoding it
     /// back and comparing against `wire` catches a stub implementation that
@@ -1099,19 +1207,52 @@ mod tests {
     #[test]
     fn shortvec_encodes_canonically() {
         let mut out = Vec::new();
-        write_shortvec(&mut out, 0);
+        write_shortvec(&mut out, 0).unwrap();
         assert_eq!(out, vec![0]);
 
         let mut out = Vec::new();
-        write_shortvec(&mut out, 127);
+        write_shortvec(&mut out, 127).unwrap();
         assert_eq!(out, vec![0x7f]);
 
         let mut out = Vec::new();
-        write_shortvec(&mut out, 128);
+        write_shortvec(&mut out, 128).unwrap();
         assert_eq!(out, vec![0x80, 0x01]);
 
         let mut out = Vec::new();
-        write_shortvec(&mut out, 300);
+        write_shortvec(&mut out, 300).unwrap();
         assert_eq!(out, vec![0xac, 0x02]);
+
+        // The three boundary values right around the two-byte/three-byte
+        // seams, and the largest value compact-u16 is defined for at all
+        // (`u16::MAX`) -- see `write_shortvec`'s own guard, tested separately
+        // below.
+        let mut out = Vec::new();
+        write_shortvec(&mut out, 16383).unwrap();
+        assert_eq!(out, vec![0xff, 0x7f]);
+
+        let mut out = Vec::new();
+        write_shortvec(&mut out, 16384).unwrap();
+        assert_eq!(out, vec![0x80, 0x80, 0x01]);
+
+        let mut out = Vec::new();
+        write_shortvec(&mut out, 65535).unwrap();
+        assert_eq!(out, vec![0xff, 0xff, 0x03]);
+    }
+
+    /// A count over `u16::MAX` is refused rather than silently compiled into
+    /// a three-byte shortvec that looks well-formed but decodes back to the
+    /// wrong number on the other end -- see `write_shortvec`'s own doc
+    /// comment for why a fourth-byte-worth of value is representable in three
+    /// 7-bit bytes but not valid compact-u16.
+    #[test]
+    fn shortvec_refuses_a_count_over_u16_max() {
+        let mut out = Vec::new();
+        let err = write_shortvec(&mut out, usize::from(u16::MAX) + 1)
+            .expect_err("65,536 is one past compact-u16's range");
+        assert!(matches!(err, super::RouteError::Malformed(_)), "got {err}");
+        assert!(
+            out.is_empty(),
+            "nothing is written once the count is refused"
+        );
     }
 }
