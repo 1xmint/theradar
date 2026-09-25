@@ -68,6 +68,22 @@ fn fixture(name: &str) -> String {
     std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("reading {}: {e}", path.display()))
 }
 
+/// The address every captured fixture's `setupInstructions`/`swapInstruction`
+/// names as a signer -- the wallet the capture was taken under.
+const FIXTURE_TAKER: &str = "CjfBjFVBs6QRvRTpMdKTBxZ7PZuJvHXWQKGRvR7wFbdz";
+
+/// `fixture(name)`, rewritten so its embedded signer is `taker` instead of
+/// [`FIXTURE_TAKER`].
+///
+/// `radar-exec`'s `assemble` refuses (ADR 0024) to compile a transaction that
+/// names a signer other than the caller's own wallet -- exactly what a
+/// captured fixture used unmodified for a synthetic test wallet would be.
+/// Substituting the string stands in for a second real capture taken under a
+/// different taker, without hand-writing one.
+fn fixture_for(name: &str, taker: &Address) -> String {
+    fixture(name).replace(FIXTURE_TAKER, &taker.to_string())
+}
+
 /// A loopback server that answers up to `limit` requests, in order, and
 /// counts how many it actually saw.
 ///
@@ -106,6 +122,52 @@ fn jupiter(status: u16, reason: &str, body: &str, limit: usize) -> (String, Arc<
                 }
             }
             counted.fetch_add(1, Ordering::SeqCst);
+            let _ = stream.write_all(response.as_bytes());
+            let _ = stream.flush();
+        }
+    });
+
+    (format!("http://127.0.0.1:{port}/build"), seen)
+}
+
+/// A loopback server that answers each connection with the next body from
+/// `bodies`, in order, and panics if asked for more connections than it was
+/// given bodies -- for tests where two different callers must each see a
+/// response built for *them* (a fixture rewritten for their own wallet as
+/// signer), not the same body twice.
+fn jupiter_sequence(status: u16, reason: &str, bodies: Vec<String>) -> (String, Arc<AtomicUsize>) {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("a port");
+    let port = listener.local_addr().expect("an address").port();
+    let seen = Arc::new(AtomicUsize::new(0));
+    let counted = Arc::clone(&seen);
+    let reason = reason.to_owned();
+
+    std::thread::spawn(move || {
+        for body in bodies {
+            let Ok((mut stream, _)) = listener.accept() else {
+                return;
+            };
+            let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
+            let mut buf = vec![0_u8; 8192];
+            let mut n = 0;
+            while n < buf.len() {
+                let Ok(read) = stream.read(&mut buf[n..]) else {
+                    break;
+                };
+                if read == 0 {
+                    break;
+                }
+                n += read;
+                if buf[..n].windows(4).any(|w| w == CRLF_CRLF) {
+                    break;
+                }
+            }
+            counted.fetch_add(1, Ordering::SeqCst);
+            let response = format!(
+                "HTTP/1.1 {status} {reason}\r\nContent-Type: application/json\r\n\
+                 Content-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            );
             let _ = stream.write_all(response.as_bytes());
             let _ = stream.flush();
         }
@@ -224,7 +286,11 @@ async fn quote(
     )
 }
 
-async fn swap(router: &axum::Router, body: Value, bearer: &str) -> (StatusCode, Value) {
+async fn swap(
+    router: &axum::Router,
+    body: Value,
+    bearer: &str,
+) -> (StatusCode, Value, Option<String>) {
     let response = router
         .clone()
         .oneshot(
@@ -234,6 +300,38 @@ async fn swap(router: &axum::Router, body: Value, bearer: &str) -> (StatusCode, 
                 .header("authorization", format!("Bearer {bearer}"))
                 .header("content-type", "application/json")
                 .body(Body::from(body.to_string()))
+                .expect("a well-formed request"),
+        )
+        .await
+        .expect("the router answers");
+    let status = response.status();
+    let cache_control = response
+        .headers()
+        .get(axum::http::header::CACHE_CONTROL)
+        .map(|v| v.to_str().expect("ascii header").to_owned());
+    let bytes = response
+        .into_body()
+        .collect()
+        .await
+        .expect("a body")
+        .to_bytes();
+    (
+        status,
+        serde_json::from_slice(&bytes).unwrap_or(Value::Null),
+        cache_control,
+    )
+}
+
+/// GETs `path` with no body and returns its status and parsed JSON body --
+/// for `/health`, the one plain unauthenticated `GET` this file exercises
+/// outside the two trade routes.
+async fn get_json(router: &axum::Router, path: &str) -> (StatusCode, Value) {
+    let response = router
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(path)
+                .body(Body::empty())
                 .expect("a well-formed request"),
         )
         .await
@@ -272,7 +370,12 @@ fn shortvec(wire: &[u8], pos: &mut usize) -> usize {
     value
 }
 
-fn fee_payer_of(wire: &[u8]) -> Address {
+/// The fee payer (first static account key) and the message header's
+/// `num_required_signatures` byte, decoded independently of `assemble`'s own
+/// encoder -- the same cross-check `radar-exec`'s own suite runs one layer
+/// down, reproduced here for the two fields an HTTP caller can check without
+/// a full Solana SDK dependency.
+fn fee_payer_of(wire: &[u8]) -> (Address, u8) {
     let mut pos = 0usize;
     let sig_count = shortvec(wire, &mut pos);
     assert_eq!(
@@ -281,10 +384,11 @@ fn fee_payer_of(wire: &[u8]) -> Address {
     );
     pos += 64; // the zeroed, unsigned slot
     pos += 1; // version byte (0x80: versioned, v0)
+    let num_required_signatures = wire[pos];
     pos += 3; // num_required_signatures, num_readonly_signed, num_readonly_unsigned
     let _key_count = shortvec(wire, &mut pos);
     let bytes: [u8; 32] = wire[pos..pos + 32].try_into().expect("32 bytes");
-    Address::new(bytes)
+    (Address::new(bytes), num_required_signatures)
 }
 
 const BUY_QUERY: &str =
@@ -301,7 +405,7 @@ async fn trading_off_refuses_both_routes_without_calling_jupiter() {
     assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE, "{body}");
     assert_eq!(body["reason"], "trading_off", "{body}");
 
-    let (status, body) = swap(
+    let (status, body, _cache) = swap(
         &router,
         serde_json::json!({"mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", "side": "buy", "amount": "100000000"}),
         &session(&wallet(1)),
@@ -407,16 +511,22 @@ async fn the_visitor_cap_refuses_the_seventh_quote_without_reaching_jupiter() {
 /// seventh Jupiter call.
 #[tokio::test(flavor = "multi_thread")]
 async fn the_wallet_cap_refuses_the_seventh_swap_without_reaching_jupiter() {
-    let (endpoint, seen) = jupiter(200, "OK", &fixture("jupiter-build-sol-usdc.json"), 6);
+    let taker = wallet(3);
+    let (endpoint, seen) = jupiter(
+        200,
+        "OK",
+        &fixture_for("jupiter-build-sol-usdc.json", &taker),
+        6,
+    );
     let router = router(Some(trading(endpoint, vec![mint_account_json(6)])));
-    let bearer = session(&wallet(3));
+    let bearer = session(&taker);
     let body = serde_json::json!({"mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", "side": "buy", "amount": "100000000"});
 
     for i in 0..6 {
-        let (status, resp) = swap(&router, body.clone(), &bearer).await;
+        let (status, resp, _cache) = swap(&router, body.clone(), &bearer).await;
         assert_eq!(status, StatusCode::OK, "call {i}: {resp}");
     }
-    let (status, resp) = swap(&router, body, &bearer).await;
+    let (status, resp, _cache) = swap(&router, body, &bearer).await;
     assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE, "{resp}");
     assert_eq!(resp["reason"], "busy", "{resp}");
     assert_eq!(
@@ -426,11 +536,13 @@ async fn the_wallet_cap_refuses_the_seventh_swap_without_reaching_jupiter() {
     );
 }
 
-/// Thirty calls a minute is the ceiling across both routes and every caller
-/// put together: five visitors each spend their own full six-call share --
-/// exactly at each one's own cap, never over it -- and the thirty-first
-/// call, from a sixth visitor with an empty share of their own, is still
-/// `busy`. Only the global ledger explains that refusal.
+/// Thirty calls a minute is the ceiling across the quote route and every
+/// visitor put together: five visitors each spend their own full six-call
+/// share -- exactly at each one's own cap, never over it -- and the
+/// thirty-first call, from a sixth visitor with an empty share of their own,
+/// is still `busy`. Only the quote route's own global ledger explains that
+/// refusal -- see `exhausting_the_quote_cap_does_not_refuse_a_swap` for proof
+/// it is that route's own ledger and not one shared with the swap route.
 #[tokio::test(flavor = "multi_thread")]
 async fn the_global_cap_refuses_the_thirty_first_call_regardless_of_who_asks() {
     let (endpoint, seen) = jupiter(200, "OK", &fixture("jupiter-build-sol-usdc.json"), 30);
@@ -468,16 +580,23 @@ async fn the_global_cap_refuses_the_thirty_first_call_regardless_of_who_asks() {
 /// for the same swap get two distinct transactions, each naming itself.
 #[tokio::test(flavor = "multi_thread")]
 async fn two_wallets_each_get_their_own_transaction_naming_themselves_as_fee_payer() {
-    let (endpoint, seen) = jupiter(200, "OK", &fixture("jupiter-build-sol-usdc.json"), 2);
+    let (a, b) = (wallet(11), wallet(22));
+    let (endpoint, seen) = jupiter_sequence(
+        200,
+        "OK",
+        vec![
+            fixture_for("jupiter-build-sol-usdc.json", &a),
+            fixture_for("jupiter-build-sol-usdc.json", &b),
+        ],
+    );
     let router = router(Some(trading(
         endpoint,
         vec![mint_account_json(6), mint_account_json(6)],
     )));
     let body = serde_json::json!({"mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", "side": "buy", "amount": "100000000"});
 
-    let (a, b) = (wallet(11), wallet(22));
-    let (status_a, resp_a) = swap(&router, body.clone(), &session(&a)).await;
-    let (status_b, resp_b) = swap(&router, body, &session(&b)).await;
+    let (status_a, resp_a, cache_a) = swap(&router, body.clone(), &session(&a)).await;
+    let (status_b, resp_b, cache_b) = swap(&router, body, &session(&b)).await;
     assert_eq!(status_a, StatusCode::OK, "{resp_a}");
     assert_eq!(status_b, StatusCode::OK, "{resp_b}");
 
@@ -494,15 +613,17 @@ async fn two_wallets_each_get_their_own_transaction_naming_themselves_as_fee_pay
 
     let wire_a = radar_types::b64::decode(tx_a).expect("valid base64");
     let wire_b = radar_types::b64::decode(tx_b).expect("valid base64");
+    let (fee_payer_a, num_required_a) = fee_payer_of(&wire_a);
+    let (fee_payer_b, num_required_b) = fee_payer_of(&wire_b);
+    assert_eq!(fee_payer_a, a, "wallet A's transaction must name wallet A");
+    assert_eq!(fee_payer_b, b, "wallet B's transaction must name wallet B");
     assert_eq!(
-        fee_payer_of(&wire_a),
-        a,
-        "wallet A's transaction must name wallet A"
+        num_required_a, 1,
+        "only the caller's own wallet signs -- never a second name from the fixture"
     );
     assert_eq!(
-        fee_payer_of(&wire_b),
-        b,
-        "wallet B's transaction must name wallet B"
+        num_required_b, 1,
+        "only the caller's own wallet signs -- never a second name from the fixture"
     );
     assert_eq!(seen.load(Ordering::SeqCst), 2);
 
@@ -513,5 +634,132 @@ async fn two_wallets_each_get_their_own_transaction_naming_themselves_as_fee_pay
     assert_eq!(
         resp_a["quote"]["mint"],
         "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
+    );
+
+    // A wallet-specific unsigned transaction is exactly as cache-unsafe as the
+    // public quote it is built from -- see `the_public_quote_route_works_
+    // without_a_session`'s own check of the same header on that route.
+    assert_eq!(cache_a.as_deref(), Some("no-store"), "{resp_a}");
+    assert_eq!(cache_b.as_deref(), Some("no-store"), "{resp_b}");
+}
+
+/// `/health` reports whether this instance builds or prices swaps at all --
+/// `false` with `RADAR_TRADE` off (no [`Trading`] at all, the shipped
+/// default), `true` once it is configured and on. An operator or `radar
+/// brief` reading this instance from outside needs this fact without probing
+/// either trade route, one of which sits behind a session it does not have.
+#[tokio::test(flavor = "multi_thread")]
+async fn health_reports_whether_trading_is_configured() {
+    let off = router(None);
+    let (status, body) = get_json(&off, "/health").await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["trading"], false, "{body}");
+
+    // Never dialed: `/health` reads `state.trading.is_some()`, nothing more.
+    let on = router(Some(trading("http://127.0.0.1:1/build".to_owned(), vec![])));
+    let (status, body) = get_json(&on, "/health").await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["trading"], true, "{body}");
+}
+
+/// [`SwapBody`] (in `trade.rs`) names only `mint`, `side`, `amount`, and
+/// `slippage_bps` -- no `wallet` or `taker` field exists for a caller to
+/// supply, so serde's default (non-`deny_unknown_fields`) behavior silently
+/// drops any extra field a request adds. This is the behavioral proof: a body
+/// naming a second wallet in an extra field still produces a transaction
+/// naming the signed-in [`Tenant`]'s own wallet as fee payer, never the
+/// name from the extra field.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_extra_wallet_field_naming_someone_else_is_ignored() {
+    let signed_in = wallet(41);
+    let someone_else = wallet(42);
+    let (endpoint, seen) = jupiter(
+        200,
+        "OK",
+        &fixture_for("jupiter-build-sol-usdc.json", &signed_in),
+        1,
+    );
+    let router = router(Some(trading(endpoint, vec![mint_account_json(6)])));
+
+    let body = serde_json::json!({
+        "mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+        "side": "buy",
+        "amount": "100000000",
+        "wallet": someone_else.to_string(),
+        "taker": someone_else.to_string(),
+    });
+    let (status, resp, _cache) = swap(&router, body, &session(&signed_in)).await;
+    assert_eq!(status, StatusCode::OK, "{resp}");
+
+    let tx = resp["transaction"].as_str().expect("a transaction string");
+    let wire = radar_types::b64::decode(tx).expect("valid base64");
+    let (fee_payer, num_required) = fee_payer_of(&wire);
+    assert_eq!(
+        fee_payer, signed_in,
+        "the fee payer is the session's own wallet, never the body's extra field"
+    );
+    assert_ne!(
+        fee_payer, someone_else,
+        "the extra wallet/taker field must not have redirected the transaction"
+    );
+    assert_eq!(
+        num_required, 1,
+        "only the signed-in wallet signs -- never a second name from the body"
+    );
+    assert_eq!(seen.load(Ordering::SeqCst), 1);
+}
+
+/// The swap route's global budget ([`MAX_JUPITER_BUILD_CALLS_PER_MINUTE`],
+/// via `Trading::build_calls`) is its own pool, separate from the quote
+/// route's ([`MAX_JUPITER_CALLS_PER_MINUTE`], via `Trading::quote_calls`) --
+/// see the module doc comment's "Four limits" section. Spending the quote
+/// route's entire thirty-call ceiling (proven `busy` for a fresh visitor
+/// immediately after) must not cost a signed-in wallet's swap build anything:
+/// it still reaches Jupiter and builds, on a ledger the quote traffic never
+/// touched.
+#[tokio::test(flavor = "multi_thread")]
+async fn exhausting_the_quote_cap_does_not_refuse_a_swap() {
+    let taker = wallet(77);
+    let mut bodies: Vec<String> = vec![fixture("jupiter-build-sol-usdc.json"); 30];
+    bodies.push(fixture_for("jupiter-build-sol-usdc.json", &taker));
+    let (endpoint, seen) = jupiter_sequence(200, "OK", bodies);
+    let router = router(Some(trading(endpoint, vec![mint_account_json(6)])));
+
+    for visitor in 0..5 {
+        let ip = format!("203.0.113.{visitor}");
+        for call in 0..6 {
+            let (status, body, _cache) = quote(&router, BUY_QUERY, Some(&ip)).await;
+            assert_eq!(
+                status,
+                StatusCode::OK,
+                "visitor {visitor} call {call}: {body}"
+            );
+        }
+    }
+    assert_eq!(
+        seen.load(Ordering::SeqCst),
+        30,
+        "the quote route's own global cap is now fully spent"
+    );
+
+    let (status, body, _cache) = quote(&router, BUY_QUERY, Some("203.0.113.99")).await;
+    assert_eq!(
+        status,
+        StatusCode::SERVICE_UNAVAILABLE,
+        "a fresh visitor confirms the quote route's ledger really is spent: {body}"
+    );
+    assert_eq!(body["reason"], "busy", "{body}");
+
+    let swap_body = serde_json::json!({"mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", "side": "buy", "amount": "100000000"});
+    let (status, resp, _cache) = swap(&router, swap_body, &session(&taker)).await;
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "the swap route's own budget was never touched by quote traffic: {resp}"
+    );
+    assert_eq!(
+        seen.load(Ordering::SeqCst),
+        31,
+        "the swap build reached Jupiter on its own separate ledger"
     );
 }

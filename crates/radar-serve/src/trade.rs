@@ -63,29 +63,39 @@
 //! refuses to **start** rather than answering `trading_off` for a reason that
 //! is actually a misconfiguration — see [`from_vars`].
 //!
-//! # Three limits, for three different things
+//! # Four limits, for four different things
 //!
-//! Mirrors [`crate::positions`]'s reasoning exactly, with one more tier because
-//! this module has two routes sharing one upstream. The **global** cap (30
-//! Jupiter calls a minute) exists because a Jupiter API key has a real rate
-//! limit that every caller of both routes draws from together. The
-//! **per-visitor** cap on the public quote route (6 calls a minute, keyed on
-//! `CF-Connecting-IP`) exists because that route has no identity to charge —
-//! anyone can ask it, so the thing rationed is the best guess at "anyone"
-//! Radar has. The header is Cloudflare's own and is not authenticated: a
-//! caller reaching this route directly (bypassing Cloudflare) can set it to
-//! whatever it likes. That is a ceiling on how *precisely* one abusive visitor
-//! can be isolated from another sharing the same guess, never a ceiling on the
-//! **global** cap itself, which does not trust the header at all. When the
-//! header is absent, the connection's own peer address is used instead — worse
-//! at telling two visitors behind one NAT apart, but not spoofable by the
-//! request itself. The **per-wallet** cap on the customer route (6 calls a
-//! minute) exists because a signed-in wallet *is* an identity, and is charged
-//! against it rather than against its visitor key.
+//! Mirrors [`crate::positions`]'s reasoning exactly, with more tiers because
+//! this module has two routes against one upstream, and neither route may
+//! starve the other of it. The **quote-route global** cap (30 Jupiter calls a
+//! minute) exists because a Jupiter API key has a real rate limit that every
+//! caller of the *pricing* route draws from together. The **per-visitor** cap
+//! on that same route (6 calls a minute, keyed on `CF-Connecting-IP`) exists
+//! because that route has no identity to charge — anyone can ask it, so the
+//! thing rationed is the best guess at "anyone" Radar has. The header is
+//! Cloudflare's own and is not authenticated: a caller reaching this route
+//! directly (bypassing Cloudflare) can set it to whatever it likes. That is a
+//! ceiling on how *precisely* one abusive visitor can be isolated from another
+//! sharing the same guess, never a ceiling on the **quote-route global** cap
+//! itself, which does not trust the header at all. When the header is absent,
+//! the connection's own peer address is used instead — worse at telling two
+//! visitors behind one NAT apart, but not spoofable by the request itself.
 //!
-//! All three checks run under the same lock-ordering discipline
-//! [`crate::positions`] documents: global first, then the per-key map, both
-//! checked before either is charged, and a refused caller is never inserted.
+//! The **swap-route global** cap and the **per-wallet** cap on that route (6
+//! calls a minute each) exist because a signed-in wallet *is* an identity, and
+//! is charged against it rather than against a visitor key — but the *global*
+//! half of that pair is its own separate budget from the quote route's,
+//! deliberately not drawn from the same pool. Public quote traffic is the
+//! larger and more elastic of the two (anyone can ask, at no cost) and a burst
+//! of it filling a shared global bucket would leave a signed-in wallet's swap
+//! build refused for a reason that has nothing to do with that wallet or with
+//! building transactions at all. See [`MAX_JUPITER_BUILD_CALLS_PER_MINUTE`]
+//! for why its number is smaller than the quote route's.
+//!
+//! All four checks run under the same lock-ordering discipline
+//! [`crate::positions`] documents: the relevant global counter first, then the
+//! per-key map, both checked before either is charged, and a refused caller is
+//! never inserted.
 
 use std::collections::{HashMap, VecDeque};
 use std::net::SocketAddr;
@@ -130,16 +140,35 @@ pub const DEFAULT_SLIPPAGE_BPS: u32 = 100;
 /// rather than being silently charged a tolerance they did not agree to.
 pub const MAX_SLIPPAGE_BPS: u32 = 500;
 
-/// The most calls this instance will make to Jupiter, across both routes, in
-/// one rolling minute.
+/// The most calls this instance will make to Jupiter for the public quote
+/// route, across every visitor, in one rolling minute.
+///
+/// Its own budget, separate from [`MAX_JUPITER_BUILD_CALLS_PER_MINUTE`] — see
+/// the module doc comment's "Four limits" section for why the two routes do
+/// not share one pool.
 const MAX_JUPITER_CALLS_PER_MINUTE: u32 = 30;
 
 /// The most calls one visitor key may draw from the public quote route in one
-/// rolling minute, regardless of room left globally.
+/// rolling minute, regardless of room left in that route's own global budget.
 const MAX_CALLS_PER_VISITOR_PER_MINUTE: u32 = 6;
 
+/// The most calls this instance will make to Jupiter for the customer swap
+/// route, across every wallet, in one rolling minute.
+///
+/// A smaller, separate pool from the quote route's 30: a swap build is a
+/// signed-in wallet about to sign and submit a transaction, not a visitor
+/// idly re-pricing, so far fewer of them happen at once in practice, and this
+/// cap only needs enough headroom for a handful of wallets to each spend their
+/// own [`MAX_CALLS_PER_WALLET_PER_MINUTE`] share concurrently without the
+/// route as a whole ever asking Jupiter for more than this in a minute. Ten
+/// is a little under two wallets' worth of simultaneous full-tilt building —
+/// generous for this route's actual traffic shape, while still being a real
+/// ceiling separate from the quote route's, so a quiet swap route is never at
+/// the mercy of a busy quote one.
+const MAX_JUPITER_BUILD_CALLS_PER_MINUTE: u32 = 10;
+
 /// The most calls one wallet may draw from the customer swap route in one
-/// rolling minute, regardless of room left globally.
+/// rolling minute, regardless of room left in that route's own global budget.
 const MAX_CALLS_PER_WALLET_PER_MINUTE: u32 = 6;
 
 /// One quote or one build: exactly one Jupiter call each (see
@@ -163,8 +192,13 @@ pub struct Trading {
     /// — and never populated for SOL or wrapped SOL, which are hardcoded and
     /// never reach this cache.
     decimals: Mutex<HashMap<Address, u8>>,
-    global_calls: Mutex<VecDeque<Instant>>,
+    /// The quote route's own global budget. Never shared with
+    /// [`Self::build_calls`] — see the module doc comment.
+    quote_calls: Mutex<VecDeque<Instant>>,
     visitor_calls: Mutex<HashMap<String, VecDeque<Instant>>>,
+    /// The swap route's own global budget. Never shared with
+    /// [`Self::quote_calls`] — see the module doc comment.
+    build_calls: Mutex<VecDeque<Instant>>,
     wallet_calls: Mutex<HashMap<Address, VecDeque<Instant>>>,
 }
 
@@ -176,8 +210,9 @@ impl Trading {
             router,
             rpc,
             decimals: Mutex::new(HashMap::new()),
-            global_calls: Mutex::new(VecDeque::new()),
+            quote_calls: Mutex::new(VecDeque::new()),
             visitor_calls: Mutex::new(HashMap::new()),
+            build_calls: Mutex::new(VecDeque::new()),
             wallet_calls: Mutex::new(HashMap::new()),
         }
     }
@@ -215,7 +250,7 @@ impl Trading {
     /// global budget. See the module doc comment for the lock-ordering rule.
     fn reserve_visitor(&self, visitor: &str, want: u32) -> bool {
         let mut global = self
-            .global_calls
+            .quote_calls
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         let mut visitors = self
@@ -245,13 +280,13 @@ impl Trading {
     }
 
     /// Reserves `want` Jupiter calls against `wallet`'s own share and the
-    /// global budget. Shares [`Self::global_calls`] with
-    /// [`Self::reserve_visitor`] — one Jupiter rate limit, drawn on by both
-    /// routes — while keeping wallets and visitor keys in separate maps, since
-    /// nothing about a visitor key is a wallet address.
+    /// swap route's own global budget ([`Self::build_calls`]) — deliberately
+    /// *not* [`Self::quote_calls`], which [`Self::reserve_visitor`] alone
+    /// draws on. See the module doc comment's "Four limits" section for why
+    /// the two routes do not share one pool.
     fn reserve_wallet(&self, wallet: Address, want: u32) -> bool {
         let mut global = self
-            .global_calls
+            .build_calls
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         let mut wallets = self
@@ -267,7 +302,7 @@ impl Trading {
         });
         let none = VecDeque::new();
         let mine = wallets.get(&wallet).unwrap_or(&none);
-        if !fits(&global, want, MAX_JUPITER_CALLS_PER_MINUTE)
+        if !fits(&global, want, MAX_JUPITER_BUILD_CALLS_PER_MINUTE)
             || !fits(mine, want, MAX_CALLS_PER_WALLET_PER_MINUTE)
         {
             return false;
@@ -417,15 +452,21 @@ fn impact_bps_json(impact_bps: u32) -> Value {
 }
 
 /// Builds the quote object the wire contract specifies, shared by both routes.
+///
+/// `in_decimals`/`out_decimals` are resolved by the caller -- inside the same
+/// `spawn_blocking` task that already reads the route from Jupiter, since
+/// [`Trading::decimals_of`] can itself block on an RPC read -- rather than
+/// looked up here on the async runtime's own thread.
 #[allow(clippy::too_many_arguments)]
 fn render_quote(
-    trading: &Trading,
     mint: Address,
     side: &str,
     input: Asset,
     output: Asset,
     quote: &radar_exec::route::Quote,
     slippage_bps: u32,
+    in_decimals: Option<u8>,
+    out_decimals: Option<u8>,
 ) -> Value {
     let worst_out = quote
         .worst_out
@@ -438,8 +479,8 @@ fn render_quote(
         "in_amount": quote.in_amount.to_string(),
         "out_amount": quote.out_amount.to_string(),
         "worst_out": worst_out.to_string(),
-        "in_decimals": trading.decimals_of(input),
-        "out_decimals": trading.decimals_of(output),
+        "in_decimals": in_decimals,
+        "out_decimals": out_decimals,
         "slippage_bps": slippage_bps,
         "impact_bps": impact_bps_json(quote.impact_bps),
         "venues": quote.venues,
@@ -550,26 +591,32 @@ async fn quote_inner(
             .trading
             .as_ref()
             .expect("trading is checked present before this task is spawned, and never removed");
-        trading.router.quote_at(&request, slippage_bps)
+        let quote_result = trading.router.quote_at(&request, slippage_bps)?;
+        // Resolved here, off the async runtime's own thread: an uncached mint
+        // reads its decimals over the same blocking RPC client `positions.rs`
+        // isolates the same way.
+        let in_decimals = trading.decimals_of(input);
+        let out_decimals = trading.decimals_of(output);
+        Ok((quote_result, in_decimals, out_decimals))
     })
     .await;
 
     match result {
-        Ok(Ok(quote_result)) => {
-            let trading = state.trading.as_ref().expect("checked above");
+        Ok(Ok((quote_result, in_decimals, out_decimals))) => {
             let side = if input == Asset::WrappedSol {
                 "buy"
             } else {
                 "sell"
             };
             Json(render_quote(
-                trading,
                 mint,
                 side,
                 input,
                 output,
                 &quote_result,
                 slippage_bps,
+                in_decimals,
+                out_decimals,
             ))
             .into_response()
         }
@@ -649,26 +696,32 @@ async fn swap_inner(
             .trading
             .as_ref()
             .expect("trading is checked present before this task is spawned, and never removed");
-        trading.router.build(&request, slippage_bps)
+        let built = trading.router.build(&request, slippage_bps)?;
+        // Resolved here, off the async runtime's own thread: an uncached mint
+        // reads its decimals over the same blocking RPC client `positions.rs`
+        // isolates the same way.
+        let in_decimals = trading.decimals_of(input);
+        let out_decimals = trading.decimals_of(output);
+        Ok((built, in_decimals, out_decimals))
     })
     .await;
 
     match result {
-        Ok(Ok(built)) => {
-            let trading = state.trading.as_ref().expect("checked above");
+        Ok(Ok((built, in_decimals, out_decimals))) => {
             let side = if input == Asset::WrappedSol {
                 "buy"
             } else {
                 "sell"
             };
             let quote_json = render_quote(
-                trading,
                 mint,
                 side,
                 input,
                 output,
                 &built.quote,
                 slippage_bps,
+                in_decimals,
+                out_decimals,
             );
             Json(json!({
                 "transaction": built.transaction.to_base64(),
