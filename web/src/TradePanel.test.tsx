@@ -278,6 +278,10 @@ describe("TradePanel review and send flow", () => {
     const card = screen.getByRole("region", { name: "Trade review" });
     expect(within(card).getByText("4.75")).toBeTruthy();
     expect(within(card).queryByText("4.9")).toBeNull();
+    // The built response's own slippage tolerance, not whatever the live
+    // fields say -- both default to 100 bps here, but the card must be
+    // reading `review.response.quote.slippage_bps`, not the input field.
+    expect(within(card).getByText("1.00%")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Approve in wallet" }));
     expect(await screen.findByText("Sent to your wallet.")).toBeTruthy();
     expect(screen.getByRole("link", { name: "View on Solscan" }).getAttribute("href")).toContain("SIG123");
@@ -298,6 +302,68 @@ describe("TradePanel review and send flow", () => {
     await buildReview();
     expect(await screen.findByRole("button", { name: "Approve in wallet" })).toBeTruthy();
     fireEvent.change(screen.getByDisplayValue("100"), { target: { value: "50" } });
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Approve in wallet" })).toBeNull());
+    expect(screen.queryByRole("region", { name: "Trade review" })).toBeNull();
+    expect(vi.mocked(signAndSend)).not.toHaveBeenCalled();
+  });
+
+  it("does not let a build that finishes after the slippage changed become approvable", async () => {
+    // Regression test for a race: `startReview` used to always call
+    // `setReview({kind: "built"})` once its `/v1/customer/swap` call
+    // resolved, even if the slippage (or amount, or side, or mint) had since
+    // changed underneath it -- so a transaction built for 500 bps could come
+    // back and show "Approve in wallet" after the field said 50 bps.
+    vi.mocked(signAndSend).mockClear();
+    signIn();
+    let resolveSwap: ((value: Response) => void) | undefined;
+    const swapPromise = new Promise<Response>((resolve) => {
+      resolveSwap = resolve;
+    });
+    mockFetch((url, init) => {
+      const u = String(url);
+      if (u.includes("/v1/market/quote")) return jsonResponse(quoteBody());
+      if (u.includes("/v1/customer/swap") && init?.method === "POST") return swapPromise;
+      return jsonResponse({ error: "unexpected" }, 404);
+    });
+    render(<TradePanel mint={MINT} symbol="FOO" positions={positionsReady()} onTraded={vi.fn()} />);
+    typeAmount("1");
+    fireEvent.change(screen.getByDisplayValue("100"), { target: { value: "500" } });
+    await buildReview();
+    await screen.findByText("Building the transaction…");
+    // The slippage changes mid-build, away from the 500 bps the in-flight
+    // `/v1/customer/swap` call was made for.
+    fireEvent.change(screen.getByDisplayValue("500"), { target: { value: "50" } });
+    await act(async () => {
+      resolveSwap?.(jsonResponse(swapBody({ slippage_bps: 500 })));
+    });
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Approve in wallet" })).toBeNull());
+    expect(screen.queryByRole("region", { name: "Trade review" })).toBeNull();
+    expect(vi.mocked(signAndSend)).not.toHaveBeenCalled();
+  });
+
+  it("does not let a build that finishes after the amount changed become approvable", async () => {
+    vi.mocked(signAndSend).mockClear();
+    signIn();
+    let resolveSwap: ((value: Response) => void) | undefined;
+    const swapPromise = new Promise<Response>((resolve) => {
+      resolveSwap = resolve;
+    });
+    mockFetch((url, init) => {
+      const u = String(url);
+      if (u.includes("/v1/market/quote")) return jsonResponse(quoteBody());
+      if (u.includes("/v1/customer/swap") && init?.method === "POST") return swapPromise;
+      return jsonResponse({ error: "unexpected" }, 404);
+    });
+    render(<TradePanel mint={MINT} symbol="FOO" positions={positionsReady()} onTraded={vi.fn()} />);
+    typeAmount("1");
+    await buildReview();
+    await screen.findByText("Building the transaction…");
+    // The amount changes mid-build, away from the "1" the in-flight
+    // `/v1/customer/swap` call was made for.
+    typeAmount("2");
+    await act(async () => {
+      resolveSwap?.(jsonResponse(swapBody()));
+    });
     await waitFor(() => expect(screen.queryByRole("button", { name: "Approve in wallet" })).toBeNull());
     expect(screen.queryByRole("region", { name: "Trade review" })).toBeNull();
     expect(vi.mocked(signAndSend)).not.toHaveBeenCalled();

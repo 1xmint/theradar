@@ -16,7 +16,7 @@
 //! server priced a different route), and showing the live figure next to an
 //! "Approve" button would be showing a promise nobody made.
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link } from "wouter";
 
 import { customer, SwapError, type PositionsToken, type SwapResponse, type SwapSide } from "./api";
@@ -111,11 +111,19 @@ export function TradePanel({ mint, symbol, positions, onTraded }: TradePanelProp
   const [review, setReview] = useState<ReviewStatus>({ kind: "idle" });
   const [now, setNow] = useState(() => Date.now());
 
+  // Bumped every time an input the review depends on changes, including
+  // mid-flight -- a `customer.swap()` call in progress when the field
+  // changes captures the generation it started under, and checks it again
+  // after the await, so a response that lands after the inputs moved on is
+  // dropped rather than shown as if it matched what is on screen now.
+  const generation = useRef(0);
+
   // A stale review must never be sent silently: whatever was built for a
   // different side, amount or slippage is thrown away the moment any of them
   // changes. Slippage especially: a transaction built at 5% must not be
   // approvable after the field (and the live quote beside it) says 0.5%.
   useEffect(() => {
+    generation.current += 1;
     setReview({ kind: "idle" });
   }, [side, amountInput, slippageInput, mint]);
 
@@ -149,6 +157,10 @@ export function TradePanel({ mint, symbol, positions, onTraded }: TradePanelProp
 
   async function startReview() {
     if (!token || amountBaseUnits === null || !slippage.ok) return;
+    // Captured before the await: if the reset effect above bumps this while
+    // `customer.swap` is in flight, this call's own result -- success or
+    // failure -- is not this component's business to show any more.
+    const myGeneration = generation.current;
     setReview({ kind: "building" });
     try {
       const response = await customer.swap(token, {
@@ -157,8 +169,10 @@ export function TradePanel({ mint, symbol, positions, onTraded }: TradePanelProp
         amount: amountBaseUnits,
         slippage_bps: slippage.bps,
       });
+      if (generation.current !== myGeneration) return;
       setReview({ kind: "built", response, builtAt: Date.now() });
     } catch (e) {
+      if (generation.current !== myGeneration) return;
       if (e instanceof SwapError) {
         setReview({ kind: "failed", message: swapRefusalMessage(e.reason, e.detail) });
       } else {
@@ -172,6 +186,26 @@ export function TradePanel({ mint, symbol, positions, onTraded }: TradePanelProp
     // again here: a hidden button is a display, and this is the send.
     if (Date.now() - builtAt > STALE_MS) {
       setNow(Date.now());
+      return;
+    }
+    // A second, independent check that this built transaction still matches
+    // what is on screen -- not just "is this response fresh" (the `generation`
+    // guard in `startReview` already covers that) but "does this exact
+    // response's own quote still describe the trade the inputs now say."
+    // Belt and braces: this is the one function that can put a transaction in
+    // front of a wallet, so it re-derives the answer from the response itself
+    // rather than trusting that nothing upstream let a stale one through.
+    const matchesCurrentInputs =
+      amountBaseUnits !== null &&
+      slippage.ok &&
+      response.quote.side === side &&
+      response.quote.in_amount === amountBaseUnits &&
+      response.quote.slippage_bps === slippage.bps;
+    if (!matchesCurrentInputs) {
+      setReview({
+        kind: "failed",
+        message: "This trade changed since it was reviewed. Review it again before approving.",
+      });
       return;
     }
     if (address === null) {
@@ -195,8 +229,21 @@ export function TradePanel({ mint, symbol, positions, onTraded }: TradePanelProp
     // `@solana/web3.js`, and a static import would put that library in the
     // entry bundle every visitor downloads -- against its 120 kB budget, for a
     // button most visitors never press. Vite splits a dynamic import into its
-    // own chunk, fetched on the first approval.
-    const { signAndSend } = await import("./sign");
+    // own chunk, fetched on the first approval -- a chunk fetch that can fail
+    // on its own (a flaky connection, a stale cached index after a deploy),
+    // independently of the wallet or the swap itself, and unlike those it is
+    // not something `signAndSend` can ever report -- it never got to run.
+    let signModule: typeof import("./sign");
+    try {
+      signModule = await import("./sign");
+    } catch {
+      setReview({
+        kind: "failed",
+        message: "Could not load the signing step. Reload the page and try again.",
+      });
+      return;
+    }
+    const { signAndSend } = signModule;
     const result = await signAndSend(
       provider as unknown as SigningProvider,
       response.transaction,
@@ -338,9 +385,21 @@ export function TradePanel({ mint, symbol, positions, onTraded }: TradePanelProp
             <span className="text-[var(--color-dim)]">You pay</span>
             <span>{formatBaseUnits(review.response.quote.in_amount, review.response.quote.in_decimals)}</span>
           </div>
+          {review.response.quote.out_amount && (
+            <div className="flex justify-between">
+              <span className="text-[var(--color-dim)]">You receive (estimate)</span>
+              <span>
+                {formatBaseUnits(review.response.quote.out_amount, review.response.quote.out_decimals)}
+              </span>
+            </div>
+          )}
           <div className="flex justify-between font-semibold">
             <span>Worst case you receive</span>
             <span>{formatBaseUnits(review.response.quote.worst_out, review.response.quote.out_decimals)}</span>
+          </div>
+          <div className="flex justify-between text-[var(--color-dim)]">
+            <span>Slippage tolerance</span>
+            <span>{(review.response.quote.slippage_bps / 100).toFixed(2)}%</span>
           </div>
           {review.kind === "declined" && (
             <p className="text-[var(--color-dim)]">Cancelled. Nothing was sent.</p>
