@@ -408,29 +408,41 @@ fn ticker_refresher(state: Arc<AppState>) {
             })
             .await
             .unwrap_or(None);
-            match read {
-                Some(value) => {
-                    if failing {
-                        eprintln!("radar-serve: ticker_refresher: store read recovered");
-                        failing = false;
-                    }
-                    last = Some(value.clone());
-                    state.ticker.publish(value);
+            if let Some(value) = read {
+                if failing {
+                    eprintln!("radar-serve: ticker_refresher: store read recovered");
+                    failing = false;
                 }
-                None => {
-                    if !failing {
-                        eprintln!(
-                            "radar-serve: ticker_refresher: store watermark read failed; \
-                             /v1/events and /v1/customer/events will not advance until it \
-                             recovers (/v1/market/events is unaffected -- it reads a separate \
-                             ticker fed by market_snapshot_refresher)"
-                        );
-                        failing = true;
-                    }
+                last = Some(value.clone());
+                state.ticker.publish(value);
+            } else {
+                if should_log_read_failure(failing) {
+                    eprintln!(
+                        "radar-serve: ticker_refresher: store watermark read failed; \
+                         /v1/events and /v1/customer/events will not advance until it \
+                         recovers (/v1/market/events is unaffected -- it reads a separate \
+                         ticker fed by market_snapshot_refresher)"
+                    );
                 }
+                failing = true;
             }
         }
     });
+}
+
+/// Whether a failed read should log, given whether the previous tick was
+/// already failing.
+///
+/// Pulled out of `ticker_refresher`'s loop so the exact decision it exists
+/// for -- log once when an outage starts, stay silent for every failed read
+/// after that -- has a test that does not need to capture stderr. Moving
+/// `failing = true` to run unconditionally after this check (rather than
+/// inside it, as it read before) changes nothing observable: the only path
+/// that ever set it back to `false` is the recovery branch above, so setting
+/// it to `true` again while it is already `true` is a no-op either way.
+#[must_use]
+fn should_log_read_failure(already_failing: bool) -> bool {
+    !already_failing
 }
 
 /// Builds the shared [`AppState`], out of `main`'s own body so its startup
@@ -627,7 +639,130 @@ async fn main() -> ExitCode {
 
 #[cfg(test)]
 mod tests {
-    use super::{bind_address, market_feed, trading_note};
+    use super::*;
+    use radar_store::Writer;
+    use radar_types::{Address, Signature, Slot};
+
+    /// A real, on-disk store with one row in it, wired into a fresh
+    /// [`AppState`] the same way `build_state` does -- built by hand rather
+    /// than through `build_state` itself, since that also demands a
+    /// `Customers` and a `Positions` this module has no need to construct.
+    /// Mirrors `tests/events_stream.rs`'s `state_with_a_store`, minus the
+    /// priming that helper does on `state.ticker`/`state.market_ticker`:
+    /// `ticker_refresher` publishing that value from a clean start is exactly
+    /// the behaviour under test here.
+    fn store_backed_state() -> (Arc<AppState>, tempfile::TempDir) {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let mut writer = Writer::open(dir.path(), 64).expect("open");
+        writer
+            .append(radar_store::Event::Launch(Box::new(radar_store::Launch {
+                envelope: radar_store::Envelope {
+                    slot: Slot(500),
+                    signature: Signature::new([7u8; 64]),
+                    tx_index: Some(0),
+                    instruction_index: 0,
+                    parent_index: None,
+                    success: Some(true),
+                },
+                origin: radar_store::Origin::known(Address::new([3u8; 32]), "create_v2"),
+                mint: Address::new([1u8; 32]),
+                creator: Address::new([2u8; 32]),
+                name: "t".to_owned(),
+                symbol: "T".to_owned(),
+                uri: String::new(),
+                dev_buy_lamports: None,
+            })))
+            .expect("append");
+        writer.flush().expect("flush");
+        let state = Arc::new(AppState {
+            admission: radar_serve::admission::Admission::Open,
+            shares: radar_serve::share::Shares::new(radar_serve::share::Allowance::per_day(100)),
+            customer_salt: vec![7u8; 32],
+            registry: Registry::new(),
+            store: Reader::open(dir.path()),
+            x402: None,
+            chat: None,
+            access: access::Mode::Off,
+            keys: access::KeyCache::new(),
+            customer: customer::Mode::Off,
+            customer_keys: customer::KeyCache::new(),
+            privy: None,
+            linker: radar_serve::link::Linker::new(),
+            scoreboard: radar_serve::cache::Cache::new(),
+            token: radar_serve::cache::Cache::new(),
+            challenges: None,
+            market: market::Market::new(),
+            market_snapshot: market::SnapshotCache::new(),
+            customers: None,
+            positions: None,
+            trading: None,
+            ticker: radar_serve::ticker::Ticker::new(),
+            market_ticker: radar_serve::ticker::Ticker::new(),
+            market_semaphore: std::sync::Arc::new(tokio::sync::Semaphore::new(
+                radar_serve::MARKET_EVENTS_MAX_CONNECTIONS,
+            )),
+            market_visitors: std::sync::Arc::default(),
+        });
+        (state, dir)
+    }
+
+    #[tokio::test]
+    async fn ticker_refresher_skips_the_store_read_when_nobody_is_subscribed() {
+        // Mutant `main.rs:401:46` (`receiver_count() == 0` -> `!=`) makes this
+        // task read and publish with zero listeners instead of skipping, so
+        // this fails under that mutant: `state.ticker` would hold the read
+        // instead of staying at `None`.
+        let (state, _dir) = store_backed_state();
+        assert_eq!(
+            state.ticker.receiver_count(),
+            0,
+            "nobody has subscribed yet"
+        );
+        ticker_refresher(Arc::clone(&state));
+
+        // The interval's first tick fires immediately, so the skip-or-read
+        // decision for it is made almost at once; this just gives the
+        // scheduler room to run that spawned task before we look.
+        tokio::time::sleep(Duration::from_millis(300)).await;
+
+        let mut rx = state.ticker.subscribe();
+        assert!(
+            rx.borrow_and_update().is_none(),
+            "zero subscribers must skip the read, not publish one anyway"
+        );
+    }
+
+    #[tokio::test]
+    async fn ticker_refresher_reads_and_publishes_when_a_subscriber_is_attached() {
+        // The other side of the same mutant: with a real listener already
+        // attached, `receiver_count() == 0` is false and the read must run.
+        // Under the `!=` mutant this hangs forever instead, which the
+        // timeout below turns into a clean failure rather than a stuck test.
+        let (state, _dir) = store_backed_state();
+        let mut rx = state.ticker.subscribe();
+        ticker_refresher(Arc::clone(&state));
+
+        tokio::time::timeout(Duration::from_secs(5), rx.changed())
+            .await
+            .expect("ticker_refresher must publish once a subscriber is attached")
+            .expect("the ticker's sender is still alive");
+        assert!(rx.borrow_and_update().is_some());
+    }
+
+    #[test]
+    fn should_log_read_failure_logs_only_on_the_first_failure_of_an_outage() {
+        // Mutant `main.rs:421:24` (delete `!`): without the negation this
+        // returns `true` only once `failing` is already `true`, i.e. the
+        // opposite of "log the first failure, stay quiet after."
+        assert!(
+            should_log_read_failure(false),
+            "the first failed read of an outage must log"
+        );
+        assert!(
+            !should_log_read_failure(true),
+            "a failure already logged this outage must stay silent"
+        );
+    }
 
     fn vars(pairs: &[(&'static str, &'static str)]) -> impl Fn(&str) -> Option<String> {
         let owned = pairs.to_vec();
