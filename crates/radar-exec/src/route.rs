@@ -336,10 +336,10 @@ pub struct Quote {
     /// count is the measurement that says this route could not be signed even
     /// if the transaction were assembled. See [`Self::signer_could_read`].
     pub lookup_tables: usize,
-    /// Jupiter's `swapMode`, `ExactIn` on every capture so far.
-    ///
-    /// `None` when absent, rather than a guessed default: the mode decides
-    /// which side of the quote is the fixed one.
+    /// Jupiter's `swapMode`, always `"ExactIn"` -- [`Self::from_response`]
+    /// refuses any other value or an absent one, because the mode decides
+    /// which side of the quote is the fixed one and Radar always fixes the
+    /// input.
     pub swap_mode: Option<String>,
 }
 
@@ -362,10 +362,13 @@ impl Quote {
     /// # Errors
     ///
     /// [`RouteError::Malformed`] if the body is not a `/build` response, if the
-    /// amounts do not parse, or if Jupiter answered about a **different pair**
-    /// from the one asked about. That last check is not a formality: the
-    /// response echoes `inputMint` and `outputMint`, and a quote filed against
-    /// the wrong market is a price nothing can act on and nothing would notice.
+    /// amounts do not parse, if Jupiter answered about a **different pair**
+    /// from the one asked about, if it answered about a different `inAmount`
+    /// than the one requested, if `swapMode` is anything but `"ExactIn"`, or
+    /// if `otherAmountThreshold` is present but does not parse. None of these
+    /// is a formality: the response echoes back what it priced, and filing an
+    /// answer to a different question as though it answered this one is a
+    /// price nothing downstream would ever notice was wrong.
     ///
     /// [`RouteError::NoRoute`] if the route returns nothing.
     pub fn from_response(body: &str, request: &QuoteRequest) -> Result<Self, RouteError> {
@@ -389,15 +392,46 @@ impl Quote {
             });
         }
 
+        let in_amount = parse_units(&parsed.in_amount, "inAmount")?;
+        if in_amount != request.amount {
+            // Jupiter is asked for an exact `inAmount`; an answer for a
+            // different one is an answer to a different question, silently
+            // priced as though it were this one.
+            return Err(RouteError::Malformed(format!(
+                "asked for {} in, answered about {in_amount}",
+                request.amount
+            )));
+        }
+
+        // Radar always asks for (and prices as) an exact input. `ExactOut` --
+        // or any other mode Jupiter might one day introduce -- fixes the
+        // *output* side instead, which makes every field below describe a
+        // different trade than the one this type promises. Refuse rather
+        // than file it under the wrong assumption.
+        if parsed.swap_mode.as_deref() != Some("ExactIn") {
+            return Err(RouteError::Malformed(format!(
+                "expected swapMode \"ExactIn\", got {:?}",
+                parsed.swap_mode
+            )));
+        }
+
+        // `None` when Jupiter did not say -- a floor of zero would be a claim
+        // that nothing is guaranteed, and "it did not say" is not that claim
+        // (AGENTS rule 9). But *present and unparseable* is not "did not
+        // say" either: it is a value this parser cannot trust, and silently
+        // treating it as absent would hand a caller no floor at all where
+        // Jupiter actually gave one.
+        let worst_out = match parsed.other_amount_threshold.as_deref() {
+            Some(raw) => Some(parse_units(raw, "otherAmountThreshold")?),
+            None => None,
+        };
+
         Ok(Self {
             input: request.input,
             output: request.output,
-            in_amount: parse_units(&parsed.in_amount, "inAmount")?,
+            in_amount,
             out_amount,
-            worst_out: parsed
-                .other_amount_threshold
-                .as_deref()
-                .and_then(|v| v.parse().ok()),
+            worst_out,
             impact_bps: impact_to_bps(parsed.price_impact_pct.as_deref()),
             venues: parsed
                 .route_plan

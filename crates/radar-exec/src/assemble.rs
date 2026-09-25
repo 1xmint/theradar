@@ -262,6 +262,22 @@ fn classify_accounts(
 
         for meta in &ix.accounts {
             let addr = parse_address(&meta.pubkey)?;
+            if meta.is_signer && addr != taker {
+                // Jupiter's own instructions can name a signer that is not
+                // the taker -- a delegate, a temporary account it expects to
+                // create and sign for itself, or similar. Radar has no
+                // signature for that address and never will: the wallet
+                // signs once, for itself. Merging the address in as an
+                // additional required signer would compile a transaction
+                // whose header claims more signatures than the one the
+                // wallet is about to produce (`Plan::build`'s
+                // `num_required_signatures`), which is a malformed
+                // transaction handed to the wallet naming someone else as a
+                // signer -- refuse instead of building it.
+                return Err(RouteError::Malformed(format!(
+                    "route names {addr} as a signer, but the taker is {taker}"
+                )));
+            }
             if seen.insert(addr) {
                 order.push(addr);
             }
@@ -987,6 +1003,26 @@ mod tests {
         v["swapInstruction"]["programId"] = serde_json::Value::String("not-base58!!".to_owned());
         let body = v.to_string();
         assert!(assemble(&body, taker()).is_err());
+    }
+
+    /// The fixture's own `setupInstructions`/`swapInstruction` name `TAKER`
+    /// as a signer. Assembling it for a *different* taker must be refused,
+    /// not silently compiled with two names claiming a signature the wallet
+    /// never gives: a transaction whose header says
+    /// `num_required_signatures >= 2` while only one signature (the caller's)
+    /// will ever be produced is malformed, and a wallet asked to sign it
+    /// would be naming someone else as a required signer without being told.
+    #[test]
+    fn a_signer_that_is_not_the_taker_is_refused_rather_than_merged_in() {
+        let someone_else = Address::new([0x42; 32]);
+        let err = assemble(SOL_USDC, someone_else).expect_err(
+            "the fixture's setup and swap instructions name TAKER as a signer, and \
+             someone_else is not TAKER",
+        );
+        assert!(
+            matches!(err, super::RouteError::Malformed(ref m) if m.contains("signer")),
+            "the refusal must name why, got {err}"
+        );
     }
 
     /// `AssembledTransaction::to_base64` must encode exactly the compiled

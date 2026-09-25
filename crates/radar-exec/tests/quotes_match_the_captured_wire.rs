@@ -246,6 +246,73 @@ fn a_zero_output_is_no_route_rather_than_a_free_trade() {
     assert!(matches!(err, RouteError::NoRoute { .. }), "got {err}");
 }
 
+/// An answer about the right pair but the wrong size is still a different
+/// question than the one asked, and must not be filed as this one's price.
+#[test]
+fn an_answer_for_a_different_in_amount_is_refused() {
+    let body = r#"{
+        "inputMint": "So11111111111111111111111111111111111111112",
+        "outputMint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+        "inAmount": "999",
+        "outAmount": "10168783",
+        "swapMode": "ExactIn",
+        "routePlan": []
+    }"#;
+    let request = QuoteRequest::new(Asset::Sol, Asset::Usdc, 100_000_000, taker());
+    let err = Quote::from_response(body, &request).expect_err("100000000 was asked for, not 999");
+    assert!(
+        matches!(err, RouteError::Malformed(ref m) if m.contains("999")),
+        "got {err}"
+    );
+}
+
+/// Radar always prices an exact input. Any other `swapMode` -- or none at
+/// all -- fixes a different side of the trade than every field here assumes.
+#[test]
+fn a_swap_mode_other_than_exact_in_is_refused() {
+    let request = QuoteRequest::new(Asset::Sol, Asset::Usdc, 100_000_000, taker());
+    for swap_mode in [r#""ExactOut""#, "null"] {
+        let body = format!(
+            r#"{{
+                "inputMint": "So11111111111111111111111111111111111111112",
+                "outputMint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+                "inAmount": "100000000",
+                "outAmount": "10168783",
+                "swapMode": {swap_mode},
+                "routePlan": []
+            }}"#
+        );
+        let err = Quote::from_response(&body, &request)
+            .expect_err("only ExactIn is a quote this type can describe");
+        assert!(
+            matches!(err, RouteError::Malformed(ref m) if m.contains("ExactIn")),
+            "got {err}"
+        );
+    }
+}
+
+/// A present but unparseable floor must be refused, not silently treated as
+/// "Jupiter did not say" -- those are two different things.
+#[test]
+fn an_unparseable_threshold_is_refused_rather_than_dropped() {
+    let body = r#"{
+        "inputMint": "So11111111111111111111111111111111111111112",
+        "outputMint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+        "inAmount": "100000000",
+        "outAmount": "10168783",
+        "swapMode": "ExactIn",
+        "otherAmountThreshold": "not-a-number",
+        "routePlan": []
+    }"#;
+    let request = QuoteRequest::new(Asset::Sol, Asset::Usdc, 100_000_000, taker());
+    let err = Quote::from_response(body, &request)
+        .expect_err("an unparseable threshold must not be read as absent");
+    assert!(
+        matches!(err, RouteError::Malformed(ref m) if m.contains("otherAmountThreshold")),
+        "got {err}"
+    );
+}
+
 /// Without the key there is no router, so there is nothing to quote with.
 ///
 /// The deny-by-default rule, checked at the only place it can be bypassed.

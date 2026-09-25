@@ -278,12 +278,16 @@ does not pay for itself never reaches the process holding the key. And
 which is what makes the other tests statements about the lane rather than about
 the fixture.
 
-**What it does not.** One production crate depends on `radar-exec`:
+**What it does not.** Two production crates depend on `radar-exec`:
 `radar-cli` reaches `radar_exec::route` for `radar route`, which prints unsigned
-bytes. Nothing in production reaches `pipeline::execute`, the signer client or
-the submitter — the composition reaches *those* through a dev-dependency, so the
-shipped graph still cannot sign. Nothing has been signed, sent, or filled.
-`repo-conformance`'s `the_documented_dependency_claims_are_true` pins it.
+bytes; and, as of Plan 0013 Phase D (ADR 0024), `radar-serve` reaches the same
+router from `/v1/market/quote` and `/v1/customer/swap` to price and assemble an
+unsigned swap transaction for a signed-in wallet to sign itself. Neither reaches
+further than the router: nothing in production reaches `pipeline::execute`, the
+signer client, the submitter or `customer_signing` — the composition reaches
+*those* through a dev-dependency, so the shipped graph still cannot sign.
+Nothing has been signed, sent, or filled. `repo-conformance`'s
+`the_documented_dependency_claims_are_true` pins it.
 
 **As of 2026-09-01 the pipeline's traits have real implementations**, which they
 did not before: `Routing` and `Sending` were satisfied only by stubs inside
