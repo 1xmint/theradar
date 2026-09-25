@@ -40,8 +40,10 @@ use core::convert::Infallible;
 use core::time::Duration;
 use std::sync::Arc;
 
-use axum::extract::{Path, Query, State};
-use axum::http::{HeaderMap, HeaderValue, StatusCode};
+use std::net::SocketAddr;
+
+use axum::extract::{ConnectInfo, Extension, Path, Query, State};
+use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{Html, IntoResponse, Response};
 use axum::routing::{get, post, put};
@@ -196,6 +198,104 @@ pub struct AppState {
     /// open connection polled the store itself, so reads grew with viewer
     /// count -- see [`ticker`]'s module doc comment.
     pub ticker: ticker::Ticker<Tick>,
+    /// The watermark of the market snapshot [`Self::market_snapshot`]
+    /// currently holds -- what `/v1/market/coins` and the other snapshot-backed
+    /// routes actually serve in non-live mode. Deliberately **not**
+    /// [`Self::ticker`]: that one tracks the whole store's watermark, which
+    /// moves on rows (decisions, holders, ...) no market route ever reads, so
+    /// `/v1/market/events` subscribed to it could fire while the snapshot the
+    /// routes actually serve had not changed, or stay quiet while it had --
+    /// PR #296's item 2.
+    ///
+    /// `main.rs`'s `market_snapshot_refresher` publishes here right after
+    /// each `market::Refresher::tick`, using [`ticker::Ticker::publish`]'s own
+    /// change-detection so a tick that rebuilt nothing (`Refresh::Skip`)
+    /// publishes nothing either. `market_events` is the only subscriber.
+    ///
+    /// In live-feed mode (`Self::market::live` is `Some`) every market route
+    /// bypasses this snapshot entirely and reads the live feed fresh per
+    /// request, so nothing publishes here at all -- see `market_events` for
+    /// why it answers 503 rather than trying to key a stream off a snapshot
+    /// live mode never uses.
+    pub market_ticker: ticker::Ticker<radar_types::Slot>,
+    /// Bounds total concurrent `/v1/market/events` connections to
+    /// [`MARKET_EVENTS_MAX_CONNECTIONS`] -- PR #296's item 3: a public,
+    /// unauthenticated SSE route with no cap is an unbounded sink of open file
+    /// descriptors for anyone who opens enough tabs. A permit is acquired with
+    /// `try_acquire_owned` before a stream starts and held inside it for the
+    /// stream's whole life, so a client disconnecting -- the permit's `Drop`
+    /// -- always frees the slot, with no separate cleanup path to forget.
+    pub market_semaphore: Arc<tokio::sync::Semaphore>,
+    /// Bounds concurrent `/v1/market/events` connections per visitor (by
+    /// [`trade::visitor_key`]) to [`MARKET_EVENTS_MAX_PER_VISITOR`], on top of
+    /// the instance-wide [`Self::market_semaphore`] cap -- so one visitor
+    /// opening many tabs cannot use up every other visitor's share of it.
+    pub market_visitors: Arc<VisitorConnections>,
+}
+
+/// Total concurrent `/v1/market/events` connections this instance serves at
+/// once. See [`AppState::market_semaphore`].
+pub const MARKET_EVENTS_MAX_CONNECTIONS: usize = 256;
+
+/// Concurrent `/v1/market/events` connections one visitor may hold open at
+/// once. See [`AppState::market_visitors`].
+pub const MARKET_EVENTS_MAX_PER_VISITOR: usize = 4;
+
+/// The concurrent-connection counts [`AppState::market_visitors`] reads and
+/// writes, keyed by [`trade::visitor_key`].
+///
+/// A `Mutex<HashMap<..>>` rather than a per-visitor atomic because the
+/// visitor set is unbounded and mostly transient: an entry is removed on its
+/// last disconnect rather than kept for the life of the process. Distinct
+/// from [`trade::Trading`]'s own per-visitor limiter, which paces *calls per
+/// 60s window*; this one caps *connections open right now* -- a different
+/// shape of the same "one visitor should not crowd out every other" rule.
+#[derive(Default)]
+pub struct VisitorConnections(std::sync::Mutex<std::collections::HashMap<String, usize>>);
+
+impl VisitorConnections {
+    /// Admits one more connection for `visitor` if fewer than `max` are
+    /// already open, returning a guard that releases the slot when dropped --
+    /// so a client disconnecting, or the stream ending any other way, always
+    /// frees it without a second cleanup path to forget.
+    fn reserve(self: &Arc<Self>, visitor: String, max: usize) -> Option<VisitorGuard> {
+        let mut counts = self
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let count = counts.entry(visitor.clone()).or_insert(0);
+        if *count >= max {
+            return None;
+        }
+        *count += 1;
+        Some(VisitorGuard {
+            connections: Arc::clone(self),
+            visitor,
+        })
+    }
+}
+
+/// Releases one visitor's reserved slot in [`VisitorConnections`] on drop --
+/// held inside `market_events`' stream state for exactly that reason.
+struct VisitorGuard {
+    connections: Arc<VisitorConnections>,
+    visitor: String,
+}
+
+impl Drop for VisitorGuard {
+    fn drop(&mut self) {
+        let mut counts = self
+            .connections
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(count) = counts.get_mut(&self.visitor) {
+            *count -= 1;
+            if *count == 0 {
+                counts.remove(&self.visitor);
+            }
+        }
+    }
 }
 
 /// Builds the router.
@@ -255,11 +355,14 @@ pub fn app(state: Arc<AppState>) -> Router {
         // a swap needs no wallet. See `trade`'s module doc comment for the
         // wire contract and for why it always answers rather than 404ing.
         .route("/v1/market/quote", get(trade::quote))
-        // The watermark alone, off the same shared ticker as `/v1/events` and
-        // `/v1/customer/events` -- so the terminal can stop polling
-        // `/v1/market/coins` blindly every 15s and re-fetch only when this
-        // moves. Public like every other `/v1/market/` route: no identity, no
-        // row counts, no wallet.
+        // The watermark alone, off `AppState::market_ticker` -- the market
+        // snapshot's own watermark, not the whole-store one `/v1/events` and
+        // `/v1/customer/events` share -- so the terminal can stop polling
+        // `/v1/market/coins` blindly every 15s and re-fetch only when the
+        // snapshot it actually reads moves. Public like every other
+        // `/v1/market/` route: no identity, no row counts, no wallet. Capped
+        // by `AppState::market_semaphore` and `AppState::market_visitors`;
+        // see `market_events`'s own doc comment.
         .route("/v1/market/events", get(market_events))
         .route("/mcp", post(mcp_endpoint))
         // Anything else is either a built asset or a route the interface owns.
@@ -1044,15 +1147,30 @@ pub struct Tick {
 }
 
 impl Tick {
-    /// Reads the current state, or `None` if the store cannot answer.
+    /// Reads the current state, or `None` if the watermark itself cannot be
+    /// read -- the one failure that leaves genuinely nothing worth
+    /// publishing.
+    ///
+    /// A `store_counts` failure alone must **not** swallow the watermark
+    /// (PR #296 review item "also do" (b)): [`customer_events`] and
+    /// [`market_events`]'s callers never look at `counts` at all, only
+    /// `as_of` (see [`Watermark`]), so an operator-only counts outage has no
+    /// business freezing the public/customer watermark too. When
+    /// `store_counts` fails this falls back to `previous`'s counts --
+    /// honestly stale rather than reset to a lying [`api::StoreCounts::default`]
+    /// zero, and only actually stale on the operator's own `/v1/events` view,
+    /// which is the one place that reads them.
     ///
     /// Called from exactly one place at runtime -- `main.rs`'s
     /// `ticker_refresher`, once per [`POLL`] -- and directly from tests that
     /// need to drive [`AppState::ticker`] without a real background task.
     #[must_use]
-    pub fn read(state: &AppState) -> Option<Self> {
+    pub fn read(state: &AppState, previous: Option<&Self>) -> Option<Self> {
         let watermark = Reader::watermark(&state.store).ok().flatten()?;
-        let counts = api::store_counts(&state.store, AsOf::at(watermark)).ok()?;
+        let counts = api::store_counts(&state.store, AsOf::at(watermark))
+            .ok()
+            .or_else(|| previous.map(|tick| tick.counts.clone()))
+            .unwrap_or_default();
         Some(Self {
             as_of: watermark.get(),
             counts,
@@ -1120,17 +1238,117 @@ async fn customer_events(
 ///
 /// The terminal's coin list used to re-fetch `/v1/market/coins` on a blind
 /// 15s timer (`REFRESH_MS` in `web/src/Terminal.tsx`). This is what it listens
-/// to instead: the same watermark [`customer_events`] sends, off the same
-/// shared ticker, so the browser re-fetches only when the store actually
-/// moved. `/v1/market/` is `Audience::Public` in [`access::audience_of`] for
-/// every route under it, this one included -- no identity, and (like every
-/// projection of [`Tick`]) no wallet or address, ever.
+/// to instead -- but off [`AppState::market_ticker`], **not** the shared
+/// [`AppState::ticker`] every other stream here reads: PR #296's item 2 found
+/// that the whole-store watermark and the market snapshot's own watermark can
+/// move independently of one another, and this route exists to say when the
+/// thing `/v1/market/coins` actually serves changed, nothing else. `/v1/market/`
+/// is `Audience::Public` in [`access::audience_of`] for every route under it,
+/// this one included -- no identity, and (like every projection of [`Tick`])
+/// no wallet or address, ever.
+///
+/// Two refusals guard it before a stream ever opens, both PR #296 item 3 --
+/// a public, identity-free SSE route with no cap is an unbounded sink of open
+/// sockets:
+/// - the instance-wide [`AppState::market_semaphore`] ([`MARKET_EVENTS_MAX_CONNECTIONS`]
+///   total), and
+/// - the per-visitor cap in [`AppState::market_visitors`] ([`MARKET_EVENTS_MAX_PER_VISITOR`]),
+///   keyed by [`trade::visitor_key`] exactly as [`trade::quote`]'s own limiter is.
+///
+/// Both refuse with 503 and `Retry-After` rather than closing the connection
+/// silently, so the web hook's own fallback poll (which treats a 503 the same
+/// as a dropped stream) takes over immediately instead of waiting out a
+/// timeout.
+///
+/// A third refusal is unconditional: in live-feed mode
+/// (`state.market.live()` is `Some`) every market route bypasses the snapshot
+/// this ticker tracks and reads the live feed fresh on each request, so there
+/// is no refresh cycle here to key a change-ticker on at all. Publishing the
+/// snapshot's now-untouched watermark would be either silent forever or
+/// actively wrong about what those routes just answered, so this answers 503
+/// instead and lets the fallback poll re-hit the always-fresh live routes
+/// directly.
 async fn market_events(
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    connect_info: Option<Extension<ConnectInfo<SocketAddr>>>,
+) -> Response {
+    if state.market.live().is_some() {
+        return market_events_unavailable("live feed mode has no snapshot watermark to stream");
+    }
+
+    let Ok(permit) = Arc::clone(&state.market_semaphore).try_acquire_owned() else {
+        return market_events_unavailable("too many open market streams");
+    };
+
+    let visitor = trade::visitor_key(&headers, connect_info.map(|Extension(c)| c.0));
+    let Some(visitor_guard) = state
+        .market_visitors
+        .reserve(visitor, MARKET_EVENTS_MAX_PER_VISITOR)
+    else {
+        return market_events_unavailable("too many open market streams for this visitor");
+    };
+
+    market_ticks(state.market_ticker.subscribe(), permit, visitor_guard).into_response()
+}
+
+/// A 503 for `market_events`' two capacity refusals, with `Retry-After` set
+/// so a caller (or the web hook's fallback poll) knows this is a "try again
+/// shortly", not a permanent refusal.
+fn market_events_unavailable(reason: &str) -> Response {
+    let mut response = tenant::refusal(StatusCode::SERVICE_UNAVAILABLE, "unavailable", reason);
+    response
+        .headers_mut()
+        .insert(header::RETRY_AFTER, HeaderValue::from_static("5"));
+    response
+}
+
+/// Like [`ticks`], but for [`AppState::market_ticker`]: a different source
+/// type ([`radar_types::Slot`], not [`Tick`]), and two extra pieces of
+/// per-connection state carried alongside the subscription through the
+/// `unfold` -- the semaphore permit and the visitor guard `market_events`
+/// already acquired. Neither is read here; they exist in this tuple purely so
+/// that dropping the stream (the client disconnecting, or the connection
+/// erroring out) drops them too and frees both slots for the next caller,
+/// with no separate disconnect handler to wire up.
+fn market_ticks(
+    rx: watch::Receiver<Option<radar_types::Slot>>,
+    permit: tokio::sync::OwnedSemaphorePermit,
+    visitor_guard: VisitorGuard,
 ) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
-    ticks(state.ticker.subscribe(), |tick: &Tick| Watermark {
-        as_of: tick.as_of,
-    })
+    let stream = futures_util::stream::unfold(
+        (rx, None::<Watermark>, permit, visitor_guard),
+        |(mut rx, last, permit, visitor_guard)| async move {
+            loop {
+                let current = rx
+                    .borrow_and_update()
+                    .as_ref()
+                    .map(|slot| Watermark { as_of: slot.get() });
+                if let Some(value) = current
+                    && last.as_ref() != Some(&value)
+                {
+                    let event = Event::default()
+                        .event("store")
+                        .json_data(&value)
+                        .unwrap_or_else(|_| Event::default().comment("unserialisable"));
+                    return Some((Ok(event), (rx, Some(value), permit, visitor_guard)));
+                }
+                // No new, distinct value yet: wait for the market ticker's
+                // next publish rather than reading anything ourselves. A
+                // dropped sender (the process shutting down) ends the stream
+                // instead of spinning.
+                if rx.changed().await.is_err() {
+                    return None;
+                }
+            }
+        },
+    );
+
+    Sse::new(stream).keep_alive(
+        KeepAlive::new()
+            .interval(Duration::from_secs(15))
+            .text("radar"),
+    )
 }
 
 /// The machinery every change stream shares.

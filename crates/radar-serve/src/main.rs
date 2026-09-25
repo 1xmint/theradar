@@ -353,6 +353,18 @@ fn market_snapshot_refresher(state: Arc<AppState>) {
             // A panicked tick took its memory with it; start over rather than
             // stop refreshing for the life of the process.
             refresher = done.unwrap_or_default();
+            // Publish the watermark of whatever `state.market_snapshot` now
+            // holds -- the thing `/v1/market/coins` and its siblings actually
+            // serve -- to `state.market_ticker`, so `/v1/market/events`
+            // reflects the snapshot's own change, not the whole store's. See
+            // `AppState::market_ticker`'s doc comment (PR #296 item 2).
+            // `Ticker::publish`'s own change-detection means a tick that
+            // rebuilt nothing (`Refresh::Skip`, an unchanged watermark)
+            // simply publishes nothing here either -- no need to branch on
+            // the `Refresh` value returned above to get that for free.
+            if let Some(snapshot) = state.market_snapshot.peek() {
+                state.market_ticker.publish(snapshot.watermark());
+            }
         }
     });
 }
@@ -370,14 +382,52 @@ fn ticker_refresher(state: Arc<AppState>) {
     tokio::spawn(async move {
         let mut tick = tokio::time::interval(radar_serve::POLL);
         tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        // Set the moment a read fails and cleared the moment one next
+        // succeeds, so an outage logs one line when it starts and one when it
+        // ends rather than a line every ten seconds for as long as it lasts.
+        let mut failing = false;
+        // Fed to `Tick::read` as its `previous` fallback: a `store_counts`
+        // failure alone reuses these counts rather than losing the watermark
+        // publish entirely (PR #296 review "also do" (b) -- see `Tick::read`'s
+        // own doc comment for why counts-only staleness must not silence the
+        // customer/public streams, which never read `counts` in the first
+        // place).
+        let mut last: Option<radar_serve::Tick> = None;
         loop {
             tick.tick().await;
+            // Nobody is listening: skip `Tick::read`'s row counts entirely
+            // rather than paying for them on behalf of zero open `/v1/events`
+            // connections.
+            if state.ticker.receiver_count() == 0 {
+                continue;
+            }
             let task_state = Arc::clone(&state);
-            let read = tokio::task::spawn_blocking(move || radar_serve::Tick::read(&task_state))
-                .await
-                .unwrap_or(None);
-            if let Some(value) = read {
-                state.ticker.publish(value);
+            let previous = last.clone();
+            let read = tokio::task::spawn_blocking(move || {
+                radar_serve::Tick::read(&task_state, previous.as_ref())
+            })
+            .await
+            .unwrap_or(None);
+            match read {
+                Some(value) => {
+                    if failing {
+                        eprintln!("radar-serve: ticker_refresher: store read recovered");
+                        failing = false;
+                    }
+                    last = Some(value.clone());
+                    state.ticker.publish(value);
+                }
+                None => {
+                    if !failing {
+                        eprintln!(
+                            "radar-serve: ticker_refresher: store watermark read failed; \
+                             /v1/events and /v1/customer/events will not advance until it \
+                             recovers (/v1/market/events is unaffected -- it reads a separate \
+                             ticker fed by market_snapshot_refresher)"
+                        );
+                        failing = true;
+                    }
+                }
             }
         }
     });
@@ -386,9 +436,10 @@ fn ticker_refresher(state: Arc<AppState>) {
 /// Builds the shared [`AppState`], out of `main`'s own body so its startup
 /// sequence -- validate, then construct, then spawn the background readers --
 /// reads as a sequence of steps rather than one function long enough to hide
-/// among them. Every argument here is something `main` already produced by
-/// the time it calls this; nothing here reaches back into the environment
-/// itself.
+/// among them. Almost every argument here is something `main` already
+/// produced by the time it calls this -- the one exception is
+/// `RADAR_CUSTOMER_DOMAIN`, read directly from the environment a few lines
+/// below (for `challenges`) rather than threaded through as a parameter.
 #[allow(clippy::too_many_arguments)]
 fn build_state(
     store_dir: &str,
@@ -433,6 +484,11 @@ fn build_state(
         positions: Some(positions),
         trading,
         ticker: radar_serve::ticker::Ticker::new(),
+        market_ticker: radar_serve::ticker::Ticker::new(),
+        market_semaphore: std::sync::Arc::new(tokio::sync::Semaphore::new(
+            radar_serve::MARKET_EVENTS_MAX_CONNECTIONS,
+        )),
+        market_visitors: std::sync::Arc::default(),
     })
 }
 

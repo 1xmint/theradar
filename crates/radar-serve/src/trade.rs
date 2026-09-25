@@ -542,7 +542,11 @@ fn route_error_response(why: &RouteError) -> Response {
 /// when Cloudflare (or a caller pretending to be it) set one, else the
 /// connection's own peer address. See the module doc comment for why the
 /// header is trusted only as far as it is.
-fn visitor_key(headers: &HeaderMap, peer: Option<SocketAddr>) -> String {
+///
+/// `pub(crate)`: `lib.rs`'s `/v1/market/events` handler keys its own
+/// per-visitor SSE connection cap by the same identity, rather than growing a
+/// second copy of this logic.
+pub(crate) fn visitor_key(headers: &HeaderMap, peer: Option<SocketAddr>) -> String {
     if let Some(header) = headers
         .get("cf-connecting-ip")
         .and_then(|v| v.to_str().ok())

@@ -52,6 +52,19 @@ impl<T> Ticker<T> {
     pub fn subscribe(&self) -> watch::Receiver<Option<T>> {
         self.tx.subscribe()
     }
+
+    /// How many subscribers are currently attached.
+    ///
+    /// Lets a background refresher skip its own expensive read when nobody is
+    /// listening -- see `main.rs`'s `ticker_refresher`, which reads
+    /// [`Tick`](crate::Tick) (row counts and all) on every tick today even
+    /// with zero open `/v1/events` connections. Delegates straight to
+    /// [`watch::Sender::receiver_count`]; a subscriber that has since dropped
+    /// its receiver is not counted.
+    #[must_use]
+    pub fn receiver_count(&self) -> usize {
+        self.tx.receiver_count()
+    }
 }
 
 impl<T: PartialEq> Ticker<T> {
@@ -130,6 +143,28 @@ mod tests {
             rx.has_changed().expect("sender still alive"),
             "a genuinely different value must wake it"
         );
+    }
+
+    #[test]
+    fn receiver_count_tracks_subscribers_as_they_join_and_drop() {
+        let ticker: Ticker<u64> = Ticker::new();
+        assert_eq!(ticker.receiver_count(), 0, "nobody has subscribed yet");
+
+        let one = ticker.subscribe();
+        assert_eq!(ticker.receiver_count(), 1);
+
+        let two = ticker.subscribe();
+        assert_eq!(ticker.receiver_count(), 2);
+
+        drop(one);
+        assert_eq!(
+            ticker.receiver_count(),
+            1,
+            "a dropped receiver must not still be counted"
+        );
+
+        drop(two);
+        assert_eq!(ticker.receiver_count(), 0);
     }
 
     #[test]

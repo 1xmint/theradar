@@ -62,12 +62,17 @@ fn state_with_a_store() -> (Arc<AppState>, tempfile::TempDir) {
         positions: None,
         trading: None,
         ticker: radar_serve::ticker::Ticker::new(),
+        market_ticker: radar_serve::ticker::Ticker::new(),
+        market_semaphore: std::sync::Arc::new(tokio::sync::Semaphore::new(
+            radar_serve::MARKET_EVENTS_MAX_CONNECTIONS,
+        )),
+        market_visitors: std::sync::Arc::default(),
     });
     // These tests exercise the stream, not the background task: no
     // `ticker_refresher` runs here, so the ticker is primed once, by hand, the
     // same way that task's own first tick would -- otherwise every stream
     // below would wait forever for a publish nothing ever sends.
-    if let Some(tick) = radar_serve::Tick::read(&state) {
+    if let Some(tick) = radar_serve::Tick::read(&state, None) {
         state.ticker.publish(tick);
     }
     (state, dir)
@@ -179,6 +184,11 @@ async fn an_empty_store_does_not_stall_the_stream_open() {
         positions: None,
         trading: None,
         ticker: radar_serve::ticker::Ticker::new(),
+        market_ticker: radar_serve::ticker::Ticker::new(),
+        market_semaphore: std::sync::Arc::new(tokio::sync::Semaphore::new(
+            radar_serve::MARKET_EVENTS_MAX_CONNECTIONS,
+        )),
+        market_visitors: std::sync::Arc::default(),
     });
 
     let response = app(state)
@@ -332,13 +342,18 @@ async fn a_late_subscriber_sees_the_published_tick_without_a_store_read_of_its_o
 /// directly (see `ticker::tests::reads_per_publish_stay_flat_from_one_subscriber_to_fifty`
 /// for the counting-fake-store version of this same property).
 ///
-/// Every one of fifty concurrent subscribers would need its own store read
-/// under the old per-connection design this replaces. Deleting the store
-/// before any of them connect turns such a read into a stall or an empty
-/// answer, so fifty correct frames -- not forty-nine, not "most" -- prove
-/// every single one was answered from the shared ticker.
+/// **Sequential, not concurrent** -- each connection opens, reads its frame,
+/// and closes before the next one opens, so this proves the property across
+/// fifty *separate* subscriptions, not fifty held open at once (for that, see
+/// the `market_events` capacity tests below, which do hold connections open
+/// concurrently by keeping their `Response`s alive). Every one of the fifty
+/// would need its own store read under the old per-connection design this
+/// replaces; deleting the store before any of them connect turns such a read
+/// into a stall or an empty answer, so fifty correct frames -- not
+/// forty-nine, not "most" -- prove every single one was answered from the
+/// shared ticker.
 #[tokio::test]
-async fn fifty_concurrent_subscribers_all_see_the_tick_with_no_store_left_to_read() {
+async fn fifty_sequential_subscribers_all_see_the_tick_with_no_store_left_to_read() {
     let (state, dir) = state_with_a_store();
     std::fs::remove_dir_all(dir.path()).expect("remove the whole store");
 
@@ -349,4 +364,200 @@ async fn fifty_concurrent_subscribers_all_see_the_tick_with_no_store_left_to_rea
             "subscriber {n} did not see the shared ticker's value: {text}"
         );
     }
+}
+
+/// PR #296 item 2: `/v1/market/events` must reflect the *market snapshot's*
+/// own watermark, not the whole store's -- so a tick that rebuilds the
+/// snapshot changes it, and a tick that finds nothing new
+/// (`market::Refresh::Skip`) must not, even though it still runs.
+#[tokio::test]
+async fn the_market_ticker_publishes_only_when_the_served_snapshot_changes() {
+    let (state, _dir) = state_with_a_store();
+    let mut refresher = radar_serve::market::Refresher::new();
+    let launch_interval = std::time::Duration::from_secs(300);
+
+    // First tick: nothing cached yet, so this builds a snapshot -- publish
+    // its watermark, exactly as `main.rs`'s `market_snapshot_refresher` does
+    // right after each `Refresher::tick`.
+    refresher.tick(&state.store, &state.market_snapshot, launch_interval);
+    let first = state
+        .market_snapshot
+        .peek()
+        .expect("the first tick must have built a snapshot");
+    state.market_ticker.publish(first.watermark());
+
+    let mut rx = state.market_ticker.subscribe();
+    assert_eq!(
+        rx.borrow_and_update().as_ref(),
+        Some(&first.watermark()),
+        "the first publish must carry the served snapshot's own watermark"
+    );
+
+    // The store has not moved, so a second tick rebuilds nothing at all
+    // (`Refresh::Skip`) and hands `publish` the identical watermark --
+    // `Ticker::publish`'s own change-detection must not wake this subscriber
+    // for that, or every quiet 20s tick would look like new market data.
+    refresher.tick(&state.store, &state.market_snapshot, launch_interval);
+    let second = state.market_snapshot.peek().expect("still there");
+    state.market_ticker.publish(second.watermark());
+
+    assert!(
+        !rx.has_changed().expect("sender still alive"),
+        "an unchanged snapshot watermark must not publish a new market tick"
+    );
+}
+
+/// Builds a `/v1/market/events` request carrying `visitor` as the
+/// `cf-connecting-ip` header, so the capacity tests below can control
+/// `trade::visitor_key`'s identity without a real TCP peer address (these
+/// tests run over `tower::ServiceExt::oneshot`, which never sets
+/// `ConnectInfo`).
+async fn market_stream_for(
+    state: &Arc<AppState>,
+    visitor: &str,
+) -> axum::http::Response<axum::body::Body> {
+    app(Arc::clone(state))
+        .oneshot(
+            axum::http::Request::builder()
+                .uri("/v1/market/events")
+                .header("cf-connecting-ip", visitor)
+                .body(axum::body::Body::empty())
+                .expect("request"),
+        )
+        .await
+        .expect("response")
+}
+
+/// PR #296 item 3: an unbounded, identity-free public SSE route is a
+/// file-descriptor sink. Fills the instance-wide cap with distinct visitors
+/// (so the per-visitor cap below never triggers first) and proves the next
+/// connection past it is refused with 503 and a `Retry-After`, rather than
+/// being accepted anyway or left to hang.
+///
+/// `market_events`'s `try_acquire_owned` runs synchronously before the SSE
+/// stream is even built, and the permit it returns is moved straight into
+/// that stream's own state -- so a connection counts against the cap the
+/// moment its `Response` comes back from `oneshot`, whether or not its body
+/// is ever read. Holding every `Response` in `held` for the rest of the test
+/// is what keeps each permit alive.
+#[tokio::test]
+async fn the_two_hundred_and_fifty_seventh_market_stream_connection_is_refused() {
+    let (state, _dir) = state_with_a_store();
+
+    let mut held = Vec::with_capacity(radar_serve::MARKET_EVENTS_MAX_CONNECTIONS);
+    for n in 0..radar_serve::MARKET_EVENTS_MAX_CONNECTIONS {
+        let response = market_stream_for(&state, &format!("visitor-{n}")).await;
+        assert_eq!(
+            response.status(),
+            axum::http::StatusCode::OK,
+            "connection {n} of {} should have been admitted",
+            radar_serve::MARKET_EVENTS_MAX_CONNECTIONS
+        );
+        held.push(response);
+    }
+
+    let refused = market_stream_for(&state, "visitor-one-too-many").await;
+    assert_eq!(
+        refused.status(),
+        axum::http::StatusCode::SERVICE_UNAVAILABLE,
+        "the connection past the instance-wide cap must be refused, not accepted or left hanging"
+    );
+    assert!(
+        refused
+            .headers()
+            .get(axum::http::header::RETRY_AFTER)
+            .is_some(),
+        "a capacity refusal must say when to try again"
+    );
+
+    // Keep every held connection alive until here -- dropping one early would
+    // free its slot and falsify the "refused" result above.
+    drop(held);
+}
+
+/// PR #296 item 3's other half: a per-visitor cap on top of the
+/// instance-wide one, so a single visitor opening many tabs cannot use up
+/// every other visitor's share of it. Four connections from the same
+/// `cf-connecting-ip` succeed; the fifth is refused while the first four stay
+/// open, and a different visitor is unaffected by either.
+#[tokio::test]
+async fn a_fifth_market_stream_connection_from_the_same_visitor_is_refused() {
+    let (state, _dir) = state_with_a_store();
+
+    let mut held = Vec::new();
+    for n in 0..radar_serve::MARKET_EVENTS_MAX_PER_VISITOR {
+        let response = market_stream_for(&state, "same-visitor").await;
+        assert_eq!(
+            response.status(),
+            axum::http::StatusCode::OK,
+            "connection {n} of {} for this visitor should have been admitted",
+            radar_serve::MARKET_EVENTS_MAX_PER_VISITOR
+        );
+        held.push(response);
+    }
+
+    let refused = market_stream_for(&state, "same-visitor").await;
+    assert_eq!(
+        refused.status(),
+        axum::http::StatusCode::SERVICE_UNAVAILABLE,
+        "a fifth connection from one visitor must be refused while its other four stay open"
+    );
+    assert!(
+        refused
+            .headers()
+            .get(axum::http::header::RETRY_AFTER)
+            .is_some(),
+        "a capacity refusal must say when to try again"
+    );
+
+    let other = market_stream_for(&state, "a-different-visitor").await;
+    assert_eq!(
+        other.status(),
+        axum::http::StatusCode::OK,
+        "another visitor's own cap must be untouched by this one's"
+    );
+
+    drop(held);
+    drop(other);
+}
+
+/// PR #296 item 3: the semaphore permit and the visitor guard both live
+/// inside the stream's own state (see `market_ticks`), so dropping a
+/// connection -- the client disconnecting, or its `Response` simply going out
+/// of scope -- must free its slot for the next caller, with no separate
+/// disconnect handler required to make that true.
+#[tokio::test]
+async fn closing_a_market_stream_connection_frees_its_visitor_slot() {
+    let (state, _dir) = state_with_a_store();
+
+    let mut held = Vec::new();
+    for n in 0..radar_serve::MARKET_EVENTS_MAX_PER_VISITOR {
+        let response = market_stream_for(&state, "closing-visitor").await;
+        assert_eq!(
+            response.status(),
+            axum::http::StatusCode::OK,
+            "connection {n} should have been admitted"
+        );
+        held.push(response);
+    }
+
+    let refused = market_stream_for(&state, "closing-visitor").await;
+    assert_eq!(
+        refused.status(),
+        axum::http::StatusCode::SERVICE_UNAVAILABLE,
+        "the visitor's cap should be full before anything closes"
+    );
+
+    // Drop one held connection, standing in for the client disconnecting.
+    held.pop();
+
+    let admitted = market_stream_for(&state, "closing-visitor").await;
+    assert_eq!(
+        admitted.status(),
+        axum::http::StatusCode::OK,
+        "closing one connection must free its slot for the next one"
+    );
+
+    drop(held);
+    drop(admitted);
 }
