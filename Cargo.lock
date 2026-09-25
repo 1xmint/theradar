@@ -1588,6 +1588,7 @@ dependencies = [
  "radar-asof",
  "radar-backfill",
  "radar-customer",
+ "radar-exec",
  "radar-instruments",
  "radar-model",
  "radar-onchain",

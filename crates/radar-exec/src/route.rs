@@ -336,10 +336,10 @@ pub struct Quote {
     /// count is the measurement that says this route could not be signed even
     /// if the transaction were assembled. See [`Self::signer_could_read`].
     pub lookup_tables: usize,
-    /// Jupiter's `swapMode`, `ExactIn` on every capture so far.
-    ///
-    /// `None` when absent, rather than a guessed default: the mode decides
-    /// which side of the quote is the fixed one.
+    /// Jupiter's `swapMode`, always `"ExactIn"` -- [`Self::from_response`]
+    /// refuses any other value or an absent one, because the mode decides
+    /// which side of the quote is the fixed one and Radar always fixes the
+    /// input.
     pub swap_mode: Option<String>,
 }
 
@@ -362,10 +362,13 @@ impl Quote {
     /// # Errors
     ///
     /// [`RouteError::Malformed`] if the body is not a `/build` response, if the
-    /// amounts do not parse, or if Jupiter answered about a **different pair**
-    /// from the one asked about. That last check is not a formality: the
-    /// response echoes `inputMint` and `outputMint`, and a quote filed against
-    /// the wrong market is a price nothing can act on and nothing would notice.
+    /// amounts do not parse, if Jupiter answered about a **different pair**
+    /// from the one asked about, if it answered about a different `inAmount`
+    /// than the one requested, if `swapMode` is anything but `"ExactIn"`, or
+    /// if `otherAmountThreshold` is present but does not parse. None of these
+    /// is a formality: the response echoes back what it priced, and filing an
+    /// answer to a different question as though it answered this one is a
+    /// price nothing downstream would ever notice was wrong.
     ///
     /// [`RouteError::NoRoute`] if the route returns nothing.
     pub fn from_response(body: &str, request: &QuoteRequest) -> Result<Self, RouteError> {
@@ -389,15 +392,46 @@ impl Quote {
             });
         }
 
+        let in_amount = parse_units(&parsed.in_amount, "inAmount")?;
+        if in_amount != request.amount {
+            // Jupiter is asked for an exact `inAmount`; an answer for a
+            // different one is an answer to a different question, silently
+            // priced as though it were this one.
+            return Err(RouteError::Malformed(format!(
+                "asked for {} in, answered about {in_amount}",
+                request.amount
+            )));
+        }
+
+        // Radar always asks for (and prices as) an exact input. `ExactOut` --
+        // or any other mode Jupiter might one day introduce -- fixes the
+        // *output* side instead, which makes every field below describe a
+        // different trade than the one this type promises. Refuse rather
+        // than file it under the wrong assumption.
+        if parsed.swap_mode.as_deref() != Some("ExactIn") {
+            return Err(RouteError::Malformed(format!(
+                "expected swapMode \"ExactIn\", got {:?}",
+                parsed.swap_mode
+            )));
+        }
+
+        // `None` when Jupiter did not say -- a floor of zero would be a claim
+        // that nothing is guaranteed, and "it did not say" is not that claim
+        // (AGENTS rule 9). But *present and unparseable* is not "did not
+        // say" either: it is a value this parser cannot trust, and silently
+        // treating it as absent would hand a caller no floor at all where
+        // Jupiter actually gave one.
+        let worst_out = match parsed.other_amount_threshold.as_deref() {
+            Some(raw) => Some(parse_units(raw, "otherAmountThreshold")?),
+            None => None,
+        };
+
         Ok(Self {
             input: request.input,
             output: request.output,
-            in_amount: parse_units(&parsed.in_amount, "inAmount")?,
+            in_amount,
             out_amount,
-            worst_out: parsed
-                .other_amount_threshold
-                .as_deref()
-                .and_then(|v| v.parse().ok()),
+            worst_out,
             impact_bps: impact_to_bps(parsed.price_impact_pct.as_deref()),
             venues: parsed
                 .route_plan
@@ -532,8 +566,10 @@ impl Router {
 
     /// Asks what `request` would get.
     ///
-    /// One GET. Nothing is signed, nothing is submitted, and the instructions
-    /// in the answer are read for their lookup-table count and then dropped.
+    /// One GET, at this router's configured slippage. Nothing is signed,
+    /// nothing is submitted, and the instructions in the answer are read for
+    /// their lookup-table count and then dropped. See [`Self::build`] for the
+    /// same call kept instead of dropped.
     ///
     /// # Errors
     ///
@@ -542,6 +578,50 @@ impl Router {
     /// [`RouteError::Unavailable`] for transport and rate limits, and
     /// [`RouteError::Malformed`] when the answer is not one this module reads.
     pub fn quote(&self, request: &QuoteRequest) -> Result<Quote, RouteError> {
+        let body = self.fetch_body(request, self.slippage_bps)?;
+        Quote::from_response(&body, request)
+    }
+
+    /// [`Self::quote`], at `slippage_bps` rather than this router's configured
+    /// default.
+    ///
+    /// Split out for `GET /v1/market/quote` (plan 0013 Phase D, ADR 0024),
+    /// which accepts slippage as an optional request parameter rather than a
+    /// per-instance setting — the same reason [`Self::build`] takes it
+    /// per-call instead of using [`Self::with_slippage_bps`].
+    ///
+    /// # Errors
+    ///
+    /// The same as [`Self::quote`].
+    pub fn quote_at(&self, request: &QuoteRequest, slippage_bps: u32) -> Result<Quote, RouteError> {
+        let body = self.fetch_body(request, slippage_bps)?;
+        Quote::from_response(&body, request)
+    }
+
+    /// Asks what `request` would get, at `slippage_bps`, and compiles the
+    /// unsigned transaction the same answer describes.
+    ///
+    /// Exactly one Jupiter call: `/build` already returns the quote fields and
+    /// the raw instructions together, so this reads both out of the one body
+    /// rather than asking twice. `slippage_bps` is per-call rather than
+    /// [`Self::with_slippage_bps`]'s per-router setting, because a customer
+    /// route accepts it as a request parameter (bounded by its own caller).
+    ///
+    /// # Errors
+    ///
+    /// The same as [`Self::quote`], plus [`RouteError::Malformed`] if the
+    /// response cannot be assembled into a transaction — see
+    /// [`crate::assemble::assemble`].
+    pub fn build(&self, request: &QuoteRequest, slippage_bps: u32) -> Result<Build, RouteError> {
+        let body = self.fetch_body(request, slippage_bps)?;
+        let quote = Quote::from_response(&body, request)?;
+        let transaction = crate::assemble::assemble(&body, request.taker)?;
+        Ok(Build { quote, transaction })
+    }
+
+    /// The one GET both [`Self::quote`] and [`Self::build`] make, returning
+    /// the raw response body for each to read its own way.
+    fn fetch_body(&self, request: &QuoteRequest, slippage_bps: u32) -> Result<String, RouteError> {
         let input = QuoteRequest::wire_mint(request.input).to_string();
         let output = QuoteRequest::wire_mint(request.output).to_string();
 
@@ -553,7 +633,7 @@ impl Router {
             .query("outputMint", &output)
             .query("amount", request.amount.to_string())
             .query("taker", request.taker.to_string())
-            .query("slippageBps", self.slippage_bps.to_string())
+            .query("slippageBps", slippage_bps.to_string())
             .call();
 
         let mut response = match response {
@@ -581,8 +661,18 @@ impl Router {
                 request.amount,
             ));
         }
-        Quote::from_response(&body, request)
+        Ok(body)
     }
+}
+
+/// A priced quote and the unsigned transaction that would fill it, from one
+/// Jupiter call. See [`Router::build`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Build {
+    /// The same quote [`Router::quote`] would have returned for this request.
+    pub quote: Quote,
+    /// The unsigned v0 transaction, fee payer set to the request's `taker`.
+    pub transaction: crate::assemble::AssembledTransaction,
 }
 
 /// Converts a percentage string to basis points, treating unreadable as maximal.

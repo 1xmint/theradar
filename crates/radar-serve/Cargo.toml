@@ -23,6 +23,10 @@ radar-asof.workspace = true
 # itself; reused here rather than a second client for the same endpoint.
 radar-backfill.workspace = true
 radar-customer.workspace = true
+# The Jupiter router and unsigned-transaction assembler, for `trade`: pricing
+# and building a swap server-side so a wallet never has to trust a client-side
+# router it cannot see the inside of. Nothing here signs or submits.
+radar-exec.workspace = true
 radar-model.workspace = true
 radar-instruments.workspace = true
 # `RpcClient`, for `positions`: the signed-in wallet's own balances, read

@@ -137,6 +137,7 @@ fn state_at(dir: &std::path::Path) -> Arc<AppState> {
         customers: None,
 
         positions: None,
+        trading: None,
     })
 }
 

@@ -42,6 +42,7 @@ fn unconfigured() -> axum::Router {
         customers: None,
 
         positions: None,
+        trading: None,
     }))
 }
 

@@ -58,6 +58,7 @@ fn router(customer: Mode) -> axum::Router {
         customers: None,
 
         positions: None,
+        trading: None,
     }))
 }
 

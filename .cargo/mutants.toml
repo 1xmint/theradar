@@ -389,6 +389,27 @@ exclude_re = [
     # its mutants are caught.
     'replace > with >= in clamped_start',
     'delete ! in fold_holders',
+
+    # `assemble::write_shortvec`: same argument as `compact_u16` above, in the
+    # sibling crate that grew its own copy of the encoding. `byte` is
+    # `n & 0x7f`, so bit 7 is provably clear every time `byte | 0x80` runs --
+    # against a clear bit, `|` and `^` produce the same byte. Nothing a test
+    # could distinguish, by the same reasoning already verified for
+    # `compact_u16`, `encode_url` and `decode_base64` above.
+    'replace \| with \^ in write_shortvec',
+
+    # `radar-serve`'s `trading_lane`: the same argument as `Router::from_env`
+    # above, applied to the same shape of problem. After splitting the pure
+    # decision into `trading_note` (tested three ways: on keeps the value and
+    # says "on", off explains how to turn it on, an error propagates), what is
+    # left in `trading_lane` itself is only the impure edge -- read two
+    # environment variables and hand them to `trading_note` -- and that cannot
+    # be tested for the reason `Router::from_env`'s entry gives verbatim:
+    # setting an environment variable is process-global, tests run in
+    # parallel threads, and `std::env::set_var` is `unsafe` in edition 2024
+    # while this workspace forbids `unsafe_code`.
+    'replace trading_lane -> Result<\(Option<radar_serve::trade::Trading>, String\), String> with Ok\(\(None, String::new\(\)\)\)',
+    'replace trading_lane -> Result<\(Option<radar_serve::trade::Trading>, String\), String> with Ok\(\(None, "xyzzy"\.into\(\)\)\)',
 ]
 
 # A note on what does NOT belong here, learned on 2026-09-03 and worth the four

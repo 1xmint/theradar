@@ -847,15 +847,20 @@ mod tests {
         // it. When one of them does trip, the fix is to re-read the paragraphs
         // it names before editing the row.
 
-        // Row 1 — exactly one crate outside `radar-exec` depends on it.
-        // The documents may say "one production caller, and it is the router";
-        // they may not say "none".
+        // Row 1 — exactly two crates outside `radar-exec` depend on it: the
+        // CLI's `radar route`, and `radar-serve`'s customer-facing quote/swap
+        // routes added for Plan 0013 Phase D (ADR 0024). Both reach only the
+        // router (`route`/`assemble`); Row 2 is what pins that neither of them
+        // reaches further, into `execute`, `signer_client`, `submit` or
+        // `customer_signing`.
         let dependents: BTreeSet<String> = crate_directories()
             .into_iter()
             .filter(|c| c != "radar-exec")
             .filter(|c| production_dependency(c, "radar-exec"))
             .collect();
-        let expected: BTreeSet<String> = ["radar-cli".to_string()].into_iter().collect();
+        let expected: BTreeSet<String> = ["radar-cli".to_string(), "radar-serve".to_string()]
+            .into_iter()
+            .collect();
         assert_eq!(
             dependents, expected,
             "the set of production crates depending on radar-exec changed. \

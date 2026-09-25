@@ -29,11 +29,15 @@ distinction it was hiding:
   tests do and do not establish, for the local lane and the customer one, and
   names them.
 - **Not exercised** — nothing has been signed by a wallet, sent, or filled.
-  One production crate depends on `radar-exec`: `radar-cli`, which reaches
-  `radar_exec::route` for `radar route` and prints unsigned bytes. Nothing in
-  production reaches `pipeline::execute`, the signer client or the submitter, so
-  **there is no production caller for the trading path**, and writing one is a
-  decision about money rather than a wiring task. `repo-conformance`'s
+  Two production crates depend on `radar-exec`: `radar-cli`, which reaches
+  `radar_exec::route` for `radar route` and prints unsigned bytes; and
+  `radar-serve`, whose `/v1/market/quote` and `/v1/customer/swap` routes
+  (Plan 0013 Phase D, ADR 0024) reach the same router to price and assemble
+  an unsigned swap transaction for a signed-in wallet to sign itself. Neither
+  reaches past the router: nothing in production reaches `pipeline::execute`,
+  the signer client, the submitter or `customer_signing`, so **there is no
+  production caller for the trading path**, and writing one is a decision
+  about money rather than a wiring task. `repo-conformance`'s
   `the_documented_dependency_claims_are_true` pins all three statements; the
   earlier claim that *nothing* depended on `radar-exec` was false from
   2026-08-31 and went uncaught for three days (LEARNINGS 29).

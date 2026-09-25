@@ -31,6 +31,7 @@ pub mod privy;
 pub mod share;
 pub mod siws;
 pub mod tenant;
+pub mod trade;
 mod watchlist;
 pub mod x402;
 
@@ -173,6 +174,17 @@ pub struct AppState {
     /// [`Self::customers`]: a route can read the calling wallet's own balances
     /// and no other wallet's.
     pub positions: Option<positions::Positions>,
+    /// Server-side Jupiter routing for `/v1/market/quote` and
+    /// `/v1/customer/swap`, or `None` when this instance does not build or
+    /// price swaps.
+    ///
+    /// `None` is the shipped state -- `RADAR_TRADE` defaults off (plan 0013
+    /// Phase D, ADR 0024, AGENTS rule 8) -- and it is not a degradation of the
+    /// two routes above: both stay **mounted** in every configuration, and
+    /// answer `trading_off` at request time rather than 404ing, so `/health`'s
+    /// `"trading"` boolean is the one place this fact lives rather than a
+    /// route's own presence or absence saying it a second, inconsistent way.
+    pub trading: Option<trade::Trading>,
 }
 
 /// Builds the router.
@@ -212,6 +224,11 @@ pub fn app(state: Arc<AppState>) -> Router {
         // `positions`'s module doc for why this replaced a browser-reads-RPC
         // design.
         .route("/v1/customer/positions", get(positions::get))
+        // A Jupiter-routed swap, built server-side and named to the signed-in
+        // wallet as fee payer -- never signed or sent here. Mounted
+        // unconditionally; see `trade`'s module doc comment for why it answers
+        // `trading_off` rather than 404 when `RADAR_TRADE` is off.
+        .route("/v1/customer/swap", post(trade::swap))
         .route("/v1/instruments", get(list_instruments))
         .route("/v1/instruments/{name}", post(call_instrument))
         // Public market data -- tier 1 of plan 0012. No identity, and none of
@@ -223,6 +240,10 @@ pub fn app(state: Arc<AppState>) -> Router {
         .route("/v1/market/holders/{mint}", get(market::holders))
         .route("/v1/market/history/{mint}", get(market::history))
         .route("/v1/market/launches", get(market::launches))
+        // Public and unscoped, like every other `/v1/market/` route -- pricing
+        // a swap needs no wallet. See `trade`'s module doc comment for the
+        // wire contract and for why it always answers rather than 404ing.
+        .route("/v1/market/quote", get(trade::quote))
         .route("/mcp", post(mcp_endpoint))
         // Anything else is either a built asset or a route the interface owns.
         // Placed last so every named route above wins.
@@ -662,6 +683,11 @@ async fn health(State(state): State<Arc<AppState>>) -> Json<Value> {
         // to a stranger. `chat::public_status` says whether it works; the
         // figures moved to `/v1/store`, which is the operator's.
         "agent": chat::public_status(state.chat.as_ref()),
+        // Whether this instance builds or prices swaps at all -- the one place
+        // that fact lives, since both trade routes stay mounted either way and
+        // answer `trading_off` per-request rather than 404ing. See
+        // `AppState::trading`'s doc comment.
+        "trading": state.trading.is_some(),
     }))
 }
 

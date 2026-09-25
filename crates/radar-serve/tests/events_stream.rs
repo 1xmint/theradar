@@ -61,6 +61,7 @@ fn state_with_a_store() -> (Arc<AppState>, tempfile::TempDir) {
             customers: None,
 
             positions: None,
+            trading: None,
         }),
         dir,
     )
@@ -170,6 +171,7 @@ async fn an_empty_store_does_not_stall_the_stream_open() {
         customers: None,
 
         positions: None,
+        trading: None,
     });
 
     let response = app(state)

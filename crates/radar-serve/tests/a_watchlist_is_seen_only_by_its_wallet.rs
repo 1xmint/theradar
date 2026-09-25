@@ -64,6 +64,7 @@ fn router(customers: Option<Customers>, access: radar_serve::access::Mode) -> ax
         customers,
         privy: None,
         positions: None,
+        trading: None,
     }))
 }
 

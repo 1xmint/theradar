@@ -560,6 +560,47 @@ Two things this surfaced, neither a code fault:
   the same IP as the two backfill jobs. Under load, visitors will see `busy`
   or "could not look". A private RPC URL there is the owner's edit.
 
+**Phase D's server half is built, 2026-09-24, PR open as a draft, not yet
+reviewed or merged.** Builds on [ADR 0024](../adr/0024-radar-builds-a-visitors-swap-and-only-their-wallet-signs-it.md)
+(#291, merged): Radar assembles an unsigned transaction and never holds a key
+that could sign or send it, never adds a fee, and persists and logs nothing
+about the request. Item D.2 is
+`GET /v1/market/quote`, public and unscoped; item D.3's server half is
+`POST /v1/customer/swap`, behind `Tenant`, returning a base64 unsigned v0
+transaction naming the session wallet as fee payer. Both routes are one new
+module, [`trade.rs`](../../crates/radar-serve/src/trade.rs), calling
+`radar-exec`'s Router (ADR 0019) and a new hand-rolled v0-transaction
+assembler, [`assemble.rs`](../../crates/radar-exec/src/assemble.rs) --
+required because the Router's `/build` endpoint returns raw instructions and
+lookup tables, not a transaction, and nothing before this change compiled one.
+
+`RADAR_TRADE` follows the `RADAR_CUSTOMER_ACCESS` shape: off ships by default,
+and `=on` with no Jupiter key refuses to start rather than answering
+`trading_off` for a reason that is actually a misconfiguration. Default
+slippage 100 bps, hard cap 500 bps, refused (`slippage_too_wide`) rather than
+clamped. Three independent rate-limit tiers share one Jupiter budget: global
+30 calls/minute across both routes, per-visitor 6/minute on the public quote
+(keyed on `CF-Connecting-IP`, falling back to the peer address), per-wallet
+6/minute on the customer route -- mirroring the shape `positions.rs` already
+established for its own RPC budget. A caller over any cap is refused `busy`
+before Jupiter is asked anything.
+
+No-network test coverage, `crates/radar-serve/tests/a_swap_is_priced_and_built_by_radar.rs`
+(8 tests): trading off refuses both routes without a Jupiter call; slippage
+over the cap is refused before any call; an unroutable pair answers
+`404 no_route`; the quote route works with no session and returns the exact
+field values from a captured fixture; the visitor and wallet caps each refuse
+their seventh call in a minute with the upstream double proving exactly six
+requests landed, not seven; the global cap refuses the thirty-first call
+across five different visitors; and two wallets each get their own
+transaction naming themselves as fee payer, verified by an independently
+re-derived minimal Solana v0 wire decoder rather than reusing
+`radar_signer::tx::decode`, which rejects lookup-table transactions by design.
+Item D.3's browser half (the terminal actually calling these routes, showing
+the visitor what they pay and receive, then invoking the wallet's
+sign-and-send) and item D.5 (independent review before real money moves) are
+not part of this change.
+
 **Phase D, web half — draft PR opened, 2026-09-24.** Built in worktree
 `plan-0013-d-trade-web` against the server contract items 2 and 3 above
 describe (`GET /v1/market/quote`, `POST /v1/customer/swap`, `/health`'s

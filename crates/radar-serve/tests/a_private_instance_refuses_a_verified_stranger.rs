@@ -111,6 +111,7 @@ fn router(admission: Admission, keys: Keys) -> axum::Router {
         customers: None,
 
         positions: None,
+        trading: None,
     }))
 }
 

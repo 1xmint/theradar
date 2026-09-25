@@ -170,6 +170,45 @@ fn positions_lane() -> (radar_serve::positions::Positions, String) {
     (positions, note)
 }
 
+/// Whether this instance builds or prices swaps at all.
+///
+/// Unlike [`positions_lane`], `None` here *is* the shipped state: `RADAR_TRADE`
+/// defaults off (plan 0013 Phase D, ADR 0024, AGENTS rule 8), and pricing a
+/// swap needs a Jupiter credential that has no safe fallback the way a public
+/// RPC node is a safe fallback for reading balances. `RADAR_TRADE=on` with no
+/// credential refuses to **start**, rather than mounting both routes to answer
+/// `trading_off` for a reason that is actually a misconfiguration.
+///
+/// # Errors
+///
+/// The message to print and refuse startup with.
+fn trading_lane() -> Result<(Option<radar_serve::trade::Trading>, String), String> {
+    let rpc = radar_onchain::rpc::RpcClient::from_vars(&|k| std::env::var(k).ok());
+    let get = |k: &str| std::env::var(k).ok();
+    trading_note(radar_serve::trade::from_vars(&get, rpc))
+}
+
+/// Turns [`radar_serve::trade::from_vars`]'s decision into the startup status
+/// line, kept separate from [`trading_lane`] so this mapping is testable
+/// without touching the environment: setting an environment variable from a
+/// test is process-global and this workspace runs tests in parallel threads,
+/// and `std::env::set_var` is `unsafe` in edition 2024 while this workspace
+/// forbids `unsafe_code` -- the same reasoning `Router::from_env`'s own
+/// exclusion in `.cargo/mutants.toml` documents for the same shape of
+/// problem. Generic over `T` so a test can call this with a plain value
+/// instead of a real `Trading`, which needs a live [`radar_exec::route::Router`]
+/// to construct.
+fn trading_note<T>(result: Result<Option<T>, String>) -> Result<(Option<T>, String), String> {
+    match result {
+        Ok(Some(trading)) => Ok((Some(trading), "on".to_owned())),
+        Ok(None) => Ok((
+            None,
+            "off — set RADAR_TRADE=on to build and price swaps".to_owned(),
+        )),
+        Err(why) => Err(why),
+    }
+}
+
 /// The startup line for the access mode, said plainly every start: an
 /// instance serving operational detail to anyone who can reach it should say
 /// so in its own logs.
@@ -369,6 +408,10 @@ async fn main() -> ExitCode {
         Err(why) => return refused(&why),
     };
     let (positions, positions_note) = positions_lane();
+    let (trading, trading_note) = match trading_lane() {
+        Ok(lane) => lane,
+        Err(why) => return refused(&why),
+    };
     let state = Arc::new(AppState {
         admission,
         shares,
@@ -395,6 +438,7 @@ async fn main() -> ExitCode {
         market_snapshot: radar_serve::market::SnapshotCache::with_background_refresh(),
         customers: Some(customers),
         positions: Some(positions),
+        trading,
     });
 
     // Off the request path, per the market module's own doc comment: every
@@ -426,6 +470,7 @@ async fn main() -> ExitCode {
     // from a support message.
     println!("  wallets    : {privy_note}");
     println!("  positions  : reading balances from {positions_note}");
+    println!("  trading    : {trading_note}");
     println!("  agent      : {agent_note}");
     println!("  market feed: {feed_note}");
     println!("  listening  : http://{bind}");
@@ -438,7 +483,17 @@ async fn main() -> ExitCode {
         }
     };
 
-    if let Err(e) = axum::serve(listener, app(state)).await {
+    // `into_make_service_with_connect_info` rather than the plain service: the
+    // per-visitor rate limit on `/v1/market/quote` falls back to the
+    // connection's own peer address when `CF-Connecting-IP` is absent (see
+    // `trade`'s module doc comment), and that fallback only exists as
+    // `ConnectInfo<SocketAddr>` when the server is told to record it.
+    if let Err(e) = axum::serve(
+        listener,
+        app(state).into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .await
+    {
         eprintln!("server stopped: {e}");
         return ExitCode::FAILURE;
     }
@@ -447,7 +502,7 @@ async fn main() -> ExitCode {
 
 #[cfg(test)]
 mod tests {
-    use super::{bind_address, market_feed};
+    use super::{bind_address, market_feed, trading_note};
 
     fn vars(pairs: &[(&'static str, &'static str)]) -> impl Fn(&str) -> Option<String> {
         let owned = pairs.to_vec();
@@ -527,5 +582,25 @@ mod tests {
                 "the message must name the value: {why}"
             );
         }
+    }
+
+    #[test]
+    fn trading_note_on_reports_on_and_keeps_the_value() {
+        let (value, note) = trading_note(Ok(Some(7_u8))).expect("ok");
+        assert_eq!(value, Some(7));
+        assert_eq!(note, "on");
+    }
+
+    #[test]
+    fn trading_note_off_explains_how_to_turn_it_on() {
+        let (value, note): (Option<u8>, _) = trading_note(Ok(None)).expect("ok");
+        assert_eq!(value, None);
+        assert_eq!(note, "off — set RADAR_TRADE=on to build and price swaps");
+    }
+
+    #[test]
+    fn trading_note_propagates_the_refusal_message() {
+        let result: Result<(Option<u8>, String), String> = trading_note(Err("boom".to_owned()));
+        assert_eq!(result, Err("boom".to_owned()));
     }
 }
