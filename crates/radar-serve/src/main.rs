@@ -185,7 +185,21 @@ fn positions_lane() -> (radar_serve::positions::Positions, String) {
 fn trading_lane() -> Result<(Option<radar_serve::trade::Trading>, String), String> {
     let rpc = radar_onchain::rpc::RpcClient::from_vars(&|k| std::env::var(k).ok());
     let get = |k: &str| std::env::var(k).ok();
-    match radar_serve::trade::from_vars(&get, rpc) {
+    trading_note(radar_serve::trade::from_vars(&get, rpc))
+}
+
+/// Turns [`radar_serve::trade::from_vars`]'s decision into the startup status
+/// line, kept separate from [`trading_lane`] so this mapping is testable
+/// without touching the environment: setting an environment variable from a
+/// test is process-global and this workspace runs tests in parallel threads,
+/// and `std::env::set_var` is `unsafe` in edition 2024 while this workspace
+/// forbids `unsafe_code` -- the same reasoning `Router::from_env`'s own
+/// exclusion in `.cargo/mutants.toml` documents for the same shape of
+/// problem. Generic over `T` so a test can call this with a plain value
+/// instead of a real `Trading`, which needs a live [`radar_exec::route::Router`]
+/// to construct.
+fn trading_note<T>(result: Result<Option<T>, String>) -> Result<(Option<T>, String), String> {
+    match result {
         Ok(Some(trading)) => Ok((Some(trading), "on".to_owned())),
         Ok(None) => Ok((
             None,
@@ -488,7 +502,7 @@ async fn main() -> ExitCode {
 
 #[cfg(test)]
 mod tests {
-    use super::{bind_address, market_feed};
+    use super::{bind_address, market_feed, trading_note};
 
     fn vars(pairs: &[(&'static str, &'static str)]) -> impl Fn(&str) -> Option<String> {
         let owned = pairs.to_vec();
@@ -568,5 +582,25 @@ mod tests {
                 "the message must name the value: {why}"
             );
         }
+    }
+
+    #[test]
+    fn trading_note_on_reports_on_and_keeps_the_value() {
+        let (value, note) = trading_note(Ok(Some(7_u8))).expect("ok");
+        assert_eq!(value, Some(7));
+        assert_eq!(note, "on");
+    }
+
+    #[test]
+    fn trading_note_off_explains_how_to_turn_it_on() {
+        let (value, note): (Option<u8>, _) = trading_note(Ok(None)).expect("ok");
+        assert_eq!(value, None);
+        assert_eq!(note, "off — set RADAR_TRADE=on to build and price swaps");
+    }
+
+    #[test]
+    fn trading_note_propagates_the_refusal_message() {
+        let result: Result<(Option<u8>, String), String> = trading_note(Err("boom".to_owned()));
+        assert_eq!(result, Err("boom".to_owned()));
     }
 }

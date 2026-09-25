@@ -417,6 +417,19 @@ exclude_re = [
     # work -- remove this line**: `signer_readonly` becomes reachable and this
     # stops being equivalent.
     'replace \+ with \- in Plan::build',
+
+    # `radar-serve`'s `trading_lane`: the same argument as `Router::from_env`
+    # above, applied to the same shape of problem. After splitting the pure
+    # decision into `trading_note` (tested three ways: on keeps the value and
+    # says "on", off explains how to turn it on, an error propagates), what is
+    # left in `trading_lane` itself is only the impure edge -- read two
+    # environment variables and hand them to `trading_note` -- and that cannot
+    # be tested for the reason `Router::from_env`'s entry gives verbatim:
+    # setting an environment variable is process-global, tests run in
+    # parallel threads, and `std::env::set_var` is `unsafe` in edition 2024
+    # while this workspace forbids `unsafe_code`.
+    'replace trading_lane -> Result<\(Option<radar_serve::trade::Trading>, String\), String> with Ok\(\(None, String::new\(\)\)\)',
+    'replace trading_lane -> Result<\(Option<radar_serve::trade::Trading>, String\), String> with Ok\(\(None, "xyzzy"\.into\(\)\)\)',
 ]
 
 # A note on what does NOT belong here, learned on 2026-09-03 and worth the four

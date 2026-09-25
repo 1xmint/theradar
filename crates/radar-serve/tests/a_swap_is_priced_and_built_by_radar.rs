@@ -635,6 +635,11 @@ async fn two_wallets_each_get_their_own_transaction_naming_themselves_as_fee_pay
         resp_a["quote"]["mint"],
         "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
     );
+    // `swap_inner` derives "buy"/"sell" itself (separately from `sides_for`,
+    // which only decides which asset is which) to label the quote it embeds
+    // in the built-transaction response -- assert it here since this is the
+    // swap route, not just the quote route which already checks this label.
+    assert_eq!(resp_a["quote"]["side"], "buy", "{resp_a}");
 
     // A wallet-specific unsigned transaction is exactly as cache-unsafe as the
     // public quote it is built from -- see `the_public_quote_route_works_

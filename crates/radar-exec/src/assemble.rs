@@ -570,18 +570,37 @@ fn parse_address(s: &str) -> Result<Address, RouteError> {
         .map_err(|_| RouteError::Malformed(format!("not a valid address: {s}")))
 }
 
+/// The most bytes this module ever needs to encode a shortvec: 3 bytes
+/// covers every value up to 2,097,151, and every count [`write_shortvec`] is
+/// called with here — accounts, instructions, instruction data length,
+/// static keys, lookup table entries — is bounded by the ~1,232-byte legacy
+/// transaction size limit long before that.
+const SHORTVEC_MAX_BYTES: usize = 3;
+
 /// Writes `n` as a shortvec (compact-u16): 7 bits per byte, continuation in
 /// the high bit, canonical (stops as soon as the remainder is zero).
+///
+/// Bounded by [`SHORTVEC_MAX_BYTES`] rather than `loop { .. }` on purpose: a
+/// single comparison flipped by mutation testing turned an unbounded loop
+/// into one that never returns for `n == 0` — a real, reached input (an
+/// empty lookup table's readonly-address count, among others) — which
+/// cargo-mutants can only report as a 60-second timeout rather than a caught
+/// mutant. Same shape as `radar_pumpfun::transaction::compact_u16`, which
+/// needed this exact bound first.
 fn write_shortvec(out: &mut Vec<u8>, mut n: usize) {
-    loop {
+    for _ in 0..SHORTVEC_MAX_BYTES {
         let byte = u8::try_from(n & 0x7f).unwrap_or(0);
         n >>= 7;
         if n == 0 {
             out.push(byte);
-            break;
+            return;
         }
         out.push(byte | 0x80);
     }
+    debug_assert!(
+        n == 0,
+        "shortvec value truncated: does not fit in {SHORTVEC_MAX_BYTES} bytes"
+    );
 }
 
 #[cfg(test)]

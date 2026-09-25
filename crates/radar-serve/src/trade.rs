@@ -741,3 +741,110 @@ async fn swap_inner(
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const USDC: &str = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
+
+    fn usdc() -> Address {
+        USDC.parse().expect("valid address")
+    }
+
+    /// No I/O happens until a request is actually sent through it, and none
+    /// of these tests send one -- `from_vars` only stores the client.
+    fn rpc() -> RpcClient {
+        RpcClient::new("http://test.invalid")
+    }
+
+    #[test]
+    fn from_vars_off_is_off_without_needing_a_credential() {
+        let result = from_vars(&|_| None, rpc());
+        assert!(
+            matches!(result, Ok(None)),
+            "RADAR_TRADE unset must mean no Trading at all, not a refusal"
+        );
+    }
+
+    #[test]
+    fn from_vars_on_with_a_credential_builds_trading() {
+        let get = |k: &str| match k {
+            VAR => Some("on".to_owned()),
+            radar_exec::route::API_KEY_VAR => Some("a-key".to_owned()),
+            _ => None,
+        };
+        let result = from_vars(&get, rpc());
+        assert!(
+            matches!(result, Ok(Some(_))),
+            "RADAR_TRADE=on with a credential must build Trading"
+        );
+    }
+
+    #[test]
+    fn from_vars_on_without_a_credential_refuses_to_start() {
+        let get = |k: &str| {
+            if k == VAR {
+                Some("on".to_owned())
+            } else {
+                None
+            }
+        };
+        let result = from_vars(&get, rpc());
+        assert!(
+            result.is_err(),
+            "a switch with nothing to price against must refuse startup rather than start half-configured"
+        );
+    }
+
+    #[test]
+    fn sides_for_sell_spends_the_mint_for_sol() {
+        let (input, output) = sides_for(usdc(), "sell").expect("sell is a valid side");
+        assert_eq!(input, Asset::spl(usdc()));
+        assert_eq!(output, Asset::WrappedSol);
+    }
+
+    #[test]
+    fn sides_for_buy_spends_sol_for_the_mint() {
+        let (input, output) = sides_for(usdc(), "buy").expect("buy is a valid side");
+        assert_eq!(input, Asset::WrappedSol);
+        assert_eq!(output, Asset::spl(usdc()));
+    }
+
+    #[test]
+    fn sides_for_refuses_any_other_side() {
+        let response = sides_for(usdc(), "hold").expect_err("\"hold\" is not a side");
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[test]
+    fn parse_request_accepts_slippage_exactly_at_the_cap() {
+        let (_, _, _, _, slippage_bps) =
+            parse_request(USDC, "buy", "100000000", Some(MAX_SLIPPAGE_BPS))
+                .expect("the cap itself is not \"too wide\"");
+        assert_eq!(slippage_bps, MAX_SLIPPAGE_BPS);
+    }
+
+    #[test]
+    fn parse_request_refuses_slippage_one_above_the_cap() {
+        let response = parse_request(USDC, "buy", "100000000", Some(MAX_SLIPPAGE_BPS + 1))
+            .expect_err("one more than the cap must be refused");
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[test]
+    fn worst_out_floor_computes_the_exact_shortfall() {
+        // 1% of 1,000,000 is 10,000; the floor is what remains after it.
+        assert_eq!(worst_out_floor(1_000_000, 100), 990_000);
+    }
+
+    #[test]
+    fn impact_bps_json_is_null_for_the_unreadable_sentinel() {
+        assert_eq!(impact_bps_json(u32::MAX), Value::Null);
+    }
+
+    #[test]
+    fn impact_bps_json_is_the_number_otherwise() {
+        assert_eq!(impact_bps_json(123), json!(123));
+    }
+}
