@@ -1152,6 +1152,58 @@ mod tests {
         );
     }
 
+    /// A transaction that serializes to exactly [`super::MAX_PACKET_BYTES`]
+    /// must still be accepted -- the guard above is a limit, not a margin.
+    /// This pins the boundary itself: `wire.len() > MAX_PACKET_BYTES` and
+    /// `wire.len() >= MAX_PACKET_BYTES` both refuse everything one byte past
+    /// the limit, and only a case sitting exactly on it tells them apart.
+    ///
+    /// The swap instruction's data length needed to land exactly on the
+    /// limit is derived, not hardcoded, because the exact byte count depends
+    /// on the fixture's account layout and shortvec encoding, neither of
+    /// which this test should have to know in advance. Growing that data
+    /// length by one grows the wire by exactly one byte, with one exception:
+    /// the single step where the data length's own shortvec prefix grows
+    /// from one byte to two (data length 127 -> 128) grows the wire by two,
+    /// skipping exactly one otherwise-reachable wire length. The `assert_ne`
+    /// below names that skipped offset rather than silently landing on the
+    /// wrong length if the limit and the fixture ever line up on it.
+    #[test]
+    fn a_transaction_at_exactly_the_packet_limit_is_accepted() {
+        fn wire_len_for_data_len(n: usize) -> usize {
+            let mut v: serde_json::Value = serde_json::from_str(SOL_USDC).unwrap();
+            let data = radar_types::b64::encode(&vec![0u8; n]);
+            v["swapInstruction"]["data"] = serde_json::Value::String(data);
+            let body = v.to_string();
+            assemble(&body, taker())
+                .expect("a data length picked to land on, not over, the limit must assemble")
+                .wire
+                .len()
+        }
+
+        let target = super::MAX_PACKET_BYTES;
+        let base = wire_len_for_data_len(0);
+        assert!(
+            target >= base,
+            "the fixture's baseline wire length ({base} bytes, empty swap data) already exceeds \
+             the packet limit ({target} bytes); this test's assumptions no longer hold"
+        );
+        let offset = target - base;
+        assert_ne!(
+            offset, 128,
+            "the packet limit sits exactly on the one offset this instruction's data length \
+             alone cannot reach (its shortvec length prefix growing from one byte to two skips \
+             it); this test needs a second knob to reach the limit"
+        );
+        let n = if offset <= 127 { offset } else { offset - 1 };
+
+        let len = wire_len_for_data_len(n);
+        assert_eq!(
+            len, target,
+            "data_len={n} should have produced a wire of exactly {target} bytes, got {len}"
+        );
+    }
+
     /// `AssembledTransaction::to_base64` must encode exactly the compiled
     /// wire bytes -- not merely return *some* non-empty string. Decoding it
     /// back and comparing against `wire` catches a stub implementation that
