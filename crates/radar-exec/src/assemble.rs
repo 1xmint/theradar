@@ -989,6 +989,58 @@ mod tests {
         assert!(assemble(&body, taker()).is_err());
     }
 
+    /// `AssembledTransaction::to_base64` must encode exactly the compiled
+    /// wire bytes -- not merely return *some* non-empty string. Decoding it
+    /// back and comparing against `wire` catches a stub implementation that
+    /// returns a fixed placeholder just as surely as one that returns an
+    /// empty string.
+    #[test]
+    fn to_base64_round_trips_the_exact_wire_bytes() {
+        let assembled = assemble(SOL_USDC, taker()).unwrap();
+        let decoded = radar_types::b64::decode(&assembled.to_base64())
+            .expect("to_base64 must produce valid base64");
+        assert_eq!(
+            decoded, assembled.wire,
+            "to_base64 must encode exactly the compiled wire bytes, not a placeholder"
+        );
+    }
+
+    /// A program id is kept static even when the same address also appears
+    /// in a lookup table (module doc, "Static keys versus lookup tables").
+    /// This exercises `partition_accounts`'s `required_static = signer ||
+    /// programs.contains(addr)` and its `!required_static` guard directly:
+    /// flipping the `||` to `&&`, or dropping the `!`, both let this
+    /// non-signer program id slip into the lookup-table branch instead of
+    /// staying in the static key list.
+    #[test]
+    fn a_program_id_that_also_sits_in_a_lookup_table_stays_static() {
+        let mut v: serde_json::Value = serde_json::from_str(SOL_USDC).unwrap();
+        let program = v["swapInstruction"]["programId"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let tables = v["addressesByLookupTableAddress"].as_object_mut().unwrap();
+        let (_, first_table) = tables
+            .iter_mut()
+            .next()
+            .expect("the SOL/USDC fixture has at least one lookup table");
+        first_table
+            .as_array_mut()
+            .unwrap()
+            .push(serde_json::Value::String(program.clone()));
+        let body = v.to_string();
+
+        let assembled = assemble(&body, taker())
+            .expect("still assembles once the program id is duplicated into a lookup table");
+        let decoded = decode(&assembled.wire);
+        let program_addr: Address = program.parse().unwrap();
+        assert!(
+            decoded.static_keys.contains(&program_addr),
+            "a program id must always compile into the static key list, even when a lookup \
+             table also lists it"
+        );
+    }
+
     #[test]
     fn shortvec_encodes_canonically() {
         let mut out = Vec::new();

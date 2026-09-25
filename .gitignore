@@ -51,3 +51,8 @@ site/tsconfig.tsbuildinfo
 # is per-machine. It was ignored in `.git/info/exclude` on one clone, which does
 # not travel; this makes it hold for every checkout.
 .orchestrator/
+
+# Per-branch scratch progress notes for an in-flight agent task. Working
+# scratch, not part of any PR -- explicitly never committed (see the file's
+# own first lines).
+PROGRESS-*.md
