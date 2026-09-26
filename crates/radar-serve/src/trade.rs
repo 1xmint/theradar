@@ -54,6 +54,34 @@
 //! `{"error","reason"}` shape (see [`crate::tenant::refusal`]). `/health`
 //! gains `"trading": true|false`.
 //!
+//! `GET /v1/customer/tx/{signature}?last_valid_block_height=<int>` (behind
+//! [`crate::tenant::Tenant`], same as `swap`), Plan 0014 F11: whether a
+//! transaction the signed-in wallet already built, signed and sent has
+//! landed. `signature` is base58 of exactly 64 bytes or the route answers
+//! `bad_request` without reading the chain; `last_valid_block_height` is the
+//! value the matching `swap` response carried.
+//!
+//! 200 body:
+//! ```text
+//! {"state": "pending"}
+//! {"state": "landed", "slot": <int>}
+//! {"state": "failed", "reason": "<short plain string, never raw JSON>"}
+//! {"state": "expired"}
+//! ```
+//!
+//! `landed` and `failed` require `confirmed` or `finalized` commitment --
+//! an on-chain error observed only at `processed` commitment is `pending`,
+//! because a `processed` result can still belong to a fork the cluster
+//! drops. `expired` requires both chain reads (block height and signature
+//! status) to have succeeded, no status found, **and** the chain's current
+//! block height to be strictly past `last_valid_block_height`; any failure
+//! reading the chain is `chain_unreadable` (502), never `expired`, which is
+//! a claim this route makes only on the chain's own word. See
+//! [`render_tx_status`] for the exact state table and
+//! [`tx_status_inner`]'s doc comment for the read order (block height
+//! before signature status, deliberately, to close a landed-but-reads-as-
+//! expired race).
+//!
 //! # `RADAR_TRADE`
 //!
 //! Off is the shipped state. AGENTS rule 8: an operator who wants Radar to
@@ -63,11 +91,12 @@
 //! refuses to **start** rather than answering `trading_off` for a reason that
 //! is actually a misconfiguration — see [`from_vars`].
 //!
-//! # Four limits, for four different things
+//! # Six limits, for six different things
 //!
 //! Mirrors [`crate::positions`]'s reasoning exactly, with more tiers because
-//! this module has two routes against one upstream, and neither route may
-//! starve the other of it. The **quote-route global** cap (30 Jupiter calls a
+//! this module has three routes against two upstreams (Jupiter, and the
+//! chain RPC node), and neither route sharing an upstream may starve the
+//! other of it. The **quote-route global** cap (30 Jupiter calls a
 //! minute) exists because a Jupiter API key has a real rate limit that every
 //! caller of the *pricing* route draws from together. The **per-visitor** cap
 //! on that same route (6 calls a minute, keyed on `CF-Connecting-IP`) exists
@@ -92,7 +121,16 @@
 //! building transactions at all. See [`MAX_JUPITER_BUILD_CALLS_PER_MINUTE`]
 //! for why its number is smaller than the quote route's.
 //!
-//! All four checks run under the same lock-ordering discipline
+//! The **tx-status-route global** cap and its own **per-wallet** cap (600 and
+//! 60 calls a minute — see [`MAX_TX_STATUS_CALLS_PER_MINUTE`] and
+//! [`MAX_TX_STATUS_CALLS_PER_WALLET_PER_MINUTE`]) exist for the same reason as
+//! the swap route's pair, and are the same shape, but drawn from their own
+//! pool again: this route reads the chain RPC node, not Jupiter, so its
+//! budget has nothing to do with either Jupiter cap, and a poll loop
+//! checking one trade's landing must not be able to starve another wallet's
+//! swap build (or vice versa).
+//!
+//! All six checks run under the same lock-ordering discipline
 //! [`crate::positions`] documents: the relevant global counter first, then the
 //! per-key map, both checked before either is charged, and a refused caller is
 //! never inserted.
@@ -103,12 +141,12 @@ use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use axum::Json;
-use axum::extract::{ConnectInfo, Extension, Query, State};
+use axum::extract::{ConnectInfo, Extension, Path, Query, State};
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use radar_exec::route::{QuoteRequest, RouteError, Router};
 use radar_onchain::budget::Budget;
-use radar_onchain::rpc::RpcClient;
+use radar_onchain::rpc::{RpcClient, RpcError, SignatureStatus, decode_base58};
 use radar_types::{Address, Asset};
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -144,7 +182,7 @@ pub const MAX_SLIPPAGE_BPS: u32 = 500;
 /// route, across every visitor, in one rolling minute.
 ///
 /// Its own budget, separate from [`MAX_JUPITER_BUILD_CALLS_PER_MINUTE`] — see
-/// the module doc comment's "Four limits" section for why the two routes do
+/// the module doc comment's "Six limits" section for why the two routes do
 /// not share one pool.
 const MAX_JUPITER_CALLS_PER_MINUTE: u32 = 30;
 
@@ -172,6 +210,29 @@ const MAX_JUPITER_BUILD_CALLS_PER_MINUTE: u32 = 24;
 /// The most calls one wallet may draw from the customer swap route in one
 /// rolling minute, regardless of room left in that route's own global budget.
 const MAX_CALLS_PER_WALLET_PER_MINUTE: u32 = 6;
+
+/// The most calls one wallet may draw from `GET /v1/customer/tx/{signature}`
+/// in one rolling minute.
+///
+/// A different order of magnitude from [`MAX_CALLS_PER_WALLET_PER_MINUTE`] on
+/// purpose: that cap paces a wallet *building* a transaction, which it does
+/// rarely. This one paces a browser tab *polling* for one transaction's
+/// outcome every 1.5s for up to 90s after a real send -- roughly 60 reads in
+/// the worst case -- so a cap sized like the swap route's would refuse a
+/// single normal poll loop partway through. Two RPC reads per call (a
+/// signature-status lookup and a block-height read), so this is a much
+/// smaller draw on the node per call than a swap build's single Jupiter call.
+const MAX_TX_STATUS_CALLS_PER_WALLET_PER_MINUTE: u32 = 60;
+
+/// The most calls this instance will make for `GET /v1/customer/tx/{signature}`,
+/// across every wallet, in one rolling minute.
+///
+/// Its own pool, separate from [`Self::build_calls`] and [`Self::quote_calls`]
+/// for the same reason those two are separate from each other -- a burst of
+/// polling from one wallet must not starve another wallet's own swap build,
+/// and vice versa. Ten wallets' worth of simultaneous full-tilt polling
+/// (10 x [`MAX_TX_STATUS_CALLS_PER_WALLET_PER_MINUTE`]'s 60).
+const MAX_TX_STATUS_CALLS_PER_MINUTE: u32 = 600;
 
 /// One quote or one build: exactly one Jupiter call each (see
 /// `radar_exec::route::Router`'s own doc comments).
@@ -202,6 +263,11 @@ pub struct Trading {
     /// [`Self::quote_calls`] — see the module doc comment.
     build_calls: Mutex<VecDeque<Instant>>,
     wallet_calls: Mutex<HashMap<Address, VecDeque<Instant>>>,
+    /// `GET /v1/customer/tx/{signature}`'s own global budget. Never shared
+    /// with [`Self::quote_calls`] or [`Self::build_calls`] — see the module
+    /// doc comment's "Six limits" section, and [`MAX_TX_STATUS_CALLS_PER_MINUTE`].
+    tx_status_calls: Mutex<VecDeque<Instant>>,
+    wallet_tx_status_calls: Mutex<HashMap<Address, VecDeque<Instant>>>,
 }
 
 impl Trading {
@@ -216,6 +282,8 @@ impl Trading {
             visitor_calls: Mutex::new(HashMap::new()),
             build_calls: Mutex::new(VecDeque::new()),
             wallet_calls: Mutex::new(HashMap::new()),
+            tx_status_calls: Mutex::new(VecDeque::new()),
+            wallet_tx_status_calls: Mutex::new(HashMap::new()),
         }
     }
 
@@ -284,7 +352,7 @@ impl Trading {
     /// Reserves `want` Jupiter calls against `wallet`'s own share and the
     /// swap route's own global budget ([`Self::build_calls`]) — deliberately
     /// *not* [`Self::quote_calls`], which [`Self::reserve_visitor`] alone
-    /// draws on. See the module doc comment's "Four limits" section for why
+    /// draws on. See the module doc comment's "Six limits" section for why
     /// the two routes do not share one pool.
     fn reserve_wallet(&self, wallet: Address, want: u32) -> bool {
         let mut global = self
@@ -306,6 +374,42 @@ impl Trading {
         let mine = wallets.get(&wallet).unwrap_or(&none);
         if !fits(&global, want, MAX_JUPITER_BUILD_CALLS_PER_MINUTE)
             || !fits(mine, want, MAX_CALLS_PER_WALLET_PER_MINUTE)
+        {
+            return false;
+        }
+        let entry = wallets.entry(wallet).or_default();
+        for _ in 0..want {
+            global.push_back(now);
+            entry.push_back(now);
+        }
+        true
+    }
+
+    /// Reserves `want` calls against `wallet`'s own share and
+    /// `GET /v1/customer/tx/{signature}`'s own global budget
+    /// ([`Self::tx_status_calls`]) — its own pool, separate from both the
+    /// quote and swap routes'. Same lock-ordering discipline as
+    /// [`Self::reserve_visitor`] and [`Self::reserve_wallet`].
+    fn reserve_tx_status(&self, wallet: Address, want: u32) -> bool {
+        let mut global = self
+            .tx_status_calls
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut wallets = self
+            .wallet_tx_status_calls
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let now = Instant::now();
+        let window = Duration::from_secs(60);
+        prune(&mut global, now, window);
+        wallets.retain(|_, calls| {
+            prune(calls, now, window);
+            !calls.is_empty()
+        });
+        let none = VecDeque::new();
+        let mine = wallets.get(&wallet).unwrap_or(&none);
+        if !fits(&global, want, MAX_TX_STATUS_CALLS_PER_MINUTE)
+            || !fits(mine, want, MAX_TX_STATUS_CALLS_PER_WALLET_PER_MINUTE)
         {
             return false;
         }
@@ -832,6 +936,176 @@ async fn swap_inner(
     }
 }
 
+/// Query parameters for `GET /v1/customer/tx/{signature}`.
+#[derive(Debug, Deserialize)]
+pub(crate) struct TxStatusQuery {
+    last_valid_block_height: u64,
+}
+
+/// A short, plain rendering of a landed-but-failed transaction's on-chain
+/// error -- never the raw JSON, which is a debugging shape (`{"InstructionError":
+/// [3,{"Custom":6001}]}`) nobody asked this route to teach a customer to read.
+///
+/// Deliberately not exhaustive on every `TransactionError` variant Solana
+/// defines: new variants are rare, and falling back to the compact JSON
+/// (still short, still plain enough) is a better failure mode here than this
+/// route refusing to answer over a shape it does not recognise yet.
+fn describe_tx_err(err: &Value) -> String {
+    if let Some(arr) = err.get("InstructionError").and_then(Value::as_array)
+        && let (Some(index), Some(detail)) = (arr.first().and_then(Value::as_u64), arr.get(1))
+    {
+        if let Some(custom) = detail.get("Custom").and_then(Value::as_u64) {
+            return format!("instruction {index} failed with custom error {custom}");
+        }
+        if let Some(kind) = detail.as_str() {
+            return format!("instruction {index} failed: {kind}");
+        }
+    }
+    if let Some(kind) = err.as_str() {
+        return kind.to_owned();
+    }
+    err.to_string()
+}
+
+/// Answers whether a transaction the caller's own wallet already sent has
+/// landed, failed, expired, or is still pending -- the read a success screen
+/// needs before it may say "success". See the module doc comment's wire
+/// contract note above [`TxStatusQuery`] for the full state table.
+fn render_tx_status(
+    status: Option<SignatureStatus>,
+    height: u64,
+    last_valid_block_height: u64,
+) -> Value {
+    match status {
+        Some(status) => {
+            let landed = matches!(
+                status.confirmation_status.as_deref(),
+                Some("confirmed" | "finalized")
+            );
+            // `err` is only final once the transaction has actually landed
+            // at `confirmed` or `finalized` commitment. A `processed`-level
+            // error can still belong to a fork the cluster drops -- the
+            // transaction may yet land clean on the fork that wins, so this
+            // is `pending`, never `failed`, until commitment says the result
+            // is not going to be re-decided.
+            if let Some(err) = status.err
+                && landed
+            {
+                return json!({ "state": "failed", "reason": describe_tx_err(&err) });
+            }
+            if landed {
+                json!({ "state": "landed", "slot": status.slot })
+            } else {
+                json!({ "state": "pending" })
+            }
+        }
+        // No status at all is only ever "expired" once both reads succeeded
+        // (we are here) and the chain's own clock has passed the transaction's
+        // last valid block height -- never on the strength of a missing status
+        // alone, which is indistinguishable from "not landed yet".
+        None if height > last_valid_block_height => json!({ "state": "expired" }),
+        None => json!({ "state": "pending" }),
+    }
+}
+
+/// `GET /v1/customer/tx/{signature}?last_valid_block_height=N`: whether a
+/// transaction the signed-in wallet already sent has landed. See the module
+/// doc comment for the wire contract.
+pub(crate) async fn tx_status(
+    state: State<Arc<AppState>>,
+    tenant: Tenant,
+    path: Path<String>,
+    query: Query<TxStatusQuery>,
+) -> Response {
+    let mut response = tx_status_inner(state, tenant, path, query).await;
+    response
+        .headers_mut()
+        .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    response
+}
+
+async fn tx_status_inner(
+    State(state): State<Arc<AppState>>,
+    tenant: Tenant,
+    Path(signature): Path<String>,
+    Query(query): Query<TxStatusQuery>,
+) -> Response {
+    let decoded = decode_base58(&signature);
+    if decoded.is_none_or(|bytes| bytes.len() != 64) {
+        return refusal(
+            StatusCode::BAD_REQUEST,
+            "bad_request",
+            "signature must be base58 of 64 bytes",
+        );
+    }
+
+    if state.trading.is_none() {
+        return refusal(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "trading_off",
+            "this instance does not build or price swaps; set RADAR_TRADE=on to enable it",
+        );
+    }
+
+    let wallet = *tenant.address();
+    {
+        let trading = state.trading.as_ref().expect("checked above");
+        if !trading.reserve_tx_status(wallet, CALLS_PER_REQUEST) {
+            return refusal(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "busy",
+                "Radar is rate-limiting transaction-status reads; try again shortly",
+            );
+        }
+    }
+
+    let last_valid_block_height = query.last_valid_block_height;
+    let state_for_call = Arc::clone(&state);
+    let result = tokio::task::spawn_blocking(move || {
+        let trading = state_for_call
+            .trading
+            .as_ref()
+            .expect("trading is checked present before this task is spawned, and never removed");
+        let mut budget = Budget::new(2, 1, Duration::from_secs(10));
+        // Block height first, then the signature status -- never the other
+        // order. A landed transaction moves both facts forward together; if
+        // the status read ran first and came back empty, then the
+        // transaction landed, then height read past the limit, an
+        // after-the-status height would show "expired" for a trade that
+        // landed while this read was in flight. Reading height first means
+        // any height this call sees was already true at (or before) the
+        // moment the status read follows it, so "no status yet, and already
+        // past the limit" cannot be true of a transaction that lands between
+        // the two reads.
+        let height = trading.rpc.block_height(&mut budget)?;
+        let status = trading.rpc.signature_status(&mut budget, &signature)?;
+        Ok::<(Option<SignatureStatus>, u64), RpcError>((status, height))
+    })
+    .await;
+
+    match result {
+        Ok(Ok((status, height))) => {
+            Json(render_tx_status(status, height, last_valid_block_height)).into_response()
+        }
+        Ok(Err(why)) => {
+            eprintln!("radar-serve: tx status read failed: {}", why.kind());
+            refusal(
+                StatusCode::BAD_GATEWAY,
+                "chain_unreadable",
+                "Radar could not read the chain to check this transaction",
+            )
+        }
+        Err(_join_error) => {
+            eprintln!("radar-serve: tx status task did not complete (join error)");
+            refusal(
+                StatusCode::BAD_GATEWAY,
+                "chain_unreadable",
+                "Radar could not read the chain to check this transaction",
+            )
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -901,6 +1175,48 @@ mod tests {
     /// of these tests send one -- `from_vars` only stores the client.
     fn rpc() -> RpcClient {
         RpcClient::new("http://test.invalid")
+    }
+
+    /// A [`Trading`] built the same way [`from_vars`] does, with no I/O:
+    /// `Router::new` only stores the credential.
+    fn trading_for_test() -> Trading {
+        let get = |k: &str| match k {
+            VAR => Some("on".to_owned()),
+            radar_exec::route::API_KEY_VAR => Some("a-key".to_owned()),
+            _ => None,
+        };
+        from_vars(&get, rpc())
+            .expect("a supplied key builds Trading")
+            .expect("RADAR_TRADE=on with a credential returns Some")
+    }
+
+    fn wallet(byte: u8) -> Address {
+        Address::new([byte; 32])
+    }
+
+    /// The per-wallet tx-status cap is its own budget, separate from every
+    /// other wallet's: one wallet spending its whole 60-call minute must
+    /// leave a second wallet fully served, never `busy` for a reason that
+    /// has nothing to do with it.
+    #[test]
+    fn the_per_wallet_tx_status_cap_busies_only_the_wallet_that_hit_it() {
+        let trading = trading_for_test();
+        let exhausted = wallet(1);
+        let other = wallet(2);
+        for i in 0..MAX_TX_STATUS_CALLS_PER_WALLET_PER_MINUTE {
+            assert!(
+                trading.reserve_tx_status(exhausted, CALLS_PER_REQUEST),
+                "call {i} is still within the per-wallet cap"
+            );
+        }
+        assert!(
+            !trading.reserve_tx_status(exhausted, CALLS_PER_REQUEST),
+            "the call past the per-wallet cap must be refused"
+        );
+        assert!(
+            trading.reserve_tx_status(other, CALLS_PER_REQUEST),
+            "a different wallet must still be served -- its own budget is untouched"
+        );
     }
 
     #[test]

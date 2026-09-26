@@ -674,6 +674,14 @@ pub fn audience_of(path: &str) -> Audience {
     let one_coin = path
         .strip_prefix("/v1/customer/watchlist/")
         .is_some_and(|mint| !mint.is_empty() && !mint.contains('/'));
+    // `GET /v1/customer/tx/{signature}` -- Plan 0014 F11. Behind the same
+    // `Tenant` as `swap`, for the same reason: it reads through the signed-in
+    // wallet's own build (`last_valid_block_height`), and answers only
+    // whether *that* transaction landed. One signature per request, so
+    // `/tx/a/b` is not a customer path either.
+    let one_tx = path
+        .strip_prefix("/v1/customer/tx/")
+        .is_some_and(|sig| !sig.is_empty() && !sig.contains('/'));
     // The signed-in wallet's own Solana holdings -- Tier 2 again, behind the
     // same `Tenant` as the watchlist, and `Customer` for the same reason: a
     // wallet session must reach it, and the handler refuses an operator login
@@ -687,7 +695,8 @@ pub fn audience_of(path: &str) -> Audience {
         // the signed-in wallet as fee payer. Behind the same `Tenant` as
         // `positions` and `watchlist`, for the same reason.
         || path == "/v1/customer/swap"
-        || one_coin;
+        || one_coin
+        || one_tx;
     if customer {
         return Audience::Customer;
     }
@@ -1457,5 +1466,26 @@ mod tests {
             audience_of("/v1/customer/config/secrets"),
             Audience::Operator
         );
+    }
+
+    /// `/v1/customer/tx/{signature}` -- Plan 0014 F11. One signature per
+    /// request, exactly like the watchlist's one coin: an empty segment and
+    /// a multi-segment path are both `Operator`, never `Customer`. Both
+    /// halves of `!sig.is_empty() && !sig.contains('/')` matter here, and
+    /// asserting only one of them (as the watchlist's own comment already
+    /// warns) leaves the other free to break -- this is the `&&` -> `||`
+    /// mutant CI found at access.rs:684:44.
+    #[test]
+    fn one_tx_signature_per_request_not_an_empty_or_multi_segment_one() {
+        assert_eq!(
+            audience_of("/v1/customer/tx/5hnW6z8s2wJ3q9yV8Ppz2WeZqK5aTf1Xk1s3ZmS9d7Bz"),
+            Audience::Customer
+        );
+        // Empty signature: `!sig.is_empty()` is false, so only `||` (never
+        // `&&`) would still call this a customer path.
+        assert_eq!(audience_of("/v1/customer/tx/"), Audience::Operator);
+        // Multi-segment: `!sig.contains('/')` is false, so only `||` would
+        // still call this a customer path.
+        assert_eq!(audience_of("/v1/customer/tx/a/b"), Audience::Operator);
     }
 }

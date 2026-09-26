@@ -49,6 +49,22 @@ function jsonKeysAfter(marker: string): string[] {
   return captures(body, /"([a-z_]+)":/g);
 }
 
+/**
+ * Every key any `json!({ ... })` literal inside `fn <name>(` emits, unioned
+ * across every branch -- `render_tx_status` returns a different literal per
+ * match arm (`failed`/`landed`/`pending`/`expired`), unlike `render_quote`'s
+ * single literal, so this counts distinct keys across the whole function
+ * body rather than assuming there is only one `json!({...})` to read.
+ */
+function jsonKeysUnionIn(fnMarker: string): string[] {
+  const at = TRADE_RS.indexOf(fnMarker);
+  expect(at, `\`${fnMarker}\` not found in trade.rs`).toBeGreaterThan(-1);
+  const end = TRADE_RS.indexOf("\n}\n", at);
+  expect(end, `${fnMarker} is not closed`).toBeGreaterThan(at);
+  const body = TRADE_RS.slice(at, end);
+  return [...new Set(captures(body, /"([a-z_]+)":/g))];
+}
+
 /** Field names of `export interface <name> { ... }` in api.ts. */
 function interfaceFields(name: string): string[] {
   const at = API_TS.indexOf(`export interface ${name} {`);
@@ -83,6 +99,13 @@ describe("the swap contract agrees on both sides", () => {
     // where the two would diverge.
     expect(body).toMatch(/let quote_json = render_quote\(/);
     expect(body).toMatch(/"quote": quote_json,/);
+  });
+
+  it("render_tx_status emits exactly the keys TxStatus declares, across every state", () => {
+    const server = jsonKeysUnionIn("fn render_tx_status(");
+    const web = interfaceFields("TxStatus");
+    expect(server.length, "render_tx_status emits nothing?").toBeGreaterThan(1);
+    expect([...server].sort()).toEqual([...web].sort());
   });
 
   it("every refusal reason the trade routes send has a sentence on the screen", () => {

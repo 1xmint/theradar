@@ -61,6 +61,10 @@ ring = { version = "0.17", default-features = false }
 tempfile = "3"
 tower = { version = "0.5", default-features = false, features = ["util"] }
 http-body-util = "0.1"
+# Already a workspace dependency (radar-types uses it for `Address`'s
+# `Display`); needed directly here only to build a well-formed 64-byte
+# base58 signature for the tx-status route's tests.
+bs58 = { version = "0.5", default-features = false, features = ["alloc"] }
 
 [lints]
 workspace = true

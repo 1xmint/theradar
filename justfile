@@ -347,7 +347,30 @@ licence-headers:
 # 270 -> 271 on 2026-09-26: plan 0014 F12, OFAC-listed wallets refused on
 # POST /v1/customer/swap. honesty.test.ts gains one case for the new
 # "sanctioned" refusal reason.
-export MIN_WEB_TESTS := "271"
+# 271 -> 282 on 2026-09-26: plan 0014 F11 ("did it land?"), the web half.
+# `TradePanel.tsx` polls `/v1/customer/tx/{signature}` every 1.5s (capped at
+# ~90s) after a send, showing landed/failed/expired/unknown through
+# `honesty.ts`'s `landingMessage` -- `expired` only on the server's own word,
+# never inferred from a poll giving up. Positions now refresh (`onTraded`)
+# only once the poll sees "landed", not the moment the wallet sends. A build
+# older than 60s is rebuilt, not silently sent, if approve is clicked before
+# the panel's own ticker has re-rendered the "Rebuild" button. 7 new
+# `TradePanel.test.tsx` cases (plus one existing case updated) cover failed,
+# expired, unknown on a refused/rate-limited/failed read, unknown at the 90s
+# cap (never expired), polling stopping on unmount, the stale rebuild, and a
+# fresh build sending directly -- the updated existing case covers landed,
+# with the positions refresh firing exactly once, only then.
+#
+# 282 -> 284 on 2026-09-26: an independent review of plan 0014 F11 found the
+# poll gave up for good on the first `chain_unreadable`/`busy`/network read,
+# which meant one flaky RPC call could show "Unknown -- check Solscan" for a
+# trade that in fact landed seconds later. Fixed to keep polling until the
+# ~90s cap on any transient error, ending early only on a 400/401 -- a
+# request or session problem asking again cannot fix. The old single
+# "refused, or is rate-limited" case became three: a 400 still ends the poll
+# immediately, a `busy` 503 keeps polling past its first refusal, and a
+# `chain_unreadable` 502 followed by a landed read still shows "Landed".
+export MIN_WEB_TESTS := "284"
 
 # The public site at cabalhunter.org. Lower because it has five pages, and it
 # exists for the same reason MIN_WEB_TESTS does: `vitest run` exits zero when it
