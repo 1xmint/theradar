@@ -200,7 +200,9 @@ export const market = {
  * `honesty.ts` reads the same `reason` code regardless of which route sent
  * it. Only `/v1/customer/swap` can additionally send a wallet-session
  * refusal (`no_session` and friends) -- `isWalletSessionRefusal` already
- * handles those without needing to know which route asked.
+ * handles those without needing to know which route asked -- or the
+ * swap-only `sanctioned` (the session wallet is on OFAC's SOL sanctions
+ * list; quotes are unaffected).
  */
 export class SwapError extends Error {
   constructor(

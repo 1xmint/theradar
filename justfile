@@ -344,7 +344,10 @@ licence-headers:
 # render states: a wallet present shows Connect as before, desktop-no-wallet
 # keeps today's message, and phone-no-wallet shows both links with the
 # current URL encoded and no dead-end button or message alongside them.
-export MIN_WEB_TESTS := "270"
+# 270 -> 271 on 2026-09-26: plan 0014 F12, OFAC-listed wallets refused on
+# POST /v1/customer/swap. honesty.test.ts gains one case for the new
+# "sanctioned" refusal reason.
+export MIN_WEB_TESTS := "271"
 
 # The public site at cabalhunter.org. Lower because it has five pages, and it
 # exists for the same reason MIN_WEB_TESTS does: `vitest run` exits zero when it

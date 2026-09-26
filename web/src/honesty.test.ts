@@ -457,6 +457,7 @@ describe("swapRefusalMessage", () => {
       "unreadable_route",
       "bad_request",
       "slippage_too_wide",
+      "sanctioned",
     ];
     const texts = codes.map((code) => swapRefusalMessage(code, "server detail"));
     expect(new Set(texts).size).toBe(texts.length);
@@ -475,6 +476,13 @@ describe("swapRefusalMessage", () => {
     expect(swapRefusalMessage("some_new_code", "a fact from the server")).toBe(
       "a fact from the server",
     );
+  });
+
+  it("states a sanctioned refusal as a fact about the list, not an accusation", () => {
+    const text = swapRefusalMessage("sanctioned", "irrelevant detail");
+    expect(text.toLowerCase()).toContain("sanctions list");
+    expect(text.toLowerCase()).not.toContain("you are");
+    expect(text.toLowerCase()).not.toContain("illegal");
   });
 
   it("includes the server's detail for a bad_request", () => {

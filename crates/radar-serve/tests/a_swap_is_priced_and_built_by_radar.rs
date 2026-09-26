@@ -654,6 +654,90 @@ async fn two_wallets_each_get_their_own_transaction_naming_themselves_as_fee_pay
     assert_eq!(cache_b.as_deref(), Some("no-store"), "{resp_b}");
 }
 
+/// One address actually on `crates/radar-serve/data/ofac_sol.txt` -- proof
+/// this is wired to the real, shipped list, not a test double. OFAC does
+/// delist addresses (it delisted Tornado Cash's in 2025), so this is not a
+/// one-way ratchet -- see the file's own header for the refresh procedure. If
+/// this address is ever delisted, this test starts failing loudly rather than
+/// silently testing nothing, which is preferable to hardcoding a synthetic
+/// address that would never prove the wiring at all.
+const SANCTIONED: &str = "42RLPACwZPx3vYYmxSueqsogfynBDqXK298EDsNoyoHi";
+
+/// A wallet on the shipped OFAC list is refused `sanctioned` at the swap
+/// route, before Jupiter is ever asked -- the loopback server sees zero
+/// requests. An unlisted wallet is unaffected and reaches Jupiter as usual.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_sanctioned_wallet_is_refused_before_any_jupiter_call() {
+    let sanctioned: Address = SANCTIONED.parse().expect("a real address from the list");
+    let clean = wallet(200);
+    let (endpoint, seen) = jupiter(
+        200,
+        "OK",
+        &fixture_for("jupiter-build-sol-usdc.json", &clean),
+        1,
+    );
+    let router = router(Some(trading(endpoint, vec![mint_account_json(6)])));
+    let body = serde_json::json!({"mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", "side": "buy", "amount": "100000000"});
+
+    let (status, resp, _cache) = swap(&router, body.clone(), &session(&sanctioned)).await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{resp}");
+    assert_eq!(resp["reason"], "sanctioned", "{resp}");
+    assert_eq!(
+        seen.load(Ordering::SeqCst),
+        0,
+        "a sanctioned wallet must never reach Jupiter"
+    );
+
+    let (status, resp, _cache) = swap(&router, body, &session(&clean)).await;
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "an unlisted wallet must pass the check: {resp}"
+    );
+    assert_eq!(seen.load(Ordering::SeqCst), 1);
+}
+
+/// The sanctions check runs *before* [`Trading::reserve_wallet`], so a
+/// sanctioned wallet never spends its own per-wallet budget either -- sending
+/// more than that budget's cap (`MAX_CALLS_PER_WALLET_PER_MINUTE` in
+/// `trade.rs`, 6 calls a minute) proves it: every one of 7 swaps from the
+/// same sanctioned wallet is refused `sanctioned`, not `busy` on the 7th, and
+/// the loopback Jupiter double still sees zero requests. A clean wallet
+/// afterward, sharing the same swap-route global budget, is unaffected.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_sanctioned_wallet_is_refused_before_the_rate_limiter_too() {
+    const PER_WALLET_CAP: usize = 6;
+    let sanctioned: Address = SANCTIONED.parse().expect("a real address from the list");
+    let clean = wallet(201);
+    let (endpoint, seen) = jupiter(
+        200,
+        "OK",
+        &fixture_for("jupiter-build-sol-usdc.json", &clean),
+        1,
+    );
+    let router = router(Some(trading(endpoint, vec![mint_account_json(6)])));
+    let body = serde_json::json!({"mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", "side": "buy", "amount": "100000000"});
+
+    for attempt in 0..=PER_WALLET_CAP {
+        let (status, resp, _cache) = swap(&router, body.clone(), &session(&sanctioned)).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "attempt {attempt}: {resp}");
+        assert_eq!(resp["reason"], "sanctioned", "attempt {attempt}: {resp}");
+    }
+    assert_eq!(
+        seen.load(Ordering::SeqCst),
+        0,
+        "a sanctioned wallet must never reach Jupiter, no matter how many times it asks"
+    );
+
+    let (status, resp, _cache) = swap(&router, body, &session(&clean)).await;
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "a clean wallet must still be served: {resp}"
+    );
+    assert_eq!(seen.load(Ordering::SeqCst), 1);
+}
+
 /// `/health` reports whether this instance builds or prices swaps at all --
 /// `false` with `RADAR_TRADE` off (no [`Trading`] at all, the shipped
 /// default), `true` once it is configured and on. An operator or `radar
