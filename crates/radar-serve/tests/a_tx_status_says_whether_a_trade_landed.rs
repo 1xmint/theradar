@@ -98,7 +98,9 @@ fn height_json(height: u64) -> String {
 
 /// A [`Trading`] pointed at a loopback Jupiter double (unused by this
 /// route) and a faked chain answering `chain_responses` in call order:
-/// `signature_status` first, then `block_height`, per `tx_status_inner`.
+/// `block_height` first, then `signature_status`, per `tx_status_inner` --
+/// deliberately, to close a landed-but-reads-as-expired race (see that
+/// function's doc comment).
 fn trading(chain_responses: Vec<String>) -> Trading {
     Trading::new(
         Router::with_endpoint("http://127.0.0.1:1/build".to_owned(), credentials()),
@@ -202,8 +204,8 @@ async fn a_malformed_signature_is_a_bad_request() {
 #[tokio::test(flavor = "multi_thread")]
 async fn a_confirmed_signature_with_no_error_has_landed() {
     let router = router(Some(trading(vec![
-        status_json(Some(("42", Some("confirmed"), None))),
         height_json(100),
+        status_json(Some(("42", Some("confirmed"), None))),
     ])));
     let (status, body) = tx_status(&router, &signature(), 200, &session(&wallet(1))).await;
     assert_eq!(status, StatusCode::OK, "{body}");
@@ -216,12 +218,12 @@ async fn a_confirmed_signature_with_no_error_has_landed() {
 #[tokio::test(flavor = "multi_thread")]
 async fn a_status_with_an_error_has_failed() {
     let router = router(Some(trading(vec![
+        height_json(100),
         status_json(Some((
             "42",
             Some("confirmed"),
             Some(serde_json::json!({"InstructionError": [1, {"Custom": 6001}]})),
         ))),
-        height_json(100),
     ])));
     let (status, body) = tx_status(&router, &signature(), 200, &session(&wallet(1))).await;
     assert_eq!(status, StatusCode::OK, "{body}");
@@ -236,7 +238,7 @@ async fn a_status_with_an_error_has_failed() {
 /// valid block height: `expired`, and only this combination may say so.
 #[tokio::test(flavor = "multi_thread")]
 async fn no_status_past_the_last_valid_height_has_expired() {
-    let router = router(Some(trading(vec![status_json(None), height_json(101)])));
+    let router = router(Some(trading(vec![height_json(101), status_json(None)])));
     let (status, body) = tx_status(&router, &signature(), 100, &session(&wallet(1))).await;
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(body["state"], "expired", "{body}");
@@ -246,7 +248,20 @@ async fn no_status_past_the_last_valid_height_has_expired() {
 /// `pending`, not `expired` -- the transaction may still land.
 #[tokio::test(flavor = "multi_thread")]
 async fn no_status_before_the_last_valid_height_is_pending() {
-    let router = router(Some(trading(vec![status_json(None), height_json(99)])));
+    let router = router(Some(trading(vec![height_json(99), status_json(None)])));
+    let (status, body) = tx_status(&router, &signature(), 100, &session(&wallet(1))).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["state"], "pending", "{body}");
+}
+
+/// No status yet, and the chain's height is exactly the last valid height --
+/// still `pending`, not `expired`. `expired` is only ever the chain height
+/// *strictly past* the limit: a signature is valid for inclusion through
+/// (and including) its `last_valid_block_height`, so this exact boundary is
+/// the mutant `>` -> `>=` would flip.
+#[tokio::test(flavor = "multi_thread")]
+async fn no_status_at_exactly_the_last_valid_height_is_pending() {
+    let router = router(Some(trading(vec![height_json(100), status_json(None)])));
     let (status, body) = tx_status(&router, &signature(), 100, &session(&wallet(1))).await;
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(body["state"], "pending", "{body}");
@@ -257,8 +272,26 @@ async fn no_status_before_the_last_valid_height_is_pending() {
 #[tokio::test(flavor = "multi_thread")]
 async fn a_processed_but_not_confirmed_status_is_pending() {
     let router = router(Some(trading(vec![
-        status_json(Some(("42", Some("processed"), None))),
         height_json(100),
+        status_json(Some(("42", Some("processed"), None))),
+    ])));
+    let (status, body) = tx_status(&router, &signature(), 200, &session(&wallet(1))).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["state"], "pending", "{body}");
+}
+
+/// A non-null `err` observed only at `processed` commitment is `pending`,
+/// never `failed` -- `processed` can still belong to a fork the cluster
+/// drops, so an error there is not yet a final fact about the transaction.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_processed_error_is_pending_never_failed() {
+    let router = router(Some(trading(vec![
+        height_json(100),
+        status_json(Some((
+            "42",
+            Some("processed"),
+            Some(serde_json::json!({"InstructionError": [1, {"Custom": 6001}]})),
+        ))),
     ])));
     let (status, body) = tx_status(&router, &signature(), 200, &session(&wallet(1))).await;
     assert_eq!(status, StatusCode::OK, "{body}");
@@ -273,6 +306,27 @@ async fn a_chain_read_failure_refuses_chain_unreadable_never_expired() {
     // Malformed JSON: `RpcClient::call` fails to deserialize the envelope
     // and returns `RpcError::Malformed` before either value is ever used.
     let router = router(Some(trading(vec!["not json at all".to_owned()])));
+    let (status, body) = tx_status(&router, &signature(), 100, &session(&wallet(1))).await;
+    assert_eq!(status, StatusCode::BAD_GATEWAY, "{body}");
+    assert_eq!(body["reason"], "chain_unreadable", "{body}");
+    assert_ne!(body["state"], "expired", "{body}");
+}
+
+/// The height read succeeds, and already reads past the limit -- but the
+/// *second* read (`signature_status`) then fails. This must still be
+/// `chain_unreadable`, never `expired`: reading height first (rather than
+/// last) closes the race where a transaction lands between the two reads
+/// and a stale "no status" gets paired with an already-past height. Before
+/// that reorder, this exact case -- a failed *second* read -- was untested,
+/// and a first-read failure alone cannot tell "read height first" apart
+/// from "read status first": substituting `u64::MAX` for a failed height
+/// read passed every test that existed.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_status_read_failure_after_a_past_limit_height_is_still_chain_unreadable() {
+    let router = router(Some(trading(vec![
+        height_json(101),
+        "not json at all".to_owned(),
+    ])));
     let (status, body) = tx_status(&router, &signature(), 100, &session(&wallet(1))).await;
     assert_eq!(status, StatusCode::BAD_GATEWAY, "{body}");
     assert_eq!(body["reason"], "chain_unreadable", "{body}");

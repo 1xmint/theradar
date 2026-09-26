@@ -1467,4 +1467,25 @@ mod tests {
             Audience::Operator
         );
     }
+
+    /// `/v1/customer/tx/{signature}` -- Plan 0014 F11. One signature per
+    /// request, exactly like the watchlist's one coin: an empty segment and
+    /// a multi-segment path are both `Operator`, never `Customer`. Both
+    /// halves of `!sig.is_empty() && !sig.contains('/')` matter here, and
+    /// asserting only one of them (as the watchlist's own comment already
+    /// warns) leaves the other free to break -- this is the `&&` -> `||`
+    /// mutant CI found at access.rs:684:44.
+    #[test]
+    fn one_tx_signature_per_request_not_an_empty_or_multi_segment_one() {
+        assert_eq!(
+            audience_of("/v1/customer/tx/5hnW6z8s2wJ3q9yV8Ppz2WeZqK5aTf1Xk1s3ZmS9d7Bz"),
+            Audience::Customer
+        );
+        // Empty signature: `!sig.is_empty()` is false, so only `||` (never
+        // `&&`) would still call this a customer path.
+        assert_eq!(audience_of("/v1/customer/tx/"), Audience::Operator);
+        // Multi-segment: `!sig.contains('/')` is false, so only `||` would
+        // still call this a customer path.
+        assert_eq!(audience_of("/v1/customer/tx/a/b"), Audience::Operator);
+    }
 }

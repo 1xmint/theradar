@@ -360,7 +360,17 @@ licence-headers:
 # cap (never expired), polling stopping on unmount, the stale rebuild, and a
 # fresh build sending directly -- the updated existing case covers landed,
 # with the positions refresh firing exactly once, only then.
-export MIN_WEB_TESTS := "282"
+#
+# 282 -> 284 on 2026-09-26: an independent review of plan 0014 F11 found the
+# poll gave up for good on the first `chain_unreadable`/`busy`/network read,
+# which meant one flaky RPC call could show "Unknown -- check Solscan" for a
+# trade that in fact landed seconds later. Fixed to keep polling until the
+# ~90s cap on any transient error, ending early only on a 400/401 -- a
+# request or session problem asking again cannot fix. The old single
+# "refused, or is rate-limited" case became three: a 400 still ends the poll
+# immediately, a `busy` 503 keeps polling past its first refusal, and a
+# `chain_unreadable` 502 followed by a landed read still shows "Landed".
+export MIN_WEB_TESTS := "284"
 
 # The public site at cabalhunter.org. Lower because it has five pages, and it
 # exists for the same reason MIN_WEB_TESTS does: `vitest run` exits zero when it

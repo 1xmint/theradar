@@ -484,13 +484,46 @@ describe("TradePanel: did the trade land?", () => {
     expect(screen.getByRole("link", { name: "View on Solscan" })).toBeTruthy();
   });
 
-  it("shows unknown, never expired, when a poll read fails, is refused, or is rate-limited", async () => {
-    const onTraded = await sendAndApprove(() => jsonResponse({ error: "rate limited", reason: "busy" }, 503));
+  it("ends the poll immediately on a 400/401 -- a request or session problem that asking again cannot fix", async () => {
+    const onTraded = await sendAndApprove(() =>
+      jsonResponse({ error: "bad signature", reason: "bad_request" }, 400),
+    );
     expect(await screen.findByText("Unknown -- check Solscan")).toBeTruthy();
     expect(screen.queryByText("Expired -- nothing was spent")).toBeNull();
     expect(onTraded).not.toHaveBeenCalled();
     expect(screen.getByRole("link", { name: "View on Solscan" })).toBeTruthy();
   });
+
+  it("keeps polling through a rate-limited (busy) read rather than giving up on the first one", async () => {
+    let calls = 0;
+    const onTraded = await sendAndApprove(() => {
+      calls += 1;
+      return jsonResponse({ error: "rate limited", reason: "busy" }, 503);
+    });
+    // Still polling, never settled to "unknown", after the first transient
+    // refusal -- a `busy` read is not evidence the trade cannot be checked,
+    // only that this one attempt was refused. The next attempt is a full
+    // `POLL_INTERVAL_MS` (1.5s) later, so this needs a longer-than-default
+    // wait.
+    await waitFor(() => expect(calls).toBeGreaterThan(1), { timeout: 4_000 });
+    expect(screen.queryByText("Unknown -- check Solscan")).toBeNull();
+    expect(onTraded).not.toHaveBeenCalled();
+  }, 10_000);
+
+  it("recovers from a transient chain_unreadable read and still shows Landed", async () => {
+    let calls = 0;
+    const onTraded = await sendAndApprove(() => {
+      calls += 1;
+      if (calls === 1) {
+        return jsonResponse({ error: "could not read the chain", reason: "chain_unreadable" }, 502);
+      }
+      return jsonResponse({ state: "landed", slot: 1 });
+    });
+    // The retry after the transient error is a full `POLL_INTERVAL_MS`
+    // (1.5s) later, so this needs a longer-than-default wait too.
+    expect(await screen.findByText("Landed", {}, { timeout: 4_000 })).toBeTruthy();
+    expect(onTraded).toHaveBeenCalledTimes(1);
+  }, 10_000);
 
   it("shows unknown, never expired, once the ~90s cap is reached with no answer", async () => {
     signIn();

@@ -188,10 +188,22 @@ export function TradePanel({ mint, symbol, positions, onTraded }: TradePanelProp
           return;
         }
         timer = setTimeout(poll, POLL_INTERVAL_MS);
-      } catch {
+      } catch (why) {
+        if (cancelled) return;
         // A failed, refused or rate-limited read is not evidence either way
-        // -- never shown as `expired`, which is a specific on-chain fact.
-        if (!cancelled) setLanding({ kind: "unknown" });
+        // -- never shown as `expired`, which is a specific on-chain fact. A
+        // 400/401 cannot improve by asking again (the request itself, or the
+        // session, is the problem), so that stops the poll immediately.
+        // Everything else -- `chain_unreadable`, `busy`, a dropped
+        // connection -- is transient: keep polling until the cap, the same
+        // as a `"pending"` state above, rather than ending on the first
+        // hiccup a visitor's own connection produced.
+        const terminal = why instanceof SwapError && (why.status === 400 || why.status === 401);
+        if (terminal || Date.now() - start >= POLL_CAP_MS) {
+          setLanding({ kind: "unknown" });
+          return;
+        }
+        timer = setTimeout(poll, POLL_INTERVAL_MS);
       }
     }
 
