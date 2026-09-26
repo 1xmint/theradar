@@ -20,7 +20,8 @@ C item 1 (#285, the watchlist) is merged and **deployed** -- `/health` reports
 build `7554bb8` since 2026-09-23. Item 4's watchlist star and panel (#287) and
 item 2, positions (#288, then the #289 fix), are merged and **deployed** --
 `/health` reports build `d0aba33` since 2026-09-24. **Phase C is built and
-live.** Nothing in D or E is built.
+live.** Phase D is built: ADR 0024 (#291), the server half (#295: `trade.rs`, `GET /v1/market/quote`, `POST /v1/customer/swap`) and the web half (#293: `TradePanel.tsx`, dark behind `TERMS_APPROVED=false`) are merged, and #295 is **deployed** -- `/health` reports build `5a9d991` with `trading: false`. Phase E item 2 (#294, chart tools) is merged and deployed; item 1 (#296, the shared ticker and `/v1/market/events`, merged 2026-09-25) is merged and **not deployed**. What D still needs before its "done when" -- the terms blanks, the Jupiter key, an independent review and a signed rehearsal -- is carried by [plan 0014](0014-close-the-terminal-and-measure-the-edge.md), which took this plan over on 2026-09-25.
+
 **Date:** 2026-09-18, handback extended 2026-09-23.
 **Branch:** none; each item lands on `main` as its own pull request.
 **Inspected base:** `c8fca0e` (`Remove the bot from Radar: it lives in realorrug
@@ -687,3 +688,13 @@ and keeps the data model itself unit-tested even though rendering, like
 `drawings.test.ts` add 26 cases; `MIN_WEB_TESTS` raised 151 to 177. No new
 dependency. Not yet done: independent review, merge, and a check against the
 real site with a coin that has enough history for every lookback to resolve.
+
+**Handed to plan 0014, 2026-09-25.** Everything in this plan that is built is
+listed in the status paragraph. What is not built (the `SHORTLIST` widening,
+D's owner gates, review and rehearsal, and #296's deploy) continues as
+[plan 0014](0014-close-the-terminal-and-measure-the-edge.md) items F1–F9 and
+G1–G3. Two notes for whoever reads this first: `/terms` is already `Public` in
+`access.rs` and listed in `routes.ts`, so the "settle the audience" question
+above is closed; and the web's `Quote`/`SwapResponse` types now have a test
+(`web/src/tradeContract.test.ts`) that reads `trade.rs` and fails if the two
+sides drift.

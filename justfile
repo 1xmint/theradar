@@ -330,7 +330,7 @@ licence-headers:
 # only bumps when a frame's `as_of` watermark actually changed, so a
 # duplicate frame or a reconnect landing on an already-seen snapshot does not
 # trigger a second downstream refetch.
-export MIN_WEB_TESTS := "258"
+export MIN_WEB_TESTS := "262"
 
 # The public site at cabalhunter.org. Lower because it has five pages, and it
 # exists for the same reason MIN_WEB_TESTS does: `vitest run` exits zero when it
