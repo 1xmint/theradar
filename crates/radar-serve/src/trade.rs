@@ -356,6 +356,12 @@ pub fn from_vars(
             radar_exec::route::API_KEY_VAR
         ));
     };
+    // Forces the OFAC list's parse now, at startup, rather than on the first
+    // swap: `sanctioned_wallets` panics on a malformed line (see
+    // `parse_sanctioned`), and a switch that comes up "on" only to panic on
+    // its first real request is the exact failure `from_vars` exists to
+    // convert into a refusal to start.
+    let _ = sanctioned_wallets();
     Ok(Some(Trading::new(Router::new(credentials), rpc)))
 }
 
@@ -679,9 +685,10 @@ const OFAC_SOL_LIST: &str = include_str!("../data/ofac_sol.txt");
 /// base58 pubkey per line, blank lines and `#`-comments ignored.
 ///
 /// Panics on a line that does not parse as a Solana address. This is a small,
-/// hand-curated file compiled into the binary, not caller input -- a typo
-/// here is worth failing the build over rather than silently dropping a
-/// sanctioned wallet from the set it exists to hold.
+/// hand-curated file compiled into the binary, not caller input, so a typo
+/// panics rather than silently dropping a sanctioned wallet from the set it
+/// exists to hold. [`from_vars`] forces this parse at startup (with
+/// `RADAR_TRADE=on`), so the panic surfaces there and not on the first swap.
 fn parse_sanctioned(data: &str) -> HashSet<Address> {
     data.lines()
         .map(str::trim)
@@ -832,9 +839,9 @@ mod tests {
     const USDC: &str = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
     const OTHER_MINT: &str = "So11111111111111111111111111111111111111112";
 
-    /// Every line the crate actually ships must parse -- a typo here is a
-    /// sanctioned wallet silently dropped from the set, not a build failure
-    /// the owner would see.
+    /// Every line the crate actually ships must parse -- `parse_sanctioned`
+    /// panics on a bad line, so this test is what catches a typo here in CI
+    /// rather than at startup on whoever next runs `RADAR_TRADE=on`.
     #[test]
     fn every_line_of_the_shipped_ofac_list_parses_as_an_address() {
         let set = parse_sanctioned(OFAC_SOL_LIST);

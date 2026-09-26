@@ -4,25 +4,25 @@
 # are ignored by the loader in `crates/radar-serve/src/trade.rs`.
 #
 # Source of truth: the US Treasury OFAC Specially Designated Nationals (SDN)
-# list, published as `sdn_advanced.xml`:
-#   https://sanctionslistservice.ofac.treas.gov/api/publicationpreview/exports/sdn_advanced.xml
-#   (linked from https://www.treasury.gov/ofac/downloads/sdn.csv and
-#   https://home.treasury.gov/policy-issues/financial-sanctions/specially-designated-nationals-and-blocked-persons-list-sdn-human-readable-lists)
-# Extracted by finding every `<FeatureType>` entry named
-# "Digital Currency Address - SOL" (ID 1167 as of the date below), then every
-# `<Feature FeatureTypeID="1167">`'s `VersionDetail` value.
+# list:
+#   https://www.treasury.gov/ofac/downloads/sdn.xml
+# Extracted by finding every `<id>` entry whose `<idType>` is
+# "Digital Currency Address - SOL" and taking its `<idNumber>`.
 #
 # Cross-checked against the community-maintained extract (same 4 addresses):
 #   https://github.com/0xB10C/ofac-sanctioned-digital-currency-addresses
 #   (lists branch: sanctioned_addresses_SOL.txt)
 #
-# Read: 2026-09-26. 4 addresses on the list as of that date.
+# Verified: 2026-09-26, against sdn.xml's Publish_Date 09/23/2026. Exactly 4
+# `idType="Digital Currency Address - SOL"` entries matched the 4 addresses
+# below.
 #
-# To refresh: download `sdn_advanced.xml` from the sanctionslistservice URL
-# above, find the FeatureType ID currently assigned to
-# "Digital Currency Address - SOL", collect the VersionDetail text of every
-# Feature with that FeatureTypeID, and replace the list below. Update the date
-# and count in this header in the same change.
+# This list is frozen at build time -- it is not fetched at runtime, so a
+# delisting or a new addition after the date above is not reflected until
+# someone refreshes it. To refresh: download sdn.xml from the URL above,
+# collect the idNumber of every id with idType "Digital Currency Address -
+# SOL", diff against the list below, and replace it. Update the date and
+# count in this header in the same change.
 
 42RLPACwZPx3vYYmxSueqsogfynBDqXK298EDsNoyoHi
 6wjqWWra8ombzaw6VHrG5xpQ972jCYF6bbHiFCbWmr4U
