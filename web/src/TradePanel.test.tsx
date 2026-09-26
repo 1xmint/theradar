@@ -264,6 +264,7 @@ describe("TradePanel review and send flow", () => {
       if (u.includes("/v1/customer/swap") && init?.method === "POST") {
         return jsonResponse(swapBody({ worst_out: "4750000" }));
       }
+      if (u.includes("/v1/customer/tx/SIG123")) return jsonResponse({ state: "landed", slot: 1 });
       return jsonResponse({ error: "unexpected" }, 404);
     });
     vi.mocked(signAndSend).mockResolvedValue({ ok: true, signature: "SIG123" });
@@ -285,6 +286,10 @@ describe("TradePanel review and send flow", () => {
     fireEvent.click(screen.getByRole("button", { name: "Approve in wallet" }));
     expect(await screen.findByText("Sent to your wallet.")).toBeTruthy();
     expect(screen.getByRole("link", { name: "View on Solscan" }).getAttribute("href")).toContain("SIG123");
+    // `onTraded` fires once the poll below sees the trade landed -- not
+    // merely because it was sent (see the dedicated failed/expired tests,
+    // which show it is never called for those outcomes at all).
+    expect(await screen.findByText("Landed")).toBeTruthy();
     expect(onTraded).toHaveBeenCalledTimes(1);
   });
 
@@ -436,6 +441,173 @@ describe("TradePanel review and send flow", () => {
     expect(screen.getByRole("button", { name: "Rebuild" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Approve in wallet" })).toBeNull();
   }, 10_000);
+});
+
+describe("TradePanel: did the trade land?", () => {
+  // Shared setup for every test below: sign in, build a review, approve it,
+  // and stub `/v1/customer/tx/SIG123` with whatever `txStatus` returns.
+  // Every test supplies its own `txStatus` handler and reads the resulting
+  // landing text off the "Sent to your wallet." card.
+  async function sendAndApprove(
+    txStatus: (url: string, init?: RequestInit) => Response | Promise<Response>,
+    onTraded: ReturnType<typeof vi.fn<() => void>> = vi.fn(),
+  ) {
+    signIn();
+    mockFetch((url, init) => {
+      const u = String(url);
+      if (u.includes("/v1/market/quote")) return jsonResponse(quoteBody());
+      if (u.includes("/v1/customer/swap") && init?.method === "POST") return jsonResponse(swapBody());
+      if (u.includes("/v1/customer/tx/")) return txStatus(u, init);
+      return jsonResponse({ error: "unexpected" }, 404);
+    });
+    vi.mocked(signAndSend).mockResolvedValue({ ok: true, signature: "SIG123" });
+    render(<TradePanel mint={MINT} symbol="FOO" positions={positionsReady()} onTraded={onTraded} />);
+    typeAmount("1");
+    await buildReview();
+    fireEvent.click(await screen.findByRole("button", { name: "Approve in wallet" }));
+    expect(await screen.findByText("Sent to your wallet.")).toBeTruthy();
+    return onTraded;
+  }
+
+  it("shows the on-chain reason when the trade failed, and never refreshes positions", async () => {
+    const onTraded = await sendAndApprove(() => jsonResponse({ state: "failed", reason: "slippage exceeded" }));
+    expect(await screen.findByText("Failed on chain: slippage exceeded")).toBeTruthy();
+    expect(onTraded).not.toHaveBeenCalled();
+    // The Solscan link stays up in every state, including this one.
+    expect(screen.getByRole("link", { name: "View on Solscan" })).toBeTruthy();
+  });
+
+  it("shows expired only when the server itself says so, and never refreshes positions", async () => {
+    const onTraded = await sendAndApprove(() => jsonResponse({ state: "expired" }));
+    expect(await screen.findByText("Expired -- nothing was spent")).toBeTruthy();
+    expect(onTraded).not.toHaveBeenCalled();
+    expect(screen.getByRole("link", { name: "View on Solscan" })).toBeTruthy();
+  });
+
+  it("shows unknown, never expired, when a poll read fails, is refused, or is rate-limited", async () => {
+    const onTraded = await sendAndApprove(() => jsonResponse({ error: "rate limited", reason: "busy" }, 503));
+    expect(await screen.findByText("Unknown -- check Solscan")).toBeTruthy();
+    expect(screen.queryByText("Expired -- nothing was spent")).toBeNull();
+    expect(onTraded).not.toHaveBeenCalled();
+    expect(screen.getByRole("link", { name: "View on Solscan" })).toBeTruthy();
+  });
+
+  it("shows unknown, never expired, once the ~90s cap is reached with no answer", async () => {
+    signIn();
+    // The clock jumps forward *inside* the mocked read, past the cap, before
+    // the poll's own elapsed-time check runs -- so this needs only the one
+    // read the effect makes right after "sent", not 60 real 1.5s intervals.
+    let clock = 1_700_000_000_000;
+    vi.spyOn(Date, "now").mockImplementation(() => clock);
+    const onTraded = vi.fn();
+    mockFetch((url, init) => {
+      const u = String(url);
+      if (u.includes("/v1/market/quote")) return jsonResponse(quoteBody());
+      if (u.includes("/v1/customer/swap") && init?.method === "POST") return jsonResponse(swapBody());
+      if (u.includes("/v1/customer/tx/")) {
+        clock += 91_000;
+        return jsonResponse({ state: "pending" });
+      }
+      return jsonResponse({ error: "unexpected" }, 404);
+    });
+    vi.mocked(signAndSend).mockResolvedValue({ ok: true, signature: "SIG123" });
+    render(<TradePanel mint={MINT} symbol="FOO" positions={positionsReady()} onTraded={onTraded} />);
+    typeAmount("1");
+    await buildReview();
+    fireEvent.click(await screen.findByRole("button", { name: "Approve in wallet" }));
+    expect(await screen.findByText("Unknown -- check Solscan")).toBeTruthy();
+    expect(screen.queryByText("Expired -- nothing was spent")).toBeNull();
+    expect(onTraded).not.toHaveBeenCalled();
+  });
+
+  it("stops polling once the component unmounts", async () => {
+    let calls = 0;
+    signIn();
+    mockFetch((url, init) => {
+      const u = String(url);
+      if (u.includes("/v1/market/quote")) return jsonResponse(quoteBody());
+      if (u.includes("/v1/customer/swap") && init?.method === "POST") return jsonResponse(swapBody());
+      if (u.includes("/v1/customer/tx/")) {
+        calls += 1;
+        return jsonResponse({ state: "pending" });
+      }
+      return jsonResponse({ error: "unexpected" }, 404);
+    });
+    vi.mocked(signAndSend).mockResolvedValue({ ok: true, signature: "SIG123" });
+    const { unmount } = render(
+      <TradePanel mint={MINT} symbol="FOO" positions={positionsReady()} onTraded={vi.fn()} />,
+    );
+    typeAmount("1");
+    await buildReview();
+    fireEvent.click(await screen.findByRole("button", { name: "Approve in wallet" }));
+    await screen.findByText("Sent to your wallet.");
+    await waitFor(() => expect(calls).toBeGreaterThan(0));
+    const callsAtUnmount = calls;
+    unmount();
+    await new Promise((resolve) => setTimeout(resolve, 1600));
+    expect(calls).toBe(callsAtUnmount);
+  });
+});
+
+describe("TradePanel: rebuilding a stale trade before it is sent", () => {
+  it("rebuilds instead of sending a build older than 60s, and shows the fresh numbers", async () => {
+    vi.mocked(signAndSend).mockClear();
+    signIn();
+    let clock = 1_700_000_000_000;
+    vi.spyOn(Date, "now").mockImplementation(() => clock);
+    let swapCalls = 0;
+    mockFetch((url, init) => {
+      const u = String(url);
+      if (u.includes("/v1/market/quote")) return jsonResponse(quoteBody());
+      if (u.includes("/v1/customer/swap") && init?.method === "POST") {
+        swapCalls += 1;
+        // The rebuild returns different numbers than the original build, so
+        // the test can tell the fresh response is what is shown.
+        return jsonResponse(swapBody({ worst_out: swapCalls === 1 ? "4900000" : "4111111" }));
+      }
+      return jsonResponse({ error: "unexpected" }, 404);
+    });
+    render(<TradePanel mint={MINT} symbol="FOO" positions={positionsReady()} onTraded={vi.fn()} />);
+    typeAmount("1");
+    await buildReview();
+    const approveButton = await screen.findByRole("button", { name: "Approve in wallet" });
+    expect(swapCalls).toBe(1);
+    // The build goes stale (61s pass) without the panel's own 1s ticker
+    // having re-rendered yet -- the button on screen still reads "Approve in
+    // wallet". Clicking it now must rebuild rather than send the stale
+    // transaction.
+    clock += 61_000;
+    fireEvent.click(approveButton);
+    await waitFor(() => expect(swapCalls).toBe(2));
+    expect(await screen.findByText("Review before you approve")).toBeTruthy();
+    const card = screen.getByRole("region", { name: "Trade review" });
+    expect(within(card).getByText("4.111111")).toBeTruthy();
+    expect(vi.mocked(signAndSend)).not.toHaveBeenCalled();
+  });
+
+  it("sends a fresh build directly, with no rebuild", async () => {
+    vi.mocked(signAndSend).mockClear();
+    signIn();
+    let swapCalls = 0;
+    mockFetch((url, init) => {
+      const u = String(url);
+      if (u.includes("/v1/market/quote")) return jsonResponse(quoteBody());
+      if (u.includes("/v1/customer/swap") && init?.method === "POST") {
+        swapCalls += 1;
+        return jsonResponse(swapBody());
+      }
+      if (u.includes("/v1/customer/tx/")) return jsonResponse({ state: "pending" });
+      return jsonResponse({ error: "unexpected" }, 404);
+    });
+    vi.mocked(signAndSend).mockResolvedValue({ ok: true, signature: "SIG123" });
+    render(<TradePanel mint={MINT} symbol="FOO" positions={positionsReady()} onTraded={vi.fn()} />);
+    typeAmount("1");
+    await buildReview();
+    fireEvent.click(await screen.findByRole("button", { name: "Approve in wallet" }));
+    expect(await screen.findByText("Sent to your wallet.")).toBeTruthy();
+    expect(swapCalls).toBe(1);
+    expect(vi.mocked(signAndSend)).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("TradePanel swap refusal messages", () => {

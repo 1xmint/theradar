@@ -21,7 +21,7 @@ import { Link } from "wouter";
 
 import { customer, SwapError, type PositionsToken, type SwapResponse, type SwapSide } from "./api";
 import { amountErrorMessage, toBaseUnits } from "./amounts";
-import { roundTripCostCaption, swapRefusalMessage } from "./honesty";
+import { landingMessage, roundTripCostCaption, swapRefusalMessage, type LandingState } from "./honesty";
 import { transactionUrl } from "./format";
 import { useQuote } from "./useQuote";
 import { useWalletAddress, useWalletToken } from "./Wallet";
@@ -36,6 +36,12 @@ const SOL_DECIMALS = 9;
 const DEFAULT_SLIPPAGE_BPS = 100;
 const MAX_SLIPPAGE_BPS = 500;
 const STALE_MS = 60_000;
+/** How often `TradePanel` asks `/v1/customer/tx/{signature}` whether a sent
+ *  trade landed, and how long it keeps asking before giving up and showing
+ *  "unknown" rather than either a landed/failed/expired claim it cannot back
+ *  or an infinite spinner. */
+const POLL_INTERVAL_MS = 1_500;
+const POLL_CAP_MS = 90_000;
 
 export interface TradePanelProps {
   mint: string;
@@ -59,7 +65,7 @@ type ReviewStatus =
   | { kind: "building" }
   | { kind: "built"; response: SwapResponse; builtAt: number }
   | { kind: "sending"; response: SwapResponse; builtAt: number }
-  | { kind: "sent"; signature: string }
+  | { kind: "sent"; signature: string; lastValidBlockHeight: number }
   | { kind: "declined"; response: SwapResponse; builtAt: number }
   | { kind: "failed"; message: string };
 
@@ -110,6 +116,10 @@ export function TradePanel({ mint, symbol, positions, onTraded }: TradePanelProp
   const [slippageInput, setSlippageInput] = useState(String(DEFAULT_SLIPPAGE_BPS));
   const [review, setReview] = useState<ReviewStatus>({ kind: "idle" });
   const [now, setNow] = useState(() => Date.now());
+  // What `/v1/customer/tx/{signature}` has said about the last sent trade --
+  // meaningful only while `review.kind === "sent"`, and reset to `pending`
+  // each time a fresh signature starts being polled (see the effect below).
+  const [landing, setLanding] = useState<LandingState>({ kind: "pending" });
 
   // Bumped every time an input the review depends on changes, including
   // mid-flight -- a `customer.swap()` call in progress when the field
@@ -134,6 +144,67 @@ export function TradePanel({ mint, symbol, positions, onTraded }: TradePanelProp
     const timer = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(timer);
   }, [review]);
+
+  // Polls whether a sent trade landed, every `POLL_INTERVAL_MS`, for up to
+  // `POLL_CAP_MS`. `onTraded` is deliberately left out of the dependency
+  // list: `TokenHeader.tsx` passes a fresh closure on every render, and
+  // depending on it here would restart the poll (and re-show "Waiting for
+  // the chain") on renders that have nothing to do with this trade.
+  useEffect(() => {
+    if (review.kind !== "sent" || token === null) return;
+    const { signature, lastValidBlockHeight } = review;
+    const start = Date.now();
+    const controller = new AbortController();
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+
+    async function poll() {
+      if (cancelled) return;
+      try {
+        const status = await customer.txStatus(
+          token as string,
+          signature,
+          lastValidBlockHeight,
+          controller.signal,
+        );
+        if (cancelled) return;
+        if (status.state === "landed") {
+          setLanding({ kind: "landed" });
+          onTraded();
+          return;
+        }
+        if (status.state === "failed") {
+          setLanding({ kind: "failed", reason: status.reason ?? "unknown reason" });
+          return;
+        }
+        if (status.state === "expired") {
+          setLanding({ kind: "expired" });
+          return;
+        }
+        // "pending": keep asking, unless the cap has already passed -- a
+        // visitor who leaves the tab open must not be told "waiting" forever.
+        if (Date.now() - start >= POLL_CAP_MS) {
+          setLanding({ kind: "unknown" });
+          return;
+        }
+        timer = setTimeout(poll, POLL_INTERVAL_MS);
+      } catch {
+        // A failed, refused or rate-limited read is not evidence either way
+        // -- never shown as `expired`, which is a specific on-chain fact.
+        if (!cancelled) setLanding({ kind: "unknown" });
+      }
+    }
+
+    setLanding({ kind: "pending" });
+    void poll();
+
+    return () => {
+      cancelled = true;
+      controller.abort();
+      if (timer) clearTimeout(timer);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- see comment above
+  }, [review, token]);
 
   const heldToken: PositionsToken | undefined =
     positions.state === "ready" ? positions.value.tokens.find((t) => t.mint === mint) : undefined;
@@ -183,9 +254,13 @@ export function TradePanel({ mint, symbol, positions, onTraded }: TradePanelProp
 
   async function approve(response: SwapResponse, builtAt: number) {
     // The button hides once the build is a minute old, but it is checked
-    // again here: a hidden button is a display, and this is the send.
+    // again here: a hidden button is a display, and this is the send. Rather
+    // than refuse silently, this rebuilds -- through the same `startReview`
+    // that populates the review card -- so a visitor who clicks in the
+    // narrow window between the last 1s tick and true staleness sees the
+    // fresh numbers and has to approve *those*, never the stale ones.
     if (Date.now() - builtAt > STALE_MS) {
-      setNow(Date.now());
+      await startReview();
       return;
     }
     // A second, independent check that this built transaction still matches
@@ -250,8 +325,15 @@ export function TradePanel({ mint, symbol, positions, onTraded }: TradePanelProp
       address,
     );
     if (result.ok) {
-      setReview({ kind: "sent", signature: result.signature });
-      onTraded();
+      // `onTraded` is not called here: the transaction was sent, not
+      // confirmed. It fires once the poll effect below sees "landed" -- a
+      // positions refresh triggered by a trade that then fails or expires
+      // would show a balance that never actually moved.
+      setReview({
+        kind: "sent",
+        signature: result.signature,
+        lastValidBlockHeight: response.last_valid_block_height,
+      });
     } else if (result.error.kind === "declined") {
       // Closing the wallet popup is a choice, not a fault -- it keeps the
       // same built transaction so approving again does not rebuild it.
@@ -441,10 +523,12 @@ export function TradePanel({ mint, symbol, positions, onTraded }: TradePanelProp
           >
             View on Solscan
           </a>
-          <p className="text-[var(--color-dim)]">
-            Radar did not check whether it landed. Solana confirmation can still fail or take a
-            moment; Solscan is the record of what actually happened.
-          </p>
+          <p className="text-[var(--color-dim)]">{landingMessage(landing)}</p>
+          {landing.kind === "unknown" && (
+            <p className="text-[var(--color-dim)]">
+              Solscan is the record of what actually happened.
+            </p>
+          )}
         </div>
       )}
 
