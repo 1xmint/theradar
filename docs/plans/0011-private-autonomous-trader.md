@@ -2,7 +2,14 @@
 # Plan 0011 — Build and measure a private autonomous trader
 
 **Status:** in progress — **P0 complete, P1 partial, P7a complete; P2 and P4-P8
-unstarted.** No live operation is authorised by this document.
+unstarted.** No live operation is authorised by this document. **Re-verified
+2026-09-26: unchanged since the last related commit, #237 (`7ef027d`,
+2026-09-10).** `git log --oneline --all` shows no further commits against
+`crates/radar-serve/src/trade.rs`'s portfolio work, the market registry, or any
+other P2/P4-P8 item since then. [Plan 0014](0014-close-the-terminal-and-measure-the-edge.md)
+lists "the private trader (plan 0011)" under "Not in scope" rather than calling
+it paused, so that word is not used here; the plan is simply not being worked
+on while 0013/0014 run.
 **Date:** 2026-09-09, implementation begun 2026-09-09.
 **Branch:** merged to `main`; implementation lands there as ordinary pull requests.
 **Inspected base:** `c39aabc8aafc3fcb9da2b0bf0c1329a18f75a212`; implementation

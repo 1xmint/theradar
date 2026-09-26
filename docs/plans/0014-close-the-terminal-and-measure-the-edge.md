@@ -196,6 +196,8 @@ do not wait.
    minus vite 8, which plan 0003 blocks on the tailwind plugin) after
    re-running CI on each (stale-green trap). Prune the worktrees under
    `.claude/worktrees/` whose branches are merged.
+   Status lines of plans 0011 and 0012 fixed in this PR; merged worktrees
+   pruned 2026-09-26.
 
 ## Phase G — the data the terminal stands on
 
