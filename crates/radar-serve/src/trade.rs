@@ -97,9 +97,9 @@
 //! per-key map, both checked before either is charged, and a refused caller is
 //! never inserted.
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::net::SocketAddr;
-use std::sync::Mutex;
+use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use axum::Json;
@@ -670,11 +670,62 @@ pub(crate) struct SwapBody {
     slippage_bps: Option<u32>,
 }
 
+/// OFAC's Solana ("Digital Currency Address - SOL") sanctions list, checked
+/// into the crate at build time. See `data/ofac_sol.txt` for the source URLs,
+/// the date it was read, and how to refresh it.
+const OFAC_SOL_LIST: &str = include_str!("../data/ofac_sol.txt");
+
+/// Parses an [`OFAC_SOL_LIST`]-shaped text into a set of addresses: one
+/// base58 pubkey per line, blank lines and `#`-comments ignored.
+///
+/// Panics on a line that does not parse as a Solana address. This is a small,
+/// hand-curated file compiled into the binary, not caller input -- a typo
+/// here is worth failing the build over rather than silently dropping a
+/// sanctioned wallet from the set it exists to hold.
+fn parse_sanctioned(data: &str) -> HashSet<Address> {
+    data.lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty() && !line.starts_with('#'))
+        .map(|line| {
+            line.parse().unwrap_or_else(|e| {
+                panic!("{line:?} in the OFAC SOL sanctions list is not a valid Solana address: {e}")
+            })
+        })
+        .collect()
+}
+
+/// The compiled-in OFAC SOL list, parsed once and reused for every request.
+fn sanctioned_wallets() -> &'static HashSet<Address> {
+    static SET: OnceLock<HashSet<Address>> = OnceLock::new();
+    SET.get_or_init(|| parse_sanctioned(OFAC_SOL_LIST))
+}
+
+/// `POST /v1/customer/swap`'s refusal for a wallet in `sanctioned`.
+///
+/// Jupiter's SDK & API License §7.3 makes the integrator (Radar) responsible
+/// for sanctions compliance, and every trade Radar builds routes through
+/// Jupiter -- so this runs before Jupiter is ever asked for a route. Quotes,
+/// viewing and sign-in are unaffected: only a swap actually being built for a
+/// listed wallet is refused.
+fn sanctioned_response(sanctioned: &HashSet<Address>, wallet: Address) -> Option<Response> {
+    sanctioned.contains(&wallet).then(|| {
+        refusal(
+            StatusCode::FORBIDDEN,
+            "sanctioned",
+            "this wallet appears on a sanctions list, so Radar will not build trades for it",
+        )
+    })
+}
+
 /// `POST /v1/customer/swap`: behind [`Tenant`], builds an unsigned transaction
 /// naming the signed-in wallet as fee payer. Nothing is persisted and nothing
 /// here logs the wallet address — see [`route_error_response`] and
 /// `radar_exec::route::Router::build`'s own doc comment for why one Jupiter
 /// call produces both the quote and the transaction.
+///
+/// **Sanctions check first, before rate-limiting or Jupiter.** A wallet on
+/// [`sanctioned_wallets`] is refused with `sanctioned` and never spends its
+/// rate-limit budget or reaches Jupiter -- see [`sanctioned_response`].
 pub(crate) async fn swap(
     state: State<Arc<AppState>>,
     tenant: Tenant,
@@ -707,6 +758,9 @@ async fn swap_inner(
     }
 
     let wallet = *tenant.address();
+    if let Some(refusal) = sanctioned_response(sanctioned_wallets(), wallet) {
+        return refusal;
+    }
     {
         let trading = state.trading.as_ref().expect("checked above");
         if !trading.reserve_wallet(wallet, CALLS_PER_REQUEST) {
@@ -776,6 +830,61 @@ mod tests {
     use super::*;
 
     const USDC: &str = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
+    const OTHER_MINT: &str = "So11111111111111111111111111111111111111112";
+
+    /// Every line the crate actually ships must parse -- a typo here is a
+    /// sanctioned wallet silently dropped from the set, not a build failure
+    /// the owner would see.
+    #[test]
+    fn every_line_of_the_shipped_ofac_list_parses_as_an_address() {
+        let set = parse_sanctioned(OFAC_SOL_LIST);
+        // Not asserting a nonzero count: an empty list is a valid, honest
+        // state (rule 9 -- absent is not zero, but zero is also not a bug),
+        // and this test's job is only that every line present is a real
+        // address, never that the list has any particular size.
+        for line in OFAC_SOL_LIST
+            .lines()
+            .map(str::trim)
+            .filter(|l| !l.is_empty() && !l.starts_with('#'))
+        {
+            assert!(
+                line.parse::<Address>().is_ok(),
+                "{line:?} does not parse as a Solana address"
+            );
+        }
+        // The parsed set and the source file agree on how many entries there
+        // are -- guards against two different lines decoding to the same
+        // 32 bytes and silently collapsing in the `HashSet`.
+        let line_count = OFAC_SOL_LIST
+            .lines()
+            .map(str::trim)
+            .filter(|l| !l.is_empty() && !l.starts_with('#'))
+            .count();
+        assert_eq!(set.len(), line_count);
+    }
+
+    /// The check is parameterised on the set precisely so this test does not
+    /// depend on how many real addresses OFAC currently lists for SOL: a
+    /// listed address is refused with `sanctioned`, and an unlisted one
+    /// passes through untouched, regardless of what `data/ofac_sol.txt`
+    /// happens to contain today.
+    #[test]
+    fn sanctioned_response_refuses_only_a_listed_wallet() {
+        let listed = usdc(); // stands in for a listed address; only its
+        // membership in the injected set matters here, not its real-world
+        // meaning as USDC's mint.
+        let unlisted: Address = OTHER_MINT.parse().expect("valid address");
+        let mut set = HashSet::new();
+        set.insert(listed);
+
+        let refused = sanctioned_response(&set, listed).expect("a listed wallet must be refused");
+        assert_eq!(refused.status(), StatusCode::FORBIDDEN);
+
+        assert!(
+            sanctioned_response(&set, unlisted).is_none(),
+            "an unlisted wallet must pass the check"
+        );
+    }
 
     fn usdc() -> Address {
         USDC.parse().expect("valid address")

@@ -570,6 +570,8 @@ export function swapRefusalMessage(reason: string, detail: string): string {
       return `Radar rejected that request: ${detail}`;
     case "slippage_too_wide":
       return "That slippage tolerance is wider than Radar allows.";
+    case "sanctioned":
+      return "This wallet appears on a sanctions list, so Radar will not build trades for it.";
     default:
       return detail;
   }
