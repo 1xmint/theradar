@@ -4,11 +4,23 @@
 //! Every branch here is a thing the customer is told, and two of them are
 //! claims about their wallet that must not be made when they are not true.
 
-import { describe, expect, it, vi } from "vitest";
+import { render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { explain, storedSession } from "./Wallet";
+import { explain, looksLikePhone, storedSession, Wallet, walletBrowseLinks } from "./Wallet";
 
 const ADDRESS = "5Kuix3HiXh7adsdcybmr5N5coLBi2mv7exGMLvoPSKjM";
+
+/** A `matchMedia` stand-in reporting a coarse (touch) or fine pointer. */
+function matchMedia(coarse: boolean) {
+  return vi.fn((query: string) => ({ matches: coarse && query.includes("coarse") }));
+}
+
+afterEach(() => {
+  localStorage.clear();
+  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
+});
 
 /** A storage that can be made to misbehave. */
 function storage(initial?: string, throws = false) {
@@ -99,5 +111,73 @@ describe("explain", () => {
       explain({ kind: "unreachable", detail: "down" }),
     ];
     expect(new Set(texts).size).toBe(texts.length);
+  });
+});
+
+describe("looksLikePhone", () => {
+  it("is true for a coarse pointer even with a desktop-looking user agent", () => {
+    expect(
+      looksLikePhone({ matchMedia: matchMedia(true), navigator: { userAgent: "Mozilla/5.0 (Windows NT 10.0)" } }),
+    ).toBe(true);
+  });
+
+  it("is true for a mobile user agent even when matchMedia is missing", () => {
+    expect(looksLikePhone({ navigator: { userAgent: "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0)" } })).toBe(true);
+  });
+
+  it("is false for an ordinary desktop", () => {
+    expect(
+      looksLikePhone({ matchMedia: matchMedia(false), navigator: { userAgent: "Mozilla/5.0 (Macintosh)" } }),
+    ).toBe(false);
+  });
+
+  it("survives a matchMedia that throws", () => {
+    const throwing = { matchMedia: vi.fn(() => { throw new Error("no support"); }), navigator: { userAgent: "desktop" } };
+    expect(looksLikePhone(throwing)).toBe(false);
+  });
+});
+
+describe("walletBrowseLinks", () => {
+  it("builds Phantom and Solflare browse deep links from the current page", () => {
+    const links = walletBrowseLinks("https://radar.example/token/ABC?x=1", "https://radar.example");
+    expect(links.phantom).toBe(
+      "https://phantom.app/ul/browse/https%3A%2F%2Fradar.example%2Ftoken%2FABC%3Fx%3D1?ref=https%3A%2F%2Fradar.example",
+    );
+    expect(links.solflare).toBe(
+      "https://solflare.com/ul/v1/browse/https%3A%2F%2Fradar.example%2Ftoken%2FABC%3Fx%3D1?ref=https%3A%2F%2Fradar.example",
+    );
+  });
+});
+
+describe("Wallet", () => {
+  it("shows Connect as before when a wallet extension is present", () => {
+    vi.stubGlobal("solana", {});
+    render(<Wallet />);
+    expect(screen.getByRole("button", { name: "Connect wallet" })).toBeTruthy();
+    expect(screen.queryByText(/Open in Phantom/)).toBeNull();
+  });
+
+  it("keeps today's dead-end message on a desktop with no wallet", () => {
+    vi.stubGlobal("matchMedia", matchMedia(false));
+    render(<Wallet />);
+    expect(screen.getByRole("button", { name: "Connect wallet" })).toBeTruthy();
+    expect(screen.getByText("No wallet detected.")).toBeTruthy();
+    expect(screen.queryByText(/Open in Phantom/)).toBeNull();
+  });
+
+  it("offers both wallet-app links, with the encoded current URL, on a phone with no wallet", () => {
+    vi.stubGlobal("matchMedia", matchMedia(true));
+    render(<Wallet />);
+
+    const expected = walletBrowseLinks(window.location.href, window.location.origin);
+    const phantomLink = screen.getByRole("link", { name: "Open in Phantom" });
+    const solflareLink = screen.getByRole("link", { name: "Open in Solflare" });
+    expect(phantomLink.getAttribute("href")).toBe(expected.phantom);
+    expect(solflareLink.getAttribute("href")).toBe(expected.solflare);
+    expect(phantomLink.getAttribute("href")).toContain(encodeURIComponent(window.location.href));
+
+    // No dead-end button or message alongside the working links.
+    expect(screen.queryByRole("button", { name: "Connect wallet" })).toBeNull();
+    expect(screen.queryByText("No wallet detected.")).toBeNull();
   });
 });

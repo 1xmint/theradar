@@ -121,7 +121,7 @@ export function Terminal({ mint }: { mint?: string }) {
   );
 
   return (
-    <div className="flex h-screen min-w-[1024px] flex-col overflow-x-auto bg-[var(--color-ink)] text-[var(--color-text)]">
+    <div className="flex min-h-dvh flex-col lg:h-dvh bg-[var(--color-ink)] text-[var(--color-text)]">
       <TopBar
         query={query}
         onQueryChange={setQuery}
@@ -129,20 +129,31 @@ export function Terminal({ mint }: { mint?: string }) {
         searchRef={searchRef}
       />
 
-      <div className="grid min-h-0 flex-1 grid-cols-[300px_1fr_320px]">
-        <CoinList
-          load={coinsLoad}
-          sort={sort}
-          onSortChange={(key) => setSort((s) => ({ key, dir: s.key === key && s.dir === "desc" ? "asc" : "desc" }))}
-          selectedMint={mint ?? null}
-          onSelect={select}
-          filter={query}
-          listRef={(coins) => {
-            orderedRef.current = coins;
-          }}
-        />
+      {/* Below `lg` (1024px) this is a single column that scrolls as one page:
+          coin list, then chart/tabs, then the token header with the trade
+          panel. The first two get fixed heights and scroll inside themselves;
+          the token header takes its natural height. An earlier version split
+          one fixed-height screen three ways, which on a 812px phone left the
+          trade panel a 24px scroll window -- reachable in theory, not in use.
+          At `lg` the page is pinned to the viewport again and the wrapper divs
+          collapse with `lg:contents`, so `CoinList` and `TokenHeader` return
+          to being direct children of the unchanged three-column grid. */}
+      <div className="flex min-h-0 flex-1 flex-col lg:grid lg:grid-cols-[300px_1fr_320px]">
+        <div className="h-[45dvh] shrink-0 lg:contents">
+          <CoinList
+            load={coinsLoad}
+            sort={sort}
+            onSortChange={(key) => setSort((s) => ({ key, dir: s.key === key && s.dir === "desc" ? "asc" : "desc" }))}
+            selectedMint={mint ?? null}
+            onSelect={select}
+            filter={query}
+            listRef={(coins) => {
+              orderedRef.current = coins;
+            }}
+          />
+        </div>
 
-        <div className="flex min-h-0 min-w-0 flex-col border-r border-[var(--color-line)]">
+        <div className="flex h-[85dvh] min-w-0 shrink-0 flex-col border-r lg:h-auto lg:min-h-0 border-[var(--color-line)]">
           <div className="min-h-0 flex-[3]">
             {mint ? (
               <CandleChart mint={mint} />
@@ -178,13 +189,15 @@ export function Terminal({ mint }: { mint?: string }) {
           </div>
         </div>
 
-        {mint ? (
-          <TokenHeader load={tokenLoad} />
-        ) : (
-          <aside className="border-l border-[var(--color-line)] bg-[var(--color-surface)] p-3 text-xs text-[var(--color-dim)]">
-            Select a coin to see its details.
-          </aside>
-        )}
+        <div className="lg:contents">
+          {mint ? (
+            <TokenHeader load={tokenLoad} />
+          ) : (
+            <aside className="h-full overflow-y-auto border-l border-[var(--color-line)] bg-[var(--color-surface)] p-3 text-xs text-[var(--color-dim)]">
+              Select a coin to see its details.
+            </aside>
+          )}
+        </div>
       </div>
     </div>
   );

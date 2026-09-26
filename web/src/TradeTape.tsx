@@ -47,7 +47,7 @@ export function TradeTape({ mint }: { mint: string }) {
               <th scope="col" className="py-1 pl-3 text-left font-medium">Time</th>
               <th scope="col" className="py-1 text-left font-medium">Side</th>
               <th scope="col" className="py-1 text-right font-medium">Price</th>
-              <th scope="col" className="py-1 text-right font-medium">Amount</th>
+              <th scope="col" className="py-1 pl-3 text-right font-medium">Amount</th>
               <th scope="col" className="py-1 pr-3 text-right font-medium">Trader</th>
             </tr>
           </thead>
@@ -79,7 +79,7 @@ function TapeRow({ trade }: { trade: Trade }) {
       <td className="py-1 text-right tabular-nums">
         <MarketFigure value={trade.price} reason={trade.price === null ? "no route priced at fill time" : null} format={formatPrice} />
       </td>
-      <td className="py-1 text-right tabular-nums text-[var(--color-dim)]">
+      <td className="py-1 pl-3 text-right tabular-nums text-[var(--color-dim)]">
         {formatCompactNumber(trade.token_amount)}
       </td>
       <td className="py-1 pr-3 text-right">

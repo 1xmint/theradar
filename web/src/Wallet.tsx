@@ -167,6 +167,53 @@ function readNothing(): string | null {
   return null;
 }
 
+/**
+ * Whether the visitor looks like they are on a phone, rather than a desktop
+ * browser that simply has no wallet extension installed.
+ *
+ * Checked two ways because either alone is unreliable: a coarse pointer is
+ * also true of a touchscreen laptop, and a user-agent string is trivially
+ * spoofed or absent in a test environment. Either signal is enough -- this
+ * only decides which "no wallet" message to show, never anything that
+ * authorises a trade, so a false positive costs a customer an extra tap on a
+ * link that does nothing worse than open their wallet app's browser.
+ */
+export function looksLikePhone(
+  win: {
+    matchMedia?: (query: string) => { matches: boolean };
+    navigator?: { userAgent?: string };
+  } = window,
+): boolean {
+  let coarsePointer = false;
+  try {
+    coarsePointer = win.matchMedia?.("(pointer: coarse)").matches ?? false;
+  } catch {
+    // No `matchMedia`, or it threw. Fall through to the user-agent check.
+  }
+  const userAgent = win.navigator?.userAgent ?? "";
+  return coarsePointer || /Android|iPhone|iPad|iPod/i.test(userAgent);
+}
+
+/**
+ * Deep links into a wallet app's own in-app browser, for a visitor with no
+ * wallet extension on a device that is not going to get one.
+ *
+ * Both formats verified against the wallets' own current docs: Phantom's
+ * `docs.phantom.com/phantom-deeplinks/other-methods/browse` and Solflare's
+ * `docs.solflare.com/solflare/technical/deeplinks/other-methods/browse`.
+ * Both are `https://<wallet>/ul/.../browse/<url-encoded target>?ref=<url-encoded
+ * requesting origin>` -- a plain navigation, not a fetch, so the page's
+ * `default-src 'none'` CSP does not see it.
+ */
+export function walletBrowseLinks(href: string, origin: string): { phantom: string; solflare: string } {
+  const target = encodeURIComponent(href);
+  const ref = encodeURIComponent(origin);
+  return {
+    phantom: `https://phantom.app/ul/browse/${target}?ref=${ref}`,
+    solflare: `https://solflare.com/ul/v1/browse/${target}?ref=${ref}`,
+  };
+}
+
 /** What to tell the customer about a failure. */
 export function explain(error: SignInError): string {
   switch (error.kind) {
@@ -248,24 +295,53 @@ export function Wallet() {
     );
   }
 
+  // No extension, and nothing is going to change that: a phone has no
+  // "install the extension" story. Rather than a Connect button that can only
+  // ever fail and a "No wallet detected." dead end, offer the two links that
+  // actually get a phone visitor to a wallet -- their own app's in-app
+  // browser, reopened on this page. Desktop with no wallet keeps today's
+  // button-plus-message behaviour unchanged.
+  const phoneNoWallet = !provider && state.kind === "signed-out" && looksLikePhone();
+  const browseLinks = phoneNoWallet
+    ? walletBrowseLinks(window.location.href, window.location.origin)
+    : null;
+
   return (
     <div className="flex items-center gap-3 text-sm">
-      <button
-        type="button"
-        onClick={() => void connect()}
-        disabled={state.kind === "connecting"}
-        className="rounded border border-[var(--color-line)] px-3 py-1 hover:border-[var(--color-ink)] disabled:opacity-60 focus-visible:outline focus-visible:outline-2"
-      >
-        {state.kind === "connecting" ? "Check your wallet…" : "Connect wallet"}
-      </button>
+      {!phoneNoWallet && (
+        <button
+          type="button"
+          onClick={() => void connect()}
+          disabled={state.kind === "connecting"}
+          className="rounded border border-[var(--color-line)] px-3 py-1 hover:border-[var(--color-ink)] disabled:opacity-60 focus-visible:outline focus-visible:outline-2"
+        >
+          {state.kind === "connecting" ? "Check your wallet…" : "Connect wallet"}
+        </button>
+      )}
       {state.kind === "failed" && (
         <span role="status" className="text-[var(--color-refuse)]">
           {explain(state.error)}
         </span>
       )}
-      {!provider && state.kind === "signed-out" && (
+      {!provider && state.kind === "signed-out" && !phoneNoWallet && (
         <span className="text-[var(--color-dim)]">
           No wallet detected.
+        </span>
+      )}
+      {browseLinks && (
+        <span className="flex items-center gap-3">
+          <a
+            href={browseLinks.phantom}
+            className="text-[var(--color-dim)] underline hover:text-[var(--color-text)] focus-visible:outline focus-visible:outline-2"
+          >
+            Open in Phantom
+          </a>
+          <a
+            href={browseLinks.solflare}
+            className="text-[var(--color-dim)] underline hover:text-[var(--color-text)] focus-visible:outline focus-visible:outline-2"
+          >
+            Open in Solflare
+          </a>
         </span>
       )}
     </div>
