@@ -25,6 +25,7 @@ import {
   isNarrowerThanRequested,
   isPossiblyCapped,
   isWalletSessionRefusal,
+  landingMessage,
   launchesEmptyMessage,
   median,
   netOfCost,
@@ -458,6 +459,7 @@ describe("swapRefusalMessage", () => {
       "bad_request",
       "slippage_too_wide",
       "sanctioned",
+      "chain_unreadable",
     ];
     const texts = codes.map((code) => swapRefusalMessage(code, "server detail"));
     expect(new Set(texts).size).toBe(texts.length);
@@ -489,5 +491,37 @@ describe("swapRefusalMessage", () => {
     expect(swapRefusalMessage("bad_request", "amount must be positive")).toContain(
       "amount must be positive",
     );
+  });
+});
+
+describe("landingMessage", () => {
+  it("gives every landing state its own, distinct sentence", () => {
+    const texts = [
+      landingMessage({ kind: "pending" }),
+      landingMessage({ kind: "landed" }),
+      landingMessage({ kind: "failed", reason: "some on-chain reason" }),
+      landingMessage({ kind: "expired" }),
+      landingMessage({ kind: "unknown" }),
+    ];
+    expect(new Set(texts).size).toBe(texts.length);
+  });
+
+  it("includes the on-chain reason for a failed transaction", () => {
+    expect(landingMessage({ kind: "failed", reason: "insufficient funds" })).toContain(
+      "insufficient funds",
+    );
+  });
+
+  it("never says expired for unknown, and never says unknown for expired -- the honesty rule", () => {
+    // `expired` is a proven on-chain fact; `unknown` is Radar's own failure to
+    // find out. Confusing either sentence for the other is the exact bug F11
+    // exists to prevent (a read failure or a timed-out poll must never read as
+    // "your money is safe, nothing happened").
+    const expired = landingMessage({ kind: "expired" }).toLowerCase();
+    const unknown = landingMessage({ kind: "unknown" }).toLowerCase();
+    expect(expired).not.toContain("unknown");
+    expect(expired).not.toContain("check solscan");
+    expect(unknown).not.toContain("expired");
+    expect(unknown).not.toContain("nothing was spent");
   });
 });
