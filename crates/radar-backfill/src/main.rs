@@ -324,14 +324,27 @@ fn parse_args() -> Result<Args, String> {
 /// brief`'s business, not the recorder's, and must not stop a follow window or
 /// a tape pass that already happened.
 ///
+/// The delta arithmetic and the "nothing to record" check that
+/// [`record_query_meter`] applies to the client's lifetime counters.
+///
+/// Pulled out as a pure function so it can be tested directly: the surrounding
+/// function reaches a client and the store, neither of which a unit test
+/// should touch. `None` means no query was issued since `seen` and the caller
+/// should write nothing.
+#[must_use]
+fn query_meter_delta(current: (u64, u64), seen: (u64, u64)) -> Option<(u64, u64)> {
+    let delta = (current.0 - seen.0, current.1 - seen.1);
+    if delta.0 == 0 { None } else { Some(delta) }
+}
+
 /// [0036]: ../../../docs/research/0036-the-hourly-consider-run-eats-the-whole-cryptohouse-allowance.md
 fn record_query_meter(store: &str, unit: &str, client: &Client, seen: &mut (u64, u64)) {
-    let (queries, refused) = (client.queries_issued(), client.quota_refusals());
-    let (delta_queries, delta_refused) = (queries - seen.0, refused - seen.1);
-    *seen = (queries, refused);
-    if delta_queries == 0 {
+    let current = (client.queries_issued(), client.quota_refusals());
+    let delta = query_meter_delta(current, *seen);
+    *seen = current;
+    let Some((delta_queries, delta_refused)) = delta else {
         return;
-    }
+    };
     let today = from_epoch(now_epoch())[..10].to_owned();
     if let Err(e) = radar_store::query_meter::record(
         std::path::Path::new(store),
@@ -1846,5 +1859,27 @@ mod tests {
         // must return the horizon itself, not overshoot by treating equality
         // as "still room to grow".
         assert_eq!(market_tape_window_end(9_880, 120, 10_000), 10_000);
+    }
+
+    /// Nothing issued since `seen`: no delta to record.
+    ///
+    /// Kills `==` mutated to `!=` in `query_meter_delta` -- with `!=`, a zero
+    /// delta reports `Some((0, 0))` instead of `None`, and `record_query_meter`
+    /// would write a meaningless zero-query entry every pass that issued
+    /// nothing.
+    #[test]
+    fn a_query_meter_delta_of_nothing_new_is_none() {
+        assert_eq!(query_meter_delta((3, 1), (3, 1)), None);
+    }
+
+    /// Both counters advance, by amounts the three arithmetic mutants at this
+    /// call site would each get wrong differently: `+` gives `(8, 3)`, `/`
+    /// gives `(1, 2)`, and correct subtraction gives `(2, 1)`. All three are
+    /// distinct from each other, so this one assertion kills all three, and
+    /// the nonzero delta also kills `==` mutated to `!=` the other way: that
+    /// mutant would report `None` here instead of `Some`.
+    #[test]
+    fn a_query_meter_delta_is_the_difference_since_seen() {
+        assert_eq!(query_meter_delta((5, 2), (3, 1)), Some((2, 1)));
     }
 }

@@ -481,4 +481,52 @@ mod tests {
         assert_eq!(client.queries_issued(), 1);
         assert_eq!(client.quota_refusals(), 0);
     }
+
+    /// Two queries against a local stub: `queries_issued` must read the real
+    /// count, not a constant.
+    ///
+    /// Kills `queries_issued` mutated to return the literal `1` -- the other
+    /// test in this file that checks it (`a_client_against_no_server_still_
+    /// counts_the_attempt`) only ever drives one query, so a client stuck
+    /// returning `1` would pass it too. It also kills `+` mutated to `*` or
+    /// `-` in `Client::query`'s counting line: `*` never leaves zero (`0*1`
+    /// stays `0`), and `-` wraps to `u64::MAX` on the first call, so neither
+    /// reaches `2`.
+    #[test]
+    fn queries_issued_counts_every_query_not_just_the_first() {
+        let endpoint = crate::test_support::start_server(vec![
+            (200, "{\"n\":\"1\"}\n"),
+            (200, "{\"n\":\"2\"}\n"),
+        ]);
+        let client = Client::new(endpoint);
+
+        let first: Vec<Row> = client.query("SELECT 1").expect("first query succeeds");
+        let second: Vec<Row> = client.query("SELECT 2").expect("second query succeeds");
+
+        assert_eq!(first, vec![Row { n: "1".into() }]);
+        assert_eq!(second, vec![Row { n: "2".into() }]);
+        assert_eq!(client.queries_issued(), 2);
+    }
+
+    /// A response CryptoHouse itself refuses for quota must move
+    /// `quota_refusals` off zero.
+    ///
+    /// Kills `quota_refusals` mutated to return the literal `0` -- every other
+    /// test in this file that checks it only ever sees a genuine zero, so a
+    /// client stuck returning `0` would pass them too.
+    #[test]
+    fn quota_refusals_counts_a_quota_exceeded_response() {
+        let endpoint = crate::test_support::start_server(vec![(
+            500,
+            "Quota for user 'crypto' for 3600s has been exceeded: queries = 121/120",
+        )]);
+        let client = Client::new(endpoint);
+
+        let result: Result<Vec<Row>, QueryError> = client.query("SELECT 1");
+
+        let err = result.expect_err("a quota-exceeded response must be an error");
+        assert!(err.is_quota_exceeded(), "{err}");
+        assert_eq!(client.queries_issued(), 1);
+        assert_eq!(client.quota_refusals(), 1);
+    }
 }

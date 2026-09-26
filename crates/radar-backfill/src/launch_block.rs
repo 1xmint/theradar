@@ -653,6 +653,47 @@ mod tests {
         );
     }
 
+    /// `CryptoHouseBlocks::queries_issued` must read the wrapped client's real
+    /// count, not a constant.
+    ///
+    /// Kills it mutated to return the literal `0` or `1`: two queries are
+    /// issued through the client before it is wrapped, so only a genuine
+    /// delegation reports `2`.
+    #[test]
+    fn queries_issued_delegates_to_the_wrapped_client() {
+        let endpoint = crate::test_support::start_server(vec![
+            (200, "{\"authority\":\"a\",\"launch_blocks\":\"1\"}\n"),
+            (200, "{\"authority\":\"b\",\"launch_blocks\":\"2\"}\n"),
+        ]);
+        let client = Client::new(endpoint);
+        let _: Result<Vec<serde_json::Value>, QueryError> = client.query("SELECT 1");
+        let _: Result<Vec<serde_json::Value>, QueryError> = client.query("SELECT 2");
+
+        let blocks = CryptoHouseBlocks::new(client, "2026-01-01T00:00:00");
+
+        assert_eq!(blocks.queries_issued(), 2);
+    }
+
+    /// `CryptoHouseBlocks::quota_refusals` must read the wrapped client's real
+    /// count, not a constant.
+    ///
+    /// Kills it mutated to return the literal `0` or `1`: two quota-exceeded
+    /// responses are driven through the client before it is wrapped, so only a
+    /// genuine delegation reports `2`.
+    #[test]
+    fn quota_refusals_delegates_to_the_wrapped_client() {
+        let quota_body = "Quota for user 'crypto' for 3600s has been exceeded: queries = 121/120";
+        let endpoint =
+            crate::test_support::start_server(vec![(500, quota_body), (500, quota_body)]);
+        let client = Client::new(endpoint);
+        let _: Result<Vec<serde_json::Value>, QueryError> = client.query("SELECT 1");
+        let _: Result<Vec<serde_json::Value>, QueryError> = client.query("SELECT 2");
+
+        let blocks = CryptoHouseBlocks::new(client, "2026-01-01T00:00:00");
+
+        assert_eq!(blocks.quota_refusals(), 2);
+    }
+
     #[test]
     fn the_consider_run_ceiling_matches_its_own_arithmetic() {
         // Restated here so a change to the constant that does not also update
