@@ -313,6 +313,37 @@ fn parse_args() -> Result<Args, String> {
     })
 }
 
+/// Adds this pass's CryptoHouse queries to `unit`'s meter for today, as the
+/// delta since `seen` -- for the two units (`radar-follow`,
+/// `radar-market-tape`) whose `client` lives for the whole process rather than
+/// one pass, so its lifetime totals would double-count every later pass
+/// without subtracting what was already recorded. [0036]'s "what was not
+/// checked": nothing counted a unit's own queries before this.
+///
+/// A write failure is reported and otherwise ignored -- the meter is `radar
+/// brief`'s business, not the recorder's, and must not stop a follow window or
+/// a tape pass that already happened.
+///
+/// [0036]: ../../../docs/research/0036-the-hourly-consider-run-eats-the-whole-cryptohouse-allowance.md
+fn record_query_meter(store: &str, unit: &str, client: &Client, seen: &mut (u64, u64)) {
+    let (queries, refused) = (client.queries_issued(), client.quota_refusals());
+    let (delta_queries, delta_refused) = (queries - seen.0, refused - seen.1);
+    *seen = (queries, refused);
+    if delta_queries == 0 {
+        return;
+    }
+    let today = from_epoch(now_epoch())[..10].to_owned();
+    if let Err(e) = radar_store::query_meter::record(
+        std::path::Path::new(store),
+        unit,
+        &today,
+        delta_queries,
+        delta_refused,
+    ) {
+        eprintln!("could not record {unit}'s query count: {e}");
+    }
+}
+
 fn merge(into: &mut Stats, from: &Stats) {
     into.emitted += from.emitted;
     for (k, v) in &from.skipped {
@@ -529,6 +560,10 @@ fn follow(args: &Args) -> Result<(), String> {
     // The window size actually in use. Shrinks on failure and recovers on
     // success, so a burst is crawled rather than repeatedly re-attempted whole.
     let mut current_step = step;
+    // What this process has already recorded into today's query meter, so a
+    // window's contribution is a delta rather than the client's whole-process
+    // total counted again on every window.
+    let mut meter_seen = (0u64, 0u64);
     loop {
         let horizon = now_epoch() - FOLLOW_LAG_SECONDS;
         if horizon - cursor < FOLLOW_MIN_WINDOW_SECONDS {
@@ -577,6 +612,7 @@ fn follow(args: &Args) -> Result<(), String> {
                     coverage::SOURCE_FOLLOW,
                 )?;
                 writer.flush().map_err(|e| e.to_string())?;
+                record_query_meter(&args.store, "radar-follow", &client, &mut meter_seen);
                 std::thread::sleep(wait);
                 continue;
             }
@@ -620,6 +656,7 @@ fn follow(args: &Args) -> Result<(), String> {
             totals.emitted
         );
 
+        record_query_meter(&args.store, "radar-follow", &client, &mut meter_seen);
         cursor = window_end;
         std::thread::sleep(PAUSE_BETWEEN_WINDOWS);
     }
@@ -819,6 +856,9 @@ fn market_tape(args: &Args) -> Result<(), String> {
         .watermark()
         .map_err(|e| e.to_string())?;
 
+    // What this process has already recorded into today's query meter -- see
+    // `record_query_meter`.
+    let mut meter_seen = (0u64, 0u64);
     loop {
         let horizon = market_tape_horizon(now_epoch(), MARKET_TAPE_LAG_SECONDS);
         cursor = give_up_a_stale_gap(&args.store, &scope, cursor, horizon, store_high)?;
@@ -843,6 +883,7 @@ fn market_tape(args: &Args) -> Result<(), String> {
             Err(e) => {
                 eprintln!("  {from_s} .. {to_s} candidates query failed: {e}");
                 record_partial_pass(&args.store, store_high)?;
+                record_query_meter(&args.store, "radar-market-tape", &client, &mut meter_seen);
                 std::thread::sleep(MARKET_TAPE_PASS_INTERVAL);
                 continue;
             }
@@ -875,6 +916,7 @@ fn market_tape(args: &Args) -> Result<(), String> {
                         budget.remaining()
                     );
                     record_partial_pass(&args.store, store_high)?;
+                    record_query_meter(&args.store, "radar-market-tape", &client, &mut meter_seen);
                     std::thread::sleep(MARKET_TAPE_PASS_INTERVAL);
                     continue;
                 }
@@ -909,6 +951,7 @@ fn market_tape(args: &Args) -> Result<(), String> {
             );
         }
         radar_store::write_cursor(&scope, window_end)?;
+        record_query_meter(&args.store, "radar-market-tape", &client, &mut meter_seen);
 
         cursor = window_end;
         std::thread::sleep(MARKET_TAPE_PASS_INTERVAL);
@@ -1152,6 +1195,9 @@ fn measure(args: &Args) -> Result<(), String> {
         println!(
             "{total_known} tokens known, none due for measurement --              all are either too young for the first checkpoint or already settled"
         );
+        // Head, slot-time and price-window queries above still happened even
+        // though nothing was due to measure.
+        record_query_meter(&args.store, "radar-backfill --outcomes", &client, &mut (0, 0));
         return Ok(());
     }
     let launches = due;
@@ -1212,6 +1258,7 @@ fn measure(args: &Args) -> Result<(), String> {
 These are labels, not verdicts. Whether any of them predicts anything"
     );
     println!("is a question for the research store to answer against them.");
+    record_query_meter(&args.store, "radar-backfill --outcomes", &client, &mut (0, 0));
     Ok(())
 }
 

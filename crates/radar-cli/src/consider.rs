@@ -194,6 +194,22 @@ pub fn run(
         &coverage,
     );
 
+    // 0036's "what was not checked": nothing counted a unit's own CryptoHouse
+    // queries. `blocks` is the only source in this run, so its client's
+    // lifetime counts is the whole run's count. A write failure here is
+    // reported but does not stop the pass -- the decision already happened,
+    // and the meter is `radar brief`'s business, not the kernel's.
+    let today = radar_store::from_epoch(radar_store::now_epoch())[..10].to_owned();
+    if let Err(e) = radar_store::query_meter::record(
+        std::path::Path::new(store),
+        "consider",
+        &today,
+        blocks.queries_issued(),
+        blocks.quota_refusals(),
+    ) {
+        eprintln!("could not record this run's query count: {e}");
+    }
+
     if let Some(dir) = record_to {
         // The kernel's verdict is folded in only now, because a decision is not
         // complete until the thing with the authority has seen it.

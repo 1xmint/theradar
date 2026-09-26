@@ -75,12 +75,36 @@ impl QueryError {
     pub fn is_budget_exhausted(&self) -> bool {
         matches!(self, Self::Server(m) if m.contains(BUDGET_EXHAUSTED_MARKER))
     }
+
+    /// Whether this failure is CryptoHouse itself refusing the query because
+    /// the shared 120-an-hour allowance is spent, rather than this process's
+    /// own declared ceiling ([`Self::is_budget_exhausted`]) or an unrelated
+    /// server error.
+    ///
+    /// The text is the vendor's own, quoted in
+    /// [0036](../../../docs/research/0036-the-hourly-consider-run-eats-the-whole-cryptohouse-allowance.md):
+    /// `Quota for user 'crypto' for 3600s has been exceeded: queries = 133/120`.
+    /// "has been exceeded" is the stable part; the numbers move every hour.
+    #[must_use]
+    pub fn is_quota_exceeded(&self) -> bool {
+        matches!(self, Self::Server(m) if m.contains("has been exceeded"))
+    }
 }
 
 /// A read-only CryptoHouse client.
+///
+/// Counts every query it issues and every one CryptoHouse refused for quota,
+/// so a caller can log its own totals when a run ends -- 0036's "what was not
+/// checked": the per-candidate query cost was read from the call sites, not
+/// counted from a log, because nothing counted. Counting here rather than in
+/// each caller covers every query any of them issues, including the ones
+/// [`crate::narrowing_fetch`] generates by halving a window, without a second
+/// counter to keep in step with this one.
 pub struct Client {
     endpoint: String,
     agent: ureq::Agent,
+    queries: std::cell::Cell<u64>,
+    quota_refused: std::cell::Cell<u64>,
 }
 
 impl Default for Client {
@@ -115,7 +139,29 @@ impl Client {
         Self {
             endpoint: endpoint.into(),
             agent: config.into(),
+            queries: std::cell::Cell::new(0),
+            quota_refused: std::cell::Cell::new(0),
         }
+    }
+
+    /// How many queries this client has sent to CryptoHouse, successful or
+    /// not, since it was built.
+    ///
+    /// Counts every attempt that reached [`Self::query`], including ones a
+    /// caller's own [`crate::launch_block::Budget`] or
+    /// [`crate::market_tape::Budget`] declined to make -- those never call
+    /// this method, so a run capped well under the shared allowance reports
+    /// the queries it actually spent, not the ones it was asked for.
+    #[must_use]
+    pub fn queries_issued(&self) -> u64 {
+        self.queries.get()
+    }
+
+    /// How many of those CryptoHouse itself refused for quota
+    /// ([`QueryError::is_quota_exceeded`]).
+    #[must_use]
+    pub fn quota_refusals(&self) -> u64 {
+        self.quota_refused.get()
     }
 
     /// Runs a query and deserialises each row.
@@ -128,6 +174,21 @@ impl Client {
     /// Returns [`QueryError`] if the request fails, the server rejects the query,
     /// or a row does not deserialise.
     pub fn query<T: DeserializeOwned>(&self, sql: &str) -> Result<Vec<T>, QueryError> {
+        self.queries.set(self.queries.get() + 1);
+        let result = self.query_uncounted(sql);
+        if let Err(e) = &result
+            && e.is_quota_exceeded()
+        {
+            self.quota_refused.set(self.quota_refused.get() + 1);
+        }
+        result
+    }
+
+    /// The request [`Self::query`] counts before and grades after.
+    ///
+    /// Split out so the counting is one pair of lines around a call, not
+    /// threaded through every early return the request itself has.
+    fn query_uncounted<T: DeserializeOwned>(&self, sql: &str) -> Result<Vec<T>, QueryError> {
         // POST with the SQL in the body rather than GET with it in the URL.
         // An outcome batch names four hundred mints, which is roughly 18 KB of
         // query -- well past the URL length most proxies accept, and the failure
@@ -370,5 +431,54 @@ mod tests {
         let body = "Code: 159. DB::Exception: Timeout exceeded (TIMEOUT_EXCEEDED)";
         let err = server_error(500, body, "SELECT 1");
         assert!(!err.is_budget_exhausted(), "{err}");
+    }
+
+    /// The exact sentence 0036 quoted from production, so the detector is
+    /// pinned to what the vendor actually sends rather than to a guess.
+    #[test]
+    fn the_measured_quota_message_is_recognised() {
+        let err = QueryError::Server(
+            "Quota for user 'crypto' for 3600s has been exceeded: queries = 133/120".to_owned(),
+        );
+        assert!(err.is_quota_exceeded(), "{err}");
+    }
+
+    /// A budget this process declared for itself must not also count as
+    /// CryptoHouse refusing it -- one is a run choosing to stop, the other is
+    /// the vendor's shared allowance actually running out, and `radar brief`
+    /// must be able to tell them apart per unit.
+    #[test]
+    fn a_declared_budget_exhaustion_is_not_a_quota_refusal() {
+        let err = QueryError::Server(
+            "consider query budget spent for this run; remaining candidates were not considered"
+                .to_owned(),
+        );
+        assert!(!err.is_quota_exceeded(), "{err}");
+    }
+
+    /// An unrelated server error is neither kind of allowance running out.
+    #[test]
+    fn an_ordinary_server_error_is_not_a_quota_refusal() {
+        let body = "Code: 159. DB::Exception: Timeout exceeded (TIMEOUT_EXCEEDED)";
+        let err = server_error(500, body, "SELECT 1");
+        assert!(!err.is_quota_exceeded(), "{err}");
+    }
+
+    /// A client counts every attempt whether it succeeds or fails, and counts
+    /// a quota refusal as both a query and a refusal -- not a refusal instead
+    /// of a query, which would make "queries issued" undercount what actually
+    /// reached the endpoint.
+    #[test]
+    fn a_client_against_no_server_still_counts_the_attempt() {
+        // No live request is made in this crate's tests (0036's own rule: a
+        // guest on a public endpoint does not hammer it from a test suite),
+        // so this exercises the counting through a client pointed at a port
+        // nothing listens on -- a transport failure, counted as one query and
+        // zero quota refusals.
+        let client = Client::new("http://127.0.0.1:0/");
+        let result: Result<Vec<serde_json::Value>, QueryError> = client.query("SELECT 1");
+        assert!(result.is_err());
+        assert_eq!(client.queries_issued(), 1);
+        assert_eq!(client.quota_refusals(), 0);
     }
 }

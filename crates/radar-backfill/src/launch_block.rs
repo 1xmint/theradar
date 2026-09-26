@@ -244,6 +244,24 @@ impl CryptoHouseBlocks {
             None => self.client.query(sql),
         }
     }
+
+    /// Queries this instance's client has issued to CryptoHouse so far.
+    ///
+    /// For `radar brief`'s per-unit count ([0036]'s "what was not checked") --
+    /// the caller reads this once at the end of a run and hands it to
+    /// [`radar_store::query_meter::record`].
+    ///
+    /// [0036]: ../../../../docs/research/0036-the-hourly-consider-run-eats-the-whole-cryptohouse-allowance.md
+    #[must_use]
+    pub fn queries_issued(&self) -> u64 {
+        self.client.queries_issued()
+    }
+
+    /// How many of those queries CryptoHouse refused for quota.
+    #[must_use]
+    pub fn quota_refusals(&self) -> u64 {
+        self.client.quota_refusals()
+    }
 }
 
 /// Builds the query for one mint in one slot.
