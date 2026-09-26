@@ -1,9 +1,10 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # Plan 0012 — The free public trading panel
 
-**Status:** planned, not started. No implementation has run. Every acceptance
-case below is a requirement for a future session, **not the name of a test that
-exists**.
+**Status:** superseded by [plan 0013](0013-the-terminal-find-look-track-trade.md),
+which built most of this plan's scope starting 2026-09-12. See "Status as of
+2026-09-26" below for what was delivered, what 0013 changed, and what remains
+undone.
 **Date:** 2026-09-11.
 **Branch:** none yet; each step lands on `main` as its own pull request.
 **Inspected base:** `cbd5029` (`Say who runs this, what it collects, and how to
@@ -17,6 +18,62 @@ longer holds: the owner chose a visitor-signed buy/sell button. And 9-11-0012's
 "a wallet's own trades from CryptoHouse" on request breaks the later rule that
 nothing on a request path may query CryptoHouse; 0013 Phase C reads balances in
 the browser and history from the store instead.
+**Status as of 2026-09-26**, checked against `origin/main` and
+`git log --oneline origin/main`, not from memory:
+
+- **P0 (tier 3 reclassified to `Audience::Operator`) is delivered.**
+  `/v1/funnel`, `/v1/scoreboard`, `/v1/decisions` and `/v1/evidence/*` are
+  `Audience::Operator` in `crates/radar-serve/src/access.rs` today (see the
+  `audience_of` test table). PR #246 (`517f372`, "The public trading terminal:
+  live market data and the screen that draws it") made this change; Q1 above
+  was answered yes. 9-11-0003 ("open admission") is **not** delivered: 0013's
+  status paragraph records wallet sign-in on the live box as still
+  `allowlist:` one address as of 2026-09-25, and `admission.rs` has not
+  changed since PR #105 — opening it is still the owner's edit to
+  `/etc/radar/radar.env`.
+- **P1-P2 (the public panel, market seam, capability route, live tape and
+  candles) are delivered.** `crates/radar-serve/src/market/` and
+  `/v1/market/coins`, `/v1/market/token/{mint}`, `/v1/market/trades/{mint}`
+  and `/v1/market/candles/{mint}` exist in `crates/radar-serve/src/lib.rs`
+  (routes) built by #246 and #248 (the live Yellowstone feed), with repairs
+  #258 and #259.
+- **P3 (per-wallet `Tenant`/`TenantStore`, isolated) is delivered, with the
+  three departures plan 0013 recorded.** `crates/radar-serve/src/tenant.rs`
+  exists; PRs #271 (trade history), #283, #285 (watchlist) and #287-#289
+  (positions) built it. The plan's own module comment on `tenant.rs` and
+  [0013's handback](0013-the-terminal-find-look-track-trade.md#handback)
+  record that a `Tenant` is built from a verified session token rather than
+  `Customer`, the watchlist is one JSON file per wallet rather than a
+  `radar-store` table, and no watermark gates it — a deliberate departure
+  from decision 2, not an oversight.
+- **P4 (holders, folded from the trade tape rather than bought) is
+  delivered.** PR #261 (`feat/holders-from-the-tape`), deployed with #266 on
+  2026-09-23; `crates/radar-serve/src/market/holders.rs`-equivalent logic
+  ships as `/v1/market/holders/{mint}`.
+- **P5 (live delivery, one shared ticker) is delivered but not deployed to
+  the live box.** PR #296 ("one shared ticker behind every SSE stream"),
+  merged 2026-09-25, adds `GET /v1/market/events`; plan 0014 Phase F item 1
+  records the deploy (`sudo radar-deploy`) as still outstanding.
+- **P6 (chart tools, timeframes and crosshair) is delivered.** PR #294,
+  merged and deployed per 0013's status paragraph; `web/src/CandleChart.tsx`
+  exists.
+- **P7 (a `repo-conformance` check walling the trader's paths off from the
+  panel) is not delivered.** No check in `crates/repo-conformance/` or
+  `access.rs` names `/v1/trader`, and no such route exists yet — plan 0011's
+  private trader is unstarted, so the boundary this item guards has nothing
+  to guard against today, but the check itself was never written.
+- **P8 (the unauthorised vendor contingency) correctly remains unbuilt.** No
+  second `MarketData` implementation or vendor client exists in
+  `crates/radar-serve/`, consistent with this item's "stop and ask before
+  writing a line."
+- **Trade execution, out of scope here, was added and is dark.** Plan 0013
+  Phase D and [ADR 0024](../adr/0024-radar-builds-a-visitors-swap-and-only-their-wallet-signs-it.md)
+  built a visitor-signed buy/sell panel (`crates/radar-serve/src/trade.rs`,
+  `web/src/TradePanel.tsx`, PRs #291/#293/#295) — this is the change the
+  "Superseded in part, 2026-09-18" paragraph above already describes. It
+  ships behind `RADAR_TRADE` and terms gates that [plan 0014](0014-close-the-terminal-and-measure-the-edge.md)
+  is closing; `/health` on the live box reports `trading: false` as of
+  2026-09-26.
 **Planned for:** Josh's implementation handoff.
 **Decided by:** the owner, 2026-09-11, recorded not argued — Radar is a public
 product, market data is free to a stranger, each wallet's own history and signals
