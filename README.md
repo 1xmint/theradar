@@ -1,13 +1,13 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # Radar
 
-Solana research and trading infrastructure, and an intelligence layer other
-agents can buy over x402.
+Solana research and trading infrastructure, with an x402/MCP agent surface built
+in and, on the live instance, sitting behind Cloudflare Access rather than open
+to any outside agent (issue #186) — see [What is live](#what-is-live) below.
 
 **Status: recording, and refusing to trade.** The pipeline runs end to end on a
-live instance — recording launches, measuring what became of them, answering
-questions about both over HTTP and MCP, and running the full decision lane over
-what it has recorded. 479,564 launches, 1,326,862 outcome measurements and 7,543
+live instance — recording launches, measuring what became of them, and running
+the full decision lane over what it has recorded. 479,564 launches, 1,326,862 outcome measurements and 7,543
 replayable decisions as of 2026-09-03.
 
 **Nothing has ever traded, and no edge has been found.** The measured selection
@@ -190,9 +190,24 @@ RADAR_STORE=./data/store cargo run -p radar-serve
 ```
 
 The last one serves an ops page at `/`, the instrument catalogue at
-`/v1/instruments`, and a stateless MCP endpoint at `/mcp`. The x402-priced public
-surface appears only when `RADAR_X402_PAY_TO` and `RADAR_X402_FACILITATOR` are
-set — it is never served free as a fallback.
+`/v1/instruments`, and a stateless MCP endpoint at `/mcp`. Locally, with
+`RADAR_ACCESS=off`, these are open. The x402-priced public surface appears only
+when `RADAR_X402_PAY_TO` and `RADAR_X402_FACILITATOR` are set — it is never
+served free as a fallback.
+
+### What is live
+
+On the deployed instance at `radar.heyvera.org`, `/v1/instruments` and `/mcp`
+sit behind Cloudflare Access — `curl` against either gets a 302 to Cloudflare's
+login, not a response, so no outside agent reaches them today (issue #186).
+What an outside agent or browser actually gets for free is `/v1/market/*`
+(coins, launches, candles, quotes — the public market-data tier) and the
+terminal UI at `radar.heyvera.org` itself. `/x402/*` classifies as public in
+`crates/radar-serve/src/access.rs`, but the deployment does not set
+`RADAR_X402_PAY_TO`/`RADAR_X402_FACILITATOR`, so a request there falls through
+to the same application shell rather than pricing anything. This section
+describes the wall as it stands, not a plan to move it — see
+[docs/STATE.md](docs/STATE.md) for the fuller, dated account.
 
 ## Measured, not assumed
 
