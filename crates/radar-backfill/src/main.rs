@@ -1197,7 +1197,12 @@ fn measure(args: &Args) -> Result<(), String> {
         );
         // Head, slot-time and price-window queries above still happened even
         // though nothing was due to measure.
-        record_query_meter(&args.store, "radar-backfill --outcomes", &client, &mut (0, 0));
+        record_query_meter(
+            &args.store,
+            "radar-backfill --outcomes",
+            &client,
+            &mut (0, 0),
+        );
         return Ok(());
     }
     let launches = due;
@@ -1241,6 +1246,33 @@ fn measure(args: &Args) -> Result<(), String> {
     }
     writer.flush().map_err(|e| e.to_string())?;
 
+    print_measure_summary(
+        measured_at,
+        written,
+        with_activity,
+        with_price,
+        priced_batches,
+        stillborn,
+    );
+    record_query_meter(
+        &args.store,
+        "radar-backfill --outcomes",
+        &client,
+        &mut (0, 0),
+    );
+    Ok(())
+}
+
+/// The human-readable tail of [`measure`], split out so the function that
+/// does the measuring stays under clippy's line-count limit.
+fn print_measure_summary(
+    measured_at: radar_types::Slot,
+    written: u64,
+    with_activity: u64,
+    with_price: u64,
+    priced_batches: u64,
+    stillborn: u64,
+) {
     println!(
         "
 --- measured {written} tokens as of slot {measured_at} ---"
@@ -1258,8 +1290,6 @@ fn measure(args: &Args) -> Result<(), String> {
 These are labels, not verdicts. Whether any of them predicts anything"
     );
     println!("is a question for the research store to answer against them.");
-    record_query_meter(&args.store, "radar-backfill --outcomes", &client, &mut (0, 0));
-    Ok(())
 }
 
 fn main() -> ExitCode {

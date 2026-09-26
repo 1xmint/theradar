@@ -16,6 +16,7 @@
 //! state file in the store's own crate, and it is not worth a `serde_json`
 //! dependency for four units and two numbers each.
 
+use std::fmt::Write as _;
 use std::path::Path;
 
 /// Where the meter lives inside the store.
@@ -29,6 +30,11 @@ pub struct UnitTally {
     /// How many of those CryptoHouse refused for quota.
     pub refused: u64,
 }
+
+/// One unit's name and its running tally, as held in memory between parsing
+/// and rendering the meter file. Named so `parse`'s and `render`'s signatures
+/// don't trip clippy's `type_complexity` on the equivalent tuple.
+type UnitRow = (String, u64, u64);
 
 /// Adds one run's counts to `unit`'s tally for `day`.
 ///
@@ -46,13 +52,19 @@ pub struct UnitTally {
 ///
 /// Returns the underlying message if the store directory or the file cannot
 /// be written, or if the rename fails.
-pub fn record(store: &Path, unit: &str, day: &str, queries: u64, refused: u64) -> Result<(), String> {
+pub fn record(
+    store: &Path,
+    unit: &str,
+    day: &str,
+    queries: u64,
+    refused: u64,
+) -> Result<(), String> {
     std::fs::create_dir_all(store).map_err(|e| e.to_string())?;
     let path = store.join(QUERY_METER_FILE);
     let existing = std::fs::read_to_string(&path).ok();
     let mut units = existing
         .as_deref()
-        .and_then(|raw| parse(raw))
+        .and_then(parse)
         .filter(|(file_day, _)| file_day == day)
         .map_or_else(Vec::new, |(_, units)| units);
 
@@ -95,7 +107,7 @@ pub fn today(store: &Path, unit: &str, day: &str) -> Option<UnitTally> {
 /// caught mid-rename, or a store predating this format. The same shape of
 /// answer [`crate::cursor::to_epoch`] gives a line it cannot read: absent,
 /// not a default.
-fn parse(raw: &str) -> Option<(String, Vec<(String, u64, u64)>)> {
+fn parse(raw: &str) -> Option<(String, Vec<UnitRow>)> {
     let mut lines = raw.lines();
     let day = lines.next()?.trim();
     if day.is_empty() {
@@ -113,10 +125,10 @@ fn parse(raw: &str) -> Option<(String, Vec<(String, u64, u64)>)> {
 }
 
 /// Renders the meter file, the inverse of [`parse`].
-fn render(day: &str, units: &[(String, u64, u64)]) -> String {
+fn render(day: &str, units: &[UnitRow]) -> String {
     let mut out = format!("{day}\n");
     for (name, queries, refused) in units {
-        out.push_str(&format!("{name} {queries} {refused}\n"));
+        let _ = writeln!(out, "{name} {queries} {refused}");
     }
     out
 }
