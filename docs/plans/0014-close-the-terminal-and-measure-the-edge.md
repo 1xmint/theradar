@@ -83,10 +83,12 @@ candidate count; any visitor measurement; running cargo test suites locally
 3. [x] **`/terms` audience.** Already `Public` in `access.rs:627` and listed in
    `routes.ts:69` on `main`; `routes.test.ts` cross-checks it. Nothing to do.
 4. [ ] **Owner, legal: the terms.** PR #292 has four blanks: operator name,
-   governing law, region blocks, contact. Recommendation: counsel reads the
-   draft before the button goes live; a public buy button on memecoins may be
-   a financial promotion in some places, and the region list has to be
-   deliberate. The draft must also say what the terminal keeps about a
+   governing law, region blocks, contact. **Owner decided 2026-09-25: counsel
+   reads the draft** before the button goes live; a public buy button on
+   memecoins may be a financial promotion in some places, and the region list
+   has to be deliberate. Counsel gets PR #292, F5's findings below, and the
+   question of whether Radar's visitors fall under Jupiter's own United States
+   block. The draft must also say what the terminal keeps about a
    visitor (wallet address, session, watchlist, positions), which the site's
    privacy page currently denies. Engineering then merges the terms, sets
    `TERMS_APPROVED` true, and links the terms from the panel. Done when the
@@ -203,20 +205,22 @@ CI re-run on any PR older than `main` before it merges.
 ## Open questions for Josh
 
 1. ~~What comes after the terminal?~~ Answered 2026-09-25: edge measurement.
-2. F4: does counsel read the terms before the button goes live, or do you fill
-   the four blanks yourself and accept the exposure? F5's findings (the
-   "Powered by Jupiter" label, the sanctions pass-through, and the United
-   States on Jupiter's own blocked list) are the reason to ask.
+2. ~~F4: does counsel read the terms before the button goes live, or do you
+   fill the four blanks yourself?~~ Answered 2026-09-25: counsel reads them.
+   F5's findings (the "Powered by Jupiter" label, the sanctions pass-through,
+   and the United States on Jupiter's own blocked list) go to counsel with the
+   draft. F7, F8 and F9 wait on counsel's answer.
 3. G2: pay CryptoHouse for a larger allowance, or leave the screen at ten
    coins until there are visitors? Asked with G1's numbers in hand.
 
 ## Handback
 
-**Stopped at:** F2's test and this plan written on
-`plan/0014-close-the-terminal`, not yet pushed; F5 read; F3 closed by reading.
+**Stopped at:** PR #297 open with F2's test and this plan; CI running. F3
+closed by reading; F5 read; F4 decided (counsel).
 
-**Next action:** push the branch, open the PR, wait for CI. Then H1 and H2 as
-their own PRs while the owner works F1's deploy, F4 and F7.
+**Next action:** when #297 is green, tick F2 and squash-merge. Then H1 and H2
+as their own PRs while the owner deploys #296 (F1) and sends #292 to counsel
+(F4). Nothing in F7 to F9 moves until counsel has answered.
 
 **Do not:** turn `RADAR_TRADE` on before F4, F5's label and F8; shrink
 `consider`; add any visitor counting; touch `Policy::CLOSED`.
