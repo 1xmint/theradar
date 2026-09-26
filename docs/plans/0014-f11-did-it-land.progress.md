@@ -1,22 +1,31 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # F11 progress (scratch handback file, not part of plan 0014's own doc)
 
-**Done:** Milestone 1 (server route, rate limiter, RPC reads) and the typed
-half of Milestone 2 (`api.ts`'s `txStatus`/`TxStatus`, `honesty.ts`'s
-`chain_unreadable` refusal and five landing-state sentences) are committed
-on `f11-did-it-land` at `38c7000`. `cargo fmt`/`clippy`/`check -p radar-serve`
-are clean (owner rule: no local `cargo test`).
+**Done:** Milestone 1 (server route) at `38c7000`. Milestone 2 in full at
+`23299d5`: the WIP integration test file
+`crates/radar-serve/tests/a_tx_status_says_whether_a_trade_landed.rs`
+(committed unverified at `f2211b5`) compiles clean under
+`cargo +stable-x86_64-pc-windows-gnullvm check/clippy/fmt -p radar-serve
+--tests` and already covered all four states plus the RPC-failure/honesty
+case (verified by reading it, not rewritten). Added the web half:
+`tradeContract.test.ts` diffs `render_tx_status`'s keys (unioned across its
+four `json!` literals, one per match arm) against `TxStatus`; `honesty.test.ts`
+covers `chain_unreadable` and a new `landingMessage` suite including the
+expired-vs-unknown honesty rule. `npx vitest run` -> 266 passed, `npx tsc
+--noEmit -p .` clean.
 
-**Next:** integration tests in a new `crates/radar-serve/tests/` file
-(pending/landed/failed/expired + RPC-failure), extend
-`web/src/tradeContract.test.ts` for `TxStatus`, then Milestone 3
-(`TradePanel.tsx` polling + stale-build rebuild, `usePositions.ts`
-landed-only refresh), web tests, then raise `MIN_WEB_TESTS` in `justfile`.
+**Next:** Milestone 3 -- `TradePanel.tsx` poll loop (1.5s, ~90s cap) after
+`signAndSendTransaction`, landed/failed/expired/unknown copy, Solscan link in
+every state, `usePositions.ts` refresh on landed only (not immediately on
+send), stale-build (>60s) rebuild before signing. Web tests for each state
+plus the rebuild path. Then Milestone 4: raise `MIN_WEB_TESTS` in `justfile`
+(currently "262") to 262 + new `it(` count, dated comment; delete this
+scratch file in the final commit.
 
-**Watch out for:** target/ cache went stale mid-session (radar-serve
-couldn't see radar-onchain's new pub items until `cargo clean -p
-radar-onchain -p radar-serve`) -- if `cargo check` claims a symbol you just
-added doesn't exist, clean those two crates before assuming the code is
-wrong. Branch was rebased-by-merge onto `origin/main`'s `a5f1f3d` (the
-plan-0014 doc + `tradeContract.test.ts` landed there after this branch was
-cut) -- already merged in, no action needed.
+**Watch out for:** `web/node_modules` was missing in this worktree --
+`npm install` first or vitest/tsc fail with ERR_MODULE_NOT_FOUND. `npm
+install` also touches `web/package-lock.json` with unrelated
+optional/peer-dep churn (a `typescript` sub-entry under `@solana/web3.js`
+appearing/disappearing) -- `git checkout -- web/package-lock.json` before
+committing unless you deliberately changed a dependency. Do not run `cargo
+test` locally (CI runs it) -- `check`/`clippy`/`fmt` are the local gate.
