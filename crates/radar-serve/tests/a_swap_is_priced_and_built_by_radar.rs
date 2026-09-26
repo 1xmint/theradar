@@ -718,7 +718,7 @@ async fn a_sanctioned_wallet_is_refused_before_the_rate_limiter_too() {
     let router = router(Some(trading(endpoint, vec![mint_account_json(6)])));
     let body = serde_json::json!({"mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", "side": "buy", "amount": "100000000"});
 
-    for attempt in 0..PER_WALLET_CAP + 1 {
+    for attempt in 0..=PER_WALLET_CAP {
         let (status, resp, _cache) = swap(&router, body.clone(), &session(&sanctioned)).await;
         assert_eq!(status, StatusCode::FORBIDDEN, "attempt {attempt}: {resp}");
         assert_eq!(resp["reason"], "sanctioned", "attempt {attempt}: {resp}");
