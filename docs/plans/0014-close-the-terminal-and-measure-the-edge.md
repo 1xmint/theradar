@@ -53,8 +53,12 @@ What is true on 2026-09-25, from `/health` and the merged list, not from memory:
   are the input to Phase I. This plan does not shrink `consider` to make room
   for more coins on the screen.
 - **The site's privacy page promises "Nothing measures you"**
-  (`site/src/Privacy.tsx:56`). Any visitor counting is an owner decision with
-  a text change first, and is not in this plan.
+  (`site/src/Privacy.tsx:56`). `site/` is cabalhunter.org, not the terminal,
+  but the rule carries: any visitor counting is an owner decision with a text
+  change first, and is not in this plan.
+- **2026-09-26, owner:** trading is public for any wallet with no counsel
+  review, and the scope is all of this plan. F4 and the order below are
+  amended to match; F10–F13 are new.
 
 ## Not in scope
 
@@ -74,26 +78,20 @@ candidate count; any visitor measurement; running cargo test suites locally
    Done when `/health` reports build `666d504` or later and
    `curl -N https://radar.heyvera.org/v1/market/events` emits ticks from
    outside.
-2. [ ] **Contract cross-check.** `web/src/tradeContract.test.ts` reads
+2. [x] **Contract cross-check.** `web/src/tradeContract.test.ts` reads
    `trade.rs` and `api.ts` and fails if `Quote`, `SwapResponse` or the refusal
    vocabulary drift. Written 2026-09-25 in this branch; read-through found no
    mismatch (six server reasons, all with a sentence in `honesty.ts`; the
-   field lists agree). Done when CI is green on this branch and
-   `MIN_WEB_TESTS` is 262.
+   field lists agree). CI green on #297 with `MIN_WEB_TESTS` 262.
 3. [x] **`/terms` audience.** Already `Public` in `access.rs:627` and listed in
    `routes.ts:69` on `main`; `routes.test.ts` cross-checks it. Nothing to do.
-4. [ ] **Owner, legal: the terms.** PR #292 has four blanks: operator name,
-   governing law, region blocks, contact. **Owner decided 2026-09-25: counsel
-   reads the draft** before the button goes live; a public buy button on
-   memecoins may be a financial promotion in some places, and the region list
-   has to be deliberate. Counsel gets PR #292, F5's findings below, and the
-   question of whether Radar's visitors fall under Jupiter's own United States
-   block. The draft must also say what the terminal keeps about a
-   visitor (wallet address, session, watchlist, positions), which the site's
-   privacy page currently denies. Engineering then merges the terms, sets
-   `TERMS_APPROVED` true, and links the terms from the panel. Done when the
-   owner or counsel has signed off in the PR, `legal.test.ts` finds no
-   placeholder, and `/terms` renders on the site.
+4. [x] **Owner, legal: the terms.** ~~Owner decided 2026-09-25: counsel
+   reads the draft.~~ **Reversed by the owner on 2026-09-26: no counsel;
+   trading is public for any wallet.** The owner fills #292's four blanks
+   (operator name, governing law, blocked regions, contact) himself and
+   carries the exposure. The work moves to F10. (The `site/` privacy page
+   belongs to cabalhunter.org, a different product; the terminal's own
+   disclosure of what it keeps lives in its terms.)
 5. [x] **Jupiter's terms, read 2026-09-25** (orch-researcher, primary pages
    only). Findings the owner and the terms draft must carry:
    - The SDK & API License Agreement
@@ -122,21 +120,66 @@ candidate count; any visitor measurement; running cargo test suites locally
 6. [ ] **Owner: update GOAL.md** to the 2026-09-18 direction: move or remove
    the X account section; say whether item 2 is still "see the decisions and
    act on them" or is now the swap button. Done when it is committed on `main`.
-7. [ ] **Owner: the key and the switch.** `RADAR_JUPITER_API_KEY` and
-   `RADAR_TRADE=on` in `/etc/radar/radar.env`, restart `radar-serve`. Only
-   after items 4 and 5. Done when `/health` reports `trading: true` and
-   `GET /v1/market/quote` answers from outside.
+7. [ ] **Owner: the key and the switch.** In the same box session as F1,
+   after F10–F12 are merged and F8 has passed: `RADAR_RPC` set to a private
+   RPC URL (G4, moved here so F11's landing check and positions do not ride
+   the public node), then `RADAR_JUPITER_API_KEY` and `RADAR_TRADE=on` in
+   `/etc/radar/radar.env`, restart `radar-serve`. Then open
+   radar.heyvera.org in Phantom and check signing shows no "unsafe site"
+   warning; if it does, submit the domain to Phantom/Blowfish before F9.
+   Done when `/health` reports `trading: true`, `GET /v1/market/quote`
+   answers from outside, and Phantom does not warn.
 8. [ ] **Independent review** (Opus, orch-reviewer) of the whole swap path,
    server and web, against 0013's D.4 and D.5: no key, no fee, slippage
    refused not clamped, the review card's numbers come from the built quote,
-   cancel and failure worded apart, "Powered by Jupiter" shown. Money moves,
-   so this is not optional. Done when PASS is recorded here with findings fixed.
-9. [ ] **Rehearsal.** A throwaway wallet with a few cents; Josh signs one buy
-   and one sell from the screen. Transaction ids and the positions panel
-   updating go here. Then 0013's status becomes `landed`.
+   cancel and failure worded apart, "Powered by Jupiter" shown, plus F10–F12:
+   landing states honest ("expired" only when proven), the sanctioned
+   refusal. Runs on each pull request as it is pushed. Money moves, so this
+   is not optional. **Trading does not switch on until PASS.** Done when PASS
+   is recorded here with findings fixed.
+9. [ ] **The owner's real test.** From radar.heyvera.org with his own wallet:
+   start with about 0.01 SOL of one coin, then sell it back; then any size.
+   Include one SOL→token and one token→SOL (proves Jupiter's wrap/unwrap
+   passes `assemble.rs`'s checks on mainnet). Transaction ids, the landing
+   state shown and the positions panel updating go here. Then 0013's status
+   becomes `landed`.
+10. [ ] **Terms final, panel on.** #292's text moves into `web/src/legal.ts`
+    with the owner's four values, plus: Jupiter is a back-end routing
+    service, not a broker, exchange or custodian; the failed-trade, slippage
+    and MEV disclaimer; sanctioned persons may not use it; what the terminal
+    keeps (wallet address, watchlist, session token in the browser,
+    positions — stored or read live, whichever the code does); Cloudflare and
+    hosting named as request loggers. `TERMS_APPROVED` true, `/terms` linked
+    from the panel, a persistent "Powered by Jupiter" label (F5, §8.4). #292
+    closed pointing here. Done when `legal.test.ts` finds no placeholder and
+    `TradePanel.test.tsx` asserts the label and the link.
+11. [ ] **Did it land?** Server: `GET /v1/customer/tx/{signature}?last_valid_block_height=N`
+    (Customer audience, the per-wallet limiter) answers `pending`, `landed`,
+    `failed` (with the reason) or `expired`, from `getSignatureStatuses` and
+    `getBlockHeight`. Web: after the wallet sends, poll it every 1.5 s up to
+    about 90 s and say which. **"Expired" only when proven**: a successful
+    read shows the chain past `last_valid_block_height` and no status for the
+    signature; a failed or rate-limited read says "unknown, check Solscan".
+    Positions refresh on `landed` only. A build older than about 60 s is
+    rebuilt before the wallet is asked to sign. Done when a server test covers
+    all four states against the faked chain and web tests cover each state
+    and the stale-build rebuild.
+12. [ ] **Sanctioned wallets refused** (Jupiter §7.3). A checked-in list of
+    OFAC-listed Solana addresses, source and date in its header, checked at
+    `customer/swap` only; refusal `sanctioned` with a sentence in
+    `honesty.ts`. Done when a server test refuses a listed address and passes
+    others.
+13. [ ] **Works on a phone.** Under 1024 px the terminal stacks to one column
+    with the trade panel reachable without sideways scroll; with no wallet in
+    a phone browser, Connect offers "Open in Phantom" / "Open in Solflare"
+    deep links to the current page. Does not hold up F7. Done when web tests
+    cover the no-wallet phone state and the page is checked at 375 px and
+    1280 px.
 
-Order: 1, 2 and 5 now. 4, 6 and 7 are the owner's and gate 8 and 9. Phases H
-and G do not wait on them.
+Order (2026-09-26): 10–13 in parallel as separate pull requests, merged one
+at a time with CI re-run; 8 reviews each as it is pushed. 1 and 7 in one box
+session after 10–12 are merged and 8 has passed. 9 after 7. Phases H, G and I
+do not wait.
 
 ## Phase H — the public claims match the product
 
@@ -206,21 +249,33 @@ CI re-run on any PR older than `main` before it merges.
 
 1. ~~What comes after the terminal?~~ Answered 2026-09-25: edge measurement.
 2. ~~F4: does counsel read the terms before the button goes live, or do you
-   fill the four blanks yourself?~~ Answered 2026-09-25: counsel reads them.
-   F5's findings (the "Powered by Jupiter" label, the sanctions pass-through,
-   and the United States on Jupiter's own blocked list) go to counsel with the
-   draft. F7, F8 and F9 wait on counsel's answer.
+   fill the four blanks yourself?~~ Answered 2026-09-25: counsel; reversed
+   2026-09-26: no counsel, public for any wallet, the owner fills the blanks.
 3. G2: pay CryptoHouse for a larger allowance, or leave the screen at ten
    coins until there are visitors? Asked with G1's numbers in hand.
+4. The four terms values for F10: operator name, governing law, contact,
+   blocked regions. Recommendation for regions: Jupiter's own list (United
+   States, Cuba, Iran, North Korea, Syria, sanctioned persons), stated in the
+   terms, not enforced by IP. If the owner is in the United States, his own
+   test would sit outside Jupiter's terms as written.
+5. F6, a GOAL.md wording for the owner to approve or rewrite (it is his
+   document; nothing here waits on it). Line 166 "nothing has ever traded"
+   and "What working would look like" item 2 become, after F9: *"2. A
+   customer can connect a wallet, see the market, and buy or sell from the
+   screen, with Radar never holding a key or a fee. Live since F9; Radar's
+   own decisions are still not published to customers."* The X account
+   section moves out (it lives in realorrug since #253). Item 1, the measured
+   edge, stays first: the swap button is a tool, not a claim of edge.
 
 ## Handback
 
-**Stopped at:** PR #297 open with F2's test and this plan; CI running. F3
-closed by reading; F5 read; F4 decided (counsel).
+**Stopped at (2026-09-26):** #297 carries F2 and this plan with the owner's
+two decisions of the day (no counsel, public for any wallet; the scope is all
+of this plan). F10–F13 added.
 
-**Next action:** when #297 is green, tick F2 and squash-merge. Then H1 and H2
-as their own PRs while the owner deploys #296 (F1) and sends #292 to counsel
-(F4). Nothing in F7 to F9 moves until counsel has answered.
+**Next action:** F11, F12, F13 and H1/H2 as their own pull requests now; F10
+when the owner sends the four terms values. F8 reviews each as pushed. Then
+the owner's box session (F1 + F7), then F9.
 
-**Do not:** turn `RADAR_TRADE` on before F4, F5's label and F8; shrink
-`consider`; add any visitor counting; touch `Policy::CLOSED`.
+**Do not:** turn `RADAR_TRADE` on before F10–F12 are merged and F8 has
+passed; shrink `consider`; add any visitor counting; touch `Policy::CLOSED`.
