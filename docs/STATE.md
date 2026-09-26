@@ -873,6 +873,57 @@ leaderboard and from the cooldown that reads it.
 Nothing here touches the store, the signer or `Policy::CLOSED`. It is read-only
 against the chain and append-only against its own log.
 
+## What is live on radar.heyvera.org
+
+As of 2026-09-26, checked directly rather than recalled.
+
+`curl -s https://radar.heyvera.org/health`:
+
+```json
+{"agent":{"configured":false},"build":"5a9d991cb1c71b15cdf8e8ec9aa8117b3ae22c96","instruments":3,"paidSurface":false,"policyClosed":true,"status":"ok","trading":false,"version":"0.0.1","watermarkSlot":450725922}
+```
+
+**Build `5a9d991`** is #295 (Phase D server half: signed-in wallet swap
+pricing and building, ADR 0024). #296 (Plan 0013 Phase E.1: one shared ticker
+behind every SSE stream, `/v1/market/events`) is merged to `main` one commit
+later and **not yet on this build** — the next `radar-deploy` picks it up.
+
+**Public, no wallet or Access token needed** (`Audience::Public` in
+[`crates/radar-serve/src/access.rs`](../crates/radar-serve/src/access.rs),
+confirmed against the live instance): `/v1/market/*` (coins, launches,
+candles, quotes, events), `/health`, and the terminal UI itself — `/`,
+`/decisions`, `/evidence`, `/wallet`, `/ask`, `/terms`, `/token/*` and the
+asset bundle. `/x402/*` classifies as public in the same file, but the
+deployment sets neither `RADAR_X402_PAY_TO` nor `RADAR_X402_FACILITATOR`, so a
+request there falls through to the application shell rather than pricing
+anything — `curl -s -o /dev/null -w '%{http_code}' https://radar.heyvera.org/x402/v1/instruments`
+returns `200` with the SPA's HTML, not an x402 response.
+
+**Behind Cloudflare Access** (`Audience::Operator`, the default for anything
+not explicitly classified): `/mcp` and `/v1/instruments` both answered `curl`
+with `302` to `small-art-43c3.cloudflareaccess.com`'s login on 2026-09-26. No
+outside agent reaches the x402/MCP agent surface today — issue #186, closed by
+making the README say this rather than by moving the wall.
+
+**Customer (wallet-session) routes**, `Audience::Customer`, reachable only
+after Sign-In-With-Solana: `/v1/customer/wallet`, `/v1/customer/events`,
+`/v1/chat`, `/v1/customer/watchlist(/:mint)`, `/v1/customer/positions`,
+`/v1/customer/swap`.
+
+**The dark switches, both still off**: `RADAR_TRADE` is unset in production,
+so [`crates/radar-serve/src/trade.rs`](../crates/radar-serve/src/trade.rs)'s
+`Trading` is never constructed — `/v1/customer/swap` reports "this instance
+does not build or price swaps" rather than pricing one, and there is no
+Jupiter credential configured either, which `RADAR_TRADE=on` would refuse to
+start without. In the web client,
+[`TERMS_APPROVED`](../web/src/legal.ts) is hardcoded `false`, which
+`TradePanel.tsx` reads as its first gate before the swap button does anything.
+
+**The policy is closed and nothing has ever traded.** `/health` reports
+`policyClosed: true` and `trading: false`. `Policy::CLOSED` refuses every
+proposal; see "The round trip is three numbers" above for why that is
+currently the arithmetically correct position rather than a placeholder.
+
 ## Where to start
 
 - [`docs/research/`](../docs/research/) — what was investigated and what it found,
