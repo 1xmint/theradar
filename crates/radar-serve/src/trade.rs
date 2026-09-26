@@ -103,12 +103,12 @@ use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use axum::Json;
-use axum::extract::{ConnectInfo, Extension, Query, State};
+use axum::extract::{ConnectInfo, Extension, Path, Query, State};
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use radar_exec::route::{QuoteRequest, RouteError, Router};
 use radar_onchain::budget::Budget;
-use radar_onchain::rpc::RpcClient;
+use radar_onchain::rpc::{RpcClient, RpcError, SignatureStatus, decode_base58};
 use radar_types::{Address, Asset};
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -173,6 +173,29 @@ const MAX_JUPITER_BUILD_CALLS_PER_MINUTE: u32 = 24;
 /// rolling minute, regardless of room left in that route's own global budget.
 const MAX_CALLS_PER_WALLET_PER_MINUTE: u32 = 6;
 
+/// The most calls one wallet may draw from `GET /v1/customer/tx/{signature}`
+/// in one rolling minute.
+///
+/// A different order of magnitude from [`MAX_CALLS_PER_WALLET_PER_MINUTE`] on
+/// purpose: that cap paces a wallet *building* a transaction, which it does
+/// rarely. This one paces a browser tab *polling* for one transaction's
+/// outcome every 1.5s for up to 90s after a real send -- roughly 60 reads in
+/// the worst case -- so a cap sized like the swap route's would refuse a
+/// single normal poll loop partway through. Two RPC reads per call (a
+/// signature-status lookup and a block-height read), so this is a much
+/// smaller draw on the node per call than a swap build's single Jupiter call.
+const MAX_TX_STATUS_CALLS_PER_WALLET_PER_MINUTE: u32 = 60;
+
+/// The most calls this instance will make for `GET /v1/customer/tx/{signature}`,
+/// across every wallet, in one rolling minute.
+///
+/// Its own pool, separate from [`Self::build_calls`] and [`Self::quote_calls`]
+/// for the same reason those two are separate from each other -- a burst of
+/// polling from one wallet must not starve another wallet's own swap build,
+/// and vice versa. Ten wallets' worth of simultaneous full-tilt polling
+/// (10 x [`MAX_TX_STATUS_CALLS_PER_WALLET_PER_MINUTE`]'s 60).
+const MAX_TX_STATUS_CALLS_PER_MINUTE: u32 = 600;
+
 /// One quote or one build: exactly one Jupiter call each (see
 /// `radar_exec::route::Router`'s own doc comments).
 const CALLS_PER_REQUEST: u32 = 1;
@@ -202,6 +225,11 @@ pub struct Trading {
     /// [`Self::quote_calls`] — see the module doc comment.
     build_calls: Mutex<VecDeque<Instant>>,
     wallet_calls: Mutex<HashMap<Address, VecDeque<Instant>>>,
+    /// `GET /v1/customer/tx/{signature}`'s own global budget. Never shared
+    /// with [`Self::quote_calls`] or [`Self::build_calls`] — see the module
+    /// doc comment's "Four limits" section, and [`MAX_TX_STATUS_CALLS_PER_MINUTE`].
+    tx_status_calls: Mutex<VecDeque<Instant>>,
+    wallet_tx_status_calls: Mutex<HashMap<Address, VecDeque<Instant>>>,
 }
 
 impl Trading {
@@ -216,6 +244,8 @@ impl Trading {
             visitor_calls: Mutex::new(HashMap::new()),
             build_calls: Mutex::new(VecDeque::new()),
             wallet_calls: Mutex::new(HashMap::new()),
+            tx_status_calls: Mutex::new(VecDeque::new()),
+            wallet_tx_status_calls: Mutex::new(HashMap::new()),
         }
     }
 
@@ -306,6 +336,42 @@ impl Trading {
         let mine = wallets.get(&wallet).unwrap_or(&none);
         if !fits(&global, want, MAX_JUPITER_BUILD_CALLS_PER_MINUTE)
             || !fits(mine, want, MAX_CALLS_PER_WALLET_PER_MINUTE)
+        {
+            return false;
+        }
+        let entry = wallets.entry(wallet).or_default();
+        for _ in 0..want {
+            global.push_back(now);
+            entry.push_back(now);
+        }
+        true
+    }
+
+    /// Reserves `want` calls against `wallet`'s own share and
+    /// `GET /v1/customer/tx/{signature}`'s own global budget
+    /// ([`Self::tx_status_calls`]) — its own pool, separate from both the
+    /// quote and swap routes'. Same lock-ordering discipline as
+    /// [`Self::reserve_visitor`] and [`Self::reserve_wallet`].
+    fn reserve_tx_status(&self, wallet: Address, want: u32) -> bool {
+        let mut global = self
+            .tx_status_calls
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut wallets = self
+            .wallet_tx_status_calls
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let now = Instant::now();
+        let window = Duration::from_secs(60);
+        prune(&mut global, now, window);
+        wallets.retain(|_, calls| {
+            prune(calls, now, window);
+            !calls.is_empty()
+        });
+        let none = VecDeque::new();
+        let mine = wallets.get(&wallet).unwrap_or(&none);
+        if !fits(&global, want, MAX_TX_STATUS_CALLS_PER_MINUTE)
+            || !fits(mine, want, MAX_TX_STATUS_CALLS_PER_WALLET_PER_MINUTE)
         {
             return false;
         }
@@ -827,6 +893,158 @@ async fn swap_inner(
                 StatusCode::BAD_GATEWAY,
                 "unreadable_route",
                 "Radar could not build a transaction for this request",
+            )
+        }
+    }
+}
+
+/// Query parameters for `GET /v1/customer/tx/{signature}`.
+#[derive(Debug, Deserialize)]
+pub(crate) struct TxStatusQuery {
+    last_valid_block_height: u64,
+}
+
+/// A short, plain rendering of a landed-but-failed transaction's on-chain
+/// error -- never the raw JSON, which is a debugging shape (`{"InstructionError":
+/// [3,{"Custom":6001}]}`) nobody asked this route to teach a customer to read.
+///
+/// Deliberately not exhaustive on every `TransactionError` variant Solana
+/// defines: new variants are rare, and falling back to the compact JSON
+/// (still short, still plain enough) is a better failure mode here than this
+/// route refusing to answer over a shape it does not recognise yet.
+fn describe_tx_err(err: &Value) -> String {
+    if let Some(arr) = err.get("InstructionError").and_then(Value::as_array)
+        && let (Some(index), Some(detail)) = (arr.first().and_then(Value::as_u64), arr.get(1))
+    {
+        if let Some(custom) = detail.get("Custom").and_then(Value::as_u64) {
+            return format!("instruction {index} failed with custom error {custom}");
+        }
+        if let Some(kind) = detail.as_str() {
+            return format!("instruction {index} failed: {kind}");
+        }
+    }
+    if let Some(kind) = err.as_str() {
+        return kind.to_owned();
+    }
+    err.to_string()
+}
+
+/// Answers whether a transaction the caller's own wallet already sent has
+/// landed, failed, expired, or is still pending -- the read a success screen
+/// needs before it may say "success". See the module doc comment's wire
+/// contract note above [`TxStatusQuery`] for the full state table.
+fn render_tx_status(
+    status: Option<SignatureStatus>,
+    height: u64,
+    last_valid_block_height: u64,
+) -> Value {
+    match status {
+        Some(status) => {
+            if let Some(err) = status.err {
+                return json!({ "state": "failed", "reason": describe_tx_err(&err) });
+            }
+            let landed = matches!(
+                status.confirmation_status.as_deref(),
+                Some("confirmed" | "finalized")
+            );
+            if landed {
+                json!({ "state": "landed", "slot": status.slot })
+            } else {
+                json!({ "state": "pending" })
+            }
+        }
+        // No status at all is only ever "expired" once both reads succeeded
+        // (we are here) and the chain's own clock has passed the transaction's
+        // last valid block height -- never on the strength of a missing status
+        // alone, which is indistinguishable from "not landed yet".
+        None if height > last_valid_block_height => json!({ "state": "expired" }),
+        None => json!({ "state": "pending" }),
+    }
+}
+
+/// `GET /v1/customer/tx/{signature}?last_valid_block_height=N`: whether a
+/// transaction the signed-in wallet already sent has landed. See the module
+/// doc comment for the wire contract.
+pub(crate) async fn tx_status(
+    state: State<Arc<AppState>>,
+    tenant: Tenant,
+    path: Path<String>,
+    query: Query<TxStatusQuery>,
+) -> Response {
+    let mut response = tx_status_inner(state, tenant, path, query).await;
+    response
+        .headers_mut()
+        .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    response
+}
+
+async fn tx_status_inner(
+    State(state): State<Arc<AppState>>,
+    tenant: Tenant,
+    Path(signature): Path<String>,
+    Query(query): Query<TxStatusQuery>,
+) -> Response {
+    let decoded = decode_base58(&signature);
+    if decoded.is_none_or(|bytes| bytes.len() != 64) {
+        return refusal(
+            StatusCode::BAD_REQUEST,
+            "bad_request",
+            "signature must be base58 of 64 bytes",
+        );
+    }
+
+    if state.trading.is_none() {
+        return refusal(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "trading_off",
+            "this instance does not build or price swaps; set RADAR_TRADE=on to enable it",
+        );
+    }
+
+    let wallet = *tenant.address();
+    {
+        let trading = state.trading.as_ref().expect("checked above");
+        if !trading.reserve_tx_status(wallet, CALLS_PER_REQUEST) {
+            return refusal(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "busy",
+                "Radar is rate-limiting transaction-status reads; try again shortly",
+            );
+        }
+    }
+
+    let last_valid_block_height = query.last_valid_block_height;
+    let state_for_call = Arc::clone(&state);
+    let result = tokio::task::spawn_blocking(move || {
+        let trading = state_for_call
+            .trading
+            .as_ref()
+            .expect("trading is checked present before this task is spawned, and never removed");
+        let mut budget = Budget::new(2, 1, Duration::from_secs(10));
+        let status = trading.rpc.signature_status(&mut budget, &signature)?;
+        let height = trading.rpc.block_height(&mut budget)?;
+        Ok::<(Option<SignatureStatus>, u64), RpcError>((status, height))
+    })
+    .await;
+
+    match result {
+        Ok(Ok((status, height))) => {
+            Json(render_tx_status(status, height, last_valid_block_height)).into_response()
+        }
+        Ok(Err(why)) => {
+            eprintln!("radar-serve: tx status read failed: {}", why.kind());
+            refusal(
+                StatusCode::BAD_GATEWAY,
+                "chain_unreadable",
+                "Radar could not read the chain to check this transaction",
+            )
+        }
+        Err(_join_error) => {
+            eprintln!("radar-serve: tx status task did not complete (join error)");
+            refusal(
+                StatusCode::BAD_GATEWAY,
+                "chain_unreadable",
+                "Radar could not read the chain to check this transaction",
             )
         }
     }

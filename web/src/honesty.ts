@@ -572,7 +572,46 @@ export function swapRefusalMessage(reason: string, detail: string): string {
       return "That slippage tolerance is wider than Radar allows.";
     case "sanctioned":
       return "This wallet appears on a sanctions list, so Radar will not build trades for it.";
+    case "chain_unreadable":
+      return "Radar could not read the chain to check this transaction. This says nothing about whether it landed.";
     default:
       return detail;
+  }
+}
+
+// --- landing's honesty rules --------------------------------------------------
+//
+// `/v1/customer/tx/{signature}` answers whether a transaction the wallet
+// already signed and sent landed. Its refusals reuse `swapRefusalMessage`
+// (same reasons: `busy`, `trading_off`, `bad_request`, `chain_unreadable`,
+// wallet-session). This is the sentence for the four *states* the route can
+// answer with when it does not refuse -- distinct from a refusal, because a
+// refusal means "Radar could not check," while a state is what Radar found.
+//
+// `unknown` is not one of the server's states. It is what the screen shows
+// when a poll itself failed, was rate-limited, or the ~90s window ran out
+// without an answer -- and it is worded to never be confused with `expired`,
+// because "expired" is a specific on-chain fact (the blockhash's last valid
+// height passed with no landed signature) and "Radar could not find out" is
+// not that fact.
+export type LandingState =
+  | { kind: "pending" }
+  | { kind: "landed" }
+  | { kind: "failed"; reason: string }
+  | { kind: "expired" }
+  | { kind: "unknown" };
+
+export function landingMessage(state: LandingState): string {
+  switch (state.kind) {
+    case "pending":
+      return "Waiting for the chain";
+    case "landed":
+      return "Landed";
+    case "failed":
+      return `Failed on chain: ${state.reason}`;
+    case "expired":
+      return "Expired -- nothing was spent";
+    case "unknown":
+      return "Unknown -- check Solscan";
   }
 }

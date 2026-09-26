@@ -795,6 +795,65 @@ impl RpcClient {
         )?;
         Ok(parse_transaction(&raw))
     }
+
+    /// What the node currently knows about `signature`, or `None` when it
+    /// has no record of it at all -- searching full transaction history
+    /// (`searchTransactionHistory: true`), not just the recent-status cache,
+    /// so a signature that landed more than ~150 slots ago is still found
+    /// rather than misread as never-sent.
+    ///
+    /// # Errors
+    ///
+    /// [`RpcError`] on transport, node or shape failures, or when the budget
+    /// is spent.
+    pub fn signature_status(
+        &self,
+        budget: &mut Budget,
+        signature: &str,
+    ) -> Result<Option<SignatureStatus>, RpcError> {
+        let result: SignatureStatusesEnvelope = self.call(
+            budget,
+            "getSignatureStatuses",
+            &serde_json::json!([[signature], { "searchTransactionHistory": true }]),
+        )?;
+        Ok(result.value.into_iter().next().flatten())
+    }
+
+    /// The current block height, at `confirmed` commitment -- the same
+    /// clock a `last_valid_block_height` from a built transaction is
+    /// compared against to say whether it has expired.
+    ///
+    /// # Errors
+    ///
+    /// [`RpcError`] on transport, node or shape failures, or when the budget
+    /// is spent.
+    pub fn block_height(&self, budget: &mut Budget) -> Result<u64, RpcError> {
+        self.call(
+            budget,
+            "getBlockHeight",
+            &serde_json::json!([{ "commitment": "confirmed" }]),
+        )
+    }
+}
+
+/// One signature's status, as `getSignatureStatuses` reports it.
+#[derive(Debug, Clone, Deserialize)]
+pub struct SignatureStatus {
+    /// The slot the transaction landed in.
+    pub slot: u64,
+    /// `Some` (non-null) when the transaction landed but failed on-chain --
+    /// the raw `TransactionError` the node reported, never normalised, so a
+    /// caller can render it however it needs to.
+    pub err: Option<serde_json::Value>,
+    /// `"processed"`, `"confirmed"`, or `"finalized"` -- `None` when the node
+    /// gave a status with no confirmation level at all.
+    #[serde(rename = "confirmationStatus")]
+    pub confirmation_status: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct SignatureStatusesEnvelope {
+    value: Vec<Option<SignatureStatus>>,
 }
 
 /// How many signatures one page asks for.

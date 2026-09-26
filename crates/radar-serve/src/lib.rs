@@ -340,6 +340,11 @@ pub fn app(state: Arc<AppState>) -> Router {
         // unconditionally; see `trade`'s module doc comment for why it answers
         // `trading_off` rather than 404 when `RADAR_TRADE` is off.
         .route("/v1/customer/swap", post(trade::swap))
+        // Whether a transaction the signed-in wallet already sent has landed
+        // -- polled by the terminal after `signAndSendTransaction` returns a
+        // signature. Behind the same `RADAR_TRADE` switch and `Tenant` as
+        // `swap`; see `trade`'s module doc comment.
+        .route("/v1/customer/tx/{signature}", get(trade::tx_status))
         .route("/v1/instruments", get(list_instruments))
         .route("/v1/instruments/{name}", post(call_instrument))
         // Public market data -- tier 1 of plan 0012. No identity, and none of

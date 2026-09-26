@@ -510,6 +510,60 @@ async function swapRequest(token: string, body: SwapRequest): Promise<SwapRespon
   return parsed as unknown as SwapResponse;
 }
 
+/**
+ * `GET /v1/customer/tx/{signature}`'s answer: whether a transaction the
+ * signed-in wallet already sent and signed itself has landed. This route
+ * never signs or sends anything (ADR 0024, same as `swap`) -- it only reads
+ * what the chain now says about a signature the wallet already produced.
+ *
+ * `"pending"` is also this shape's answer to "not sure yet" -- a caller
+ * treats every state that is not `"landed"` as "do not tell the customer
+ * this succeeded" (`TradePanel.tsx`).
+ */
+export interface TxStatus {
+  state: "pending" | "landed" | "failed" | "expired";
+  /** Set only when `state` is `"failed"` -- a short, plain rendering of the
+   *  on-chain error, never the raw JSON `TransactionError` shape. */
+  reason?: string;
+  /** Set only when `state` is `"landed"`. */
+  slot?: number;
+}
+
+async function txStatusRequest(
+  token: string,
+  signature: string,
+  lastValidBlockHeight: number,
+  signal?: AbortSignal,
+): Promise<TxStatus> {
+  const params = new URLSearchParams({ last_valid_block_height: String(lastValidBlockHeight) });
+  const response = await fetch(
+    `/v1/customer/tx/${encodeURIComponent(signature)}?${params.toString()}`,
+    {
+      signal: signal ?? null,
+      headers: { authorization: `Bearer ${token}`, accept: "application/json" },
+    },
+  );
+  let parsed: { error?: string; reason?: string; state?: string } | null = null;
+  try {
+    parsed = (await response.json()) as { error?: string; reason?: string; state?: string };
+  } catch {
+    // A non-JSON body is itself informative: something upstream answered.
+  }
+  if (!response.ok) {
+    throw new SwapError(
+      response.status,
+      parsed?.reason ?? "unknown",
+      parsed?.error ?? response.statusText,
+    );
+  }
+  if (parsed === null || parsed.state === undefined) {
+    // Mirrors `swapRequest`'s defensive branch: a 2xx with no readable
+    // `state` is a read that failed silently, never treated as landed.
+    throw new SwapError(response.status, "could_not_read", "the response body was not JSON");
+  }
+  return parsed as unknown as TxStatus;
+}
+
 export const customer = {
   watchlist: {
     list: (token: string, signal?: AbortSignal) =>
@@ -530,6 +584,15 @@ export const customer = {
    *  and sign itself. Never a query string, for the same reason as
    *  `positions.get` -- the wallet is always the bearer token's. */
   swap: (token: string, body: SwapRequest) => swapRequest(token, body),
+  /** Whether a transaction the signed-in wallet already signed and sent has
+   *  landed. Polled by `TradePanel.tsx` after `sign.ts` returns a
+   *  signature. */
+  txStatus: (
+    token: string,
+    signature: string,
+    lastValidBlockHeight: number,
+    signal?: AbortSignal,
+  ) => txStatusRequest(token, signature, lastValidBlockHeight, signal),
 };
 
 /**
