@@ -121,7 +121,7 @@ export function Terminal({ mint }: { mint?: string }) {
   );
 
   return (
-    <div className="flex h-screen min-w-[1024px] flex-col overflow-x-auto bg-[var(--color-ink)] text-[var(--color-text)]">
+    <div className="flex h-dvh flex-col bg-[var(--color-ink)] text-[var(--color-text)]">
       <TopBar
         query={query}
         onQueryChange={setQuery}
@@ -129,20 +129,30 @@ export function Terminal({ mint }: { mint?: string }) {
         searchRef={searchRef}
       />
 
-      <div className="grid min-h-0 flex-1 grid-cols-[300px_1fr_320px]">
-        <CoinList
-          load={coinsLoad}
-          sort={sort}
-          onSortChange={(key) => setSort((s) => ({ key, dir: s.key === key && s.dir === "desc" ? "asc" : "desc" }))}
-          selectedMint={mint ?? null}
-          onSelect={select}
-          filter={query}
-          listRef={(coins) => {
-            orderedRef.current = coins;
-          }}
-        />
+      {/* Below `lg` (1024px) this is a single column, stacked coin list ->
+          chart/tabs -> token header, each sized by a `flex-[n]` weight so the
+          three still divide the fixed-height viewport instead of overflowing
+          it -- the same "each panel scrolls on its own" idea `flex-[3]` /
+          `flex-[2]` already apply to the chart/tabs split below. At `lg` the
+          wrapper divs collapse with `lg:contents`, so `CoinList` and
+          `TokenHeader` return to being direct children of the unchanged
+          three-column grid -- today's desktop layout, byte for byte. */}
+      <div className="flex min-h-0 flex-1 flex-col lg:grid lg:grid-cols-[300px_1fr_320px]">
+        <div className="min-h-0 flex-[3] lg:contents">
+          <CoinList
+            load={coinsLoad}
+            sort={sort}
+            onSortChange={(key) => setSort((s) => ({ key, dir: s.key === key && s.dir === "desc" ? "asc" : "desc" }))}
+            selectedMint={mint ?? null}
+            onSelect={select}
+            filter={query}
+            listRef={(coins) => {
+              orderedRef.current = coins;
+            }}
+          />
+        </div>
 
-        <div className="flex min-h-0 min-w-0 flex-col border-r border-[var(--color-line)]">
+        <div className="flex min-h-0 min-w-0 flex-[4] flex-col border-r border-[var(--color-line)]">
           <div className="min-h-0 flex-[3]">
             {mint ? (
               <CandleChart mint={mint} />
@@ -178,13 +188,15 @@ export function Terminal({ mint }: { mint?: string }) {
           </div>
         </div>
 
-        {mint ? (
-          <TokenHeader load={tokenLoad} />
-        ) : (
-          <aside className="border-l border-[var(--color-line)] bg-[var(--color-surface)] p-3 text-xs text-[var(--color-dim)]">
-            Select a coin to see its details.
-          </aside>
-        )}
+        <div className="min-h-0 flex-[3] lg:contents">
+          {mint ? (
+            <TokenHeader load={tokenLoad} />
+          ) : (
+            <aside className="h-full overflow-y-auto border-l border-[var(--color-line)] bg-[var(--color-surface)] p-3 text-xs text-[var(--color-dim)]">
+              Select a coin to see its details.
+            </aside>
+          )}
+        </div>
       </div>
     </div>
   );

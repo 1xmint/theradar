@@ -330,7 +330,21 @@ licence-headers:
 # only bumps when a frame's `as_of` watermark actually changed, so a
 # duplicate frame or a reconnect landing on an already-seen snapshot does not
 # trigger a second downstream refetch.
-export MIN_WEB_TESTS := "262"
+#
+# 262 -> 270 on 2026-09-26: plan 0014 F13 (eight tests), the terminal on a phone.
+# `Terminal.tsx` drops `min-w-[1024px]` and stacks to one column below `lg`
+# (1024px) as one scrolling page, via wrapper divs that `lg:contents` collapses
+# at that breakpoint, so the desktop grid is unchanged there. `Wallet.tsx`
+# adds `looksLikePhone()` and `walletBrowseLinks()`: with no injected
+# provider on a device that looks like a phone, the connect control offers
+# "Open in Phantom" / "Open in Solflare" links into each wallet's own in-app
+# browser instead of a dead-end message. 8 new `Wallet.test.tsx` cases cover
+# `looksLikePhone` (coarse pointer, mobile user agent, ordinary desktop, a
+# throwing `matchMedia`), `walletBrowseLinks`'s exact encoding, and the three
+# render states: a wallet present shows Connect as before, desktop-no-wallet
+# keeps today's message, and phone-no-wallet shows both links with the
+# current URL encoded and no dead-end button or message alongside them.
+export MIN_WEB_TESTS := "270"
 
 # The public site at cabalhunter.org. Lower because it has five pages, and it
 # exists for the same reason MIN_WEB_TESTS does: `vitest run` exits zero when it
