@@ -313,6 +313,50 @@ fn parse_args() -> Result<Args, String> {
     })
 }
 
+/// Adds this pass's CryptoHouse queries to `unit`'s meter for today, as the
+/// delta since `seen` -- for the two units (`radar-follow`,
+/// `radar-market-tape`) whose `client` lives for the whole process rather than
+/// one pass, so its lifetime totals would double-count every later pass
+/// without subtracting what was already recorded. [0036]'s "what was not
+/// checked": nothing counted a unit's own queries before this.
+///
+/// A write failure is reported and otherwise ignored -- the meter is `radar
+/// brief`'s business, not the recorder's, and must not stop a follow window or
+/// a tape pass that already happened.
+///
+/// The delta arithmetic and the "nothing to record" check that
+/// [`record_query_meter`] applies to the client's lifetime counters.
+///
+/// Pulled out as a pure function so it can be tested directly: the surrounding
+/// function reaches a client and the store, neither of which a unit test
+/// should touch. `None` means no query was issued since `seen` and the caller
+/// should write nothing.
+#[must_use]
+fn query_meter_delta(current: (u64, u64), seen: (u64, u64)) -> Option<(u64, u64)> {
+    let delta = (current.0 - seen.0, current.1 - seen.1);
+    if delta.0 == 0 { None } else { Some(delta) }
+}
+
+/// [0036]: ../../../docs/research/0036-the-hourly-consider-run-eats-the-whole-cryptohouse-allowance.md
+fn record_query_meter(store: &str, unit: &str, client: &Client, seen: &mut (u64, u64)) {
+    let current = (client.queries_issued(), client.quota_refusals());
+    let delta = query_meter_delta(current, *seen);
+    *seen = current;
+    let Some((delta_queries, delta_refused)) = delta else {
+        return;
+    };
+    let today = from_epoch(now_epoch())[..10].to_owned();
+    if let Err(e) = radar_store::query_meter::record(
+        std::path::Path::new(store),
+        unit,
+        &today,
+        delta_queries,
+        delta_refused,
+    ) {
+        eprintln!("could not record {unit}'s query count: {e}");
+    }
+}
+
 fn merge(into: &mut Stats, from: &Stats) {
     into.emitted += from.emitted;
     for (k, v) in &from.skipped {
@@ -529,6 +573,10 @@ fn follow(args: &Args) -> Result<(), String> {
     // The window size actually in use. Shrinks on failure and recovers on
     // success, so a burst is crawled rather than repeatedly re-attempted whole.
     let mut current_step = step;
+    // What this process has already recorded into today's query meter, so a
+    // window's contribution is a delta rather than the client's whole-process
+    // total counted again on every window.
+    let mut meter_seen = (0u64, 0u64);
     loop {
         let horizon = now_epoch() - FOLLOW_LAG_SECONDS;
         if horizon - cursor < FOLLOW_MIN_WINDOW_SECONDS {
@@ -577,6 +625,7 @@ fn follow(args: &Args) -> Result<(), String> {
                     coverage::SOURCE_FOLLOW,
                 )?;
                 writer.flush().map_err(|e| e.to_string())?;
+                record_query_meter(&args.store, "radar-follow", &client, &mut meter_seen);
                 std::thread::sleep(wait);
                 continue;
             }
@@ -620,6 +669,7 @@ fn follow(args: &Args) -> Result<(), String> {
             totals.emitted
         );
 
+        record_query_meter(&args.store, "radar-follow", &client, &mut meter_seen);
         cursor = window_end;
         std::thread::sleep(PAUSE_BETWEEN_WINDOWS);
     }
@@ -819,6 +869,9 @@ fn market_tape(args: &Args) -> Result<(), String> {
         .watermark()
         .map_err(|e| e.to_string())?;
 
+    // What this process has already recorded into today's query meter -- see
+    // `record_query_meter`.
+    let mut meter_seen = (0u64, 0u64);
     loop {
         let horizon = market_tape_horizon(now_epoch(), MARKET_TAPE_LAG_SECONDS);
         cursor = give_up_a_stale_gap(&args.store, &scope, cursor, horizon, store_high)?;
@@ -843,6 +896,7 @@ fn market_tape(args: &Args) -> Result<(), String> {
             Err(e) => {
                 eprintln!("  {from_s} .. {to_s} candidates query failed: {e}");
                 record_partial_pass(&args.store, store_high)?;
+                record_query_meter(&args.store, "radar-market-tape", &client, &mut meter_seen);
                 std::thread::sleep(MARKET_TAPE_PASS_INTERVAL);
                 continue;
             }
@@ -875,6 +929,7 @@ fn market_tape(args: &Args) -> Result<(), String> {
                         budget.remaining()
                     );
                     record_partial_pass(&args.store, store_high)?;
+                    record_query_meter(&args.store, "radar-market-tape", &client, &mut meter_seen);
                     std::thread::sleep(MARKET_TAPE_PASS_INTERVAL);
                     continue;
                 }
@@ -909,6 +964,7 @@ fn market_tape(args: &Args) -> Result<(), String> {
             );
         }
         radar_store::write_cursor(&scope, window_end)?;
+        record_query_meter(&args.store, "radar-market-tape", &client, &mut meter_seen);
 
         cursor = window_end;
         std::thread::sleep(MARKET_TAPE_PASS_INTERVAL);
@@ -1152,6 +1208,14 @@ fn measure(args: &Args) -> Result<(), String> {
         println!(
             "{total_known} tokens known, none due for measurement --              all are either too young for the first checkpoint or already settled"
         );
+        // Head, slot-time and price-window queries above still happened even
+        // though nothing was due to measure.
+        record_query_meter(
+            &args.store,
+            "radar-backfill --outcomes",
+            &client,
+            &mut (0, 0),
+        );
         return Ok(());
     }
     let launches = due;
@@ -1195,6 +1259,33 @@ fn measure(args: &Args) -> Result<(), String> {
     }
     writer.flush().map_err(|e| e.to_string())?;
 
+    print_measure_summary(
+        measured_at,
+        written,
+        with_activity,
+        with_price,
+        priced_batches,
+        stillborn,
+    );
+    record_query_meter(
+        &args.store,
+        "radar-backfill --outcomes",
+        &client,
+        &mut (0, 0),
+    );
+    Ok(())
+}
+
+/// The human-readable tail of [`measure`], split out so the function that
+/// does the measuring stays under clippy's line-count limit.
+fn print_measure_summary(
+    measured_at: radar_types::Slot,
+    written: u64,
+    with_activity: u64,
+    with_price: u64,
+    priced_batches: u64,
+    stillborn: u64,
+) {
     println!(
         "
 --- measured {written} tokens as of slot {measured_at} ---"
@@ -1212,7 +1303,6 @@ fn measure(args: &Args) -> Result<(), String> {
 These are labels, not verdicts. Whether any of them predicts anything"
     );
     println!("is a question for the research store to answer against them.");
-    Ok(())
 }
 
 fn main() -> ExitCode {
@@ -1769,5 +1859,27 @@ mod tests {
         // must return the horizon itself, not overshoot by treating equality
         // as "still room to grow".
         assert_eq!(market_tape_window_end(9_880, 120, 10_000), 10_000);
+    }
+
+    /// Nothing issued since `seen`: no delta to record.
+    ///
+    /// Kills `==` mutated to `!=` in `query_meter_delta` -- with `!=`, a zero
+    /// delta reports `Some((0, 0))` instead of `None`, and `record_query_meter`
+    /// would write a meaningless zero-query entry every pass that issued
+    /// nothing.
+    #[test]
+    fn a_query_meter_delta_of_nothing_new_is_none() {
+        assert_eq!(query_meter_delta((3, 1), (3, 1)), None);
+    }
+
+    /// Both counters advance, by amounts the three arithmetic mutants at this
+    /// call site would each get wrong differently: `+` gives `(8, 3)`, `/`
+    /// gives `(1, 2)`, and correct subtraction gives `(2, 1)`. All three are
+    /// distinct from each other, so this one assertion kills all three, and
+    /// the nonzero delta also kills `==` mutated to `!=` the other way: that
+    /// mutant would report `None` here instead of `Some`.
+    #[test]
+    fn a_query_meter_delta_is_the_difference_since_seen() {
+        assert_eq!(query_meter_delta((5, 2), (3, 1)), Some((2, 1)));
     }
 }

@@ -244,6 +244,24 @@ impl CryptoHouseBlocks {
             None => self.client.query(sql),
         }
     }
+
+    /// Queries this instance's client has issued to CryptoHouse so far.
+    ///
+    /// For `radar brief`'s per-unit count ([0036]'s "what was not checked") --
+    /// the caller reads this once at the end of a run and hands it to
+    /// [`radar_store::query_meter::record`].
+    ///
+    /// [0036]: ../../../../docs/research/0036-the-hourly-consider-run-eats-the-whole-cryptohouse-allowance.md
+    #[must_use]
+    pub fn queries_issued(&self) -> u64 {
+        self.client.queries_issued()
+    }
+
+    /// How many of those queries CryptoHouse refused for quota.
+    #[must_use]
+    pub fn quota_refusals(&self) -> u64 {
+        self.client.quota_refusals()
+    }
 }
 
 /// Builds the query for one mint in one slot.
@@ -633,6 +651,47 @@ mod tests {
             err.is_budget_exhausted(),
             "the guard's own refusal must be recognised as budget exhaustion: {err}"
         );
+    }
+
+    /// `CryptoHouseBlocks::queries_issued` must read the wrapped client's real
+    /// count, not a constant.
+    ///
+    /// Kills it mutated to return the literal `0` or `1`: two queries are
+    /// issued through the client before it is wrapped, so only a genuine
+    /// delegation reports `2`.
+    #[test]
+    fn queries_issued_delegates_to_the_wrapped_client() {
+        let endpoint = crate::test_support::start_server(vec![
+            (200, "{\"authority\":\"a\",\"launch_blocks\":\"1\"}\n"),
+            (200, "{\"authority\":\"b\",\"launch_blocks\":\"2\"}\n"),
+        ]);
+        let client = Client::new(endpoint);
+        let _: Result<Vec<serde_json::Value>, QueryError> = client.query("SELECT 1");
+        let _: Result<Vec<serde_json::Value>, QueryError> = client.query("SELECT 2");
+
+        let blocks = CryptoHouseBlocks::new(client, "2026-01-01T00:00:00");
+
+        assert_eq!(blocks.queries_issued(), 2);
+    }
+
+    /// `CryptoHouseBlocks::quota_refusals` must read the wrapped client's real
+    /// count, not a constant.
+    ///
+    /// Kills it mutated to return the literal `0` or `1`: two quota-exceeded
+    /// responses are driven through the client before it is wrapped, so only a
+    /// genuine delegation reports `2`.
+    #[test]
+    fn quota_refusals_delegates_to_the_wrapped_client() {
+        let quota_body = "Quota for user 'crypto' for 3600s has been exceeded: queries = 121/120";
+        let endpoint =
+            crate::test_support::start_server(vec![(500, quota_body), (500, quota_body)]);
+        let client = Client::new(endpoint);
+        let _: Result<Vec<serde_json::Value>, QueryError> = client.query("SELECT 1");
+        let _: Result<Vec<serde_json::Value>, QueryError> = client.query("SELECT 2");
+
+        let blocks = CryptoHouseBlocks::new(client, "2026-01-01T00:00:00");
+
+        assert_eq!(blocks.quota_refusals(), 2);
     }
 
     #[test]

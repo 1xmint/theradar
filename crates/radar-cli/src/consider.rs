@@ -97,18 +97,7 @@ pub fn run(
     let recent = universe.recent(window);
     let strategy = CreatorEdge::default();
     let mut session = draft(store, watermark, window, cap, &strategy, pricing, &coverage);
-
-    announce(
-        watermark,
-        &universe,
-        recent.len(),
-        window,
-        session.coverage.window,
-    );
-
-    session.funnel.launches_recorded = universe.launches.len();
-    session.funnel.creators_recorded = universe.creators.len();
-    session.funnel.in_window = recent.len();
+    announce_and_open_funnel(&mut session, watermark, &universe, &recent, window);
 
     if recent.is_empty() {
         println!("Nothing recent enough to consider. Widen --window, or let the recorder run.");
@@ -194,6 +183,8 @@ pub fn run(
         &coverage,
     );
 
+    record_query_meter(store, &blocks);
+
     if let Some(dir) = record_to {
         // The kernel's verdict is folded in only now, because a decision is not
         // complete until the thing with the authority has seen it.
@@ -211,6 +202,52 @@ pub fn run(
         write_decisions(dir, &ledger.examined)?;
     }
     keep(&mut session, record_to, began)
+}
+
+/// Records this run's CryptoHouse query count against today's tally.
+///
+/// 0036's "what was not checked": nothing counted a unit's own CryptoHouse
+/// queries. `blocks` is the only source in this run, so its client's lifetime
+/// counts are the whole run's counts.
+///
+/// Called after [`record_pass`] but before `write_decisions`, deliberately: a
+/// write failure there returns early via `?` and would otherwise leave this
+/// run's queries unrecorded even though CryptoHouse was already paid for them
+/// — the decision already happened, and the meter is `radar brief`'s
+/// business, not the kernel's. A write failure here is reported but does not
+/// stop the pass.
+fn record_query_meter(store: &str, blocks: &CryptoHouseBlocks) {
+    let today = radar_store::from_epoch(radar_store::now_epoch())[..10].to_owned();
+    if let Err(e) = radar_store::query_meter::record(
+        std::path::Path::new(store),
+        "consider",
+        &today,
+        blocks.queries_issued(),
+        blocks.quota_refusals(),
+    ) {
+        eprintln!("could not record this run's query count: {e}");
+    }
+}
+
+/// Prints the pre-candidate summary and opens the funnel record, together --
+/// split out of [`run`] to keep that function under clippy's line-count limit.
+fn announce_and_open_funnel(
+    session: &mut SessionRecord,
+    watermark: radar_types::Slot,
+    universe: &Universe,
+    recent: &[Address],
+    window: u64,
+) {
+    announce(
+        watermark,
+        universe,
+        recent.len(),
+        window,
+        session.coverage.window,
+    );
+    session.funnel.launches_recorded = universe.launches.len();
+    session.funnel.creators_recorded = universe.creators.len();
+    session.funnel.in_window = recent.len();
 }
 
 /// What an operator sees before a single candidate is counted.
