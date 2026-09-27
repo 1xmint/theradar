@@ -48,8 +48,8 @@ the browser and history from the store instead.
   from decision 2, not an oversight.
 - **P4 (holders, folded from the trade tape rather than bought) is
   delivered.** PR #261 (`feat/holders-from-the-tape`), deployed with #266 on
-  2026-09-23; `crates/radar-serve/src/market/holders.rs`-equivalent logic
-  ships as `/v1/market/holders/{mint}`.
+  2026-09-23; the fold lives in `crates/radar-serve/src/market/mod.rs`
+  and ships as `/v1/market/holders/{mint}`.
 - **P5 (live delivery, one shared ticker) is delivered but not deployed to
   the live box.** PR #296 ("one shared ticker behind every SSE stream"),
   merged 2026-09-25, adds `GET /v1/market/events`; plan 0014 Phase F item 1
