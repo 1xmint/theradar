@@ -209,7 +209,8 @@ fn what_jupiter_did_not_say_is_never_read_as_zero() {
         "routePlan": []
     }"#;
     let request = QuoteRequest::new(Asset::Sol, Asset::Usdc, 100_000_000, taker());
-    let quote = Quote::from_response(body, &request, 100).expect("the required fields are all here");
+    let quote =
+        Quote::from_response(body, &request, 100).expect("the required fields are all here");
 
     assert_eq!(
         quote.impact_bps,
@@ -259,7 +260,8 @@ fn an_answer_for_a_different_in_amount_is_refused() {
         "routePlan": []
     }"#;
     let request = QuoteRequest::new(Asset::Sol, Asset::Usdc, 100_000_000, taker());
-    let err = Quote::from_response(body, &request, 100).expect_err("100000000 was asked for, not 999");
+    let err =
+        Quote::from_response(body, &request, 100).expect_err("100000000 was asked for, not 999");
     assert!(
         matches!(err, RouteError::Malformed(ref m) if m.contains("999")),
         "got {err}"

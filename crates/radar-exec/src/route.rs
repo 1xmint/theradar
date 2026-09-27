@@ -469,11 +469,13 @@ impl Quote {
         // u64 `outAmount`. `checked_sub` rather than `10_000 -
         // requested_slippage_bps`: a caller asking for more than 10_000 bps
         // must not wrap the subtraction into a floor near u64::MAX.
-        let allowed = 10_000u32.checked_sub(requested_slippage_bps).ok_or_else(|| {
-            RouteError::SlippageMismatch(format!(
-                "requested slippage {requested_slippage_bps} bps is not less than 10000 bps"
-            ))
-        })?;
+        let allowed = 10_000u32
+            .checked_sub(requested_slippage_bps)
+            .ok_or_else(|| {
+                RouteError::SlippageMismatch(format!(
+                    "requested slippage {requested_slippage_bps} bps is not less than 10000 bps"
+                ))
+            })?;
         let required_floor = u128::from(out_amount) * u128::from(allowed) / 10_000;
         match worst_out {
             Some(floor) if u128::from(floor) < required_floor => {

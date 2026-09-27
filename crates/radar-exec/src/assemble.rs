@@ -171,7 +171,10 @@ pub fn assemble(body: &str, taker: Address) -> Result<AssembledTransaction, Rout
         + 1 // swap_instruction
         + usize::from(parsed.cleanup_instruction.is_some())
         + parsed.other_instructions.len();
-    check_priority_fee(&parsed.compute_budget_instructions, non_compute_budget_count)?;
+    check_priority_fee(
+        &parsed.compute_budget_instructions,
+        non_compute_budget_count,
+    )?;
 
     let instructions: Vec<RawInstruction> = parsed
         .compute_budget_instructions
@@ -269,7 +272,10 @@ fn check_priority_fee(
 
     for ix in instructions {
         let data = b64::decode(&ix.data).ok_or_else(|| {
-            RouteError::Malformed(format!("compute budget instruction data is not base64: {}", ix.data))
+            RouteError::Malformed(format!(
+                "compute budget instruction data is not base64: {}",
+                ix.data
+            ))
         })?;
         match data.first() {
             Some(&SET_COMPUTE_UNIT_PRICE) if data.len() == 9 => {
@@ -294,8 +300,7 @@ fn check_priority_fee(
         }
     }
 
-    let non_compute_budget_count =
-        u64::try_from(non_compute_budget_count).unwrap_or(u64::MAX);
+    let non_compute_budget_count = u64::try_from(non_compute_budget_count).unwrap_or(u64::MAX);
     let default_limit = DEFAULT_COMPUTE_UNITS_PER_INSTRUCTION
         .saturating_mul(non_compute_budget_count)
         .min(MAX_COMPUTE_UNITS);
@@ -303,7 +308,9 @@ fn check_priority_fee(
         .map_or(default_limit, u64::from)
         .min(MAX_COMPUTE_UNITS);
 
-    let fee_lamports = u128::from(price_micro_lamports) * u128::from(limit) / 1_000_000;
+    // Rounded up, as the runtime charges it: flooring would let a fee a
+    // fraction of a lamport over the cap through.
+    let fee_lamports = (u128::from(price_micro_lamports) * u128::from(limit)).div_ceil(1_000_000);
     if fee_lamports > MAX_PRIORITY_FEE_LAMPORTS {
         return Err(RouteError::PriorityFeeExceeded(format!(
             "priority fee would be {fee_lamports} lamports ({price_micro_lamports} micro-lamports \
@@ -1444,12 +1451,18 @@ mod tests {
         let sol_usdc: serde_json::Value = serde_json::from_str(SOL_USDC).unwrap();
         let ixs: Vec<RawInstruction> =
             serde_json::from_value(sol_usdc["computeBudgetInstructions"].clone()).unwrap();
-        assert!(check_priority_fee(&ixs, 6).is_ok(), "the sol-usdc fixture must still build");
+        assert!(
+            check_priority_fee(&ixs, 6).is_ok(),
+            "the sol-usdc fixture must still build"
+        );
 
         let usdc_sol: serde_json::Value = serde_json::from_str(USDC_SOL).unwrap();
         let ixs: Vec<RawInstruction> =
             serde_json::from_value(usdc_sol["computeBudgetInstructions"].clone()).unwrap();
-        assert!(check_priority_fee(&ixs, 3).is_ok(), "the usdc-sol fixture must still build");
+        assert!(
+            check_priority_fee(&ixs, 3).is_ok(),
+            "the usdc-sol fixture must still build"
+        );
     }
 
     #[test]
@@ -1458,7 +1471,10 @@ mod tests {
         // instructions), this price spends well over the cap.
         let ixs = vec![compute_unit_price(1_000_000)];
         let err = check_priority_fee(&ixs, 6).expect_err("an over-cap price must refuse");
-        assert!(matches!(err, RouteError::PriorityFeeExceeded(_)), "got {err}");
+        assert!(
+            matches!(err, RouteError::PriorityFeeExceeded(_)),
+            "got {err}"
+        );
     }
 
     #[test]
@@ -1481,7 +1497,10 @@ mod tests {
         let ixs = vec![compute_unit_limit(limit), compute_unit_price(price)];
         let err =
             check_priority_fee(&ixs, 0).expect_err("one micro-lamport over the cap must refuse");
-        assert!(matches!(err, RouteError::PriorityFeeExceeded(_)), "got {err}");
+        assert!(
+            matches!(err, RouteError::PriorityFeeExceeded(_)),
+            "got {err}"
+        );
     }
 
     #[test]
@@ -1493,6 +1512,9 @@ mod tests {
         }];
         let err = check_priority_fee(&ixs, 6)
             .expect_err("an undecodable compute-budget instruction must refuse, not pass through");
-        assert!(matches!(err, RouteError::PriorityFeeExceeded(_)), "got {err}");
+        assert!(
+            matches!(err, RouteError::PriorityFeeExceeded(_)),
+            "got {err}"
+        );
     }
 }
