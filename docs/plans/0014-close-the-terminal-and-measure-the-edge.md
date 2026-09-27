@@ -147,6 +147,14 @@ candidate count; any visitor measurement; running cargo test suites locally
      Left open, not code: whether Phantom or Solflare replace the blockhash
      inside `signAndSendTransaction`, which would make "expired" fire early —
      F9 compares the landed transaction's `recentBlockhash` with the built one.
+   - **Whole path: PASS**, 2026-09-26, reviewed at origin/main + #306 (`4ca1164`),
+     merged as `b30588c` and deployed the same night. Eight optional findings;
+     #307 fixes the slippage check, a 0.001 SOL priority-fee ceiling, the live
+     quote beside the review card, a rent caption, refusal wording and the mint
+     comparison. Left open: positions sum every token account though Jupiter
+     sells from the ATA (a non-ATA holding could offer a "max" that fails
+     simulation, costing nothing); no pump.fun or Token-2022 `/build` response
+     captured yet — save the owner's first test's response as a fixture.
    - **F10: not yet reviewed** — waits on the owner's four terms values.
    - **Panel without terms** (item 10's note): reviewed as part of the
      whole-path review before `RADAR_TRADE=on`.

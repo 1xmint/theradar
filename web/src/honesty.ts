@@ -574,8 +574,12 @@ export function swapRefusalMessage(reason: string, detail: string): string {
       return "This wallet appears on a sanctions list, so Radar will not build trades for it.";
     case "chain_unreadable":
       return "Radar could not read the chain to check this transaction. This says nothing about whether it landed.";
+    case "route_slippage_mismatch":
+      return "Jupiter's route did not keep to your slippage limit, so Radar refused it. Nothing was sent.";
+    case "route_priority_fee_exceeded":
+      return "Jupiter asked for a priority fee above Radar's 0.001 SOL cap, so Radar refused it. Nothing was sent. Try again in a moment.";
     default:
-      return detail;
+      return "Radar could not build this trade. Nothing was sent.";
   }
 }
 
@@ -608,7 +612,7 @@ export function landingMessage(state: LandingState): string {
     case "landed":
       return "Landed";
     case "failed":
-      return `Failed on chain: ${state.reason}`;
+      return `Failed on chain: ${state.reason}. The network fee was still spent.`;
     case "expired":
       return "Expired -- nothing was spent";
     case "unknown":

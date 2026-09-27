@@ -474,9 +474,21 @@ describe("swapRefusalMessage", () => {
     }
   });
 
-  it("passes the server's detail through for an unrecognised code", () => {
+  it("gives an unrecognised code a plain refusal sentence, never the raw server detail", () => {
+    // The default case used to pass the server's `detail`/`statusText` straight
+    // through -- honest but capable of leaking raw server text onto the
+    // screen. It now always says the same thing: nothing was sent.
     expect(swapRefusalMessage("some_new_code", "a fact from the server")).toBe(
-      "a fact from the server",
+      "Radar could not build this trade. Nothing was sent.",
+    );
+  });
+
+  it("gives route_slippage_mismatch and route_priority_fee_exceeded their own sentences", () => {
+    expect(swapRefusalMessage("route_slippage_mismatch", "irrelevant detail")).toBe(
+      "Jupiter's route did not keep to your slippage limit, so Radar refused it. Nothing was sent.",
+    );
+    expect(swapRefusalMessage("route_priority_fee_exceeded", "irrelevant detail")).toBe(
+      "Jupiter asked for a priority fee above Radar's 0.001 SOL cap, so Radar refused it. Nothing was sent. Try again in a moment.",
     );
   });
 
@@ -506,10 +518,10 @@ describe("landingMessage", () => {
     expect(new Set(texts).size).toBe(texts.length);
   });
 
-  it("includes the on-chain reason for a failed transaction", () => {
-    expect(landingMessage({ kind: "failed", reason: "insufficient funds" })).toContain(
-      "insufficient funds",
-    );
+  it("includes the on-chain reason for a failed transaction, and says the network fee was still spent", () => {
+    const text = landingMessage({ kind: "failed", reason: "insufficient funds" });
+    expect(text).toContain("insufficient funds");
+    expect(text.toLowerCase()).toContain("network fee was still spent");
   });
 
   it("never says expired for unknown, and never says unknown for expired -- the honesty rule", () => {
