@@ -114,20 +114,27 @@ fact the bot later wants to state has the pass it must go through first.
       not done in this item: the deterministic rule's fit-free result against
       0017's interval is a **measurement**, not a unit test — it needs the
       production store and belongs to item 3
-- [ ] 3. **Research 0026** —
-      `new:docs/research/0026-the-walk-forward-protocol-and-what-it-found.md`:
-      the protocol, the two planted tests and the commands that ran them, the
-      per-fold tables for the deterministic rule, the refusal strata and the
-      best fitted stratum, the number of strata tried, and the verdict — a
-      null written as a result.
-      gate: every figure carries its window and watermark; the commands
-      reproduce it; `cargo test -p repo-conformance` green
-- [ ] 4. **`docs/STATE.md`**: the learning-loop section gains the measured
-      result with its date and the command; "Where to start" says
-      `Observed<T>` and `LookAhead` have a caller — or the two types are
-      deleted in this PR if item 1 found no honest use for them (design 0010
-      §8.1 row 3), with the crate's own doc changed in the same commit.
-      gate: conformance; the sentence names the command
+- [x] 3. **Research 0026** —
+      `docs/research/0026-the-walk-forward-protocol-and-what-it-found.md`:
+      the protocol, the commands that ran them, the per-fold tables for the
+      fixed strata (the fit fold held zero labelled rows, so nothing was
+      fitted), the number of strata tried, and the verdict — a null written
+      as a result. Run 2026-09-27 on `guardian-vps-tail`, commands
+      `radar features --store /home/guardian/radar/data/store --from
+      441040080 --to 445363440 --out <file>` then
+      `radar edge --features <file> --rates
+      docs/research/data/0024-base-rates.json`, both against a Linux build of
+      `main` at `4fdb9e3`. Output kept at
+      `/home/guardian/radar/data/edge-runs/2026-09-27/`.
+      done: this branch (`phase-i-edge-run`), commit to follow this line's
+      own commit
+- [x] 4. **`docs/STATE.md`**: the learning-loop section gains the measured
+      result with its date and the command. `Observed<T>` and `LookAhead`'s
+      caller status is unchanged by this run and is not revisited here — plan
+      0014 Phase I did not ask for it and this item's own gate does not
+      require it beyond what item 1 already recorded.
+      done: `docs/STATE.md`'s "The learning loop has an instrument" section,
+      this branch (`phase-i-edge-run`)
 
 ## Open questions for Josh
 

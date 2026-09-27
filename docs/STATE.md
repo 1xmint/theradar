@@ -185,11 +185,21 @@ population it could not see, because a sample missing labels for want of any
 measurement is a different sample from one missing them because every exit price
 was stale.
 
-**No result exists.** Neither command has been run against the production
-store — that needs a Linux binary on the box, and this workstation has no store
-to run them against. So the honest state of the number is unchanged: research
-0017 measures the selection edge at **0 bps** against a bar of about **456**,
-and nothing here has moved it. What exists is the instrument that could.
+**Run 2026-09-27, plan 0014 Phase I: nothing found.**
+[`0026`](../docs/research/0026-the-walk-forward-protocol-and-what-it-found.md)
+ran both commands for the first time, on a 20-day window of the store
+(441040080..445363440, the oldest fifth — chosen after a full-store pass was
+killed for trending over the memory and time budget; `radar features` costs
+~2.1-2.4 GB regardless of window size on this box). 595,202 launches, 181,675
+with a 24h label. No fitted stratum could even be tried — the fit fold held
+zero labelled rows, for reasons not yet diagnosed. The four fixed strata
+(`creator_edge`'s thresholds and the refusal signals' complements) all showed
+a **0 bps median gross return** and a Wilson lower bound on the paid share no
+higher than 0.031, nowhere near the 0.5 the bar requires. Agrees in direction
+with research 0017's 0 bps: no stratum this table can name clears **456 bps**
+(charged as 850). This does not settle that no edge exists in this data —
+twelve of twenty-four features are still absent because the trades table is
+empty, and only 20 of the store's 46 days were run.
 
 **Design 0010 §6.1 is superseded on the cost, and this file is why.** The
 design charged a `by_notional` band and then asked for 456 bps on top. The
