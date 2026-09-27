@@ -146,6 +146,12 @@ pub fn run(store: &Path, serve_url: Option<&str>) -> bool {
     ));
     checks.push(binaries(&build_info));
     checks.push(query_budget(store));
+    let today = from_epoch(now)[..10].to_owned();
+    checks.extend(
+        QUERY_METER_UNITS
+            .into_iter()
+            .map(|unit| unit_queries(store, unit, &today)),
+    );
     checks.push(trading_lane());
 
     println!("radar brief — {}\n", from_epoch(now));
@@ -602,6 +608,61 @@ fn query_budget(store: &Path) -> Check {
             format!("the last `consider` run under {dir} cannot be read: {e}"),
         ),
     }
+}
+
+/// Every unit that queries CryptoHouse, in the order the brief prints them.
+///
+/// [0036]'s "what was not checked": the per-candidate query cost was read from
+/// the call sites, not counted from a log, because no unit logged its own
+/// count. This is the reader's half of closing that gap -- the writing half is
+/// each unit's own call to [`radar_store::query_meter::record`].
+///
+/// [0036]: ../../../docs/research/0036-the-hourly-consider-run-eats-the-whole-cryptohouse-allowance.md
+const QUERY_METER_UNITS: [&str; 4] = [
+    "consider",
+    "radar-follow",
+    "radar-market-tape",
+    "radar-backfill --outcomes",
+];
+
+/// Grades one unit's query tally for today.
+///
+/// A refusal is `Warn`, not `Fail`: CryptoHouse's quota is shared across every
+/// process on the box, so one unit being refused is evidence about the whole
+/// allowance, not a fault in this unit alone, and the query budget above this
+/// check already grades `consider`'s own response to it.
+///
+/// No tally at all is `Ok`, the same convention [`query_budget`] uses for "no
+/// kept run yet": a unit that has not recorded today has not misbehaved. Rule 9
+/// still holds in the wording -- it says "no record", never "0 queries".
+fn grade_unit_queries(unit: &'static str, tally: Option<radar_store::UnitTally>) -> Check {
+    match tally {
+        Some(t) if t.refused > 0 => Check::new(
+            Status::Warn,
+            unit,
+            format!(
+                "{} quer{} today, {} refused for quota",
+                t.queries,
+                if t.queries == 1 { "y" } else { "ies" },
+                t.refused
+            ),
+        ),
+        Some(t) => Check::new(
+            Status::Ok,
+            unit,
+            format!(
+                "{} quer{} today, none refused",
+                t.queries,
+                if t.queries == 1 { "y" } else { "ies" }
+            ),
+        ),
+        None => Check::new(Status::Ok, unit, "no record for today yet"),
+    }
+}
+
+/// Reads today's tally for `unit` and grades it.
+fn unit_queries(store: &Path, unit: &'static str, day: &str) -> Check {
+    grade_unit_queries(unit, radar_store::query_meter::today(store, unit, day))
 }
 
 /// The highest slot the store holds.
@@ -1362,7 +1423,8 @@ fn humanise(seconds: i64) -> String {
 #[cfg(test)]
 mod tests {
 
-    use super::{Status, grade_query_budget, query_budget};
+    use super::{Status, grade_query_budget, grade_unit_queries, query_budget, unit_queries};
+    use radar_store::UnitTally;
     use radar_types::Funnel;
 
     /// A run that spent its whole query budget before it ran out of candidates.
@@ -1444,6 +1506,97 @@ mod tests {
             "an unrun store must not report a spend: {}",
             check.detail
         );
+    }
+
+    /// A unit refused for quota is `Warn`, and the count is in the line -- an
+    /// operator reading past the status word must still see how bad it was.
+    #[test]
+    fn a_unit_refused_for_quota_warns_and_says_how_many() {
+        let check = grade_unit_queries(
+            "radar-follow",
+            Some(UnitTally {
+                queries: 133,
+                refused: 13,
+            }),
+        );
+        assert_eq!(check.status, Status::Warn);
+        assert!(
+            check.detail.contains("133") && check.detail.contains("13"),
+            "both the total and the refusal count are the point: {}",
+            check.detail
+        );
+    }
+
+    /// A clean run -- queries issued, none refused -- is `Ok`, and must not
+    /// read like the refused case just because both mention a query count.
+    #[test]
+    fn a_unit_with_no_refusals_is_ok_and_does_not_read_like_a_warning() {
+        let check = grade_unit_queries(
+            "consider",
+            Some(UnitTally {
+                queries: 12,
+                refused: 0,
+            }),
+        );
+        assert_eq!(check.status, Status::Ok);
+        assert!(
+            !check.detail.contains("refused for quota"),
+            "a clean run must not borrow the refused run's sentence: {}",
+            check.detail
+        );
+    }
+
+    /// Rule 9: absent is not zero. A unit with nothing recorded today must
+    /// read as "no record", not "0 queries" -- the two mean different things
+    /// and the second one is a fabricated measurement.
+    #[test]
+    fn a_unit_with_no_record_today_says_so_and_not_zero() {
+        let check = grade_unit_queries("radar-market-tape", None);
+        assert_eq!(check.status, Status::Ok);
+        assert!(
+            check.detail.contains("no record"),
+            "must say absent, not report a manufactured zero: {}",
+            check.detail
+        );
+        assert!(
+            !check.detail.contains('0'),
+            "must not read as a zero count: {}",
+            check.detail
+        );
+    }
+
+    /// The two answers must not be interchangeable, the same property
+    /// `the_starved_and_the_finished_run_do_not_read_alike` checks for the
+    /// query budget above.
+    #[test]
+    fn a_refused_unit_and_a_clean_unit_do_not_read_alike() {
+        let refused = grade_unit_queries(
+            "consider",
+            Some(UnitTally {
+                queries: 10,
+                refused: 1,
+            }),
+        );
+        let clean = grade_unit_queries(
+            "consider",
+            Some(UnitTally {
+                queries: 10,
+                refused: 0,
+            }),
+        );
+        assert_ne!(refused.detail, clean.detail);
+        assert_ne!(refused.status, clean.status);
+    }
+
+    /// `unit_queries` is the reading half of the meter, and an empty store has
+    /// never had anything recorded against it.
+    #[test]
+    fn a_fresh_store_reports_no_record_for_every_unit() {
+        let empty = std::env::temp_dir().join(format!("radar-brief-qm{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&empty);
+        let check = unit_queries(&empty, "consider", "2026-09-26");
+        assert_eq!(check.status, Status::Ok);
+        assert!(check.detail.contains("no record"));
     }
 
     /// A manifest with one real-looking sha line, so the check gets past its

@@ -873,6 +873,20 @@ leaderboard and from the cooldown that reads it.
 Nothing here touches the store, the signer or `Policy::CLOSED`. It is read-only
 against the chain and append-only against its own log.
 
+`radar brief`, as of 2026-09-26, prints one line per unit that spends
+CryptoHouse queries -- `consider`, `radar-follow`, `radar-market-tape` and
+`radar-backfill --outcomes` -- naming today's query count and quota-refusal
+count for each,
+[`0036`](../docs/research/0036-the-hourly-consider-run-eats-the-whole-cryptohouse-allowance.md)'s
+original complaint being that nothing counted them at all. The counts come
+from a small sidecar state file, `.query-meter`, kept beside the store
+(`crates/radar-store/src/query_meter.rs`, in the same family as the follow
+cursor, not a schema change to `Coverage`); each unit adds its own run's
+counts to today's tally as it finishes. A unit that has not run today has no
+entry in that file, and `radar brief` reports it as "no record for today yet",
+never as "0 queries" -- rule 9, since a silent unit and a unit that ran
+cleanly are different facts.
+
 ## What is live on radar.heyvera.org
 
 As of 2026-09-26, checked directly rather than recalled.

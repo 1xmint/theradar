@@ -24,6 +24,8 @@ pub mod market;
 pub mod market_tape;
 pub mod outcomes;
 pub mod prices;
+#[cfg(test)]
+pub(crate) mod test_support;
 
 pub use cryptohouse::{Client, QueryError};
 pub use extract::{
