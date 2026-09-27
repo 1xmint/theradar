@@ -20,7 +20,6 @@ import { CoinImage } from "./CoinImage";
 import { MarketFigure } from "./Figures";
 import {formatAge, formatCompactUsd, formatPrice, formatSolAmount, shortenAddress} from "./format";
 import { isWalletSessionRefusal, positionsMessage, watchlistMessage, watchlistToggleFailure } from "./honesty";
-import { TERMS_APPROVED } from "./legal";
 import { tokenPath } from "./routes";
 import { TradePanel } from "./TradePanel";
 import type { Load } from "./useApi";
@@ -57,10 +56,11 @@ export function TokenHeader({ load }: { load: Load<MarketToken> }) {
   // `onTraded` prop below.
   const [positionsNonce, setPositionsNonce] = useState(0);
   const positions = usePositions(positionsNonce);
-  // Both switches, independently: an approved-but-off feature and an
-  // on-but-unapproved one must each still ship dark. See `legal.ts`'s doc
-  // comment for why this lives in code rather than a config flag.
-  const tradingLive = TERMS_APPROVED && trading;
+  // The server's switch alone. The owner decided on 2026-09-26 that the panel
+  // does not wait for the terms while the site sits behind the access wall
+  // (plan 0014, item 10); `legal.ts`'s `TERMS_APPROVED` still gates `/terms`
+  // and the link to it, and must gate this again before the site is public.
+  const tradingLive = trading;
   return (
     <aside className="flex h-full flex-col border-l border-[var(--color-line)] bg-[var(--color-surface)]">
       <div className="border-b border-[var(--color-line)] p-3">

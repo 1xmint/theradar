@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 //! Tests for `TradePanel.tsx`: the buy/sell panel itself, rendered directly
 //! with a `positions` prop rather than through `TokenHeader`. Whether the
-//! panel mounts at all -- `legal.ts`'s `TERMS_APPROVED` and
-//! `useHealth.ts`'s `useTrading()` -- is `TokenHeader.tsx`'s job, per this
+//! panel mounts at all -- `useHealth.ts`'s `useTrading()` -- is
+//! `TokenHeader.tsx`'s job, per this
 //! component's own doc comment ("This file does not re-check them"), so it
 //! is not re-tested here. What is covered here is everything the panel does
 //! once mounted: amount and slippage validation, the debounced live quote,
@@ -251,6 +251,13 @@ describe("TradePanel without a connected wallet", () => {
     typeAmount("1");
     expect(await screen.findByText("Connect a wallet to trade.")).toBeTruthy();
     expect((screen.getByRole("button", { name: "Review trade" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("shows the notice and Jupiter's credit, but no link to terms that are not approved yet", () => {
+    render(<TradePanel mint={MINT} symbol="FOO" positions={{ state: "signed-out" }} onTraded={vi.fn()} />);
+    expect(screen.getByText(/You sign every trade\./)).toBeTruthy();
+    expect(screen.queryByRole("link", { name: "Read the full terms" })).toBeNull();
+    expect(screen.getByText("Powered by Jupiter")).toBeTruthy();
   });
 });
 

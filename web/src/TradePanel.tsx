@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 //! Buy and sell, from the token screen.
 //!
-//! Gated on two independent switches -- `legal.ts`'s `TERMS_APPROVED` and
-//! `useHealth.ts`'s `useTrading()` -- and mounted only by `TokenHeader.tsx`,
-//! which checks both before this component exists at all. This file does not
+//! Gated on `useHealth.ts`'s `useTrading()` and mounted only by
+//! `TokenHeader.tsx`, which checks it before this component exists at all.
+//! (It also waited on `legal.ts`'s `TERMS_APPROVED` until the owner's
+//! 2026-09-26 decision: no terms while the site is private -- plan 0014,
+//! item 10.) This file does not
 //! re-check them: a panel that rendered its own "trading is not available
 //! yet" placeholder would still be a visible trace of an unshipped feature,
 //! which is exactly what shipping dark means to avoid.
@@ -30,7 +32,7 @@ import { useWalletAddress, useWalletToken } from "./Wallet";
 import type { SigningProvider } from "./sign";
 import { detect } from "./siws";
 import type { PositionsLoad } from "./usePositions";
-import { NOTICE_TEXT } from "./legal";
+import { NOTICE_TEXT, TERMS_APPROVED } from "./legal";
 
 const SOL_DECIMALS = 9;
 const DEFAULT_SLIPPAGE_BPS = 100;
@@ -547,8 +549,19 @@ export function TradePanel({ mint, symbol, positions, onTraded }: TradePanelProp
       {review.kind === "failed" && <p className="text-[var(--color-warn)]">{review.message}</p>}
 
       <p className="text-[var(--color-dim)]">
-        {NOTICE_TEXT} <Link href="/terms" className="underline">Read the full terms</Link>.
+        {NOTICE_TEXT}
+        {/* `/terms` renders "no such page" until the terms are approved, so
+            the link waits for the same switch rather than leading nowhere. */}
+        {TERMS_APPROVED && (
+          <>
+            {" "}
+            <Link href="/terms" className="underline">Read the full terms</Link>.
+          </>
+        )}
       </p>
+      {/* Jupiter's API terms, §8.4: attribution wherever its routes are
+          used, private site or not. Plan 0014, item 5. */}
+      <p className="text-[var(--color-dim)]">Powered by Jupiter</p>
     </div>
   );
 }

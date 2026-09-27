@@ -113,9 +113,10 @@ export const agent = {
 
 /**
  * `/health`'s shape, narrowed to the one field the interface reads:
- * whether trading is switched on. ADR 0024's second dark switch -- the first
- * is `legal.ts`'s `TERMS_APPROVED` -- and `TradePanel` renders only when
- * both agree. Everything else `/health` reports is operational detail this
+ * whether trading is switched on. ADR 0024's second dark switch; the first,
+ * `legal.ts`'s `TERMS_APPROVED`, now gates only `/terms` and the link to it
+ * while the site is private (plan 0014, item 10), so `TradePanel` renders
+ * whenever this is true. Everything else `/health` reports is operational detail this
  * customer-facing bundle has no reason to parse.
  */
 export interface Health {

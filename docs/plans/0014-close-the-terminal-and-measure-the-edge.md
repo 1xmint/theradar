@@ -121,7 +121,8 @@ candidate count; any visitor measurement; running cargo test suites locally
    the X account section; say whether item 2 is still "see the decisions and
    act on them" or is now the swap button. Done when it is committed on `main`.
 7. [ ] **Owner: the key and the switch.** In the same box session as F1,
-   after F10–F12 are merged and F8 has passed: `RADAR_RPC` set to a private
+   after F11–F12 are merged and F8 has passed (F10 deferred by the owner,
+   see item 10): `RADAR_RPC` set to a private
    RPC URL (G4, moved here so F11's landing check and positions do not ride
    the public node), then `RADAR_JUPITER_API_KEY` and `RADAR_TRADE=on` in
    `/etc/radar/radar.env`, restart `radar-serve`. Then open
@@ -147,6 +148,8 @@ candidate count; any visitor measurement; running cargo test suites locally
      inside `signAndSendTransaction`, which would make "expired" fire early —
      F9 compares the landed transaction's `recentBlockhash` with the built one.
    - **F10: not yet reviewed** — waits on the owner's four terms values.
+   - **Panel without terms** (item 10's note): reviewed as part of the
+     whole-path review before `RADAR_TRADE=on`.
 9. [ ] **The owner's real test.** From radar.heyvera.org with his own wallet:
    start with about 0.01 SOL of one coin, then sell it back; then any size.
    Include one SOL→token and one token→SOL (proves Jupiter's wrap/unwrap
@@ -163,6 +166,14 @@ candidate count; any visitor measurement; running cargo test suites locally
     from the panel, a persistent "Powered by Jupiter" label (F5, §8.4). #292
     closed pointing here. Done when `legal.test.ts` finds no placeholder and
     `TradePanel.test.tsx` asserts the label and the link.
+    - **Owner decided 2026-09-26: skip the terms while the site is private.**
+      The site stays behind the Cloudflare Access wall, so the panel now
+      follows the server's `trading` switch alone (`TokenHeader.tsx`);
+      `TERMS_APPROVED` still hides `/terms` and the panel's link to it. The
+      "Powered by Jupiter" label shipped with this change, because §8.4 binds
+      API use whether or not the site is public. **Before the site goes
+      public, this item is done in full and `TERMS_APPROVED` gates the panel
+      again.** Item 7 no longer waits on this item; it still waits on item 8.
 11. [x] **Did it land?** (#301, `ba38d78`, CI green 2026-09-26) Server: `GET /v1/customer/tx/{signature}?last_valid_block_height=N`
     (Customer audience, the per-wallet limiter) answers `pending`, `landed`,
     `failed` (with the reason) or `expired`, from `getSignatureStatuses` and

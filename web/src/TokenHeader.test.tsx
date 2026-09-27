@@ -544,3 +544,37 @@ describe("TokenHeader positions", () => {
     }
   });
 });
+
+//! Whether the trade panel mounts: the server's `/health` switch alone while
+//! the site is private (plan 0014, item 10). The terms switch no longer
+//! holds it back; if it ever does again, the first test here fails.
+
+describe("TokenHeader trade panel", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  function stubHealth(body: unknown): void {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) =>
+        String(url).endsWith("/health") ? jsonResponse(body) : jsonResponse(watchlistBody([])),
+      ),
+    );
+  }
+
+  it("shows the panel when the server says trading is on, though the terms are unapproved", async () => {
+    stubHealth({ trading: true });
+    render(<TokenHeader load={ready(token())} />);
+    expect(await screen.findByRole("group", { name: "Buy or sell" })).toBeTruthy();
+  });
+
+  it("shows no panel when the server says trading is off", async () => {
+    stubHealth({ trading: false });
+    render(<TokenHeader load={ready(token())} />);
+    // Let the health read settle before asserting the panel stayed away.
+    await act(async () => {});
+    expect(screen.queryByRole("group", { name: "Buy or sell" })).toBeNull();
+  });
+});
