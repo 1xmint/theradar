@@ -616,6 +616,8 @@ fn route_error_label(why: &RouteError) -> &'static str {
         RouteError::Unavailable(_) => "unavailable",
         RouteError::Malformed(_) => "malformed",
         RouteError::Unverifiable(_) => "unverifiable",
+        RouteError::SlippageMismatch(_) => "slippage_mismatch",
+        RouteError::PriorityFeeExceeded(_) => "priority_fee_exceeded",
     }
 }
 
@@ -643,6 +645,37 @@ fn route_error_response(why: &RouteError) -> Response {
                 StatusCode::BAD_GATEWAY,
                 "unreadable_route",
                 "Radar could not read a route from Jupiter for this request",
+            )
+        }
+        // Jupiter's own worst-case output does not honour the slippage this
+        // request asked for -- or it echoed a different tolerance than the
+        // one requested. Its own refusal code, not folded into
+        // `unreadable_route`: the route *was* readable, it just would not
+        // bind the cap the request named. See `Quote::from_response`.
+        RouteError::SlippageMismatch(_) => {
+            eprintln!(
+                "radar-serve: trade route failed: {}",
+                route_error_label(why)
+            );
+            refusal(
+                StatusCode::BAD_GATEWAY,
+                "route_slippage_mismatch",
+                "Jupiter's route does not honour the slippage this request asked for",
+            )
+        }
+        // The transaction's compute-budget instructions would spend more
+        // than the priority-fee cap, or name one this module cannot decode.
+        // Its own code for the same reason: a readable route Radar still
+        // will not build.
+        RouteError::PriorityFeeExceeded(_) => {
+            eprintln!(
+                "radar-serve: trade route failed: {}",
+                route_error_label(why)
+            );
+            refusal(
+                StatusCode::BAD_GATEWAY,
+                "route_priority_fee_exceeded",
+                "Radar could not build this trade within its priority-fee cap",
             )
         }
     }
@@ -1341,6 +1374,14 @@ mod tests {
             (
                 RouteError::Unverifiable("secret-detail".to_owned()),
                 "unverifiable",
+            ),
+            (
+                RouteError::SlippageMismatch("secret-detail".to_owned()),
+                "slippage_mismatch",
+            ),
+            (
+                RouteError::PriorityFeeExceeded("secret-detail".to_owned()),
+                "priority_fee_exceeded",
             ),
         ];
         for (err, expected_label) in cases {

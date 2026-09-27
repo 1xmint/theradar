@@ -167,6 +167,12 @@ pub fn assemble(body: &str, taker: Address) -> Result<AssembledTransaction, Rout
         })?;
     let last_valid_block_height = parsed.blockhash_with_metadata.last_valid_block_height;
 
+    let non_compute_budget_count = parsed.setup_instructions.len()
+        + 1 // swap_instruction
+        + usize::from(parsed.cleanup_instruction.is_some())
+        + parsed.other_instructions.len();
+    check_priority_fee(&parsed.compute_budget_instructions, non_compute_budget_count)?;
+
     let instructions: Vec<RawInstruction> = parsed
         .compute_budget_instructions
         .into_iter()
@@ -212,6 +218,100 @@ pub fn assemble(body: &str, taker: Address) -> Result<AssembledTransaction, Rout
 /// included. Checked here, against the exact bytes this module is about to
 /// hand back, rather than left for the wallet or the RPC node to discover.
 const MAX_PACKET_BYTES: usize = 1232;
+
+/// The Compute Budget program's `SetComputeUnitLimit` instruction tag: a `u32`
+/// unit count follows.
+const SET_COMPUTE_UNIT_LIMIT: u8 = 2;
+/// The Compute Budget program's `SetComputeUnitPrice` instruction tag: a `u64`
+/// of micro-lamports per compute unit follows.
+const SET_COMPUTE_UNIT_PRICE: u8 = 3;
+
+/// Solana's own ceiling on compute units for one transaction
+/// (`MAX_COMPUTE_UNIT_LIMIT`). The default this module assumes when Jupiter's
+/// response names no explicit limit is capped at this, the same as the
+/// runtime's own cap, so an assumed limit can never claim more than a
+/// transaction could ever be granted.
+const MAX_COMPUTE_UNITS: u64 = 1_400_000;
+
+/// What one compute unit costs, in the absence of an explicit
+/// `SetComputeUnitLimit`: 200,000 units per non-compute-budget instruction,
+/// the same rough default the runtime itself falls back to per instruction.
+const DEFAULT_COMPUTE_UNITS_PER_INSTRUCTION: u64 = 200_000;
+
+/// The most a transaction this module assembles may spend on priority fees:
+/// 0.001 SOL, in lamports.
+///
+/// A refused build costs the visitor nothing -- nothing was sent, nothing was
+/// signed. A route that would spend six figures of lamports on priority fees
+/// alone (the fixtures captured on 2026-09-09 pay on the order of 13,000) is
+/// either a Jupiter default this module should not silently forward, or a
+/// congested moment Radar should say so about rather than pay through.
+pub const MAX_PRIORITY_FEE_LAMPORTS: u128 = 1_000_000;
+
+/// Reads `SetComputeUnitPrice` and `SetComputeUnitLimit` out of Jupiter's
+/// `computeBudgetInstructions` and refuses if the fee they would spend, at
+/// `non_compute_budget_count` other instructions, is over
+/// [`MAX_PRIORITY_FEE_LAMPORTS`] -- or if an instruction in that list cannot be
+/// decoded as either.
+///
+/// # Errors
+///
+/// [`RouteError::PriorityFeeExceeded`] for both cases above. Refusing an
+/// undecodable instruction rather than passing it through is the same
+/// reasoning as the module's `tipInstruction` refusal: an instruction this
+/// code cannot read is one it cannot prove is only a compute-budget setting.
+fn check_priority_fee(
+    instructions: &[RawInstruction],
+    non_compute_budget_count: usize,
+) -> Result<(), RouteError> {
+    let mut price_micro_lamports: u64 = 0;
+    let mut explicit_limit: Option<u32> = None;
+
+    for ix in instructions {
+        let data = b64::decode(&ix.data).ok_or_else(|| {
+            RouteError::Malformed(format!("compute budget instruction data is not base64: {}", ix.data))
+        })?;
+        match data.first() {
+            Some(&SET_COMPUTE_UNIT_PRICE) if data.len() == 9 => {
+                let bytes: [u8; 8] = data[1..9]
+                    .try_into()
+                    .expect("checked length 9 above, so 8 bytes remain after the tag");
+                price_micro_lamports = u64::from_le_bytes(bytes);
+            }
+            Some(&SET_COMPUTE_UNIT_LIMIT) if data.len() == 5 => {
+                let bytes: [u8; 4] = data[1..5]
+                    .try_into()
+                    .expect("checked length 5 above, so 4 bytes remain after the tag");
+                explicit_limit = Some(u32::from_le_bytes(bytes));
+            }
+            _ => {
+                return Err(RouteError::PriorityFeeExceeded(format!(
+                    "undecodable compute budget instruction: {} bytes, tag {:?}",
+                    data.len(),
+                    data.first()
+                )));
+            }
+        }
+    }
+
+    let non_compute_budget_count =
+        u64::try_from(non_compute_budget_count).unwrap_or(u64::MAX);
+    let default_limit = DEFAULT_COMPUTE_UNITS_PER_INSTRUCTION
+        .saturating_mul(non_compute_budget_count)
+        .min(MAX_COMPUTE_UNITS);
+    let limit = explicit_limit
+        .map_or(default_limit, u64::from)
+        .min(MAX_COMPUTE_UNITS);
+
+    let fee_lamports = u128::from(price_micro_lamports) * u128::from(limit) / 1_000_000;
+    if fee_lamports > MAX_PRIORITY_FEE_LAMPORTS {
+        return Err(RouteError::PriorityFeeExceeded(format!(
+            "priority fee would be {fee_lamports} lamports ({price_micro_lamports} micro-lamports \
+             per unit at a {limit}-unit limit), over the {MAX_PRIORITY_FEE_LAMPORTS}-lamport cap"
+        )));
+    }
+    Ok(())
+}
 
 /// Where one account will be found in the compiled message: a plain static
 /// index, or an index into the v0 extended space a lookup table supplies.
@@ -669,9 +769,12 @@ fn write_shortvec(out: &mut Vec<u8>, mut n: usize) -> Result<(), RouteError> {
 mod tests {
     use std::collections::{BTreeMap, HashMap};
 
-    use radar_types::Address;
+    use radar_types::{Address, b64};
 
-    use super::{assemble, write_shortvec};
+    use super::{
+        MAX_PRIORITY_FEE_LAMPORTS, RawInstruction, RouteError, assemble, check_priority_fee,
+        write_shortvec,
+    };
 
     const SOL_USDC: &str = include_str!("../fixtures/jupiter-build-sol-usdc.json");
     const USDC_SOL: &str = include_str!("../fixtures/jupiter-build-usdc-sol.json");
@@ -1306,5 +1409,90 @@ mod tests {
             out.is_empty(),
             "nothing is written once the count is refused"
         );
+    }
+
+    fn compute_unit_price(micro_lamports: u64) -> RawInstruction {
+        let mut data = vec![3u8];
+        data.extend_from_slice(&micro_lamports.to_le_bytes());
+        RawInstruction {
+            program_id: "ComputeBudget111111111111111111111111111111".to_owned(),
+            accounts: Vec::new(),
+            data: b64::encode(&data),
+        }
+    }
+
+    fn compute_unit_limit(units: u32) -> RawInstruction {
+        let mut data = vec![2u8];
+        data.extend_from_slice(&units.to_le_bytes());
+        RawInstruction {
+            program_id: "ComputeBudget111111111111111111111111111111".to_owned(),
+            accounts: Vec::new(),
+            data: b64::encode(&data),
+        }
+    }
+
+    /// Finding B: passing `computeBudgetInstructions` through unread meant a
+    /// widened priority fee never bound. These decode the two instructions
+    /// Jupiter actually sends and check the cap that stands in for the
+    /// passthrough now.
+    #[test]
+    fn the_real_fixtures_priority_fee_is_within_the_cap() {
+        // Real captures, real math: 9386 micro-lamports/unit (sol-usdc) and
+        // 9583 (usdc-sol), each at a default limit sized off the fixture's
+        // own non-compute-budget instruction count -- 6 for sol-usdc, 3 for
+        // usdc-sol -- both well under the cap.
+        let sol_usdc: serde_json::Value = serde_json::from_str(SOL_USDC).unwrap();
+        let ixs: Vec<RawInstruction> =
+            serde_json::from_value(sol_usdc["computeBudgetInstructions"].clone()).unwrap();
+        assert!(check_priority_fee(&ixs, 6).is_ok(), "the sol-usdc fixture must still build");
+
+        let usdc_sol: serde_json::Value = serde_json::from_str(USDC_SOL).unwrap();
+        let ixs: Vec<RawInstruction> =
+            serde_json::from_value(usdc_sol["computeBudgetInstructions"].clone()).unwrap();
+        assert!(check_priority_fee(&ixs, 3).is_ok(), "the usdc-sol fixture must still build");
+    }
+
+    #[test]
+    fn a_price_over_the_cap_is_refused() {
+        // At a 1,200,000-unit default limit (6 non-compute-budget
+        // instructions), this price spends well over the cap.
+        let ixs = vec![compute_unit_price(1_000_000)];
+        let err = check_priority_fee(&ixs, 6).expect_err("an over-cap price must refuse");
+        assert!(matches!(err, RouteError::PriorityFeeExceeded(_)), "got {err}");
+    }
+
+    #[test]
+    fn the_boundary_exactly_at_the_cap_is_accepted() {
+        let limit = 200_000u32;
+        let price =
+            u64::try_from(MAX_PRIORITY_FEE_LAMPORTS * 1_000_000 / u128::from(limit)).unwrap();
+        let ixs = vec![compute_unit_limit(limit), compute_unit_price(price)];
+        assert!(
+            check_priority_fee(&ixs, 0).is_ok(),
+            "the boundary itself must not be refused"
+        );
+    }
+
+    #[test]
+    fn one_micro_lamport_over_the_boundary_is_refused() {
+        let limit = 200_000u32;
+        let price =
+            u64::try_from(MAX_PRIORITY_FEE_LAMPORTS * 1_000_000 / u128::from(limit)).unwrap() + 1;
+        let ixs = vec![compute_unit_limit(limit), compute_unit_price(price)];
+        let err =
+            check_priority_fee(&ixs, 0).expect_err("one micro-lamport over the cap must refuse");
+        assert!(matches!(err, RouteError::PriorityFeeExceeded(_)), "got {err}");
+    }
+
+    #[test]
+    fn an_undecodable_compute_budget_instruction_is_refused_not_passed_through() {
+        let ixs = vec![RawInstruction {
+            program_id: "ComputeBudget111111111111111111111111111111".to_owned(),
+            accounts: Vec::new(),
+            data: b64::encode(&[7u8, 1, 2, 3]),
+        }];
+        let err = check_priority_fee(&ixs, 6)
+            .expect_err("an undecodable compute-budget instruction must refuse, not pass through");
+        assert!(matches!(err, RouteError::PriorityFeeExceeded(_)), "got {err}");
     }
 }

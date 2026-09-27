@@ -33,7 +33,7 @@ fn fixture(name: &str) -> String {
 #[test]
 fn a_sol_to_usdc_capture_becomes_the_quote_it_describes() {
     let request = QuoteRequest::new(Asset::Sol, Asset::Usdc, 100_000_000, taker());
-    let quote = Quote::from_response(&fixture("jupiter-build-sol-usdc.json"), &request)
+    let quote = Quote::from_response(&fixture("jupiter-build-sol-usdc.json"), &request, 100)
         .expect("the capture is a well-formed answer to this request");
 
     // The numbers, not merely that it parsed. A parser that returned zeroes
@@ -68,7 +68,7 @@ fn a_sol_to_usdc_capture_becomes_the_quote_it_describes() {
 #[test]
 fn the_same_parser_reads_the_reverse_direction() {
     let request = QuoteRequest::new(Asset::Usdc, Asset::Sol, 10_000_000, taker());
-    let quote = Quote::from_response(&fixture("jupiter-build-usdc-sol.json"), &request)
+    let quote = Quote::from_response(&fixture("jupiter-build-usdc-sol.json"), &request, 100)
         .expect("USDC in and SOL out is a quotable pair");
 
     assert_eq!(quote.in_amount, 10_000_000);
@@ -83,10 +83,10 @@ fn the_same_parser_reads_the_reverse_direction() {
 #[test]
 fn wrapped_sol_quotes_as_either_side() {
     let out = QuoteRequest::new(Asset::WrappedSol, Asset::Usdc, 100_000_000, taker());
-    assert!(Quote::from_response(&fixture("jupiter-build-sol-usdc.json"), &out).is_ok());
+    assert!(Quote::from_response(&fixture("jupiter-build-sol-usdc.json"), &out, 100).is_ok());
 
     let back = QuoteRequest::new(Asset::Usdc, Asset::WrappedSol, 10_000_000, taker());
-    let quote = Quote::from_response(&fixture("jupiter-build-usdc-sol.json"), &back)
+    let quote = Quote::from_response(&fixture("jupiter-build-usdc-sol.json"), &back, 100)
         .expect("USDC into wrapped SOL");
     assert_eq!(
         quote.output,
@@ -105,7 +105,7 @@ fn wrapped_sol_quotes_as_either_side() {
 fn a_quote_for_a_different_pair_is_refused_rather_than_attributed() {
     // The SOL -> USDC body, offered as an answer to the USDC -> SOL question.
     let wrong_way = QuoteRequest::new(Asset::Usdc, Asset::Sol, 10_000_000, taker());
-    let err = Quote::from_response(&fixture("jupiter-build-sol-usdc.json"), &wrong_way)
+    let err = Quote::from_response(&fixture("jupiter-build-sol-usdc.json"), &wrong_way, 100)
         .expect_err("a quote for the opposite direction must not be accepted");
     assert!(
         matches!(err, RouteError::Malformed(ref m) if m.contains("answered about")),
@@ -120,7 +120,7 @@ fn a_quote_for_a_different_pair_is_refused_rather_than_attributed() {
         taker(),
     );
     assert!(
-        Quote::from_response(&fixture("jupiter-build-sol-usdc.json"), &unrelated).is_err(),
+        Quote::from_response(&fixture("jupiter-build-sol-usdc.json"), &unrelated, 100).is_err(),
         "an answer about wSOL is not an answer about another mint"
     );
 }
@@ -130,7 +130,7 @@ fn a_quote_for_a_different_pair_is_refused_rather_than_attributed() {
 fn every_captured_route_runs_through_lookup_tables_the_signer_refuses() {
     let out = QuoteRequest::new(Asset::Sol, Asset::Usdc, 100_000_000, taker());
     let quote =
-        Quote::from_response(&fixture("jupiter-build-sol-usdc.json"), &out).expect("parses");
+        Quote::from_response(&fixture("jupiter-build-sol-usdc.json"), &out, 100).expect("parses");
     assert_eq!(quote.lookup_tables, 5);
     assert!(
         !quote.signer_could_read(),
@@ -142,7 +142,7 @@ fn every_captured_route_runs_through_lookup_tables_the_signer_refuses() {
     // legacy transaction and call it supported.
     let back = QuoteRequest::new(Asset::Usdc, Asset::Sol, 10_000_000, taker());
     let quote =
-        Quote::from_response(&fixture("jupiter-build-usdc-sol.json"), &back).expect("parses");
+        Quote::from_response(&fixture("jupiter-build-usdc-sol.json"), &back, 100).expect("parses");
     assert_eq!(quote.lookup_tables, 1);
     assert!(!quote.signer_could_read());
 }
@@ -209,7 +209,7 @@ fn what_jupiter_did_not_say_is_never_read_as_zero() {
         "routePlan": []
     }"#;
     let request = QuoteRequest::new(Asset::Sol, Asset::Usdc, 100_000_000, taker());
-    let quote = Quote::from_response(body, &request).expect("the required fields are all here");
+    let quote = Quote::from_response(body, &request, 100).expect("the required fields are all here");
 
     assert_eq!(
         quote.impact_bps,
@@ -242,7 +242,7 @@ fn a_zero_output_is_no_route_rather_than_a_free_trade() {
         "routePlan": []
     }"#;
     let request = QuoteRequest::new(Asset::Sol, Asset::Usdc, 100_000_000, taker());
-    let err = Quote::from_response(body, &request).expect_err("zero out is not a price");
+    let err = Quote::from_response(body, &request, 100).expect_err("zero out is not a price");
     assert!(matches!(err, RouteError::NoRoute { .. }), "got {err}");
 }
 
@@ -259,7 +259,7 @@ fn an_answer_for_a_different_in_amount_is_refused() {
         "routePlan": []
     }"#;
     let request = QuoteRequest::new(Asset::Sol, Asset::Usdc, 100_000_000, taker());
-    let err = Quote::from_response(body, &request).expect_err("100000000 was asked for, not 999");
+    let err = Quote::from_response(body, &request, 100).expect_err("100000000 was asked for, not 999");
     assert!(
         matches!(err, RouteError::Malformed(ref m) if m.contains("999")),
         "got {err}"
@@ -282,7 +282,7 @@ fn a_swap_mode_other_than_exact_in_is_refused() {
                 "routePlan": []
             }}"#
         );
-        let err = Quote::from_response(&body, &request)
+        let err = Quote::from_response(&body, &request, 100)
             .expect_err("only ExactIn is a quote this type can describe");
         assert!(
             matches!(err, RouteError::Malformed(ref m) if m.contains("ExactIn")),
@@ -305,7 +305,7 @@ fn an_unparseable_threshold_is_refused_rather_than_dropped() {
         "routePlan": []
     }"#;
     let request = QuoteRequest::new(Asset::Sol, Asset::Usdc, 100_000_000, taker());
-    let err = Quote::from_response(body, &request)
+    let err = Quote::from_response(body, &request, 100)
         .expect_err("an unparseable threshold must not be read as absent");
     assert!(
         matches!(err, RouteError::Malformed(ref m) if m.contains("otherAmountThreshold")),
@@ -339,4 +339,62 @@ fn no_key_means_no_router_at_all() {
         !rendered.contains("test-key-that-authorises-nothing"),
         "the key must not survive into a formatter: {rendered}"
     );
+}
+
+/// Finding A: Jupiter's own worst-case output must honour the slippage this
+/// request asked for. The two ways it could silently fail to are a widened
+/// `otherAmountThreshold` and an echoed `slippageBps` that names a different
+/// tolerance -- both tampered here from the real capture, never invented from
+/// scratch, so the untampered fields still describe a shape Jupiter actually
+/// sent.
+mod slippage_mismatch {
+    use super::{Asset, Quote, QuoteRequest, RouteError, fixture, taker};
+
+    /// The real capture, with one field hand-edited. Everything else --
+    /// `outAmount`, route plan, blockhash -- is the untouched 2026-09-09
+    /// capture, so only the tampered field can be the reason this refuses.
+    fn tampered(from_field: &str, to_field: &str) -> String {
+        let body = fixture("jupiter-build-sol-usdc.json");
+        assert!(
+            body.contains(from_field),
+            "fixture no longer contains {from_field:?}; update this test"
+        );
+        body.replace(from_field, to_field)
+    }
+
+    #[test]
+    fn a_widened_threshold_is_refused() {
+        // outAmount is 10_168_783; 100 bps slippage requires a floor of
+        // 10_067_095. Widening the threshold below that floor is exactly the
+        // gap the review found: nothing else in the response says the
+        // transaction's real floor is worse than the request asked for.
+        let body = tampered(
+            r#""otherAmountThreshold":"10067096""#,
+            r#""otherAmountThreshold":"9000000""#,
+        );
+        let request = QuoteRequest::new(Asset::Sol, Asset::Usdc, 100_000_000, taker());
+        let err = Quote::from_response(&body, &request, 100).expect_err("must refuse");
+        assert!(
+            matches!(err, RouteError::SlippageMismatch(ref m) if m.contains("9000000")),
+            "got {err}"
+        );
+    }
+
+    #[test]
+    fn an_echoed_slippage_that_differs_from_the_request_is_refused() {
+        let body = tampered(r#""slippageBps":100"#, r#""slippageBps":50"#);
+        let request = QuoteRequest::new(Asset::Sol, Asset::Usdc, 100_000_000, taker());
+        let err = Quote::from_response(&body, &request, 100).expect_err("must refuse");
+        assert!(
+            matches!(err, RouteError::SlippageMismatch(ref m) if m.contains('5') && m.contains("100")),
+            "got {err}"
+        );
+    }
+
+    #[test]
+    fn the_real_capture_still_passes_at_its_own_slippage() {
+        let body = fixture("jupiter-build-sol-usdc.json");
+        let request = QuoteRequest::new(Asset::Sol, Asset::Usdc, 100_000_000, taker());
+        assert!(Quote::from_response(&body, &request, 100).is_ok());
+    }
 }
