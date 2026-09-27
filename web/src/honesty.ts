@@ -545,11 +545,12 @@ export function roundTripCostCaption(impactBps: number | null): string {
 /**
  * The sentence for a refusal from `/v1/market/quote` or `/v1/customer/swap`.
  *
- * Every code the contract documents gets its own sentence. An unrecognised
- * code falls back to the server's own `detail` rather than a generic "could
- * not trade" -- the same reasoning `partitionReasons` gives for an
- * unrecognised strategy reason: showing an unfamiliar fact is the safe
- * direction to be wrong in, hiding one is not.
+ * Every code the contract documents gets its own sentence, and
+ * `tradeContract.test.ts` fails if the server gains one without it. An
+ * unrecognised code gets a fixed sentence, never the server's `detail`: that
+ * text is written for the log and can name internals, and on the money path
+ * "nothing was sent" serves a visitor better than a message nobody wrote for
+ * them.
  */
 export function swapRefusalMessage(reason: string, detail: string): string {
   if (isWalletSessionRefusal(reason)) {
@@ -577,7 +578,7 @@ export function swapRefusalMessage(reason: string, detail: string): string {
     case "route_slippage_mismatch":
       return "Jupiter's route did not keep to your slippage limit, so Radar refused it. Nothing was sent.";
     case "route_priority_fee_exceeded":
-      return "Jupiter asked for a priority fee above Radar's 0.001 SOL cap, so Radar refused it. Nothing was sent. Try again in a moment.";
+      return "Jupiter's route asked for a priority fee above Radar's 0.001 SOL cap, or a fee setting Radar could not read, so Radar refused it. Nothing was sent. Try again in a moment.";
     default:
       return "Radar could not build this trade. Nothing was sent.";
   }

@@ -488,7 +488,7 @@ describe("swapRefusalMessage", () => {
       "Jupiter's route did not keep to your slippage limit, so Radar refused it. Nothing was sent.",
     );
     expect(swapRefusalMessage("route_priority_fee_exceeded", "irrelevant detail")).toBe(
-      "Jupiter asked for a priority fee above Radar's 0.001 SOL cap, so Radar refused it. Nothing was sent. Try again in a moment.",
+      "Jupiter's route asked for a priority fee above Radar's 0.001 SOL cap, or a fee setting Radar could not read, so Radar refused it. Nothing was sent. Try again in a moment.",
     );
   });
 

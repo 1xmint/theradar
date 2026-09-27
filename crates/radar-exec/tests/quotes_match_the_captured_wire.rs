@@ -394,6 +394,19 @@ mod slippage_mismatch {
     }
 
     #[test]
+    fn a_threshold_exactly_at_the_floor_is_accepted() {
+        // The capture sits one above the 10_067_095 floor, because Jupiter
+        // rounds up and the check rounds down. If Jupiter ever rounded down
+        // too, a check that refused the floor itself would refuse every quote.
+        let body = tampered(
+            r#""otherAmountThreshold":"10067096""#,
+            r#""otherAmountThreshold":"10067095""#,
+        );
+        let request = QuoteRequest::new(Asset::Sol, Asset::Usdc, 100_000_000, taker());
+        assert!(Quote::from_response(&body, &request, 100).is_ok());
+    }
+
+    #[test]
     fn the_real_capture_still_passes_at_its_own_slippage() {
         let body = fixture("jupiter-build-sol-usdc.json");
         let request = QuoteRequest::new(Asset::Sol, Asset::Usdc, 100_000_000, taker());

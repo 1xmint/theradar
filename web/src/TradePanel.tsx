@@ -505,8 +505,8 @@ export function TradePanel({ mint, symbol, positions, onTraded }: TradePanelProp
           <p className="text-[var(--color-dim)]">{roundTripCostCaption(review.response.quote.impact_bps)}</p>
           {side === "buy" && (
             <p className="text-[var(--color-dim)]">
-              The first buy of a coin may also pay about 0.002 SOL of refundable account rent, plus
-              network fees, shown in your wallet.
+              The first buy of a coin may also pay about 0.002 SOL of account rent, returned only if
+              the empty token account is later closed, plus network fees, shown in your wallet.
             </p>
           )}
           {review.kind === "declined" && (

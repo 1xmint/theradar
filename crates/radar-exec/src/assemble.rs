@@ -146,6 +146,10 @@ impl AssembledTransaction {
 /// wire format's account index is a single byte, so this is a real limit and
 /// not a round-number guess), or if the finished transaction is over
 /// [`MAX_PACKET_BYTES`].
+///
+/// [`RouteError::PriorityFeeExceeded`] if `computeBudgetInstructions` would
+/// spend more than [`MAX_PRIORITY_FEE_LAMPORTS`], or holds an instruction
+/// this module cannot read as a compute-budget setting.
 pub fn assemble(body: &str, taker: Address) -> Result<AssembledTransaction, RouteError> {
     let parsed: BuildInstructions =
         serde_json::from_str(body).map_err(|e| RouteError::Malformed(e.to_string()))?;
@@ -222,6 +226,10 @@ pub fn assemble(body: &str, taker: Address) -> Result<AssembledTransaction, Rout
 /// hand back, rather than left for the wallet or the RPC node to discover.
 const MAX_PACKET_BYTES: usize = 1232;
 
+/// The Compute Budget program's address. An instruction in
+/// `computeBudgetInstructions` naming any other program is refused: its
+/// bytes decoding like a price would say nothing about what it does.
+const COMPUTE_BUDGET_PROGRAM: &str = "ComputeBudget111111111111111111111111111111";
 /// The Compute Budget program's `SetComputeUnitLimit` instruction tag: a `u32`
 /// unit count follows.
 const SET_COMPUTE_UNIT_LIMIT: u8 = 2;
@@ -254,8 +262,8 @@ pub const MAX_PRIORITY_FEE_LAMPORTS: u128 = 1_000_000;
 /// Reads `SetComputeUnitPrice` and `SetComputeUnitLimit` out of Jupiter's
 /// `computeBudgetInstructions` and refuses if the fee they would spend, at
 /// `non_compute_budget_count` other instructions, is over
-/// [`MAX_PRIORITY_FEE_LAMPORTS`] -- or if an instruction in that list cannot be
-/// decoded as either.
+/// [`MAX_PRIORITY_FEE_LAMPORTS`] -- or if an instruction in that list is not
+/// the Compute Budget program's, or cannot be decoded as either.
 ///
 /// # Errors
 ///
@@ -271,6 +279,12 @@ fn check_priority_fee(
     let mut explicit_limit: Option<u32> = None;
 
     for ix in instructions {
+        if ix.program_id != COMPUTE_BUDGET_PROGRAM {
+            return Err(RouteError::PriorityFeeExceeded(format!(
+                "compute budget list holds an instruction for {}, not the Compute Budget program",
+                ix.program_id
+            )));
+        }
         let data = b64::decode(&ix.data).ok_or_else(|| {
             RouteError::Malformed(format!(
                 "compute budget instruction data is not base64: {}",
@@ -1499,6 +1513,82 @@ mod tests {
             check_priority_fee(&ixs, 0).expect_err("one micro-lamport over the cap must refuse");
         assert!(
             matches!(err, RouteError::PriorityFeeExceeded(_)),
+            "got {err}"
+        );
+    }
+
+    /// `body` with its one compute-budget instruction's price replaced.
+    fn with_price(body: &str, micro_lamports: u64) -> String {
+        let mut v: serde_json::Value = serde_json::from_str(body).unwrap();
+        v["computeBudgetInstructions"][0]["data"] =
+            serde_json::Value::String(compute_unit_price(micro_lamports).data);
+        v.to_string()
+    }
+
+    /// Jupiter sends a price and never a limit, so in production the fee is
+    /// priced off the instruction count `assemble` passes in. These pin that
+    /// count through `assemble` itself: sol-usdc has 4 setup + swap + cleanup
+    /// = 6, a 1,200,000-unit default limit, so 833,333 micro-lamports a unit
+    /// is the last price under the cap and 833,334 the first over it. A count
+    /// one lower would let 833,334 through; one higher would refuse 833,333.
+    #[test]
+    fn the_instruction_count_prices_the_fee_at_the_last_price_under_the_cap() {
+        assert!(assemble(&with_price(SOL_USDC, 833_333), taker()).is_ok());
+    }
+
+    #[test]
+    fn the_instruction_count_prices_the_fee_at_the_first_price_over_the_cap() {
+        let err = assemble(&with_price(SOL_USDC, 833_334), taker()).unwrap_err();
+        assert!(
+            matches!(err, RouteError::PriorityFeeExceeded(_)),
+            "got {err}"
+        );
+    }
+
+    /// Neither capture has `otherInstructions`, so this adds one: usdc-sol's
+    /// 1 setup + swap + cleanup + 1 other = 4, an 800,000-unit limit, and
+    /// 1,250,001 micro-lamports a unit is one over the cap. Not counting the
+    /// other instruction would price it at 3 and let it through.
+    #[test]
+    fn other_instructions_count_towards_the_fee() {
+        let mut v: serde_json::Value =
+            serde_json::from_str(&with_price(USDC_SOL, 1_250_001)).unwrap();
+        v["otherInstructions"] = serde_json::Value::Array(vec![v["cleanupInstruction"].clone()]);
+        let err = assemble(&v.to_string(), taker()).unwrap_err();
+        assert!(
+            matches!(err, RouteError::PriorityFeeExceeded(_)),
+            "got {err}"
+        );
+    }
+
+    #[test]
+    fn a_compute_budget_instruction_of_the_wrong_length_is_refused_not_misread() {
+        let short_price = [3u8, 1, 2, 3];
+        let short_limit = [2u8, 1];
+        // One byte too long each: the extra byte must not be ignored.
+        let long_price = [3u8, 1, 0, 0, 0, 0, 0, 0, 0, 0];
+        let long_limit = [2u8, 1, 0, 0, 0, 0];
+        for data in [&short_price[..], &short_limit, &long_price, &long_limit] {
+            let ixs = vec![RawInstruction {
+                program_id: super::COMPUTE_BUDGET_PROGRAM.to_owned(),
+                accounts: Vec::new(),
+                data: b64::encode(data),
+            }];
+            let err = check_priority_fee(&ixs, 1).expect_err("a wrong length must refuse");
+            assert!(
+                matches!(err, RouteError::PriorityFeeExceeded(_)),
+                "{data:?}: got {err}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_price_instruction_from_another_program_is_refused() {
+        let mut ix = compute_unit_price(1);
+        ix.program_id = "11111111111111111111111111111111".to_owned();
+        let err = check_priority_fee(&[ix], 1).expect_err("another program must refuse");
+        assert!(
+            matches!(err, RouteError::PriorityFeeExceeded(ref m) if m.contains("not the Compute Budget program")),
             "got {err}"
         );
     }

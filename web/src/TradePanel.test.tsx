@@ -336,7 +336,7 @@ describe("TradePanel review and send flow", () => {
     await buildReview();
     expect(await screen.findByText("Review before you approve")).toBeTruthy();
     expect(
-      screen.getByText(/refundable account rent, plus/),
+      screen.getByText(/account rent, returned only if/),
     ).toBeTruthy();
   });
 
@@ -353,7 +353,7 @@ describe("TradePanel review and send flow", () => {
     typeAmount("1");
     await buildReview();
     expect(await screen.findByText("Review before you approve")).toBeTruthy();
-    expect(screen.queryByText(/refundable account rent, plus/)).toBeNull();
+    expect(screen.queryByText(/account rent, returned only if/)).toBeNull();
   });
 
   it("refuses to approve when the built response's quote names a different mint than the one on screen", async () => {
@@ -769,7 +769,7 @@ describe("TradePanel swap refusal messages", () => {
     [
       "route_priority_fee_exceeded",
       "",
-      "Jupiter asked for a priority fee above Radar's 0.001 SOL cap, so Radar refused it. Nothing was sent. Try again in a moment.",
+      "Jupiter's route asked for a priority fee above Radar's 0.001 SOL cap, or a fee setting Radar could not read, so Radar refused it. Nothing was sent. Try again in a moment.",
     ],
   ])("shows the right sentence for reason %s", async (reason, detail, expected) => {
     signIn();
