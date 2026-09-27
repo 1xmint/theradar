@@ -13,7 +13,7 @@ benefit of the doubt on everything else.
 
 ## Index
 
-**25 of these 35 name something mechanical that would catch a
+**26 of these 36 name something mechanical that would catch a
 recurrence. 10 name only a habit, and say so** — which is this file's opening
 standard rather than a gap in it. The habit-only rows are the ones worth reading
 twice; nothing will stop those repeating except somebody remembering.
@@ -60,6 +60,7 @@ quietly absent.
 | [33](#33-the-composition-test-documented-the-hole-and-every-assertion-passed) | The composition test documented the hole, and every assertion passed | `the_size_the_signer_reads_is_the_size_this_crate_wrote`,… |
 | [34](#34-the-monitor-resolved-its-paths-against-the-wrong-root-and-two-of-its-wrong-lines-said-ok) | The monitor resolved its paths against the wrong root, and two of its wrong lines said `[ok]` | `the_briefs_subjects_hang_off_the_one_path_it_is_given`,… |
 | [35](#35-a-measured-zero-was-read-as-a-verdict-and-a-first-reaction-was-filed-as-doctrine) | A measured zero was read as a verdict, and a first reaction was filed as doctrine | habit only, and it says so |
+| [36](#36-a-freshness-check-tested-the-wrong-property-and-a-wrong-horizon-hid-behind-it) | A freshness check tested the wrong property, and a wrong horizon hid behind it | `the_six_hour_label_is_always_refused_for_overlapping_its_own_entry`,… |
 
 ---
 

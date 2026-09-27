@@ -1435,6 +1435,44 @@ fn a_day_reading_recorded_too_long_after_its_horizon_is_not_an_exit() {
 }
 
 #[test]
+fn a_day_reading_recorded_exactly_at_the_tolerance_is_still_an_exit() {
+    // The edge of the tolerance belongs to it: a reading one hour late is the
+    // ordinary lag, not an unscheduled measurement. Pins `>` rather than `>=`.
+    let at = 1_000u64;
+    let day = 24 * 9_000u64;
+    let table = table_over(
+        vec![launch(1, 100, at)],
+        vec![
+            outcome(1, at + T, at, None, Some(100)),
+            outcome(1, at + day + 9_000, at, None, Some(150)),
+        ],
+    );
+
+    assert_eq!(table.rows[0].missing_24h, None);
+    assert_eq!(table.rows[0].gross_24h_bps, Some(5_000.0));
+}
+
+#[test]
+fn a_gap_just_wider_than_the_price_window_still_needs_its_margin() {
+    // 55,000 slots is past the nominal six-hour window (54,000) but inside the
+    // 25% margin, so it is still refused. Without the margin the exit's window
+    // could reach back to the entry's fill whenever slots ran fast.
+    let at = 1_000u64;
+    let table = table_over(
+        vec![launch(1, 100, at)],
+        vec![
+            outcome(1, at + T, at, None, Some(100)),
+            outcome(1, at + T + 55_000, at, None, Some(150)),
+        ],
+    );
+
+    assert_eq!(
+        table.rows[0].missing_6h,
+        Some(Missing::ExitWindowOverlapsEntry)
+    );
+}
+
+#[test]
 fn identical_prices_close_to_the_entry_are_refused_not_a_measured_zero() {
     // The bug's exact shape, isolated: the same `last_price` at two readings
     // inside the same six-hour price window used to read as `Ok(0.0)` -- a
