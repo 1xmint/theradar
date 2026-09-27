@@ -322,20 +322,27 @@ pub const MAX_PRIORITY_FEE_LAMPORTS: u128 = 1_000_000;
 /// compute-budget ones (each priced at [`BUILTIN_COMPUTE_UNITS`] when no
 /// explicit limit is given -- see that constant's doc comment), is over
 /// [`MAX_PRIORITY_FEE_LAMPORTS`] -- or if an instruction in that list is not
-/// the Compute Budget program's, or cannot be decoded as either.
+/// the Compute Budget program's, cannot be decoded as either, or repeats one
+/// Agave only accepts once (`SetComputeUnitPrice` or `SetComputeUnitLimit`).
 ///
 /// # Errors
 ///
-/// [`RouteError::PriorityFeeExceeded`] for both cases above. Refusing an
+/// [`RouteError::PriorityFeeExceeded`] for all three cases above. Refusing an
 /// undecodable instruction rather than passing it through is the same
 /// reasoning as the module's `tipInstruction` refusal: an instruction this
 /// code cannot read is one it cannot prove is only a compute-budget setting.
+/// Refusing a duplicate rather than keeping the last one seen is the same
+/// reasoning applied to a transaction Agave would refuse outright
+/// (`DuplicateInstruction`): a visitor should never be handed a transaction
+/// to sign that can never land.
 fn check_priority_fee(
     instructions: &[RawInstruction],
     non_compute_budget_count: usize,
 ) -> Result<(), RouteError> {
     let mut price_micro_lamports: u64 = 0;
     let mut explicit_limit: Option<u32> = None;
+    let mut seen_price = false;
+    let mut seen_limit = false;
 
     for ix in instructions {
         if ix.program_id != COMPUTE_BUDGET_PROGRAM {
@@ -352,12 +359,32 @@ fn check_priority_fee(
         })?;
         match data.first() {
             Some(&SET_COMPUTE_UNIT_PRICE) if data.len() == 9 => {
+                // Agave refuses a transaction carrying `SetComputeUnitPrice`
+                // twice (`DuplicateInstruction`, compute-budget-instruction/
+                // src/compute_budget_instruction_details.rs's
+                // `process_instruction`): signing this would produce a
+                // transaction that can never land.
+                if seen_price {
+                    return Err(RouteError::PriorityFeeExceeded(
+                        "duplicate compute budget instruction: SetComputeUnitPrice appears twice"
+                            .to_owned(),
+                    ));
+                }
+                seen_price = true;
                 let bytes: [u8; 8] = data[1..9]
                     .try_into()
                     .expect("checked length 9 above, so 8 bytes remain after the tag");
                 price_micro_lamports = u64::from_le_bytes(bytes);
             }
             Some(&SET_COMPUTE_UNIT_LIMIT) if data.len() == 5 => {
+                // Same rule, for `SetComputeUnitLimit`.
+                if seen_limit {
+                    return Err(RouteError::PriorityFeeExceeded(
+                        "duplicate compute budget instruction: SetComputeUnitLimit appears twice"
+                            .to_owned(),
+                    ));
+                }
+                seen_limit = true;
                 let bytes: [u8; 4] = data[1..5]
                     .try_into()
                     .expect("checked length 5 above, so 4 bytes remain after the tag");
@@ -857,8 +884,8 @@ mod tests {
     use radar_types::{Address, b64};
 
     use super::{
-        MAX_PRIORITY_FEE_LAMPORTS, RawInstruction, RouteError, assemble, check_priority_fee,
-        write_shortvec,
+        COMPUTE_BUDGET_PROGRAM, MAX_PRIORITY_FEE_LAMPORTS, RawInstruction, RouteError, assemble,
+        check_priority_fee, write_shortvec,
     };
 
     const SOL_USDC: &str = include_str!("../fixtures/jupiter-build-sol-usdc.json");
@@ -1541,8 +1568,11 @@ mod tests {
         v["otherInstructions"] =
             serde_json::Value::Array(vec![ix_json(&compute_unit_price(50_000_000))]);
         let err = assemble(&v.to_string(), taker()).unwrap_err();
+        let RouteError::PriorityFeeExceeded(msg) = &err else {
+            panic!("got {err}");
+        };
         assert!(
-            matches!(err, RouteError::PriorityFeeExceeded(_)),
+            msg.contains("outside computeBudgetInstructions"),
             "got {err}"
         );
     }
@@ -1560,8 +1590,50 @@ mod tests {
         setup.push(ix_json(&compute_unit_limit(1_400_000)));
         v["setupInstructions"] = serde_json::Value::Array(setup);
         let err = assemble(&v.to_string(), taker()).unwrap_err();
+        let RouteError::PriorityFeeExceeded(msg) = &err else {
+            panic!("got {err}");
+        };
         assert!(
-            matches!(err, RouteError::PriorityFeeExceeded(_)),
+            msg.contains("outside computeBudgetInstructions"),
+            "got {err}"
+        );
+    }
+
+    /// The same loop reaches `swapInstruction`, which — unlike setup, cleanup
+    /// and other — is a single required object rather than an array: a
+    /// per-slice check would miss it, so the loop must reach it too.
+    #[test]
+    fn a_compute_budget_instruction_hidden_in_swap_instruction_is_refused() {
+        let mut v: serde_json::Value = serde_json::from_str(SOL_USDC).unwrap();
+        v["swapInstruction"]["programId"] =
+            serde_json::Value::String(COMPUTE_BUDGET_PROGRAM.to_owned());
+        let err = assemble(&v.to_string(), taker()).unwrap_err();
+        let RouteError::PriorityFeeExceeded(msg) = &err else {
+            panic!("got {err}");
+        };
+        assert!(
+            msg.contains("outside computeBudgetInstructions"),
+            "got {err}"
+        );
+    }
+
+    /// Same again for `cleanupInstruction`, present in the fixture and
+    /// checked through `Option::iter` rather than a `Vec`.
+    #[test]
+    fn a_compute_budget_instruction_hidden_in_cleanup_instruction_is_refused() {
+        let mut v: serde_json::Value = serde_json::from_str(SOL_USDC).unwrap();
+        assert!(
+            !v["cleanupInstruction"].is_null(),
+            "fixture must carry a cleanup instruction for this test to say anything"
+        );
+        v["cleanupInstruction"]["programId"] =
+            serde_json::Value::String(COMPUTE_BUDGET_PROGRAM.to_owned());
+        let err = assemble(&v.to_string(), taker()).unwrap_err();
+        let RouteError::PriorityFeeExceeded(msg) = &err else {
+            panic!("got {err}");
+        };
+        assert!(
+            msg.contains("outside computeBudgetInstructions"),
             "got {err}"
         );
     }
@@ -1737,6 +1809,31 @@ mod tests {
             .expect_err("an undecodable compute-budget instruction must refuse, not pass through");
         assert!(
             matches!(err, RouteError::PriorityFeeExceeded(_)),
+            "got {err}"
+        );
+    }
+
+    /// Agave refuses a transaction carrying two `SetComputeUnitPrice`
+    /// instructions (`DuplicateInstruction`); a visitor should never be
+    /// handed one to sign that can never land.
+    #[test]
+    fn a_duplicate_price_instruction_is_refused() {
+        let ixs = vec![compute_unit_price(1), compute_unit_price(1)];
+        let err = check_priority_fee(&ixs, 1).expect_err("a duplicate price must refuse");
+        assert!(
+            matches!(err, RouteError::PriorityFeeExceeded(ref m) if m.contains("duplicate")),
+            "got {err}"
+        );
+    }
+
+    /// Same rule for `SetComputeUnitLimit`, with two different limits so the
+    /// refusal is clearly about the repeat and not about the values agreeing.
+    #[test]
+    fn a_duplicate_limit_instruction_is_refused() {
+        let ixs = vec![compute_unit_limit(100_000), compute_unit_limit(200_000)];
+        let err = check_priority_fee(&ixs, 1).expect_err("a duplicate limit must refuse");
+        assert!(
+            matches!(err, RouteError::PriorityFeeExceeded(ref m) if m.contains("duplicate")),
             "got {err}"
         );
     }
