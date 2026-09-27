@@ -890,10 +890,8 @@ cleanly are different facts.
 ## What is live on radar.heyvera.org
 
 As of 2026-09-27 (~15:20 UTC), checked directly rather than recalled. This
-replaces the 2026-09-26 snapshot below it point for point; the trading switch
-changed under it, and the previous "Customer... routes reachable only after
-Sign-In-With-Solana" sentence turns out to have been wrong even on
-2026-09-26 — see the correction under "dark switches" below.
+replaces the 2026-09-26 snapshot point for point; the trading switch changed
+under it.
 
 `curl -s https://radar.heyvera.org/health`:
 
@@ -927,18 +925,23 @@ making the README say this rather than by moving the wall.
 **Customer (wallet-session) routes** — `/v1/customer/wallet`,
 `/v1/customer/events`, `/v1/chat`, `/v1/customer/watchlist(/:mint)`,
 `/v1/customer/positions`, `/v1/customer/swap` — classify as
-`Audience::Customer` in `access.rs`, but **the customer lane itself is off**:
-the startup banner reads `customers  : off — customer routes require operator
-identity`, because `RADAR_PRIVY_APP_ID` is absent from `/etc/radar/radar.env`
-(`grep -oE '^[A-Z_]+=' /etc/radar/radar.env` lists no such key). Per
-[`customer::Mode::from_vars`](../crates/radar-serve/src/customer.rs) and
-`Audience::accepts_operator`, an audience with no authenticator configured
-falls back to the strictest check available — these routes today require
-Cloudflare Access, the same as the operator surface, not a connected wallet.
-**Correction:** the 2026-09-26 snapshot of this section said these routes were
-"reachable only after Sign-In-With-Solana"; that was never true while
-`RADAR_PRIVY_APP_ID` was unset, which it was on 2026-09-26 too. There is no
-public wallet sign-in on this instance yet.
+`Audience::Customer` in `access.rs` and are **reachable by any wallet after
+Sign-In-With-Solana**. The two sign-in routes, `/v1/customer/siws/challenge`
+and `/v1/customer/siws/verify`, are `Audience::Public`. The auth middleware in
+[`crates/radar-serve/src/lib.rs`](../crates/radar-serve/src/lib.rs) checks a
+wallet session token first and does not need Privy for it; admission is `open`
+on the box (`RADAR_CUSTOMER_ACCESS`), so any signed-in wallet is admitted.
+Checked from outside on 2026-09-27: `POST /v1/customer/swap` and
+`GET /v1/customer/positions` with no session both answer `403`
+`{"error":"no wallet session on this request; sign in with your wallet","reason":"no_session"}`
+— Radar's own refusal asking for a wallet, not a Cloudflare Access redirect.
+
+The banner lines `customers : off — customer routes require operator identity`
+and `admission : open — any verified Privy identity` below describe **only the
+Privy (email) lane**, which is off because `RADAR_PRIVY_APP_ID` is not set.
+They read as if the whole customer surface were closed, and it is not; the
+banner wording is misleading and is recorded here rather than fixed in this
+docs change.
 
 **The dark switches — one on, one off, as of the 15:06 UTC restart** (from
 `journalctl -u radar-serve --no-pager -n 400`, the startup banner):
@@ -962,14 +965,14 @@ is configured — `/v1/customer/swap` can price and build a swap rather than
 reporting "this instance does not build or price swaps". Positions
 (`/v1/customer/positions`) read balances from `mainnet.helius-rpc.com`, a
 private RPC endpoint (`RADAR_RPC` is set in `/etc/radar/radar.env`), not the
-public node. In the web client,
-[`TERMS_APPROVED`](../web/src/legal.ts) is hardcoded `false`, which
-`TradePanel.tsx` reads as its first gate before the swap button does anything
-— the owner's decision, recorded here as his: "skip the terms page, it's not
-public yet." Because the customer lane is off (above), the only identity that
-can currently reach `/v1/customer/swap` at all is an operator behind
-Cloudflare Access, so turning `RADAR_TRADE` on did not make trading reachable
-by an outside wallet.
+public node. In the web client the trade panel now shows whenever `/health`
+says `trading: true` (#306, `web/src/TokenHeader.tsx`);
+[`TERMS_APPROVED`](../web/src/legal.ts) stays `false` and gates only the terms
+link and `/terms`' text — the owner's decision, recorded here as his: "skip the
+terms page, it's not public yet." **So trading is reachable today by any
+wallet that signs in**, with no terms shown. Before the site is made public,
+F10 in plan 0014 must re-gate the panel on `TERMS_APPROVED`. The site
+answers from anywhere already; "not public" means not announced.
 
 **As of 2026-09-27, no trade from the panel is recorded.** This is a
 point-in-time statement, not a permanent one — check `/health`'s `trading`
