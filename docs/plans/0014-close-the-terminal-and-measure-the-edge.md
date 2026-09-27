@@ -137,6 +137,16 @@ candidate count; any visitor measurement; running cargo test suites locally
    refusal. Runs on each pull request as it is pushed. Money moves, so this
    is not optional. **Trading does not switch on until PASS.** Done when PASS
    is recorded here with findings fixed.
+   - **F12: PASS**, 2026-09-26, merged as #300 (`64cfb65`) with CI green.
+   - **F11: PASS**, 2026-09-26, after one FAIL whose four findings were fixed
+     before merge: a read-order race that could call a landed trade
+     "expired" (height is now read before status), a processed-but-unconfirmed
+     error reported as "failed" (now `pending`), a `>=` boundary and four
+     mutation survivors. Merged as #301 (`ba38d78`), all 14 checks green.
+     Left open, not code: whether Phantom or Solflare replace the blockhash
+     inside `signAndSendTransaction`, which would make "expired" fire early —
+     F9 compares the landed transaction's `recentBlockhash` with the built one.
+   - **F10: not yet reviewed** — waits on the owner's four terms values.
 9. [ ] **The owner's real test.** From radar.heyvera.org with his own wallet:
    start with about 0.01 SOL of one coin, then sell it back; then any size.
    Include one SOL→token and one token→SOL (proves Jupiter's wrap/unwrap
@@ -153,7 +163,7 @@ candidate count; any visitor measurement; running cargo test suites locally
     from the panel, a persistent "Powered by Jupiter" label (F5, §8.4). #292
     closed pointing here. Done when `legal.test.ts` finds no placeholder and
     `TradePanel.test.tsx` asserts the label and the link.
-11. [ ] **Did it land?** Server: `GET /v1/customer/tx/{signature}?last_valid_block_height=N`
+11. [x] **Did it land?** (#301, `ba38d78`, CI green 2026-09-26) Server: `GET /v1/customer/tx/{signature}?last_valid_block_height=N`
     (Customer audience, the per-wallet limiter) answers `pending`, `landed`,
     `failed` (with the reason) or `expired`, from `getSignatureStatuses` and
     `getBlockHeight`. Web: after the wallet sends, poll it every 1.5 s up to
@@ -164,7 +174,7 @@ candidate count; any visitor measurement; running cargo test suites locally
     rebuilt before the wallet is asked to sign. Done when a server test covers
     all four states against the faked chain and web tests cover each state
     and the stale-build rebuild.
-12. [ ] **Sanctioned wallets refused** (Jupiter §7.3). A checked-in list of
+12. [x] **Sanctioned wallets refused** (#300, `64cfb65`, CI green 2026-09-26) (Jupiter §7.3). A checked-in list of
     OFAC-listed Solana addresses, source and date in its header, checked at
     `customer/swap` only; refusal `sanctioned` with a sentence in
     `honesty.ts`. Done when a server test refuses a listed address and passes
@@ -196,6 +206,8 @@ do not wait.
    minus vite 8, which plan 0003 blocks on the tailwind plugin) after
    re-running CI on each (stale-green trap). Prune the worktrees under
    `.claude/worktrees/` whose branches are merged.
+   Status lines of plans 0011 and 0012 fixed in #303; merged worktrees pruned
+   2026-09-26.
 
 ## Phase G — the data the terminal stands on
 
