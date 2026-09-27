@@ -196,6 +196,14 @@ candidate count; any visitor measurement; running cargo test suites locally
     deep links to the current page. Does not hold up F7. Done when web tests
     cover the no-wallet phone state and the page is checked at 375 px and
     1280 px.
+    - Merged as #299 (`9974142`). Checked locally on 2026-09-26 at `d0d5d9a`
+      with no radar-serve behind the dev server: at 375 px the page is 375 px
+      wide (no sideways scroll), stacks to one column and offers "Open in
+      Phantom" / "Open in Solflare" (links go to `phantom.app/ul/browse/…` and
+      `solflare.com/ul/v1/browse/…`); at 1280 px, no sideways scroll and
+      "Connect wallet". **Not checked:** the trade panel's reach at 375 px,
+      because no coin could open without data. Left for the first phone visit
+      after F1.
 
 Order (2026-09-26): 10–13 in parallel as separate pull requests, merged one
 at a time with CI re-run; 8 reviews each as it is pushed. 1 and 7 in one box
@@ -222,7 +230,8 @@ do not wait.
 
 ## Phase G — the data the terminal stands on
 
-1. [ ] **Per-unit query counts.** Each unit logs its own CryptoHouse query
+1. [x] **Per-unit query counts.** (#302, `d0d5d9a`, CI green; 0036 addendum
+   2026-09-26: no refusals since the cap, `consider` still mostly blind.) Each unit logs its own CryptoHouse query
    count per run (0036's "what was not checked"), and `radar brief` shows the
    day's refusals per unit. Then read the recorder and decision logs since
    2026-09-20 and write a 0036 addendum: is anything still refused now that

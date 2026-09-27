@@ -170,3 +170,35 @@ from a log — the units do not log their own query counts, which is itself wort
 fixing. The 24-hour window is one day, on one box, and was not repeated. Whether
 CryptoHouse counts a refused query against the allowance is unknown, and it
 changes how quickly a starved hour recovers.
+
+## Addendum, 2026-09-26: six days after the cap
+
+**Source:** `journalctl` for `radar-follow` and `radar-market-tape`, and
+`~/radar/decisions.log`, read on the box on 2026-09-26/27 UTC. Counts are of
+`QUOTA_EXCEEDED` lines, as above.
+
+**Nothing has been refused since the cap.** The last refusal of each unit:
+`radar-follow` at 2026-09-20T14:55Z, `radar-market-tape` at 14:55Z the same
+day. From 2026-09-21 to 2026-09-26 both units logged every day (about 900 and
+290 lines a day), so the zero is a measurement and not a silent journal.
+
+**The cap is the likely cause, not a proven one.** The capped binary was
+installed at 19:59Z, five hours *after* the last refusal. The uncapped cron
+runs at 15:37–19:37Z refused nothing. That fits the pattern before the cap,
+which already had quiet stretches of up to three hours (the 2026-09-19/20
+hourly counts). One hundred and forty-four quiet hours in a row did not happen
+before it.
+
+**`consider` is still mostly blind, as point 2 predicted.** Every run spends its
+ten queries: the log holds 2,489 `consider query budget spent` lines. In the
+latest run, 17 candidates were never examined for that reason and nine proposals
+were raised; the kernel refused all nine under the closed policy, so no capital
+was at risk. Twenty-four runs earlier: 27 unexamined, nine proposed.
+
+**So the answer to plan 0014 G1 is:** the recorder and the tape are whole, and
+`consider` pays for it. The allowance is still too small for all three. The
+owner's G2 choice stands exactly as 0036 point 2 framed it.
+
+**Still not checked:** per-unit query *counts*, as opposed to refusals. #302
+added them to `radar brief`, but that build is not yet on the box. The first
+deploy after it will show them.
