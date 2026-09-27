@@ -287,6 +287,7 @@ export function TradePanel({ mint, symbol, positions, onTraded }: TradePanelProp
     const matchesCurrentInputs =
       amountBaseUnits !== null &&
       slippage.ok &&
+      response.quote.mint === mint &&
       response.quote.side === side &&
       response.quote.in_amount === amountBaseUnits &&
       response.quote.slippage_bps === slippage.bps;
@@ -419,40 +420,44 @@ export function TradePanel({ mint, symbol, positions, onTraded }: TradePanelProp
         {!slippage.ok && <span className="text-[var(--color-warn)]">{slippage.message}</span>}
       </label>
 
-      {quote.state === "loading" && <p className="text-[var(--color-dim)]">Getting a quote…</p>}
-      {quote.state === "failed" && (
-        <p className="text-[var(--color-warn)]">{swapRefusalMessage(quote.reason, quote.detail)}</p>
-      )}
-      {quote.state === "ready" && (
-        <div className="flex flex-col gap-1 rounded-md border border-[var(--color-line)] p-2">
-          <div className="flex justify-between">
-            <span className="text-[var(--color-dim)]">You pay</span>
-            <span>{formatBaseUnits(quote.value.in_amount, quote.value.in_decimals)}</span>
-          </div>
-          <div className="flex justify-between">
-            <span className="text-[var(--color-dim)]">You receive (estimate)</span>
-            <span>{formatBaseUnits(quote.value.out_amount, quote.value.out_decimals)}</span>
-          </div>
-          <div className="flex justify-between font-semibold">
-            <span>Worst case</span>
-            <span>{formatBaseUnits(quote.value.worst_out, quote.value.out_decimals)}</span>
-          </div>
-          <div className="flex justify-between text-[var(--color-dim)]">
-            <span>Price impact</span>
-            <span>{quote.value.impact_bps === null ? "not reported" : `${(quote.value.impact_bps / 100).toFixed(2)}%`}</span>
-          </div>
-          <div className="flex justify-between text-[var(--color-dim)]">
-            <span>Venues</span>
-            <span>{quote.value.venues.length > 0 ? quote.value.venues.join(", ") : "none reported"}</span>
-          </div>
-          {slippage.ok && quote.value.slippage_bps !== slippage.bps && (
-            <p className="text-[var(--color-warn)]">
-              Note: this quote reflects a {(quote.value.slippage_bps / 100).toFixed(2)}% slippage
-              tolerance, not the {(slippage.bps / 100).toFixed(2)}% set above.
-            </p>
+      {(review.kind === "idle" || review.kind === "building" || review.kind === "failed") && (
+        <>
+          {quote.state === "loading" && <p className="text-[var(--color-dim)]">Getting a quote…</p>}
+          {quote.state === "failed" && (
+            <p className="text-[var(--color-warn)]">{swapRefusalMessage(quote.reason, quote.detail)}</p>
           )}
-          <p className="text-[var(--color-dim)]">{roundTripCostCaption(quote.value.impact_bps)}</p>
-        </div>
+          {quote.state === "ready" && (
+            <div className="flex flex-col gap-1 rounded-md border border-[var(--color-line)] p-2">
+              <div className="flex justify-between">
+                <span className="text-[var(--color-dim)]">You pay</span>
+                <span>{formatBaseUnits(quote.value.in_amount, quote.value.in_decimals)}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-[var(--color-dim)]">You receive (estimate)</span>
+                <span>{formatBaseUnits(quote.value.out_amount, quote.value.out_decimals)}</span>
+              </div>
+              <div className="flex justify-between font-semibold">
+                <span>Worst case</span>
+                <span>{formatBaseUnits(quote.value.worst_out, quote.value.out_decimals)}</span>
+              </div>
+              <div className="flex justify-between text-[var(--color-dim)]">
+                <span>Price impact</span>
+                <span>{quote.value.impact_bps === null ? "not reported" : `${(quote.value.impact_bps / 100).toFixed(2)}%`}</span>
+              </div>
+              <div className="flex justify-between text-[var(--color-dim)]">
+                <span>Venues</span>
+                <span>{quote.value.venues.length > 0 ? quote.value.venues.join(", ") : "none reported"}</span>
+              </div>
+              {slippage.ok && quote.value.slippage_bps !== slippage.bps && (
+                <p className="text-[var(--color-warn)]">
+                  Note: this quote reflects a {(quote.value.slippage_bps / 100).toFixed(2)}% slippage
+                  tolerance, not the {(slippage.bps / 100).toFixed(2)}% set above.
+                </p>
+              )}
+              <p className="text-[var(--color-dim)]">{roundTripCostCaption(quote.value.impact_bps)}</p>
+            </div>
+          )}
+        </>
       )}
 
       {!token && <p className="text-[var(--color-dim)]">Connect a wallet to trade.</p>}
@@ -497,6 +502,13 @@ export function TradePanel({ mint, symbol, positions, onTraded }: TradePanelProp
             <span>Slippage tolerance</span>
             <span>{(review.response.quote.slippage_bps / 100).toFixed(2)}%</span>
           </div>
+          <p className="text-[var(--color-dim)]">{roundTripCostCaption(review.response.quote.impact_bps)}</p>
+          {side === "buy" && (
+            <p className="text-[var(--color-dim)]">
+              The first buy of a coin may also pay about 0.002 SOL of account rent, returned only if
+              the empty token account is later closed, plus network fees, shown in your wallet.
+            </p>
+          )}
           {review.kind === "declined" && (
             <p className="text-[var(--color-dim)]">Cancelled. Nothing was sent.</p>
           )}

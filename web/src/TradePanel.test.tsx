@@ -242,6 +242,29 @@ describe("TradePanel live quote", () => {
       ),
     ).toBeTruthy();
   });
+
+  it("hides the live quote box once a review is built, leaving only the built quote's worst case", async () => {
+    // Item C: the live box beside the review card is exactly the promise the
+    // file header says the panel never makes -- a number the review's
+    // transaction does not contain. It is only safe to show before a review
+    // exists (idle/building/failed), and must disappear once one is built.
+    signIn();
+    mockFetch((url) => {
+      const u = String(url);
+      if (u.includes("/v1/market/quote")) return jsonResponse(quoteBody({ worst_out: "4900000" }));
+      if (u.includes("/v1/customer/swap")) return jsonResponse(swapBody({ worst_out: "4750000" }));
+      return jsonResponse({ error: "unexpected" }, 404);
+    });
+    render(<TradePanel mint={MINT} symbol="FOO" positions={positionsReady()} onTraded={vi.fn()} />);
+    typeAmount("1");
+    expect(await screen.findByText("Worst case")).toBeTruthy();
+    await buildReview();
+    expect(await screen.findByText("Worst case you receive")).toBeTruthy();
+    // The live box's own "Worst case" label (as opposed to the review card's
+    // "Worst case you receive") must be gone -- not merely covered up.
+    expect(screen.queryByText("Worst case")).toBeNull();
+    expect(screen.queryByText("Getting a quote…")).toBeNull();
+  });
 });
 
 describe("TradePanel without a connected wallet", () => {
@@ -298,6 +321,65 @@ describe("TradePanel review and send flow", () => {
     // which show it is never called for those outcomes at all).
     expect(await screen.findByText("Landed")).toBeTruthy();
     expect(onTraded).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows the first-buy rent caption on a buy review, not a sell review", async () => {
+    signIn();
+    mockFetch((url) => {
+      const u = String(url);
+      if (u.includes("/v1/market/quote")) return jsonResponse(quoteBody());
+      if (u.includes("/v1/customer/swap")) return jsonResponse(swapBody());
+      return jsonResponse({ error: "unexpected" }, 404);
+    });
+    render(<TradePanel mint={MINT} symbol="FOO" positions={positionsReady()} onTraded={vi.fn()} />);
+    typeAmount("1");
+    await buildReview();
+    expect(await screen.findByText("Review before you approve")).toBeTruthy();
+    expect(
+      screen.getByText(/account rent, returned only if/),
+    ).toBeTruthy();
+  });
+
+  it("does not show the buy-side rent caption on a sell review", async () => {
+    signIn();
+    mockFetch((url) => {
+      const u = String(url);
+      if (u.includes("/v1/market/quote")) return jsonResponse(quoteBody({ side: "sell" }));
+      if (u.includes("/v1/customer/swap")) return jsonResponse(swapBody({ side: "sell" }));
+      return jsonResponse({ error: "unexpected" }, 404);
+    });
+    render(<TradePanel mint={MINT} symbol="FOO" positions={positionsReady([heldToken()])} onTraded={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "sell" }));
+    typeAmount("1");
+    await buildReview();
+    expect(await screen.findByText("Review before you approve")).toBeTruthy();
+    expect(screen.queryByText(/account rent, returned only if/)).toBeNull();
+  });
+
+  it("refuses to approve when the built response's quote names a different mint than the one on screen", async () => {
+    // Item F: `matchesCurrentInputs` used to compare side, amount and
+    // slippage but not mint. A response built for one mint must not be
+    // approvable once the screen (somehow) disagrees about which mint it is
+    // trading -- belt and braces alongside the `mint` dependency that already
+    // resets the review on a prop change.
+    vi.mocked(signAndSend).mockClear();
+    signIn();
+    mockFetch((url) => {
+      const u = String(url);
+      if (u.includes("/v1/market/quote")) return jsonResponse(quoteBody());
+      if (u.includes("/v1/customer/swap")) {
+        return jsonResponse(swapBody({ mint: "OtherMintZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ" }));
+      }
+      return jsonResponse({ error: "unexpected" }, 404);
+    });
+    render(<TradePanel mint={MINT} symbol="FOO" positions={positionsReady()} onTraded={vi.fn()} />);
+    typeAmount("1");
+    await buildReview();
+    fireEvent.click(await screen.findByRole("button", { name: "Approve in wallet" }));
+    expect(
+      await screen.findByText("This trade changed since it was reviewed. Review it again before approving."),
+    ).toBeTruthy();
+    expect(vi.mocked(signAndSend)).not.toHaveBeenCalled();
   });
 
   it("throws a built transaction away when the slippage changes, so it cannot be approved at the old one", async () => {
@@ -478,7 +560,9 @@ describe("TradePanel: did the trade land?", () => {
 
   it("shows the on-chain reason when the trade failed, and never refreshes positions", async () => {
     const onTraded = await sendAndApprove(() => jsonResponse({ state: "failed", reason: "slippage exceeded" }));
-    expect(await screen.findByText("Failed on chain: slippage exceeded")).toBeTruthy();
+    expect(
+      await screen.findByText("Failed on chain: slippage exceeded. The network fee was still spent."),
+    ).toBeTruthy();
     expect(onTraded).not.toHaveBeenCalled();
     // The Solscan link stays up in every state, including this one.
     expect(screen.getByRole("link", { name: "View on Solscan" })).toBeTruthy();
@@ -672,7 +756,21 @@ describe("TradePanel swap refusal messages", () => {
       "",
       "Your wallet session is no longer valid. Sign in with your wallet again.",
     ],
-    ["something_new_the_client_has_never_seen", "an unfamiliar detail sentence", "an unfamiliar detail sentence"],
+    [
+      "something_new_the_client_has_never_seen",
+      "an unfamiliar detail sentence",
+      "Radar could not build this trade. Nothing was sent.",
+    ],
+    [
+      "route_slippage_mismatch",
+      "",
+      "Jupiter's route did not keep to your slippage limit, so Radar refused it. Nothing was sent.",
+    ],
+    [
+      "route_priority_fee_exceeded",
+      "",
+      "Jupiter's route asked for a priority fee above Radar's 0.001 SOL cap, or a fee setting Radar could not read, so Radar refused it. Nothing was sent. Try again in a moment.",
+    ],
   ])("shows the right sentence for reason %s", async (reason, detail, expected) => {
     signIn();
     mockFetch((url) => {

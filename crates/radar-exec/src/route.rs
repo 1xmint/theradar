@@ -174,6 +174,22 @@ pub enum RouteError {
     /// bytes nothing checked.
     #[error("router returned a transaction the signer cannot read: {0}")]
     Unverifiable(String),
+    /// Jupiter's own worst-case output does not honour the slippage this
+    /// request asked for, or its echoed `slippageBps` names a different
+    /// tolerance than the one requested.
+    ///
+    /// The 500 bps cap `radar-serve` enforces before asking Jupiter is a
+    /// request, not a guarantee -- Jupiter is free to widen the tolerance on
+    /// its own route, and a caller reading only the cap would never learn
+    /// that the transaction it is about to sign accepts a worse floor. See
+    /// [`Quote::from_response`].
+    #[error("route slippage mismatch: {0}")]
+    SlippageMismatch(String),
+    /// The transaction's compute-budget instructions would spend more than
+    /// [`crate::assemble::MAX_PRIORITY_FEE_LAMPORTS`] on priority fees, or
+    /// name a compute-budget instruction this module cannot decode.
+    #[error("priority fee exceeds the cap: {0}")]
+    PriorityFeeExceeded(String),
 }
 
 impl RouteError {
@@ -371,7 +387,18 @@ impl Quote {
     /// price nothing downstream would ever notice was wrong.
     ///
     /// [`RouteError::NoRoute`] if the route returns nothing.
-    pub fn from_response(body: &str, request: &QuoteRequest) -> Result<Self, RouteError> {
+    ///
+    /// [`RouteError::SlippageMismatch`] if Jupiter's own `otherAmountThreshold`
+    /// is looser than `requested_slippage_bps` would allow, or if an echoed
+    /// `slippageBps` names a different tolerance than the one requested. The
+    /// 500 bps cap `radar-serve` enforces before asking does not bind the
+    /// transaction on its own -- Jupiter is free to answer at a wider
+    /// tolerance, and this is the check that catches it before a wallet signs.
+    pub fn from_response(
+        body: &str,
+        request: &QuoteRequest,
+        requested_slippage_bps: u32,
+    ) -> Result<Self, RouteError> {
         let parsed: BuildResponse =
             serde_json::from_str(body).map_err(|e| RouteError::Malformed(e.to_string()))?;
 
@@ -426,6 +453,39 @@ impl Quote {
             None => None,
         };
 
+        // Jupiter echoing a different tolerance than the one asked for is the
+        // easiest way this could silently widen: nothing else in this
+        // response says so, and the field was never read before this check.
+        if let Some(echoed) = parsed.slippage_bps
+            && echoed != requested_slippage_bps
+        {
+            return Err(RouteError::SlippageMismatch(format!(
+                "requested {requested_slippage_bps} bps, Jupiter echoed {echoed} bps"
+            )));
+        }
+
+        // The floor this request's tolerance requires, computed in u128 so
+        // neither the multiplication nor a 10000 bps request can overflow a
+        // u64 `outAmount`. `checked_sub` rather than `10_000 -
+        // requested_slippage_bps`: a caller asking for more than 10_000 bps
+        // must not wrap the subtraction into a floor near u64::MAX.
+        let allowed = 10_000u32
+            .checked_sub(requested_slippage_bps)
+            .ok_or_else(|| {
+                RouteError::SlippageMismatch(format!(
+                    "requested slippage {requested_slippage_bps} bps is not less than 10000 bps"
+                ))
+            })?;
+        let required_floor = u128::from(out_amount) * u128::from(allowed) / 10_000;
+        match worst_out {
+            Some(floor) if u128::from(floor) < required_floor => {
+                return Err(RouteError::SlippageMismatch(format!(
+                    "otherAmountThreshold {floor} is below the {required_floor} floor {requested_slippage_bps} bps slippage requires on {out_amount}"
+                )));
+            }
+            _ => {}
+        }
+
         Ok(Self {
             input: request.input,
             output: request.output,
@@ -473,6 +533,11 @@ struct BuildResponse {
     other_amount_threshold: Option<String>,
     #[serde(rename = "swapMode")]
     swap_mode: Option<String>,
+    /// Jupiter's own echo of the slippage it priced at, when it sends one.
+    /// Checked in [`Quote::from_response`] against the tolerance requested --
+    /// unread until now, which is why a widened tolerance never surfaced.
+    #[serde(rename = "slippageBps")]
+    slippage_bps: Option<u32>,
     #[serde(rename = "priceImpactPct")]
     price_impact_pct: Option<String>,
     #[serde(rename = "routePlan", default)]
@@ -579,7 +644,7 @@ impl Router {
     /// [`RouteError::Malformed`] when the answer is not one this module reads.
     pub fn quote(&self, request: &QuoteRequest) -> Result<Quote, RouteError> {
         let body = self.fetch_body(request, self.slippage_bps)?;
-        Quote::from_response(&body, request)
+        Quote::from_response(&body, request, self.slippage_bps)
     }
 
     /// [`Self::quote`], at `slippage_bps` rather than this router's configured
@@ -595,7 +660,7 @@ impl Router {
     /// The same as [`Self::quote`].
     pub fn quote_at(&self, request: &QuoteRequest, slippage_bps: u32) -> Result<Quote, RouteError> {
         let body = self.fetch_body(request, slippage_bps)?;
-        Quote::from_response(&body, request)
+        Quote::from_response(&body, request, slippage_bps)
     }
 
     /// Asks what `request` would get, at `slippage_bps`, and compiles the
@@ -614,7 +679,7 @@ impl Router {
     /// [`crate::assemble::assemble`].
     pub fn build(&self, request: &QuoteRequest, slippage_bps: u32) -> Result<Build, RouteError> {
         let body = self.fetch_body(request, slippage_bps)?;
-        let quote = Quote::from_response(&body, request)?;
+        let quote = Quote::from_response(&body, request, slippage_bps)?;
         let transaction = crate::assemble::assemble(&body, request.taker)?;
         Ok(Build { quote, transaction })
     }
