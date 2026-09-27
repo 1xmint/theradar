@@ -17,9 +17,10 @@
  *   its nested `quote` is the same `render_quote` output -- the review step
  *   shows the numbers the transaction was built from, not a second quote;
  * - every refusal `reason` the trade routes can send has a sentence in
- *   `swapRefusalMessage`. The default branch shows the server's own
- *   sentence, which is honest but bare; a reason added on the server and
- *   forgotten here should be a failing test, not a visitor reading a code.
+ *   `swapRefusalMessage`. The default branch shows a fixed, generic sentence
+ *   rather than the reason code or the server's own detail; a reason added
+ *   on the server and forgotten here should be a failing test, not a visitor
+ *   reading the generic sentence in place of one that names what happened.
  */
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
@@ -114,11 +115,12 @@ describe("the swap contract agrees on both sides", () => {
     ];
     expect(reasons.length, "no refusal( calls found in trade.rs").toBeGreaterThan(4);
     const detail = "the server's own sentence";
+    const fallback = swapRefusalMessage("__no_such_reason__", detail);
     for (const reason of reasons) {
       expect(
         swapRefusalMessage(reason, detail),
-        `\`${reason}\` falls through to the server's bare sentence`,
-      ).not.toBe(detail);
+        `\`${reason}\` falls through to the generic default sentence`,
+      ).not.toBe(fallback);
     }
   });
 });

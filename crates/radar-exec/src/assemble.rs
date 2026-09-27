@@ -148,8 +148,12 @@ impl AssembledTransaction {
 /// [`MAX_PACKET_BYTES`].
 ///
 /// [`RouteError::PriorityFeeExceeded`] if `computeBudgetInstructions` would
-/// spend more than [`MAX_PRIORITY_FEE_LAMPORTS`], or holds an instruction
-/// this module cannot read as a compute-budget setting.
+/// spend more than [`MAX_PRIORITY_FEE_LAMPORTS`], if it holds an instruction
+/// this module cannot read as a compute-budget setting, or if a Compute
+/// Budget instruction is found outside `computeBudgetInstructions` (setup,
+/// swap, cleanup or other instructions) -- the runtime reads Compute Budget
+/// settings from anywhere in the message, so one hiding there would spend or
+/// size the transaction without ever being priced.
 pub fn assemble(body: &str, taker: Address) -> Result<AssembledTransaction, RouteError> {
     let parsed: BuildInstructions =
         serde_json::from_str(body).map_err(|e| RouteError::Malformed(e.to_string()))?;
@@ -170,6 +174,29 @@ pub fn assemble(body: &str, taker: Address) -> Result<AssembledTransaction, Rout
             RouteError::Malformed(format!("blockhash is {} bytes, not 32", v.len()))
         })?;
     let last_valid_block_height = parsed.blockhash_with_metadata.last_valid_block_height;
+
+    // Solana's runtime (Agave's `ComputeBudgetInstructionDetails::try_from`)
+    // reads Compute Budget instructions wherever they sit in the message, not
+    // only from a designated slice -- Jupiter's `computeBudgetInstructions`
+    // field is a convention of its own response shape, not something the
+    // chain enforces. An instruction naming the Compute Budget program
+    // anywhere else would set a price or a limit that `check_priority_fee`
+    // below never sees, so it is refused here before that check runs.
+    for ix in parsed
+        .setup_instructions
+        .iter()
+        .chain(std::iter::once(&parsed.swap_instruction))
+        .chain(parsed.cleanup_instruction.iter())
+        .chain(parsed.other_instructions.iter())
+    {
+        if ix.program_id == COMPUTE_BUDGET_PROGRAM {
+            return Err(RouteError::PriorityFeeExceeded(
+                "a Compute Budget instruction was found outside computeBudgetInstructions; the \
+                 runtime would still execute it, unpriced"
+                    .to_owned(),
+            ));
+        }
+    }
 
     let non_compute_budget_count = parsed.setup_instructions.len()
         + 1 // swap_instruction
@@ -245,9 +272,39 @@ const SET_COMPUTE_UNIT_PRICE: u8 = 3;
 const MAX_COMPUTE_UNITS: u64 = 1_400_000;
 
 /// What one compute unit costs, in the absence of an explicit
-/// `SetComputeUnitLimit`: 200,000 units per non-compute-budget instruction,
-/// the same rough default the runtime itself falls back to per instruction.
+/// `SetComputeUnitLimit`: 200,000 units for every instruction this module
+/// cannot prove is a cheaper builtin.
+///
+/// This is Agave's own `DEFAULT_INSTRUCTION_COMPUTE_UNIT_LIMIT`
+/// (`program-runtime/src/execution_budget.rs:31`, master as of 2026-09-27),
+/// the per-instruction default `calculate_default_compute_unit_limit`
+/// (`compute-budget-instruction/src/compute_budget_instruction_details.rs:196-217`)
+/// charges any instruction it does not recognise as one of a short list of
+/// non-migrated builtins. This module only ever recognises Compute Budget
+/// instructions (below); every setup, swap, cleanup and other instruction --
+/// including a System Program instruction, which the runtime would actually
+/// charge [`BUILTIN_COMPUTE_UNITS`] for -- is priced at this higher rate.
+/// That is deliberately conservative, in the same direction as
+/// [`MAX_COMPUTE_UNITS`]: overcounting a builtin's cost only ever makes the
+/// modelled limit (and so the modelled fee) larger than the runtime's own,
+/// never smaller.
 const DEFAULT_COMPUTE_UNITS_PER_INSTRUCTION: u64 = 200_000;
+
+/// What the runtime charges a non-migrated builtin instruction by default --
+/// Compute Budget instructions among them -- when no explicit
+/// `SetComputeUnitLimit` is given.
+///
+/// Agave's `MAX_BUILTIN_ALLOCATION_COMPUTE_UNIT_LIMIT`
+/// (`program-runtime/src/execution_budget.rs:34`, master as of 2026-09-27) is
+/// `3_000`. `calculate_default_compute_unit_limit`
+/// (`compute-budget-instruction/src/compute_budget_instruction_details.rs:196-217`)
+/// re-walks every instruction in the message -- Compute Budget instructions
+/// included, since the Compute Budget program is itself a non-migrated
+/// builtin -- and charges each one this amount rather than
+/// [`DEFAULT_COMPUTE_UNITS_PER_INSTRUCTION`]. Used only for the
+/// `computeBudgetInstructions` this module reads; every other instruction is
+/// charged the (higher, conservative) per-instruction default above.
+const BUILTIN_COMPUTE_UNITS: u64 = 3_000;
 
 /// The most a transaction this module assembles may spend on priority fees:
 /// 0.001 SOL, in lamports.
@@ -261,7 +318,9 @@ pub const MAX_PRIORITY_FEE_LAMPORTS: u128 = 1_000_000;
 
 /// Reads `SetComputeUnitPrice` and `SetComputeUnitLimit` out of Jupiter's
 /// `computeBudgetInstructions` and refuses if the fee they would spend, at
-/// `non_compute_budget_count` other instructions, is over
+/// `non_compute_budget_count` other instructions plus `instructions.len()`
+/// compute-budget ones (each priced at [`BUILTIN_COMPUTE_UNITS`] when no
+/// explicit limit is given -- see that constant's doc comment), is over
 /// [`MAX_PRIORITY_FEE_LAMPORTS`] -- or if an instruction in that list is not
 /// the Compute Budget program's, or cannot be decoded as either.
 ///
@@ -315,8 +374,13 @@ fn check_priority_fee(
     }
 
     let non_compute_budget_count = u64::try_from(non_compute_budget_count).unwrap_or(u64::MAX);
+    // `instructions` is exactly the compute-budget list, so its length is the
+    // count `calculate_default_compute_unit_limit` would charge
+    // `BUILTIN_COMPUTE_UNITS` for -- see that constant's doc comment.
+    let compute_budget_count = u64::try_from(instructions.len()).unwrap_or(u64::MAX);
     let default_limit = DEFAULT_COMPUTE_UNITS_PER_INSTRUCTION
         .saturating_mul(non_compute_budget_count)
+        .saturating_add(BUILTIN_COMPUTE_UNITS.saturating_mul(compute_budget_count))
         .min(MAX_COMPUTE_UNITS);
     let limit = explicit_limit
         .map_or(default_limit, u64::from)
@@ -1452,6 +1516,56 @@ mod tests {
         }
     }
 
+    /// `RawInstruction` has no `Serialize` impl (nothing outside tests needs
+    /// to write one back out), so tests that plant an instruction into a
+    /// fixture's JSON build the object by hand instead.
+    fn ix_json(ix: &RawInstruction) -> serde_json::Value {
+        serde_json::json!({
+            "programId": ix.program_id,
+            "accounts": [],
+            "data": ix.data,
+        })
+    }
+
+    /// Finding 1, failure A: an empty `computeBudgetInstructions` said
+    /// nothing about it, but `otherInstructions` (which nothing checked)
+    /// carried a real `SetComputeUnitPrice`. The runtime reads Compute
+    /// Budget instructions from anywhere in the message
+    /// (`ComputeBudgetInstructionDetails::try_from`), so this would have
+    /// spent 50,000,000 micro-lamports a unit -- on the order of 0.04 SOL --
+    /// while `check_priority_fee` saw an empty list and priced it at zero.
+    #[test]
+    fn a_compute_budget_instruction_hidden_in_other_instructions_is_refused() {
+        let mut v: serde_json::Value = serde_json::from_str(SOL_USDC).unwrap();
+        v["computeBudgetInstructions"] = serde_json::Value::Array(Vec::new());
+        v["otherInstructions"] =
+            serde_json::Value::Array(vec![ix_json(&compute_unit_price(50_000_000))]);
+        let err = assemble(&v.to_string(), taker()).unwrap_err();
+        assert!(
+            matches!(err, RouteError::PriorityFeeExceeded(_)),
+            "got {err}"
+        );
+    }
+
+    /// Finding 1, failure B: a `SetComputeUnitLimit` planted in
+    /// `setupInstructions` would still be read by the runtime and would
+    /// widen the real compute-unit limit past whatever
+    /// `computeBudgetInstructions` modelled, the same passthrough Finding B
+    /// (`the_real_fixtures_priority_fee_is_within_the_cap`) closed for the
+    /// designated list.
+    #[test]
+    fn a_compute_budget_instruction_hidden_in_setup_instructions_is_refused() {
+        let mut v: serde_json::Value = serde_json::from_str(SOL_USDC).unwrap();
+        let mut setup = v["setupInstructions"].as_array().unwrap().clone();
+        setup.push(ix_json(&compute_unit_limit(1_400_000)));
+        v["setupInstructions"] = serde_json::Value::Array(setup);
+        let err = assemble(&v.to_string(), taker()).unwrap_err();
+        assert!(
+            matches!(err, RouteError::PriorityFeeExceeded(_)),
+            "got {err}"
+        );
+    }
+
     /// Finding B: passing `computeBudgetInstructions` through unread meant a
     /// widened priority fee never bound. These decode the two instructions
     /// Jupiter actually sends and check the cap that stands in for the
@@ -1460,8 +1574,10 @@ mod tests {
     fn the_real_fixtures_priority_fee_is_within_the_cap() {
         // Real captures, real math: 9386 micro-lamports/unit (sol-usdc) and
         // 9583 (usdc-sol), each at a default limit sized off the fixture's
-        // own non-compute-budget instruction count -- 6 for sol-usdc, 3 for
-        // usdc-sol -- both well under the cap.
+        // own instruction counts -- 6 non-compute-budget + 1 compute-budget
+        // for sol-usdc (200_000*6 + 3_000*1 = 1,203,000 units), 3 + 1 for
+        // usdc-sol (200_000*3 + 3_000*1 = 603,000 units) -- both well under
+        // the cap.
         let sol_usdc: serde_json::Value = serde_json::from_str(SOL_USDC).unwrap();
         let ixs: Vec<RawInstruction> =
             serde_json::from_value(sol_usdc["computeBudgetInstructions"].clone()).unwrap();
@@ -1481,8 +1597,10 @@ mod tests {
 
     #[test]
     fn a_price_over_the_cap_is_refused() {
-        // At a 1,200,000-unit default limit (6 non-compute-budget
-        // instructions), this price spends well over the cap.
+        // At a 1,203,000-unit default limit (6 non-compute-budget
+        // instructions at 200,000 each, plus this one compute-budget
+        // instruction at 3,000: 200_000*6 + 3_000*1), this price spends well
+        // over the cap.
         let ixs = vec![compute_unit_price(1_000_000)];
         let err = check_priority_fee(&ixs, 6).expect_err("an over-cap price must refuse");
         assert!(
@@ -1526,19 +1644,29 @@ mod tests {
     }
 
     /// Jupiter sends a price and never a limit, so in production the fee is
-    /// priced off the instruction count `assemble` passes in. These pin that
+    /// priced off the instruction counts `assemble` passes in. These pin that
     /// count through `assemble` itself: sol-usdc has 4 setup + swap + cleanup
-    /// = 6, a 1,200,000-unit default limit, so 833,333 micro-lamports a unit
-    /// is the last price under the cap and 833,334 the first over it. A count
-    /// one lower would let 833,334 through; one higher would refuse 833,333.
+    /// = 6 non-compute-budget instructions plus its 1 compute-budget price
+    /// instruction, for a default limit of `200_000*6 + 3_000*1 =
+    /// 1,203,000` units.
+    ///
+    /// The last price under the cap is the largest `price` with
+    /// `price * 1,203,000 <= 1,000,000 * 1_000_000` (the cap in
+    /// micro-lamports, since the fee rounds up): `1,000,000,000,000 /
+    /// 1,203,000 = 831,255.19...`, so `831,255` is last under (`831,255 *
+    /// 1,203,000 = 999,999,765,000`, fee `= ceil(999,999,765,000 / 1e6) =
+    /// 1,000,000`, exactly at the cap) and `831,256` is first over
+    /// (`831,256 * 1,203,000 = 1,000,000,968,000`, fee `= 1,000,001`, over
+    /// the cap). A count one lower would let `831,256` through; one higher
+    /// would refuse `831,255`.
     #[test]
     fn the_instruction_count_prices_the_fee_at_the_last_price_under_the_cap() {
-        assert!(assemble(&with_price(SOL_USDC, 833_333), taker()).is_ok());
+        assert!(assemble(&with_price(SOL_USDC, 831_255), taker()).is_ok());
     }
 
     #[test]
     fn the_instruction_count_prices_the_fee_at_the_first_price_over_the_cap() {
-        let err = assemble(&with_price(SOL_USDC, 833_334), taker()).unwrap_err();
+        let err = assemble(&with_price(SOL_USDC, 831_256), taker()).unwrap_err();
         assert!(
             matches!(err, RouteError::PriorityFeeExceeded(_)),
             "got {err}"
@@ -1546,9 +1674,14 @@ mod tests {
     }
 
     /// Neither capture has `otherInstructions`, so this adds one: usdc-sol's
-    /// 1 setup + swap + cleanup + 1 other = 4, an 800,000-unit limit, and
-    /// 1,250,001 micro-lamports a unit is one over the cap. Not counting the
-    /// other instruction would price it at 3 and let it through.
+    /// 1 setup + swap + cleanup + 1 other = 4 non-compute-budget instructions
+    /// plus its 1 compute-budget price instruction, for a default limit of
+    /// `200_000*4 + 3_000*1 = 803,000` units. At that limit, 1,250,001
+    /// micro-lamports a unit is `ceil(1,250,001 * 803,000 / 1e6) =
+    /// 1,003,751` lamports, over the cap. Not counting the other
+    /// instruction would price it at 3 non-compute-budget instructions
+    /// (`200_000*3 + 3_000*1 = 603,000` units, fee `ceil(1,250,001 *
+    /// 603,000 / 1e6) = 753,751`) and let it through.
     #[test]
     fn other_instructions_count_towards_the_fee() {
         let mut v: serde_json::Value =
