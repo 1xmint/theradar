@@ -361,24 +361,52 @@ fn a_failed_launch_gets_no_row() {
 #[test]
 fn the_label_is_the_return_between_two_checkpoints_after_t() {
     // Labels are read from the future on purpose. Entry is the first
-    // measurement at or after T; the six-hour exit is the last one by then.
+    // measurement at or after T; the exit is the first one at or after the
+    // horizon. The day-long horizon rather than six hours: the six-hour
+    // horizon's own price window (54,000 slots) reaches back far enough to
+    // touch the entry, so it is always refused --
+    // `the_six_hour_label_is_always_refused_for_overlapping_its_own_entry`
+    // covers that directly.
     let at = 1_000;
     let entry_at = at + T;
-    let six_hours = at + 6 * 9_000;
+    let one_day = at + 24 * 9_000;
 
     let table = table_over(
         vec![launch(1, 100, at)],
         vec![
             outcome(1, entry_at, at, None, Some(100)),
-            outcome(1, six_hours, at, None, Some(150)),
+            outcome(1, one_day, at, None, Some(150)),
         ],
     );
 
     let row = &table.rows[0];
     assert_eq!(
-        row.gross_6h_bps,
+        row.gross_24h_bps,
         Some(5_000.0),
         "100 to 150 is fifty per cent, which is 5,000 bps"
+    );
+}
+
+#[test]
+fn the_six_hour_label_is_always_refused_for_overlapping_its_own_entry() {
+    // The consequence of the fix, stated as a test rather than left implicit:
+    // the six-hour price window is 54,000 slots wide, which is wider than the
+    // gap between an entry near T and an exit at the six-hour horizon, so the
+    // exit's window always reaches back into the entry's own reading. The
+    // six-hour label is refused on every row now, not just the ones that used
+    // to come back as an identity.
+    let at = 1_000;
+    let table = table_over(
+        vec![launch(1, 100, at)],
+        vec![
+            outcome(1, at + T, at, None, Some(100)),
+            outcome(1, at + 6 * 9_000, at, None, Some(150)),
+        ],
+    );
+
+    assert_eq!(
+        table.rows[0].missing_6h,
+        Some(Missing::ExitWindowOverlapsEntry)
     );
 }
 
@@ -1005,17 +1033,18 @@ fn one_measurement_after_t_is_not_a_return() {
 fn a_second_measurement_after_t_is_a_return() {
     // The other side, so the rule above is not satisfied by refusing every
     // label. Two distinct readings after T, with a fill between them, are a
-    // real move.
+    // real move -- read at the day horizon, since a reading one slot after T
+    // is nowhere near the six-hour one and would be refused as `NoExit`.
     let at = 1_000u64;
     let table = table_over(
         vec![launch(1, 100, at)],
         vec![
             outcome(1, at + T, at, None, Some(100)),
-            outcome(1, at + T + 1, at, None, Some(150)),
+            outcome(1, at + 24 * 9_000, at, None, Some(150)),
         ],
     );
 
-    assert_eq!(table.rows[0].gross_6h_bps, Some(5_000.0));
+    assert_eq!(table.rows[0].gross_24h_bps, Some(5_000.0));
 }
 
 #[test]
@@ -1028,32 +1057,38 @@ fn a_price_nobody_quoted_is_not_a_return() {
     // exited at all.
     //
     // The exit is stale here: its window held no fills, so its price is the one
-    // from before.
+    // from before. Read at the day horizon and far enough from the entry to
+    // clear the new overlap check, so `StaleExit` is the reason on trial and
+    // not `ExitWindowOverlapsEntry` or `NoExit`.
     let at = 1_000u64;
     let first = outcome(1, at + T, at, None, Some(100));
-    let mut second = outcome(1, at + T + 5_000, at, None, Some(100));
+    let mut second = outcome(1, at + 24 * 9_000, at, None, Some(100));
     second.window_peak_price = None;
     second.window_trough_price = None;
 
     let table = table_over(vec![launch(1, 100, at)], vec![first, second]);
 
-    assert_eq!(table.rows[0].gross_6h_bps, None);
     assert_eq!(table.rows[0].gross_24h_bps, None);
+    assert_eq!(table.rows[0].missing_24h, Some(Missing::StaleExit));
 }
 
 #[test]
 fn a_stale_entry_price_is_not_a_return_either() {
     // Both ends, and the entry is the one an earlier attempt missed. A quote
     // nobody could have bought at is not an entry, however live the exit is.
+    // Read at the day horizon for the same reason as the stale-exit test
+    // above: far enough from the entry that the overlap check is not what
+    // refuses this row.
     let at = 1_000u64;
     let mut first = outcome(1, at + T, at, None, Some(100));
     first.window_peak_price = None;
     first.window_trough_price = None;
-    let second = outcome(1, at + T + 5_000, at, None, Some(150));
+    let second = outcome(1, at + 24 * 9_000, at, None, Some(150));
 
     let table = table_over(vec![launch(1, 100, at)], vec![first, second]);
 
-    assert_eq!(table.rows[0].gross_6h_bps, None);
+    assert_eq!(table.rows[0].gross_24h_bps, None);
+    assert_eq!(table.rows[0].missing_24h, Some(Missing::StaleEntry));
 }
 
 #[test]
@@ -1062,17 +1097,19 @@ fn a_price_that_traded_back_to_where_it_started_is_a_return_of_zero() {
     // trading at both ends and came back to the same price really did return
     // zero, and that is a measurement -- the point mass research 0017 found is
     // made of these, and losing them would flatter every median in the opposite
-    // direction.
+    // direction. Read at the day horizon and far enough from the entry to
+    // clear the overlap check, so this is a genuine second quote at the same
+    // price rather than the entry's own window being priced back to itself.
     let at = 1_000u64;
     let table = table_over(
         vec![launch(1, 100, at)],
         vec![
             outcome(1, at + T, at, None, Some(100)),
-            outcome(1, at + T + 5_000, at, None, Some(100)),
+            outcome(1, at + 24 * 9_000, at, None, Some(100)),
         ],
     );
 
-    assert_eq!(table.rows[0].gross_6h_bps, Some(0.0));
+    assert_eq!(table.rows[0].gross_24h_bps, Some(0.0));
 }
 
 /// A buy whose trader and block position the recorder never resolved.
@@ -1179,7 +1216,7 @@ fn a_failed_swap_is_not_a_trade_a_buyer_or_curve_progress() {
 }
 
 #[test]
-fn every_absent_label_says_which_of_the_six_things_went_wrong() {
+fn every_absent_label_says_which_of_the_seven_things_went_wrong() {
     // The reasons are not interchangeable. A population missing labels because
     // nothing was ever measured after T is a different sample from one missing
     // them because every exit price was stale, and a report that says only
@@ -1189,6 +1226,7 @@ fn every_absent_label_says_which_of_the_six_things_went_wrong() {
     // case it covers loses its reason and lands in the wrong bucket.
     let at = 1_000u64;
     let six = 6 * 9_000u64;
+    let day = 24 * 9_000u64;
 
     // Nothing measured at or after T.
     let no_entry = table_over(
@@ -1197,17 +1235,42 @@ fn every_absent_label_says_which_of_the_six_things_went_wrong() {
     );
     assert_eq!(no_entry.rows[0].missing_6h, Some(Missing::NoEntry));
 
-    // An entry after T, but nothing later inside the horizon: the latest
-    // measurement before the horizon is the entry itself.
-    let one_reading = table_over(
+    // An entry after T, and nothing at all measured near the horizon.
+    let no_exit = table_over(
         vec![launch(1, 100, at)],
         vec![outcome(1, at + T, at, None, Some(100))],
     );
+    assert_eq!(no_exit.rows[0].missing_6h, Some(Missing::NoExit));
+
+    // The entry's own reading already sits at or after the horizon, so the
+    // same reading closes both ends: an identity, not a return.
+    let one_observation_twice = table_over(
+        vec![launch(1, 100, at)],
+        vec![outcome(1, at + six, at, None, Some(100))],
+    );
     assert_eq!(
-        one_reading.rows[0].missing_6h,
+        one_observation_twice.rows[0].missing_6h,
         Some(Missing::OneObservationTwice),
         "one reading divided by itself is an identity, not a return"
     );
+
+    // A distinct, later exit right at the six-hour horizon -- but the
+    // six-hour window (54,000 slots) reaches back into the entry's own
+    // reading, so it is refused for being too close rather than absent.
+    let overlap = table_over(
+        vec![launch(1, 100, at)],
+        vec![
+            outcome(1, at + T, at, None, Some(100)),
+            outcome(1, at + six, at, None, Some(150)),
+        ],
+    );
+    assert_eq!(
+        overlap.rows[0].missing_6h,
+        Some(Missing::ExitWindowOverlapsEntry)
+    );
+
+    // The remaining reasons need a gap wide enough to clear the overlap
+    // check, so they are read at the day horizon.
 
     // An entry whose own window held no fills: a quote nobody could have
     // bought at.
@@ -1216,22 +1279,19 @@ fn every_absent_label_says_which_of_the_six_things_went_wrong() {
     stale_entry_first.window_trough_price = None;
     let stale_entry = table_over(
         vec![launch(1, 100, at)],
-        vec![
-            stale_entry_first,
-            outcome(1, at + T + 5_000, at, None, Some(150)),
-        ],
+        vec![stale_entry_first, outcome(1, at + day, at, None, Some(150))],
     );
-    assert_eq!(stale_entry.rows[0].missing_6h, Some(Missing::StaleEntry));
+    assert_eq!(stale_entry.rows[0].missing_24h, Some(Missing::StaleEntry));
 
     // And the same at the exit, which is the other end of the same mistake.
-    let mut stale_exit_last = outcome(1, at + T + 5_000, at, None, Some(150));
+    let mut stale_exit_last = outcome(1, at + day, at, None, Some(150));
     stale_exit_last.window_peak_price = None;
     stale_exit_last.window_trough_price = None;
     let stale_exit = table_over(
         vec![launch(1, 100, at)],
         vec![outcome(1, at + T, at, None, Some(100)), stale_exit_last],
     );
-    assert_eq!(stale_exit.rows[0].missing_6h, Some(Missing::StaleExit));
+    assert_eq!(stale_exit.rows[0].missing_24h, Some(Missing::StaleExit));
 
     // A checkpoint that carried no price at all -- distinct from the two
     // above, which are prices that exist and are stale.
@@ -1239,22 +1299,18 @@ fn every_absent_label_says_which_of_the_six_things_went_wrong() {
     no_price_entry.last_price = None;
     let no_price = table_over(
         vec![launch(1, 100, at)],
-        vec![
-            no_price_entry,
-            outcome(1, at + T + 5_000, at, None, Some(150)),
-        ],
+        vec![no_price_entry, outcome(1, at + day, at, None, Some(150))],
     );
-    assert_eq!(no_price.rows[0].missing_6h, Some(Missing::NoPrice));
+    assert_eq!(no_price.rows[0].missing_24h, Some(Missing::NoPrice));
 
-    // Nothing at or before the horizon *after* an entry that is itself past
-    // it. The six-hour horizon is closed and the day-long one is not, so the
-    // same launch fails the two horizons differently -- which is why the
-    // reason is recorded per horizon rather than per row.
+    // Nothing near the six-hour horizon at all, but the day horizon is still
+    // open and does carry a label -- which is why the reason is recorded per
+    // horizon rather than per row.
     let late = table_over(
         vec![launch(1, 100, at)],
         vec![
-            outcome(1, at + six + 1, at, None, Some(100)),
-            outcome(1, at + six + 9_000, at, None, Some(150)),
+            outcome(1, at + T, at, None, Some(100)),
+            outcome(1, at + day, at, None, Some(150)),
         ],
     );
     assert_eq!(late.rows[0].missing_6h, Some(Missing::NoExit));
@@ -1301,16 +1357,22 @@ fn a_labelled_row_carries_no_reason_and_an_unlabelled_one_carries_nothing_else()
 fn the_reason_survives_the_file_and_an_older_file_reads_back_as_unrecorded() {
     // The reason is only useful if it reaches the report, and the report is
     // built from the file rather than from the table in memory.
+    //
+    // A single reading taken right at the six-hour horizon is both entry and
+    // exit there, which is `OneObservationTwice`; the same reading is nowhere
+    // near the day horizon at all, which is `NoExit` -- the reason really is
+    // per-horizon, not per-row, and the round trip has to carry both.
     let at = 1_000u64;
     let table = table_over(
         vec![launch(1, 100, at)],
-        vec![outcome(1, at + T, at, None, Some(100))],
+        vec![outcome(1, at + 6 * 9_000, at, None, Some(100))],
     );
     assert_eq!(
         table.rows[0].missing_6h,
         Some(Missing::OneObservationTwice),
         "the fixture is the case being carried"
     );
+    assert_eq!(table.rows[0].missing_24h, Some(Missing::NoExit));
 
     let dir = tempfile::tempdir().expect("tempdir");
     let path = dir.path().join(features::file_name(table.watermark));
@@ -1318,5 +1380,81 @@ fn the_reason_survives_the_file_and_an_older_file_reads_back_as_unrecorded() {
     let back = features::read(&path).expect("read");
 
     assert_eq!(back.rows[0].missing_6h, Some(Missing::OneObservationTwice));
-    assert_eq!(back.rows[0].missing_24h, Some(Missing::OneObservationTwice));
+    assert_eq!(back.rows[0].missing_24h, Some(Missing::NoExit));
+}
+
+#[test]
+fn the_day_label_uses_the_first_reading_past_its_horizon_even_when_six_hours_cannot() {
+    // The recorder's own schedule: readings near 1h, 6h and 24h
+    // (`radar-backfill`'s `CHECKPOINTS`). The 6h reading's price window
+    // reaches back into the 1h entry -- same `last_price` -- which used to
+    // read as a real return of exactly zero; the fix refuses it instead. The
+    // 24h reading is a fresh fill at a different price and does carry a
+    // label. Re-apply by reverting `gross` to `latest_by(&series, horizon)`:
+    // this test's 24h label would then use the 6h reading (the latest one at
+    // or before 216,000) instead of the 24h one, and would come back `None`
+    // via `OneObservationTwice` rather than a real return.
+    let at = 1_000u64;
+    let table = table_over(
+        vec![launch(1, 100, at)],
+        vec![
+            outcome(1, at + 9_500, at, None, Some(100)),
+            outcome(1, at + 55_000, at, None, Some(100)),
+            outcome(1, at + 217_000, at, None, Some(120)),
+        ],
+    );
+
+    let row = &table.rows[0];
+    assert_eq!(row.missing_6h, Some(Missing::ExitWindowOverlapsEntry));
+    assert!(
+        row.gross_24h_bps.is_some_and(|bps| bps > 0.0),
+        "the day label is a real, positive return: {:?}",
+        row.gross_24h_bps
+    );
+    assert_eq!(row.missing_24h, None);
+}
+
+#[test]
+fn a_day_reading_recorded_too_long_after_its_horizon_is_not_an_exit() {
+    // The tolerance covers the ordinary lag between "the horizon passed" and
+    // "the recorder measured it" -- not a reading taken so much later that it
+    // is really a different, unscheduled measurement. Re-apply by dropping
+    // the tolerance check: this reading would then be accepted as the exit
+    // and the label would come back with a value instead of `NoExit`.
+    let at = 1_000u64;
+    let day = 24 * 9_000u64;
+    let table = table_over(
+        vec![launch(1, 100, at)],
+        vec![
+            outcome(1, at + T, at, None, Some(100)),
+            outcome(1, at + day + 9_001, at, None, Some(150)),
+        ],
+    );
+
+    assert_eq!(table.rows[0].missing_24h, Some(Missing::NoExit));
+}
+
+#[test]
+fn identical_prices_close_to_the_entry_are_refused_not_a_measured_zero() {
+    // The bug's exact shape, isolated: the same `last_price` at two readings
+    // inside the same six-hour price window used to read as `Ok(0.0)` -- a
+    // real, if boring, return. It is not one: the exit's window reaches back
+    // into the entry's own fill, so the two readings can be the same trade
+    // rather than a price that held steady. Re-apply by deleting the gap
+    // check: `gross_6h_bps` would then be `Some(0.0)` instead of refused.
+    let at = 1_000u64;
+    let table = table_over(
+        vec![launch(1, 100, at)],
+        vec![
+            outcome(1, at + 9_500, at, None, Some(100)),
+            outcome(1, at + 55_000, at, None, Some(100)),
+        ],
+    );
+
+    assert_eq!(
+        table.rows[0].missing_6h,
+        Some(Missing::ExitWindowOverlapsEntry)
+    );
+    assert_ne!(table.rows[0].gross_6h_bps, Some(0.0));
+    assert_eq!(table.rows[0].gross_6h_bps, None);
 }

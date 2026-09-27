@@ -1738,3 +1738,42 @@ was at 399, so the two rules could not be added quietly.
 papered over. No check can read "this is not worth building" and know it was
 inferred from an absent measurement. The guard is the pair of rules and the fact
 that the owner will say so again.
+
+## 36. A freshness check tested the wrong property, and a wrong horizon hid behind it
+
+`labels()` in `crates/radar-research/src/features.rs` returned a gross return of
+exactly 0 bps for 87.4% of labelled rows on a 2026-09-27 box run — 158,841 of
+181,675 — from two defects stacked on top of each other.
+
+The exit reading was picked with `latest_by(series, horizon)`, the last reading
+at or before the horizon. `radar-backfill`'s checkpoint schedule only measures a
+mint once its age is *at or past* a checkpoint, so the reading that actually
+closes a horizon is never taken exactly on it — `latest_by` was finding an
+earlier checkpoint's reading, not this one's.
+
+That alone would have surfaced as `OneObservationTwice` most of the time, and it
+mostly didn't, because the freshness check tested the wrong property.
+`window_peak_price.is_some()` on the exit answers "did fills happen near this
+reading", not "did fills happen after the entry" — a window that reaches back
+into the entry's own fill still passes it. The two defects combined to produce
+a reading that was, by construction, the entry's own price read back a second
+time: an identity dressed as a measurement, and every median in every stratum
+was 0.0 bps.
+
+**What changed:** exit selection moved to `first_from(series, horizon)`, accepted
+only within a named tolerance of the horizon (`EXIT_HORIZON_TOLERANCE_SLOTS`).
+A new check, `MIN_EXIT_GAP_SLOTS`, requires the entry-exit gap to clear the
+recorder's price-window width with margin, so the exit's window cannot have
+reached back into the entry's fill; failing it is a new `Missing::
+ExitWindowOverlapsEntry`, not a silent pass. The 6h label's own horizon is
+narrower than that required gap, so it is now always refused — a labelled
+consequence, not an oversight.
+
+**What catches a recurrence:**
+`the_day_label_uses_the_first_reading_past_its_horizon_even_when_six_hours_cannot`
+and `a_day_reading_recorded_too_long_after_its_horizon_is_not_an_exit` in
+`crates/radar-research/tests/the_feature_table_cannot_see_the_future.rs` cover
+the horizon defect; `identical_prices_close_to_the_entry_are_refused_not_a_
+measured_zero` and `the_six_hour_label_is_always_refused_for_overlapping_its_
+own_entry` cover the freshness defect. The general lesson: a freshness check has
+to test the property it names, not one that merely correlates with it.

@@ -695,7 +695,7 @@ pub fn run(
 
 /// What a row read from a file older than the reason column counts as.
 ///
-/// Not a seventh [`Missing`] variant: the row's reason is absent, and inventing
+/// Not another [`Missing`] variant: the row's reason is absent, and inventing
 /// one would put it in a bucket nobody measured. Named here rather than spelled
 /// twice, because the report prints it and a test asserts on it.
 pub const UNRECORDED_REASON: &str = "unrecorded";
