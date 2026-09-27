@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-//! Whether trading is switched on, server-side -- the second of the two dark
-//! switches `TradePanel` checks (the first is `legal.ts`'s `TERMS_APPROVED`).
+//! Whether trading is switched on, server-side -- the switch `TokenHeader`
+//! checks before mounting `TradePanel`. (`legal.ts`'s `TERMS_APPROVED` gated
+//! it too until 2026-09-26; see plan 0014, item 10.)
 //!
 //! Modelled as a plain boolean, not a `Load<T>` union like `useApi`: nothing
 //! downstream needs to tell "still loading" apart from "off" or "could not

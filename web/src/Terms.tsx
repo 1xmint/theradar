@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 //! The terms page linked from `TradePanel`'s notice.
 //!
-//! Gated the same way the panel itself is -- `TERMS_APPROVED` and
-//! `useHealth.ts`'s `useTrading()` -- and for the same reason: `TERMS_TEXT`
+//! Gated on `TERMS_APPROVED` and `useHealth.ts`'s `useTrading()`. (The
+//! panel dropped the first on 2026-09-26 while the site is private -- plan
+//! 0014, item 10 -- but this page keeps it.) The reason: `TERMS_TEXT`
 //! is `docs/legal/terms-and-trade-notice-draft.md`'s draft, unapproved and
 //! still carrying `[PLACEHOLDER]` brackets (see `legal.test.ts`), and putting
 //! it at a reachable URL before the owner approves it would publish a draft

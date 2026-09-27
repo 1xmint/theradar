@@ -22,7 +22,10 @@
  * showing to visitors. `false` until that approval happens, independent of
  * whether the text still contains a placeholder.
  *
- * This is the whole feature's dark switch on the client side. See
+ * It gates `/terms` and the panel's link to it. It gated the trade panel
+ * itself too until the owner's 2026-09-26 decision to test trading while
+ * the site is private (plan 0014, item 10); it must gate the panel again
+ * before the site is public. See
  * `legal.test.ts` for the invariant that keeps it honest: this can never be
  * `true` while [`TERMS_TEXT`] or [`NOTICE_TEXT`] still holds a placeholder
  * bracket, because flipping this without reading the draft is exactly the
