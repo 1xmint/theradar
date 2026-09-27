@@ -664,9 +664,10 @@ fn route_error_response(why: &RouteError) -> Response {
             )
         }
         // The transaction's compute-budget instructions would spend more
-        // than the priority-fee cap, or name one this module cannot decode.
-        // Its own code for the same reason: a readable route Radar still
-        // will not build.
+        // than the priority-fee cap, name one this module cannot decode,
+        // place a compute-budget instruction outside computeBudgetInstructions,
+        // or repeat one Agave only accepts once. Its own code for the same
+        // reason: a readable route Radar still will not build.
         RouteError::PriorityFeeExceeded(_) => {
             eprintln!(
                 "radar-serve: trade route failed: {}",
