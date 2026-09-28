@@ -724,6 +724,20 @@ fn tables(reader: &Reader) -> Vec<Check> {
     out
 }
 
+/// How far behind the watermark the newest outcome may fall before the
+/// measuring pass is considered stopped, in slots.
+///
+/// The cron runs hourly at :17 and launches never stop, so every hour has
+/// tokens due; a gap over about 2.4 hours (at ~11,300 slots an hour) means runs are failing rather
+/// than that nothing was due. On 2026-09-23 the transfer query's window
+/// (bounded by the earliest launch in the whole store, not the earliest due
+/// one) crossed CryptoHouse's 10-billion-row cap and every hourly run failed
+/// for the next five days -- 106 in a row -- while this check still printed
+/// `ok` because it reported a count and an age of the *rows it had*, not how
+/// stale the newest one was against the watermark. Found by regrounding, not
+/// by the alarm.
+const OUTCOMES_STALE_AFTER: u64 = 27_000;
+
 /// When outcomes were last measured.
 ///
 /// Reported in slots rather than wall time because that is what the measurement
@@ -735,25 +749,38 @@ fn outcomes(reader: &Reader) -> Check {
         return Check::new(Status::Unknown, "outcomes", "cannot read the watermark");
     };
     match reader.read_outcomes(AsOf::at(top)) {
-        Ok(rows) if rows.is_empty() => Check::new(
+        Ok(rows) => outcomes_health(&rows, top),
+        Err(e) => Check::new(Status::Unknown, "outcomes", format!("cannot read: {e}")),
+    }
+}
+
+/// The rule, separated from the read.
+fn outcomes_health(rows: &[radar_store::Outcome], top: radar_types::Slot) -> Check {
+    let Some(latest) = rows.iter().map(|o| o.measured_at.get()).max() else {
+        return Check::new(
             Status::Warn,
             "outcomes",
             "none measured yet — every signal is unvalidated until this runs",
-        ),
-        Ok(rows) => {
-            let latest = rows.iter().map(|o| o.measured_at.get()).max().unwrap_or(0);
-            let graduated = rows.iter().filter(|o| o.graduated()).count();
-            Check::new(
-                Status::Ok,
-                "outcomes",
-                format!(
-                    "{} measurements, latest at slot {latest}, {graduated} graduations",
-                    rows.len()
-                ),
-            )
-        }
-        Err(e) => Check::new(Status::Unknown, "outcomes", format!("cannot read: {e}")),
+        );
+    };
+
+    let graduated = rows.iter().filter(|o| o.graduated()).count();
+    let detail = format!(
+        "{} measurements, latest at slot {latest}, {graduated} graduations",
+        rows.len()
+    );
+
+    let behind = top.get().saturating_sub(latest);
+    if behind > OUTCOMES_STALE_AFTER {
+        return Check::new(
+            Status::Fail,
+            "outcomes",
+            format!(
+                "{detail} — {behind} slots behind the watermark; the measuring pass has stopped"
+            ),
+        );
     }
+    Check::new(Status::Ok, "outcomes", detail)
 }
 
 /// How far behind the watermark the newest decision may fall before the
@@ -768,7 +795,7 @@ const DECISIONS_STALE_AFTER: u64 = 27_000;
 /// Whether the decision pass is still recording.
 ///
 /// It exists because nothing else would notice it stopping. The outcomes cron
-/// has the same shape and the same absence of supervision, and a recorder that
+/// has the same shape and is checked by [`outcomes_health`]; a recorder that
 /// dies quietly is [LEARNINGS] entry 8 — the failure that left hours of chain
 /// unrecorded and was found by regrounding rather than by an alarm.
 ///
@@ -2072,7 +2099,7 @@ mod tests {
     #[test]
     fn a_decision_pass_that_has_stopped_is_reported_as_broken() {
         // The check exists because nothing else would notice. The outcomes cron
-        // has the same shape and the same absence of supervision, and a recorder
+        // has the same shape and is checked by outcomes_health; a recorder
         // that dies quietly is LEARNINGS 8 -- hours of chain lost, found by
         // regrounding rather than by an alarm.
         let top = radar_types::Slot(1_000_000);
@@ -2143,6 +2170,80 @@ mod tests {
         );
         assert_eq!(
             gap(DECISIONS_STALE_AFTER + 1),
+            Status::Fail,
+            "one slot past it is not"
+        );
+    }
+
+    fn an_outcome(measured_at: u64) -> radar_store::Outcome {
+        radar_store::Outcome {
+            mint: radar_types::Address::new([1u8; 32]),
+            measured_at: radar_types::Slot(measured_at),
+            launch_slot: radar_types::Slot(measured_at.saturating_sub(6_000)),
+            first_transfer_slot: None,
+            last_transfer_slot: None,
+            transfers: 0,
+            unique_senders: 0,
+            unique_receivers: 0,
+            graduated_at: None,
+            first_price: None,
+            last_price: None,
+            peak_price: None,
+            trough_price: None,
+            window_peak_price: None,
+            window_trough_price: None,
+            vwap: None,
+            fills: 0,
+        }
+    }
+
+    #[test]
+    fn no_outcomes_at_all_warns_rather_than_passing_silently() {
+        let empty: Vec<radar_store::Outcome> = Vec::new();
+        let check = outcomes_health(&empty, radar_types::Slot(1_000_000));
+        assert_eq!(check.status, Status::Warn);
+    }
+
+    #[test]
+    fn an_outcomes_pass_that_has_stopped_is_reported_as_broken() {
+        // The actual incident: the transfer window was bounded by the earliest
+        // launch in the whole store, grew with the store's age, crossed
+        // CryptoHouse's 10-billion-row cap on 2026-09-23, and failed every
+        // hourly run for the next five days -- 106 in a row -- while this
+        // check kept reporting `ok` because it only looked at the rows it had,
+        // never at how far behind the watermark the newest one had fallen.
+        let top = radar_types::Slot(1_000_000);
+        let fresh = vec![an_outcome(1_000_000 - 100)];
+        let stalled = vec![an_outcome(1_000_000 - OUTCOMES_STALE_AFTER - 1)];
+
+        assert_eq!(outcomes_health(&fresh, top).status, Status::Ok);
+        let check = outcomes_health(&stalled, top);
+        assert_eq!(
+            check.status,
+            Status::Fail,
+            "a measuring pass that has not run in hours must alarm, not read as quiet"
+        );
+        assert!(
+            check.detail.contains("measuring pass has stopped"),
+            "detail was {}",
+            check.detail
+        );
+    }
+
+    #[test]
+    fn the_outcomes_staleness_window_boundary_is_exact() {
+        // `>` and `>=` differ only at the boundary, so it is tested on its own
+        // rather than only well inside and well outside the window.
+        let top = radar_types::Slot(1_000_000);
+        let gap = |slots: u64| outcomes_health(&[an_outcome(1_000_000 - slots)], top).status;
+
+        assert_eq!(
+            gap(OUTCOMES_STALE_AFTER),
+            Status::Ok,
+            "exactly at the window is still within it"
+        );
+        assert_eq!(
+            gap(OUTCOMES_STALE_AFTER + 1),
             Status::Fail,
             "one slot past it is not"
         );

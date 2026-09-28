@@ -61,6 +61,7 @@ quietly absent.
 | [34](#34-the-monitor-resolved-its-paths-against-the-wrong-root-and-two-of-its-wrong-lines-said-ok) | The monitor resolved its paths against the wrong root, and two of its wrong lines said `[ok]` | `the_briefs_subjects_hang_off_the_one_path_it_is_given`,… |
 | [35](#35-a-measured-zero-was-read-as-a-verdict-and-a-first-reaction-was-filed-as-doctrine) | A measured zero was read as a verdict, and a first reaction was filed as doctrine | habit only, and it says so |
 | [36](#36-a-freshness-check-tested-the-wrong-property-and-a-wrong-horizon-hid-behind-it) | A freshness check tested the wrong property, and a wrong horizon hid behind it | `the_six_hour_label_is_always_refused_for_overlapping_its_own_entry`,… |
+| [37](#37-a-query-window-that-grew-with-the-stores-age-crossed-a-vendor-limit-nobody-chose-and-a-health-check-that-could-not-see-its-own-age-said-ok-through-285-failed-runs) | A query window that grew with the store's age crossed a vendor limit nobody chose, and a health check that could not see its own age said `ok` through 285 failed runs | `earliest_due_slot_ignores_launches_that_are_not_due`,… |
 
 ---
 
@@ -1778,3 +1779,45 @@ the horizon defect; `identical_prices_close_to_the_entry_are_refused_not_a_
 measured_zero` and `the_six_hour_label_is_always_refused_for_overlapping_its_
 own_entry` cover the freshness defect. The general lesson: a freshness check has
 to test the property it names, not one that merely correlates with it.
+
+## 37. A query window that grew with the store's age crossed a vendor limit nobody chose, and a health check that could not see its own age said `ok` through 285 failed runs
+
+`radar-backfill --outcomes` bounded its transfer-aggregate query by the earliest
+launch slot in the *whole store*, not the earliest launch still due for
+measurement. The window widened every day the store existed: HTTP 408 timeouts
+(ClickHouse Code 159) began around 2026-09-13 as it passed roughly three weeks
+wide, nearly every run failed from about 2026-09-19, and from about 2026-09-22
+it also crossed CryptoHouse's 10-billion-row cap. 285 of 864 logged runs
+failed. `radar brief` said `[ok] outcomes ...` throughout, because the check
+reported a count and the newest row's own slot, never how far that slot had
+fallen behind the watermark.
+
+**What changed:** the window is now bounded by the earliest slot among the
+tokens actually due (`earliest_due_slot`, `crates/radar-backfill/src/main.rs`) --
+complete, since no mint has a transfer before its own launch. Because even that
+bound still scans weeks once the backlog is old, the due set is further split
+into a recent tier (still crossing checkpoints in normal operation, always
+about a 1.5-day window) and a backlog tier, each with its own bounded query and
+the recent tier's writes flushed before the backlog tier can fail -- so a wide,
+timeout-prone backlog scan can no longer block or delay current measurement.
+Draining the 264,774-launch backlog at full speed would then have taken the
+whole shared 120-an-hour CryptoHouse allowance for about a day, so a run now
+stops at `OUTCOMES_RUN` (20) queries, recent tier first, and the backlog
+drains in what is left over days (`a_run_measures_only_what_its_query_allowance_reaches`).
+`outcomes()` in `crates/radar-cli/src/brief.rs` gained `outcomes_health`,
+mirroring `decisions_health`: `Status::Fail` once the newest measurement falls
+more than `OUTCOMES_STALE_AFTER` (27,000 slots, about 2.4 hours at the ~11,300 slots an hour this store's
+slot times show) behind the
+watermark.
+
+**What catches a recurrence:** the call site is held by structure, not a test:
+`measure_tier` is handed only its tier, and `MeasureContext` carries no launch
+list to reach for. `earliest_due_slot_ignores_launches_that_are_not_due` pins
+only the helper's `min`. `the_recent_tier_is_twice_the_last_checkpoint_wide`
+fails if the recent tier narrows, and `split_by_recency_boundary_is_exact` if
+the split drifts by one slot;
+`an_outcomes_pass_that_has_stopped_is_reported_as_broken` and the boundary test
+next to it fail if the health check goes back to reporting a count instead of an
+age. The general lesson: a window that grows with the store's age will cross
+someone else's limit on a date nobody chose, and a health check that reports a
+count without its age cannot see a stopped pass.
