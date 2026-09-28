@@ -303,7 +303,7 @@ build `6b424f7`, the live build (refreshed with this plan update).
 
 Plan 0007 items 3 and 4, as written there.
 
-1. [ ] **One windowed run on the box** of `radar-next features` then
+1. [x] **One windowed run on the box** of `radar-next features` then
    `radar-next edge` over the decision records since the recorder started; the
    window and the store path recorded here with the command. `Policy::CLOSED`
    untouched. Done when the run's output is saved beside the store.
@@ -318,13 +318,19 @@ Plan 0007 items 3 and 4, as written there.
      6h label is now always refused), bounds how late a 24h reading may be
      (one hour), and records it as LEARNINGS 36. #310 (research 0026) is on
      hold and must not quote the first run's medians.
-   - **Rerun now that #312 is merged**, over a window wholly after 2026-08-31 (when
-     `window_peak_price` begins) and ending at least 225,000 slots before the
-     watermark, niced, one job, under a timeout.
-2. [ ] **Research 0026:** the measured edge, over how many decisions, with
+   - **Second run, 2026-09-28 (`ca2ef05`, launches 09-13..09-27): also not a
+     measurement.** 1% labelled. The hourly outcome recorder had been failing
+     since about 09-13 — its transfer query grew with the whole store until it
+     timed out and then hit CryptoHouse's row limit, while `radar brief` said
+     ok. Fixed by #314; research 0026 records it.
+   - **Third run, 2026-09-28, done.** `ca2ef05`, launches 443100000..446800000
+     (about 08-31..09-13), watermark 451198556; output at
+     `/home/guardian/radar/data/edge-runs/2026-09-28/`, commands in 0026.
+     `Policy::CLOSED` untouched.
+2. [x] **Research 0026:** the measured edge, over how many decisions, with
    LEARNINGS 35's caveat if the sample is small (a measured zero is not a
    verdict). Done when it is on `main`.
-3. [ ] **`docs/STATE.md`'s measured-edge narrative** updated from 0026, and
+3. [x] **`docs/STATE.md`'s measured-edge narrative** updated from 0026, and
    plan 0007 items 3–4 ticked with the evidence. Done when STATE.md and 0007
    agree and `repo-conformance` is green.
 
@@ -361,13 +367,16 @@ CI re-run on any PR older than `main` before it merges.
 
 ## Handback
 
-**Stopped at (2026-09-27):** trading is live behind the Cloudflare Access
+**Stopped at (2026-09-28):** trading is live behind the Cloudflare Access
 wall at build `6b424f7`: F1, F7 (bar the Phantom check), F8, F11–F13 and
 G4 done; the terms (F10) deferred by the owner while the site is private.
-#311 is deployed. #312 (`ca2ef05`) fixed the edge table's labels; Phase I's
-rerun waits on its release build.
+Phase I's run is done and research 0026 is written (#310): nothing clears,
+and every readable stratum loses before costs, on a 4% survivor sample. The
+run found the outcome recorder broken since about 09-13; #314 fixes it and is
+not yet deployed.
 
-**Next action:** rerun Phase I on the `ca2ef05` release and rewrite #310 from the new numbers.
+**Next action:** merge and deploy #314 so the recorder catches up. Phase I
+items 2–3 are done by #310 landing on `main`.
 The owner runs F9 (his own buys and sells); record the transaction ids, the
 landing state shown and the positions panel here, and save the first
 pump.fun `/build` response as a fixture.

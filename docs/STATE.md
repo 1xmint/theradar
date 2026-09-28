@@ -185,11 +185,18 @@ population it could not see, because a sample missing labels for want of any
 measurement is a different sample from one missing them because every exit price
 was stale.
 
-**No result exists.** Neither command has been run against the production
-store — that needs a Linux binary on the box, and this workstation has no store
-to run them against. So the honest state of the number is unchanged: research
-0017 measures the selection edge at **0 bps** against a bar of about **456**,
-and nothing here has moved it. What exists is the instrument that could.
+**Run 2026-09-28, plan 0014 Phase I: nothing found.**
+[`0026`](../docs/research/0026-the-walk-forward-protocol-and-what-it-found.md)
+ran both commands on the box for launches from 2026-08-31 to 2026-09-13
+(slots 443100000..446800000, watermark 451198556, `main` at `ca2ef05`).
+386,908 launches, 15,867 with a 24h label. The best of 44,042 fitted strata,
+`creator_edge`'s thresholds and the refusal signals all fail out of sample, and
+every stratum with more than nine rows has a **negative median gross return**
+before the 850 bps round trip. This does not settle that no edge exists: the
+labels cover 4% of launches and only coins still trading a day later (58% had
+no fills near the exit), the twelve trade-derived features are absent because
+the trades table is empty, and "24h" is about 19 real hours. Two earlier
+attempts were instrument faults, recorded in 0026.
 
 **Design 0010 §6.1 is superseded on the cost, and this file is why.** The
 design charged a `by_notional` band and then asked for 456 bps on top. The
