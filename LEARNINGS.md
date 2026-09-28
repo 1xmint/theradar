@@ -1783,23 +1783,30 @@ to test the property it names, not one that merely correlates with it.
 
 `radar-backfill --outcomes` bounded its transfer-aggregate query by the earliest
 launch slot in the *whole store*, not the earliest launch still due for
-measurement. The window widened every day the store existed; on 2026-09-23 it
-crossed CryptoHouse's 10-billion-row cap and every hourly run failed from then
-on -- 106 in a row, found on 2026-09-28 by regrounding, not by an alarm.
-`radar brief` kept printing `[ok] outcomes ... measurements, latest at slot
-449755147` the whole time, because the check reported a count and the newest
-row's own slot, never how far that slot had fallen behind the watermark
-(451195671 at the time it was found).
+measurement. The window widened every day the store existed: HTTP 408 timeouts
+(ClickHouse Code 159) began around 2026-09-13 as it passed roughly three weeks
+wide, nearly every run failed from about 2026-09-19, and from about 2026-09-22
+it also crossed CryptoHouse's 10-billion-row cap. 285 of 864 logged runs
+failed. `radar brief` said `[ok] outcomes ...` throughout, because the check
+reported a count and the newest row's own slot, never how far that slot had
+fallen behind the watermark.
 
 **What changed:** the window is now bounded by the earliest slot among the
 tokens actually due (`earliest_due_slot`, `crates/radar-backfill/src/main.rs`) --
-complete, since no mint has a transfer before its own launch. `outcomes()` in
-`crates/radar-cli/src/brief.rs` gained `outcomes_health`, mirroring
-`decisions_health`: `Status::Fail` once the newest measurement falls more than
-`OUTCOMES_STALE_AFTER` (27,000 slots, about three hours) behind the watermark.
+complete, since no mint has a transfer before its own launch. Because even that
+bound still scans weeks once the backlog is old, the due set is further split
+into a recent tier (still crossing checkpoints in normal operation, always
+about a 1.5-day window) and a backlog tier, each with its own bounded query and
+the recent tier's writes flushed before the backlog tier can fail -- so a wide,
+timeout-prone backlog scan can no longer block or delay current measurement.
+`outcomes()` in `crates/radar-cli/src/brief.rs` gained `outcomes_health`,
+mirroring `decisions_health`: `Status::Fail` once the newest measurement falls
+more than `OUTCOMES_STALE_AFTER` (27,000 slots, about three hours) behind the
+watermark.
 
 **What catches a recurrence:** `earliest_due_slot_ignores_launches_that_are_not_
 due` fails if the full launch list is passed back in instead of the due set;
+`split_by_recency_boundary_is_exact` fails if the tier split drifts by one slot;
 `an_outcomes_pass_that_has_stopped_is_reported_as_broken` and the boundary test
 next to it fail if the health check goes back to reporting a count instead of an
 age. The general lesson: a window that grows with the store's age will cross

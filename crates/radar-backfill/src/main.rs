@@ -1077,11 +1077,127 @@ fn due_for_measurement(
 /// window this bounds only needs to reach the oldest launch still being
 /// measured, and every mint older than that either has no transfer before its
 /// own launch anyway or has already settled and is not being re-queried.
+/// One launch still being tracked for measurement: its mint and launch slot.
+type Due = Vec<(radar_types::Address, radar_types::Slot)>;
+
 fn earliest_due_slot(due: &[(radar_types::Address, radar_types::Slot)]) -> radar_types::Slot {
     due.iter()
         .map(|(_, slot)| *slot)
         .min()
         .unwrap_or(radar_types::Slot(0))
+}
+
+/// How far back a launch can be and still count as "recent" for measurement.
+///
+/// Twice [`checkpoints::settled_after`], so every token still crossing a
+/// checkpoint in normal operation -- the traffic a healthy pass measures every
+/// run -- falls inside it. Its transfer scan is then always about a day and a
+/// half, regardless of how large a backlog has piled up behind it.
+///
+/// A function rather than a `const` because [`checkpoints::settled_after`]
+/// reads a slice at runtime; it is cheap enough to call on every split.
+fn recent_tier_slots() -> radar_types::SlotDelta {
+    radar_types::SlotDelta(2 * checkpoints::settled_after().get())
+}
+
+/// Splits the due set into a recent tier and a backlog tier.
+///
+/// A launch at or after `measured_at - RECENT_TIER_SLOTS` is recent; anything
+/// older is backlog. Kept separate from [`measure`] because the boundary is
+/// exactly where a `>=`-vs-`>` mistake would silently misfile a launch by one
+/// slot, and that needs a test that does not also need a store or a client.
+fn split_by_recency(due: Due, measured_at: radar_types::Slot) -> (Due, Due) {
+    let cutoff = measured_at - recent_tier_slots();
+    due.into_iter()
+        .partition(|(_, launch_slot)| *launch_slot >= cutoff)
+}
+
+/// What one tier's pass through [`measure`] accumulated.
+#[derive(Default)]
+struct Totals {
+    written: u64,
+    stillborn: u64,
+    with_activity: u64,
+    priced_batches: u64,
+    with_price: u64,
+}
+
+/// What every tier's pass needs and does not change.
+struct MeasureContext<'a> {
+    client: &'a Client,
+    measured_at: radar_types::Slot,
+    graduated: &'a BTreeMap<radar_types::Address, radar_types::Slot>,
+    prior: &'a BTreeMap<String, prices::Prices>,
+}
+
+/// Measures one tier of the due set, with its own transfer and price window.
+///
+/// Each tier is bounded by its own earliest launch rather than the due set's
+/// as a whole, so a large backlog tier's wide window can never delay or block
+/// the recent tier's -- see [`measure`] for why that split exists at all.
+/// Skips its own slot-time and price-window queries entirely when empty.
+fn measure_tier(
+    ctx: &MeasureContext,
+    writer: &mut Writer,
+    tier_name: &str,
+    tier: &[(radar_types::Address, radar_types::Slot)],
+    total_due: usize,
+    totals: &mut Totals,
+) -> Result<(), String> {
+    if tier.is_empty() {
+        return Ok(());
+    }
+
+    let earliest_slot = earliest_due_slot(tier);
+    let times: Vec<TimeRow> = ctx
+        .client
+        .query(&outcomes::query_for_slot_time(earliest_slot))
+        .map_err(|e| e.to_string())?;
+    let since = times
+        .first()
+        .map(|t| t.at.clone())
+        .filter(|t| !t.is_empty() && !t.starts_with("1970"))
+        .ok_or_else(|| {
+            format!("could not resolve a timestamp for the earliest {tier_name} launch")
+        })?;
+
+    let (price_from, price_to) = price_window(ctx.client, ctx.measured_at, &since);
+    println!("  {tier_name}: {} due, transfers since {since}", tier.len());
+
+    for batch in tier.chunks(outcomes::MINTS_PER_BATCH) {
+        let mints: Vec<String> = batch.iter().map(|(m, _)| m.to_string()).collect();
+        let rows: Vec<AggregateRow> = ctx
+            .client
+            .query(&outcomes::query_for_mints(&mints, &since))
+            .map_err(|e| e.to_string())?;
+
+        let priced = price_batch(
+            ctx.client,
+            &mints,
+            price_from.as_deref(),
+            price_to.as_deref(),
+        );
+        totals.priced_batches += u64::from(!priced.is_empty());
+
+        let measured = outcomes::outcomes_from_rows(&rows, batch, ctx.measured_at, ctx.graduated);
+        let measured = prices::apply(measured, &priced, ctx.prior);
+        for outcome in measured {
+            if outcome.appears_stillborn() {
+                totals.stillborn += 1;
+            }
+            if outcome.transfers > 0 {
+                totals.with_activity += 1;
+            }
+            if outcome.first_price.is_some() {
+                totals.with_price += 1;
+            }
+            writer.append_outcome(outcome).map_err(|e| e.to_string())?;
+            totals.written += 1;
+        }
+        println!("  {}/{total_due} measured", totals.written);
+        std::thread::sleep(PAUSE_BETWEEN_WINDOWS);
+    }
+    Ok(())
 }
 
 /// Measures what became of every token already in the store.
@@ -1212,74 +1328,50 @@ fn measure(args: &Args) -> Result<(), String> {
         );
         return Ok(());
     }
-    let launches = due;
+    let total_due = due.len();
 
-    // The transfer table prunes by timestamp, not slot, so the earliest slot
-    // among the tokens actually due is converted once and the whole run is
-    // bounded by it. Bounding by the earliest launch in the whole store grows
-    // the scan with the store's age forever; it crossed CryptoHouse's 10
-    // billion row cap on 2026-09-23 and failed every hourly run for five days
-    // unremarked. No mint has a transfer before its own launch, so the
-    // earliest *due* launch is a complete bound for every due mint.
-    let earliest_slot = earliest_due_slot(&launches);
-    let times: Vec<TimeRow> = client
-        .query(&outcomes::query_for_slot_time(earliest_slot))
-        .map_err(|e| e.to_string())?;
-    let since = times
-        .first()
-        .map(|t| t.at.clone())
-        .filter(|t| !t.is_empty() && !t.starts_with("1970"))
-        .ok_or("could not resolve a timestamp for the earliest due launch")?;
+    // Splitting into tiers, rather than one query window bounded by the
+    // earliest due launch, matters once the backlog is old: the current
+    // backlog reaches back roughly three weeks, and a scan that wide is where
+    // ClickHouse timeouts (HTTP 408) and TOO_MANY_ROWS both started (see
+    // LEARNINGS 37). Keeping "recent" on its own bounded window means a
+    // backlog failure can never delay or block measuring the tokens actually
+    // crossing checkpoints right now.
+    let (recent, backlog) = split_by_recency(due, measured_at);
 
-    let (price_from, price_to) = price_window(&client, measured_at, &since);
+    println!("{total_known} tokens known, {total_due} due; measuring as of slot {measured_at}");
+
     let prior = baseline_prices(&already, args.reprice);
-
-    println!(
-        "{total_known} tokens known, {} due; measuring as of slot {measured_at},          transfers since {since}, batches of {}",
-        launches.len(),
-        outcomes::MINTS_PER_BATCH
-    );
-
     let mut writer = Writer::open(&args.store, 20_000).map_err(|e| e.to_string())?;
-    let (mut written, mut stillborn, mut with_activity) = (0u64, 0u64, 0u64);
-    let (mut priced_batches, mut with_price) = (0u64, 0u64);
+    let ctx = MeasureContext {
+        client: &client,
+        measured_at,
+        graduated: &graduated,
+        prior: &prior,
+    };
+    let mut totals = Totals::default();
 
-    for batch in launches.chunks(outcomes::MINTS_PER_BATCH) {
-        let mints: Vec<String> = batch.iter().map(|(m, _)| m.to_string()).collect();
-        let rows: Vec<AggregateRow> = client
-            .query(&outcomes::query_for_mints(&mints, &since))
-            .map_err(|e| e.to_string())?;
-
-        let priced = price_batch(&client, &mints, price_from.as_deref(), price_to.as_deref());
-        priced_batches += u64::from(!priced.is_empty());
-
-        let measured = outcomes::outcomes_from_rows(&rows, batch, measured_at, &graduated);
-        let measured = prices::apply(measured, &priced, &prior);
-        for outcome in measured {
-            if outcome.appears_stillborn() {
-                stillborn += 1;
-            }
-            if outcome.transfers > 0 {
-                with_activity += 1;
-            }
-            if outcome.first_price.is_some() {
-                with_price += 1;
-            }
-            writer.append_outcome(outcome).map_err(|e| e.to_string())?;
-            written += 1;
-        }
-        println!("  {written}/{} measured", launches.len());
-        std::thread::sleep(PAUSE_BETWEEN_WINDOWS);
-    }
+    measure_tier(&ctx, &mut writer, "recent", &recent, total_due, &mut totals)?;
+    // A failure measuring the backlog must not cost the recent tier's writes,
+    // so they are flushed before the backlog tier's own queries can fail.
+    writer.flush().map_err(|e| e.to_string())?;
+    measure_tier(
+        &ctx,
+        &mut writer,
+        "backlog",
+        &backlog,
+        total_due,
+        &mut totals,
+    )?;
     writer.flush().map_err(|e| e.to_string())?;
 
     print_measure_summary(
         measured_at,
-        written,
-        with_activity,
-        with_price,
-        priced_batches,
-        stillborn,
+        totals.written,
+        totals.with_activity,
+        totals.with_price,
+        totals.priced_batches,
+        totals.stillborn,
     );
     record_query_meter(
         &args.store,
@@ -1644,6 +1736,26 @@ mod tests {
             radar_types::Slot(100),
             "sanity: the full launch list would have picked the older, not-due slot"
         );
+    }
+
+    /// Exactly at the cutoff is recent; one slot older is backlog. A
+    /// `>=`-to-`>` mutant on the split moves this exact launch across tiers,
+    /// which is what this pins down.
+    #[test]
+    fn split_by_recency_boundary_is_exact() {
+        let measured_at = radar_types::Slot(1_000_000);
+        let cutoff = measured_at - recent_tier_slots();
+
+        let at_cutoff = (radar_types::Address::new([1u8; 32]), cutoff);
+        let one_older = (
+            radar_types::Address::new([2u8; 32]),
+            radar_types::Slot(cutoff.get() - 1),
+        );
+
+        let (recent, backlog) = split_by_recency(vec![at_cutoff, one_older], measured_at);
+
+        assert_eq!(recent, vec![at_cutoff], "exactly at the cutoff is recent");
+        assert_eq!(backlog, vec![one_older], "one slot older is backlog");
     }
 
     #[test]
