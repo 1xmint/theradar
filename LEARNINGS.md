@@ -61,6 +61,7 @@ quietly absent.
 | [34](#34-the-monitor-resolved-its-paths-against-the-wrong-root-and-two-of-its-wrong-lines-said-ok) | The monitor resolved its paths against the wrong root, and two of its wrong lines said `[ok]` | `the_briefs_subjects_hang_off_the_one_path_it_is_given`,… |
 | [35](#35-a-measured-zero-was-read-as-a-verdict-and-a-first-reaction-was-filed-as-doctrine) | A measured zero was read as a verdict, and a first reaction was filed as doctrine | habit only, and it says so |
 | [36](#36-a-freshness-check-tested-the-wrong-property-and-a-wrong-horizon-hid-behind-it) | A freshness check tested the wrong property, and a wrong horizon hid behind it | `the_six_hour_label_is_always_refused_for_overlapping_its_own_entry`,… |
+| [37](#37-a-query-window-that-grew-with-the-stores-age-crossed-a-vendor-limit-nobody-chose-and-a-health-check-that-could-not-see-its-own-age-said-ok-through-285-failed-runs) | A query window that grew with the store's age crossed a vendor limit nobody chose, and a health check that could not see its own age said `ok` through 285 failed runs | `earliest_due_slot_ignores_launches_that_are_not_due`,… |
 
 ---
 
@@ -1779,7 +1780,7 @@ measured_zero` and `the_six_hour_label_is_always_refused_for_overlapping_its_
 own_entry` cover the freshness defect. The general lesson: a freshness check has
 to test the property it names, not one that merely correlates with it.
 
-## 37. A query window that grew with the store's age crossed a vendor limit nobody chose, and a health check that could not see its own age said `ok` through 106 failed runs
+## 37. A query window that grew with the store's age crossed a vendor limit nobody chose, and a health check that could not see its own age said `ok` through 285 failed runs
 
 `radar-backfill --outcomes` bounded its transfer-aggregate query by the earliest
 launch slot in the *whole store*, not the earliest launch still due for

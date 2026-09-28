@@ -1071,15 +1071,15 @@ fn due_for_measurement(
         .collect()
 }
 
+/// One launch still being tracked for measurement: its mint and launch slot.
+type Due = Vec<(radar_types::Address, radar_types::Slot)>;
+
 /// The earliest launch slot among the tokens actually due for measurement.
 ///
 /// Deliberately takes the due set, not the full launch list: the transfer
 /// window this bounds only needs to reach the oldest launch still being
 /// measured, and every mint older than that either has no transfer before its
 /// own launch anyway or has already settled and is not being re-queried.
-/// One launch still being tracked for measurement: its mint and launch slot.
-type Due = Vec<(radar_types::Address, radar_types::Slot)>;
-
 fn earliest_due_slot(due: &[(radar_types::Address, radar_types::Slot)]) -> radar_types::Slot {
     due.iter()
         .map(|(_, slot)| *slot)
@@ -1153,13 +1153,9 @@ fn measure_tier(
         .client
         .query(&outcomes::query_for_slot_time(earliest_slot))
         .map_err(|e| e.to_string())?;
-    let since = times
-        .first()
-        .map(|t| t.at.clone())
-        .filter(|t| !t.is_empty() && !t.starts_with("1970"))
-        .ok_or_else(|| {
-            format!("could not resolve a timestamp for the earliest {tier_name} launch")
-        })?;
+    let since = resolved_time(&times).ok_or_else(|| {
+        format!("could not resolve a timestamp for the earliest {tier_name} launch")
+    })?;
 
     let (price_from, price_to) = price_window(ctx.client, ctx.measured_at, &since);
     println!("  {tier_name}: {} due, transfers since {since}", tier.len());
@@ -1200,6 +1196,18 @@ fn measure_tier(
     Ok(())
 }
 
+/// The timestamp a slot-time query resolved to, or `None` when it did not.
+///
+/// The query is a `min` over the blocks in a range, and over no blocks it
+/// answers the column's default -- the epoch -- rather than an error; an empty
+/// answer set gives no row at all. The epoch taken as a real time would start
+/// a transfer scan at 1970, the whole table, so it is refused like the others.
+fn resolved_time(rows: &[TimeRow]) -> Option<String> {
+    rows.first()
+        .map(|t| t.at.clone())
+        .filter(|t| !t.is_empty() && !t.starts_with("1970"))
+}
+
 /// Measures what became of every token already in the store.
 /// The window a price query may cover, as `(from, to)`.
 ///
@@ -1219,10 +1227,7 @@ fn price_window(
     let Ok(now) = client.query::<TimeRow>(&outcomes::query_for_slot_time(measured_at)) else {
         return (None, None);
     };
-    let to = now
-        .first()
-        .map(|t| t.at.clone())
-        .filter(|t| !t.is_empty() && !t.starts_with("1970"));
+    let to = resolved_time(&now);
     let from = to.as_ref().map(|to| prices::window_start(to, since));
     (from, to)
 }
@@ -1736,6 +1741,22 @@ mod tests {
             radar_types::Slot(100),
             "sanity: the full launch list would have picked the older, not-due slot"
         );
+    }
+
+    #[test]
+    fn a_slot_time_resolves_only_to_a_real_timestamp() {
+        let row = |at: &str| TimeRow { at: at.to_owned() };
+        assert_eq!(
+            resolved_time(&[row("2026-09-13 04:00:00")]).as_deref(),
+            Some("2026-09-13 04:00:00")
+        );
+        assert_eq!(
+            resolved_time(&[row("1970-01-01 00:00:00")]),
+            None,
+            "the epoch"
+        );
+        assert_eq!(resolved_time(&[row("")]), None, "an empty answer");
+        assert_eq!(resolved_time(&[]), None, "no row");
     }
 
     /// Exactly at the cutoff is recent; one slot older is backlog. A
