@@ -899,52 +899,101 @@ cleanly are different facts.
 
 ## What is live on radar.heyvera.org
 
-As of 2026-09-26, checked directly rather than recalled.
+As of 2026-09-27 (~15:20 UTC; build line refreshed 2026-09-28 03:07 UTC),
+checked directly rather than recalled. This replaces the 2026-09-26 snapshot
+point for point; the trading switch changed under it.
 
 `curl -s https://radar.heyvera.org/health`:
 
 ```json
-{"agent":{"configured":false},"build":"5a9d991cb1c71b15cdf8e8ec9aa8117b3ae22c96","instruments":3,"paidSurface":false,"policyClosed":true,"status":"ok","trading":false,"version":"0.0.1","watermarkSlot":450725922}
+{"agent":{"configured":false},"build":"6b424f718542ef87a18e701ce924eabd50236e97","instruments":3,"paidSurface":false,"policyClosed":true,"status":"ok","trading":true,"version":"0.0.1","watermarkSlot":451193205}
 ```
 
-**Build `5a9d991`** is #295 (Phase D server half: signed-in wallet swap
-pricing and building, ADR 0024). #296 (Plan 0013 Phase E.1: one shared ticker
-behind every SSE stream, `/v1/market/events`) is merged to `main` one commit
-later and **not yet on this build** — the next `radar-deploy` picks it up.
+**Build `6b424f7`** is #274 (a dependency bump) on top of #311 (duplicate
+compute-budget instructions refused) and #309 (compute-budget instructions
+checked wherever they sit), deployed with `sudo radar-deploy` at 23:01 UTC
+on 2026-09-27 (systemd's `ActiveEnterTimestamp`) after the artifact's sha256
+matched `BUILD-INFO.txt`. The owner's 15:06 UTC
+restart of `4fdb9e3` (#307, confirmed from `journalctl -u radar-serve`, below)
+is the one that switched trading on.
 
 **Public, no wallet or Access token needed** (`Audience::Public` in
 [`crates/radar-serve/src/access.rs`](../crates/radar-serve/src/access.rs),
 confirmed against the live instance): `/v1/market/*` (coins, launches,
-candles, quotes, events), `/health`, and the terminal UI itself — `/`,
-`/decisions`, `/evidence`, `/wallet`, `/ask`, `/terms`, `/token/*` and the
+candles, quotes, events — `curl -s -o /dev/null -w '%{http_code}'` on
+`/v1/market/quote?mint=...&side=buy&amount=10000000` and `/v1/market/events`
+both return `200` on 2026-09-27), `/health`, and the terminal UI itself —
+`/`, `/decisions`, `/evidence`, `/wallet`, `/ask`, `/terms`, `/token/*` and the
 asset bundle. `/x402/*` classifies as public in the same file, but the
 deployment sets neither `RADAR_X402_PAY_TO` nor `RADAR_X402_FACILITATOR`, so a
 request there falls through to the application shell rather than pricing
-anything — `curl -s -o /dev/null -w '%{http_code}' https://radar.heyvera.org/x402/v1/instruments`
-returns `200` with the SPA's HTML, not an x402 response.
+anything.
 
 **Behind Cloudflare Access** (`Audience::Operator`, the default for anything
 not explicitly classified): `/mcp` and `/v1/instruments` both answered `curl`
-with `302` to `small-art-43c3.cloudflareaccess.com`'s login on 2026-09-26. No
+with `302` to `small-art-43c3.cloudflareaccess.com`'s login on 2026-09-27. No
 outside agent reaches the x402/MCP agent surface today — issue #186, closed by
 making the README say this rather than by moving the wall.
 
-**Customer (wallet-session) routes**, `Audience::Customer`, reachable only
-after Sign-In-With-Solana: `/v1/customer/wallet`, `/v1/customer/events`,
-`/v1/chat`, `/v1/customer/watchlist(/:mint)`, `/v1/customer/positions`,
-`/v1/customer/swap`.
+**Customer (wallet-session) routes** — `/v1/customer/wallet`,
+`/v1/customer/events`, `/v1/chat`, `/v1/customer/watchlist(/:mint)`,
+`/v1/customer/positions`, `/v1/customer/swap` — classify as
+`Audience::Customer` in `access.rs` and are **reachable by any wallet after
+Sign-In-With-Solana**. The two sign-in routes, `/v1/customer/siws/challenge`
+and `/v1/customer/siws/verify`, are `Audience::Public`. The auth middleware in
+[`crates/radar-serve/src/lib.rs`](../crates/radar-serve/src/lib.rs) checks a
+wallet session token first and does not need Privy for it; admission is `open`
+on the box (`RADAR_CUSTOMER_ACCESS`), so any signed-in wallet is admitted.
+Checked from outside on 2026-09-27: `POST /v1/customer/swap` and
+`GET /v1/customer/positions` with no session both answer `403`
+`{"error":"no wallet session on this request; sign in with your wallet","reason":"no_session"}`
+— Radar's own refusal asking for a wallet, not a Cloudflare Access redirect.
 
-**The dark switches, both still off**: `RADAR_TRADE` is unset in production,
-so [`crates/radar-serve/src/trade.rs`](../crates/radar-serve/src/trade.rs)'s
-`Trading` is never constructed — `/v1/customer/swap` reports "this instance
-does not build or price swaps" rather than pricing one, and there is no
-Jupiter credential configured either, which `RADAR_TRADE=on` would refuse to
-start without. In the web client,
-[`TERMS_APPROVED`](../web/src/legal.ts) is hardcoded `false`, which
-`TradePanel.tsx` reads as its first gate before the swap button does anything.
+The banner lines `customers : off — customer routes require operator identity`
+and `admission : open — any verified Privy identity` below describe **only the
+Privy (email) lane**, which is off because `RADAR_PRIVY_APP_ID` is not set.
+They read as if the whole customer surface were closed, and it is not; the
+banner wording is misleading and is recorded here rather than fixed in this
+docs change.
 
-**The policy is closed and nothing has ever traded.** `/health` reports
-`policyClosed: true` and `trading: false`. `Policy::CLOSED` refuses every
+**The dark switches — one on, one off, as of the 15:06 UTC restart** (from
+`journalctl -u radar-serve --no-pager -n 400`, the startup banner):
+
+```
+access     : verifying small-art-43c3.cloudflareaccess.com tokens
+admission  : open — any verified Privy identity
+chat share : closed — no customer may spend the model budget (set RADAR_CHAT_PER_CUSTOMER_DAILY)
+customers  : off — customer routes require operator identity
+wallets    : off (no RADAR_PRIVY_APP_SECRET; wallets cannot be read)
+positions  : reading balances from mainnet.helius-rpc.com
+trading    : on
+agent      : off (no RADAR_MODEL_DAILY_USD; a model with no budget spends without a ceiling)
+market feed: off (set RADAR_STREAM_ENDPOINT to stream; market routes read the store)
+```
+
+`RADAR_TRADE` is now set (the owner turned it on at 15:06 UTC 2026-09-27), so
+[`crates/radar-serve/src/trade.rs`](../crates/radar-serve/src/trade.rs)'s
+`Trading` **is** constructed and a Jupiter credential (`RADAR_JUPITER_API_KEY`)
+is configured — `/v1/customer/swap` can price and build a swap rather than
+reporting "this instance does not build or price swaps". Positions
+(`/v1/customer/positions`) read balances from `mainnet.helius-rpc.com`, a
+private RPC endpoint (`RADAR_RPC` is set in `/etc/radar/radar.env`), not the
+public node. In the web client the trade panel now shows whenever `/health`
+says `trading: true` (#306, `web/src/TokenHeader.tsx`);
+[`TERMS_APPROVED`](../web/src/legal.ts) stays `false` and gates only the terms
+link and `/terms`' text — the owner's decision, recorded here as his: "skip the
+terms page, it's not public yet." **So trading is reachable today by any
+wallet that signs in**, with no terms shown. Before the site is made public,
+F10 in plan 0014 must re-gate the panel on `TERMS_APPROVED`. The site
+answers from anywhere already; "not public" means not announced.
+
+**As of 2026-09-27, no trade from the panel is recorded.** This is a
+point-in-time statement, not a permanent one — check `/health`'s `trading`
+and this section's date before repeating it.
+
+**The policy is closed and nothing has ever traded through the automated
+strategy lane.** `/health` reports
+`policyClosed: true`. `Policy::CLOSED` refuses every
 proposal; see "The round trip is three numbers" above for why that is
 currently the arithmetically correct position rather than a placeholder.
 
