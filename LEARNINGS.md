@@ -1778,3 +1778,30 @@ the horizon defect; `identical_prices_close_to_the_entry_are_refused_not_a_
 measured_zero` and `the_six_hour_label_is_always_refused_for_overlapping_its_
 own_entry` cover the freshness defect. The general lesson: a freshness check has
 to test the property it names, not one that merely correlates with it.
+
+## 37. A query window that grew with the store's age crossed a vendor limit nobody chose, and a health check that could not see its own age said `ok` through 106 failed runs
+
+`radar-backfill --outcomes` bounded its transfer-aggregate query by the earliest
+launch slot in the *whole store*, not the earliest launch still due for
+measurement. The window widened every day the store existed; on 2026-09-23 it
+crossed CryptoHouse's 10-billion-row cap and every hourly run failed from then
+on -- 106 in a row, found on 2026-09-28 by regrounding, not by an alarm.
+`radar brief` kept printing `[ok] outcomes ... measurements, latest at slot
+449755147` the whole time, because the check reported a count and the newest
+row's own slot, never how far that slot had fallen behind the watermark
+(451195671 at the time it was found).
+
+**What changed:** the window is now bounded by the earliest slot among the
+tokens actually due (`earliest_due_slot`, `crates/radar-backfill/src/main.rs`) --
+complete, since no mint has a transfer before its own launch. `outcomes()` in
+`crates/radar-cli/src/brief.rs` gained `outcomes_health`, mirroring
+`decisions_health`: `Status::Fail` once the newest measurement falls more than
+`OUTCOMES_STALE_AFTER` (27,000 slots, about three hours) behind the watermark.
+
+**What catches a recurrence:** `earliest_due_slot_ignores_launches_that_are_not_
+due` fails if the full launch list is passed back in instead of the due set;
+`an_outcomes_pass_that_has_stopped_is_reported_as_broken` and the boundary test
+next to it fail if the health check goes back to reporting a count instead of an
+age. The general lesson: a window that grows with the store's age will cross
+someone else's limit on a date nobody chose, and a health check that reports a
+count without its age cannot see a stopped pass.

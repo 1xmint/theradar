@@ -1071,6 +1071,19 @@ fn due_for_measurement(
         .collect()
 }
 
+/// The earliest launch slot among the tokens actually due for measurement.
+///
+/// Deliberately takes the due set, not the full launch list: the transfer
+/// window this bounds only needs to reach the oldest launch still being
+/// measured, and every mint older than that either has no transfer before its
+/// own launch anyway or has already settled and is not being re-queried.
+fn earliest_due_slot(due: &[(radar_types::Address, radar_types::Slot)]) -> radar_types::Slot {
+    due.iter()
+        .map(|(_, slot)| *slot)
+        .min()
+        .unwrap_or(radar_types::Slot(0))
+}
+
 /// Measures what became of every token already in the store.
 /// The window a price query may cover, as `(from, to)`.
 ///
@@ -1182,25 +1195,6 @@ fn measure(args: &Args) -> Result<(), String> {
             .ok_or("could not read the chain head")?,
     );
 
-    // The transfer table prunes by timestamp, not slot, so the earliest launch
-    // slot is converted once and the whole run is bounded by it.
-    let earliest_slot = launches
-        .iter()
-        .map(|(_, slot)| *slot)
-        .min()
-        .unwrap_or(radar_types::Slot(0));
-    let times: Vec<TimeRow> = client
-        .query(&outcomes::query_for_slot_time(earliest_slot))
-        .map_err(|e| e.to_string())?;
-    let since = times
-        .first()
-        .map(|t| t.at.clone())
-        .filter(|t| !t.is_empty() && !t.starts_with("1970"))
-        .ok_or("could not resolve a timestamp for the earliest launch slot")?;
-
-    let (price_from, price_to) = price_window(&client, measured_at, &since);
-    let prior = baseline_prices(&already, args.reprice);
-
     let total_known = launches.len();
     let due = due_for_measurement(&launches, &already, measured_at);
 
@@ -1208,8 +1202,8 @@ fn measure(args: &Args) -> Result<(), String> {
         println!(
             "{total_known} tokens known, none due for measurement --              all are either too young for the first checkpoint or already settled"
         );
-        // Head, slot-time and price-window queries above still happened even
-        // though nothing was due to measure.
+        // No due tokens means no slot-time or price-window query is needed
+        // either: only the head query above ran.
         record_query_meter(
             &args.store,
             "radar-backfill --outcomes",
@@ -1219,6 +1213,26 @@ fn measure(args: &Args) -> Result<(), String> {
         return Ok(());
     }
     let launches = due;
+
+    // The transfer table prunes by timestamp, not slot, so the earliest slot
+    // among the tokens actually due is converted once and the whole run is
+    // bounded by it. Bounding by the earliest launch in the whole store grows
+    // the scan with the store's age forever; it crossed CryptoHouse's 10
+    // billion row cap on 2026-09-23 and failed every hourly run for five days
+    // unremarked. No mint has a transfer before its own launch, so the
+    // earliest *due* launch is a complete bound for every due mint.
+    let earliest_slot = earliest_due_slot(&launches);
+    let times: Vec<TimeRow> = client
+        .query(&outcomes::query_for_slot_time(earliest_slot))
+        .map_err(|e| e.to_string())?;
+    let since = times
+        .first()
+        .map(|t| t.at.clone())
+        .filter(|t| !t.is_empty() && !t.starts_with("1970"))
+        .ok_or("could not resolve a timestamp for the earliest due launch")?;
+
+    let (price_from, price_to) = price_window(&client, measured_at, &since);
+    let prior = baseline_prices(&already, args.reprice);
 
     println!(
         "{total_known} tokens known, {} due; measuring as of slot {measured_at},          transfers since {since}, batches of {}",
@@ -1609,6 +1623,28 @@ mod tests {
     }
 
     use super::*;
+
+    /// Picks the minimum over the due set, not over every known launch.
+    ///
+    /// Passing `launches` back in here would still compile and would still
+    /// return *a* slot -- just the wrong one, the one that grows the transfer
+    /// query's window with the store's age. This is what would have caught it.
+    #[test]
+    fn earliest_due_slot_ignores_launches_that_are_not_due() {
+        let old_but_not_due = (radar_types::Address::new([1u8; 32]), radar_types::Slot(100));
+        let due_a = (radar_types::Address::new([2u8; 32]), radar_types::Slot(500));
+        let due_b = (radar_types::Address::new([3u8; 32]), radar_types::Slot(300));
+
+        let due = vec![due_a, due_b];
+        assert_eq!(earliest_due_slot(&due), radar_types::Slot(300));
+
+        let all_launches = vec![old_but_not_due, due_a, due_b];
+        assert_eq!(
+            earliest_due_slot(&all_launches),
+            radar_types::Slot(100),
+            "sanity: the full launch list would have picked the older, not-due slot"
+        );
+    }
 
     #[test]
     fn the_retry_backoff_climbs_and_then_stops_climbing() {
