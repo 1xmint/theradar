@@ -72,7 +72,10 @@ candidate count; any visitor measurement; running cargo test suites locally
 
 ## Phase F — close plan 0013 on the real site
 
-1. [ ] **Bring 0013's status up to `main` and deploy #296.** The status
+1. [x] **Bring 0013's status up to `main` and deploy #296.** Done 2026-09-27:
+   `/health` reports build `a285385` (#309, which carries #296), and from
+   outside `curl -N …/v1/market/events` emitted `event: store` ticks
+   (`as_of` 451137422, then 451137795). The status
    paragraph is edited in this branch. The deploy is the owner's:
    `deploy/README.md` "Every deploy after that", then `sudo radar-deploy`.
    Done when `/health` reports build `666d504` or later and
@@ -130,7 +133,18 @@ candidate count; any visitor measurement; running cargo test suites locally
    warning; if it does, submit the domain to Phantom/Blowfish before F9.
    Done when `/health` reports `trading: true`, `GET /v1/market/quote`
    answers from outside, and Phantom does not warn.
-8. [ ] **Independent review** (Opus, orch-reviewer) of the whole swap path,
+   - **Done 2026-09-27 except the Phantom check.** The owner set `RADAR_RPC`,
+     the Jupiter key and `RADAR_TRADE=on`; `/health` reports `trading: true`
+     at build `a285385`; from outside, a quote of 0.01 SOL for USDC
+     (`amount=10000000`) answered 1,214,318 out, worst 1,202,175, slippage
+     100 bps, four venues. **Not checked:** whether Phantom shows an "unsafe
+     site" warning — the owner sees that at the start of F9.
+   - The startup banner still prints `customers : off` and
+     `admission : open — any verified Privy identity`
+     (`crates/radar-serve/src/admission.rs:121`). Both are about the Privy
+     customer lane, not the wallet trade panel, and read as if trading were
+     either off or open to more than it is. Not fixed; wording only.
+8. [x] **Independent review** (Opus, orch-reviewer) of the whole swap path,
    server and web, against 0013's D.4 and D.5: no key, no fee, slippage
    refused not clamped, the review card's numbers come from the built quote,
    cancel and failure worded apart, "Powered by Jupiter" shown, plus F10–F12:
@@ -155,6 +169,20 @@ candidate count; any visitor measurement; running cargo test suites locally
      sells from the ATA (a non-ATA holding could offer a "max" that fails
      simulation, costing nothing); no pump.fun or Token-2022 `/build` response
      captured yet — save the owner's first test's response as a fixture.
+   - **Second whole-path pass after #307: FAIL, then PASS.** Finding 1 was
+     money: the priority-fee cap read only Jupiter's
+     `computeBudgetInstructions`, but the chain honours a Compute Budget
+     instruction anywhere in the transaction, so one hidden in the swap
+     section could raise the fee past the cap. #309 (`a285385`) refuses any
+     Compute Budget instruction outside that section and fixes a contract
+     test that could not fail; PASS, deployed 2026-09-27. #311 (`eb914fd`)
+     is the follow-up: a duplicate `SetComputeUnitPrice` or
+     `SetComputeUnitLimit` is refused rather than letting the later one win.
+     Merged and deployed 2026-09-27 as build `6b424f7`.
+   - **Left open by the reviewer, optional:** the slippage check reads
+     Jupiter's JSON echo, not the swap instruction's own bytes, and does not
+     refuse when `otherAmountThreshold` is absent; the rent caption reads
+     the side shown on screen rather than the built quote's.
    - **F10: not yet reviewed** — waits on the owner's four terms values.
    - **Panel without terms** (item 10's note): reviewed as part of the
      whole-path review before `RADAR_TRADE=on`.
@@ -198,7 +226,7 @@ candidate count; any visitor measurement; running cargo test suites locally
     `customer/swap` only; refusal `sanctioned` with a sentence in
     `honesty.ts`. Done when a server test refuses a listed address and passes
     others.
-13. [ ] **Works on a phone.** Under 1024 px the terminal stacks to one column
+13. [x] **Works on a phone.** Under 1024 px the terminal stacks to one column
     with the trade panel reachable without sideways scroll; with no wallet in
     a phone browser, Connect offers "Open in Phantom" / "Open in Solflare"
     deep links to the current page. Does not hold up F7. Done when web tests
@@ -220,12 +248,16 @@ do not wait.
 
 ## Phase H — the public claims match the product
 
-1. [ ] **Close issue #186 by making the README true.** The x402/MCP surface
+H1 and H2 landed in #308 (`8648cd2`): the README's "What is live" was already
+true against an outside `curl` and #186 was closed 2026-09-26; STATE.md names
+build `6b424f7`, the live build (refreshed with this plan update).
+
+1. [x] **Close issue #186 by making the README true.** The x402/MCP surface
    is behind Cloudflare Access and no agent reaches it today; what is free is
    `/v1/market/*` and the terminal. The wall does not move in this item. Done
    when the README states what `curl` shows and the issue is closed with the
    commit.
-2. [ ] **`docs/STATE.md` gains "what is live on radar.heyvera.org"**: the
+2. [x] **`docs/STATE.md` gains "what is live on radar.heyvera.org"**: the
    build, the public routes, the customer routes, the dark switches, and that
    nothing has ever traded. Done when `repo-conformance` is green.
 3. [ ] **Housekeeping.** Plan 0012's status line ("planned, not started") and
@@ -234,7 +266,12 @@ do not wait.
    re-running CI on each (stale-green trap). Prune the worktrees under
    `.claude/worktrees/` whose branches are merged.
    Status lines of plans 0011 and 0012 fixed in #303; merged worktrees pruned
-   2026-09-26.
+   2026-09-26. Dependabot merged 2026-09-27 after a fresh CI run: #273,
+   #305 (cargo minor and patch), #274 (npm minor and patch). Still open, each
+   for a reason: #281 and #275 (vite 8, blocked by plan 0003); #276 and #282
+   (vitest 5), #278 and #280 (parquet and arrow 60), #196 and #210
+   (plugin-react 6) are major versions, not merged in this plan; #279 (npm
+   minor and patch, an older group) fails the `web` check.
 
 ## Phase G — the data the terminal stands on
 
@@ -257,9 +294,10 @@ do not wait.
    refresher, after F7, so SOL at least shows a dollar figure. Done when more
    than ten coins are named, or SOL is `priced: true` without CryptoHouse, and
    `radar brief` stays under 80 queries an hour.
-4. [ ] **Owner:** `RADAR_RPC` set to a private RPC URL (a free tier at one of
+4. [x] **Owner:** `RADAR_RPC` set to a private RPC URL (a free tier at one of
    the RPC providers is enough for one box). Done when positions reads no
-   longer hit the public node.
+   longer hit the public node. Set by the owner on 2026-09-27 with F7; the
+   key name is present in `/etc/radar/radar.env` (read by name only).
 
 ## Phase I — edge measurement (the owner unparked this on 2026-09-25)
 
@@ -269,6 +307,20 @@ Plan 0007 items 3 and 4, as written there.
    `radar-next edge` over the decision records since the recorder started; the
    window and the store path recorded here with the command. `Policy::CLOSED`
    untouched. Done when the run's output is saved beside the store.
+   - **First run, 2026-09-27: the numbers are an instrument fault, not a
+     measurement.** It printed a median of zero at every horizon. The cause
+     was the label, not the market: the recorder reads prices at 1h, 6h and
+     24h, each summarising the six hours before it, and the entry sits at
+     T = 6,000 slots. So the "6h" exit's window overlaps the entry's, and when
+     a coin had no 24h reading the table took a later one without a limit.
+     Identical prices on both sides gave zero. #312 (`ca2ef05`) refuses an exit
+     whose window overlaps the entry's (`exit_window_overlaps_entry`; the
+     6h label is now always refused), bounds how late a 24h reading may be
+     (one hour), and records it as LEARNINGS 36. #310 (research 0026) is on
+     hold and must not quote the first run's medians.
+   - **Rerun now that #312 is merged**, over a window wholly after 2026-08-31 (when
+     `window_peak_price` begins) and ending at least 225,000 slots before the
+     watermark, niced, one job, under a timeout.
 2. [ ] **Research 0026:** the measured edge, over how many decisions, with
    LEARNINGS 35's caveat if the sample is small (a measured zero is not a
    verdict). Done when it is on `main`.
@@ -309,13 +361,20 @@ CI re-run on any PR older than `main` before it merges.
 
 ## Handback
 
-**Stopped at (2026-09-26):** #297 carries F2 and this plan with the owner's
-two decisions of the day (no counsel, public for any wallet; the scope is all
-of this plan). F10–F13 added.
+**Stopped at (2026-09-27):** trading is live behind the Cloudflare Access
+wall at build `6b424f7`: F1, F7 (bar the Phantom check), F8, F11–F13 and
+G4 done; the terms (F10) deferred by the owner while the site is private.
+#311 is deployed. #312 (`ca2ef05`) fixed the edge table's labels; Phase I's
+rerun waits on its release build.
 
-**Next action:** F11, F12, F13 and H1/H2 as their own pull requests now; F10
-when the owner sends the four terms values. F8 reviews each as pushed. Then
-the owner's box session (F1 + F7), then F9.
+**Next action:** rerun Phase I on the `ca2ef05` release and rewrite #310 from the new numbers.
+The owner runs F9 (his own buys and sells); record the transaction ids, the
+landing state shown and the positions panel here, and save the first
+pump.fun `/build` response as a fixture.
 
-**Do not:** turn `RADAR_TRADE` on before F10–F12 are merged and F8 has
-passed; shrink `consider`; add any visitor counting; touch `Policy::CLOSED`.
+**Owner's, open:** F6 (GOAL.md wording), F10 (the four terms values), G2
+(money for CryptoHouse).
+
+**Do not:** announce the site or lift the Access wall before F10 is done and
+`TERMS_APPROVED` gates the panel again; shrink `consider`; add any visitor
+counting; touch `Policy::CLOSED`.
