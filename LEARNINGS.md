@@ -1802,12 +1802,16 @@ the recent tier's writes flushed before the backlog tier can fail -- so a wide,
 timeout-prone backlog scan can no longer block or delay current measurement.
 `outcomes()` in `crates/radar-cli/src/brief.rs` gained `outcomes_health`,
 mirroring `decisions_health`: `Status::Fail` once the newest measurement falls
-more than `OUTCOMES_STALE_AFTER` (27,000 slots, about three hours) behind the
+more than `OUTCOMES_STALE_AFTER` (27,000 slots, about 2.4 hours at the ~11,300 slots an hour this store's
+slot times show) behind the
 watermark.
 
-**What catches a recurrence:** `earliest_due_slot_ignores_launches_that_are_not_
-due` fails if the full launch list is passed back in instead of the due set;
-`split_by_recency_boundary_is_exact` fails if the tier split drifts by one slot;
+**What catches a recurrence:** the call site is held by structure, not a test:
+`measure_tier` is handed only its tier, and `MeasureContext` carries no launch
+list to reach for. `earliest_due_slot_ignores_launches_that_are_not_due` pins
+only the helper's `min`. `the_recent_tier_is_twice_the_last_checkpoint_wide`
+fails if the recent tier narrows, and `split_by_recency_boundary_is_exact` if
+the split drifts by one slot;
 `an_outcomes_pass_that_has_stopped_is_reported_as_broken` and the boundary test
 next to it fail if the health check goes back to reporting a count instead of an
 age. The general lesson: a window that grows with the store's age will cross

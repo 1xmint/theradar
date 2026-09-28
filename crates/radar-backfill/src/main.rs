@@ -1122,6 +1122,22 @@ struct Totals {
     with_price: u64,
 }
 
+impl Totals {
+    /// Counts one batch's price query: a batch counts as priced when any of
+    /// its mints came back with a price.
+    fn count_batch(&mut self, priced_mints: usize) {
+        self.priced_batches += u64::from(priced_mints > 0);
+    }
+
+    /// Counts one written outcome into the summary the run prints.
+    fn count(&mut self, outcome: &radar_store::Outcome) {
+        self.written += 1;
+        self.stillborn += u64::from(outcome.appears_stillborn());
+        self.with_activity += u64::from(outcome.transfers > 0);
+        self.with_price += u64::from(outcome.first_price.is_some());
+    }
+}
+
 /// What every tier's pass needs and does not change.
 struct MeasureContext<'a> {
     client: &'a Client,
@@ -1173,22 +1189,13 @@ fn measure_tier(
             price_from.as_deref(),
             price_to.as_deref(),
         );
-        totals.priced_batches += u64::from(!priced.is_empty());
+        totals.count_batch(priced.len());
 
         let measured = outcomes::outcomes_from_rows(&rows, batch, ctx.measured_at, ctx.graduated);
         let measured = prices::apply(measured, &priced, ctx.prior);
         for outcome in measured {
-            if outcome.appears_stillborn() {
-                totals.stillborn += 1;
-            }
-            if outcome.transfers > 0 {
-                totals.with_activity += 1;
-            }
-            if outcome.first_price.is_some() {
-                totals.with_price += 1;
-            }
+            totals.count(&outcome);
             writer.append_outcome(outcome).map_err(|e| e.to_string())?;
-            totals.written += 1;
         }
         println!("  {}/{total_due} measured", totals.written);
         std::thread::sleep(PAUSE_BETWEEN_WINDOWS);
@@ -1721,11 +1728,12 @@ mod tests {
 
     use super::*;
 
-    /// Picks the minimum over the due set, not over every known launch.
+    /// Picks the minimum over the slice it is given.
     ///
-    /// Passing `launches` back in here would still compile and would still
-    /// return *a* slot -- just the wrong one, the one that grows the transfer
-    /// query's window with the store's age. This is what would have caught it.
+    /// This pins the helper, not the call site: a caller handing it every
+    /// known launch instead of the due set would still pass here. What holds
+    /// the call site is structure -- `measure_tier` is handed only its tier,
+    /// and `MeasureContext` carries no launch list to reach for.
     #[test]
     fn earliest_due_slot_ignores_launches_that_are_not_due() {
         let old_but_not_due = (radar_types::Address::new([1u8; 32]), radar_types::Slot(100));
@@ -1757,6 +1765,79 @@ mod tests {
         );
         assert_eq!(resolved_time(&[row("")]), None, "an empty answer");
         assert_eq!(resolved_time(&[]), None, "no row");
+    }
+
+    /// The recent tier reaches exactly twice past the last checkpoint, by
+    /// fixed ages rather than by calling `recent_tier_slots` -- a test that
+    /// builds its cutoff from the function under test cannot see the width
+    /// change. Too narrow and the backlog swallows current launches again,
+    /// which is the incident this split exists to prevent.
+    #[test]
+    fn the_recent_tier_is_twice_the_last_checkpoint_wide() {
+        let settled = checkpoints::settled_after().get();
+        let measured_at = radar_types::Slot(10 * settled);
+        let aged = |n: u8, age: u64| {
+            (
+                radar_types::Address::new([n; 32]),
+                radar_types::Slot(measured_at.get() - age),
+            )
+        };
+        let crossing_last_checkpoint = aged(1, settled);
+        let at_the_edge = aged(2, 2 * settled);
+        let past_the_edge = aged(3, 2 * settled + 1);
+
+        let (recent, backlog) = split_by_recency(
+            vec![crossing_last_checkpoint, at_the_edge, past_the_edge],
+            measured_at,
+        );
+
+        assert_eq!(recent, vec![crossing_last_checkpoint, at_the_edge]);
+        assert_eq!(backlog, vec![past_the_edge]);
+    }
+
+    /// Every counter the run prints moves by exactly the outcomes that meet
+    /// its rule, and a batch counts as priced only when a price came back.
+    #[test]
+    fn the_summary_counts_what_it_says() {
+        let outcome =
+            |transfers: u64, last: Option<u64>, price: Option<u64>| radar_store::Outcome {
+                mint: radar_types::Address::new([1; 32]),
+                measured_at: radar_types::Slot(500_000),
+                launch_slot: radar_types::Slot(1_000),
+                first_transfer_slot: None,
+                last_transfer_slot: last.map(radar_types::Slot),
+                transfers,
+                unique_senders: 0,
+                unique_receivers: 0,
+                graduated_at: None,
+                first_price: price,
+                last_price: None,
+                peak_price: None,
+                trough_price: None,
+                window_peak_price: None,
+                window_trough_price: None,
+                vwap: None,
+                fills: 0,
+            };
+        let mut totals = Totals::default();
+        totals.count(&outcome(0, None, None));
+        totals.count(&outcome(3, Some(1_100), None));
+        totals.count(&outcome(100, Some(90_000), Some(42)));
+        totals.count_batch(0);
+        totals.count_batch(3);
+        totals.count_batch(1);
+
+        assert_eq!(totals.written, 3);
+        assert_eq!(
+            totals.stillborn, 2,
+            "no life, and three transfers in 100 slots"
+        );
+        assert_eq!(totals.with_activity, 2, "zero transfers is not activity");
+        assert_eq!(totals.with_price, 1);
+        assert_eq!(
+            totals.priced_batches, 2,
+            "an empty price answer is not a priced batch"
+        );
     }
 
     /// Exactly at the cutoff is recent; one slot older is backlog. A

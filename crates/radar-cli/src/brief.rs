@@ -728,7 +728,7 @@ fn tables(reader: &Reader) -> Vec<Check> {
 /// measuring pass is considered stopped, in slots.
 ///
 /// The cron runs hourly at :17 and launches never stop, so every hour has
-/// tokens due; a gap over roughly three hours means runs are failing rather
+/// tokens due; a gap over about 2.4 hours (at ~11,300 slots an hour) means runs are failing rather
 /// than that nothing was due. On 2026-09-23 the transfer query's window
 /// (bounded by the earliest launch in the whole store, not the earliest due
 /// one) crossed CryptoHouse's 10-billion-row cap and every hourly run failed
