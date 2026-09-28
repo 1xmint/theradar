@@ -889,20 +889,23 @@ cleanly are different facts.
 
 ## What is live on radar.heyvera.org
 
-As of 2026-09-27 (~15:20 UTC), checked directly rather than recalled. This
-replaces the 2026-09-26 snapshot point for point; the trading switch changed
-under it.
+As of 2026-09-27 (~15:20 UTC; build line refreshed 2026-09-28 03:07 UTC),
+checked directly rather than recalled. This replaces the 2026-09-26 snapshot
+point for point; the trading switch changed under it.
 
 `curl -s https://radar.heyvera.org/health`:
 
 ```json
-{"agent":{"configured":false},"build":"4fdb9e3e04d7d4fa9c094d7af160080d74613232","instruments":3,"paidSurface":false,"policyClosed":true,"status":"ok","trading":true,"version":"0.0.1","watermarkSlot":451033908}
+{"agent":{"configured":false},"build":"6b424f718542ef87a18e701ce924eabd50236e97","instruments":3,"paidSurface":false,"policyClosed":true,"status":"ok","trading":true,"version":"0.0.1","watermarkSlot":451193205}
 ```
 
-**Build `4fdb9e3`** is #307 (Plan 0014 item 8: fixes from the whole-path
-review), the tip of `main` at this writing and the build the owner deployed at
-15:06 UTC restarting `radar-serve.service` (confirmed from
-`journalctl -u radar-serve`, below).
+**Build `6b424f7`** is #274 (a dependency bump) on top of #311 (duplicate
+compute-budget instructions refused) and #309 (compute-budget instructions
+checked wherever they sit), deployed with `sudo radar-deploy` at 23:01 UTC
+on 2026-09-27 (systemd's `ActiveEnterTimestamp`) after the artifact's sha256
+matched `BUILD-INFO.txt`. The owner's 15:06 UTC
+restart of `4fdb9e3` (#307, confirmed from `journalctl -u radar-serve`, below)
+is the one that switched trading on.
 
 **Public, no wallet or Access token needed** (`Audience::Public` in
 [`crates/radar-serve/src/access.rs`](../crates/radar-serve/src/access.rs),

@@ -178,7 +178,7 @@ candidate count; any visitor measurement; running cargo test suites locally
      test that could not fail; PASS, deployed 2026-09-27. #311 (`eb914fd`)
      is the follow-up: a duplicate `SetComputeUnitPrice` or
      `SetComputeUnitLimit` is refused rather than letting the later one win.
-     Merged, **not yet deployed**.
+     Merged and deployed 2026-09-27 as build `6b424f7`.
    - **Left open by the reviewer, optional:** the slippage check reads
      Jupiter's JSON echo, not the swap instruction's own bytes, and does not
      refuse when `otherAmountThreshold` is absent; the rent caption reads
@@ -250,7 +250,7 @@ do not wait.
 
 H1 and H2 landed in #308 (`8648cd2`): the README's "What is live" was already
 true against an outside `curl` and #186 was closed 2026-09-26; STATE.md names
-build `4fdb9e3`, one deploy behind the live `a285385`.
+build `6b424f7`, the live build (refreshed with this plan update).
 
 1. [x] **Close issue #186 by making the README true.** The x402/MCP surface
    is behind Cloudflare Access and no agent reaches it today; what is free is
@@ -313,12 +313,12 @@ Plan 0007 items 3 and 4, as written there.
      24h, each summarising the six hours before it, and the entry sits at
      T = 6,000 slots. So the "6h" exit's window overlaps the entry's, and when
      a coin had no 24h reading the table took a later one without a limit.
-     Identical prices on both sides gave zero. #312 (draft) refuses an exit
+     Identical prices on both sides gave zero. #312 (`ca2ef05`) refuses an exit
      whose window overlaps the entry's (`exit_window_overlaps_entry`; the
      6h label is now always refused), bounds how late a 24h reading may be
      (one hour), and records it as LEARNINGS 36. #310 (research 0026) is on
      hold and must not quote the first run's medians.
-   - **Rerun after #312 merges**, over a window wholly after 2026-08-31 (when
+   - **Rerun now that #312 is merged**, over a window wholly after 2026-08-31 (when
      `window_peak_price` begins) and ending at least 225,000 slots before the
      watermark, niced, one job, under a timeout.
 2. [ ] **Research 0026:** the measured edge, over how many decisions, with
@@ -362,13 +362,12 @@ CI re-run on any PR older than `main` before it merges.
 ## Handback
 
 **Stopped at (2026-09-27):** trading is live behind the Cloudflare Access
-wall at build `a285385`: F1, F7 (bar the Phantom check), F8, F11–F13 and
+wall at build `6b424f7`: F1, F7 (bar the Phantom check), F8, F11–F13 and
 G4 done; the terms (F10) deferred by the owner while the site is private.
-#311 is merged and waits for its release build to deploy. #312 fixes the
-edge table's labels; Phase I's rerun waits on it.
+#311 is deployed. #312 (`ca2ef05`) fixed the edge table's labels; Phase I's
+rerun waits on its release build.
 
-**Next action:** deploy #311 and refresh STATE.md's build line; merge #312
-when CI is green, then rerun Phase I and rewrite #310 from the new numbers.
+**Next action:** rerun Phase I on the `ca2ef05` release and rewrite #310 from the new numbers.
 The owner runs F9 (his own buys and sells); record the transaction ids, the
 landing state shown and the positions panel here, and save the first
 pump.fun `/build` response as a fixture.
