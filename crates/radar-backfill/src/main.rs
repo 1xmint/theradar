@@ -1100,6 +1100,42 @@ fn recent_tier_slots() -> radar_types::SlotDelta {
     radar_types::SlotDelta(2 * checkpoints::settled_after().get())
 }
 
+/// Queries one `--outcomes` run may send to CryptoHouse, counted by the
+/// client itself so every query the run makes is inside it.
+///
+/// **Twenty, not the ten `launch_block::Budget::CONSIDER_RUN`'s split
+/// assigns this job**, because ten was never what a healthy run spent: before
+/// the outage of LEARNINGS 37, a run found 2,400-3,300 launches due, which is
+/// seven to nine batches at two queries each plus three fixed queries. Ten
+/// would reach about 1,200 of them and fall further behind every hour. So the
+/// four ceilings sum to 130 against CryptoHouse's 120 an hour; they are
+/// ceilings rather than what each job spends, and this one only makes the old
+/// spend explicit. What it removes is the unbounded case: a 264,774-launch
+/// backlog would otherwise take the whole shared allowance for a day.
+const OUTCOMES_RUN: u64 = 20;
+
+/// Queries a tier spends before its first batch: its earliest launch's time
+/// and the chain head's time for the price window.
+const TIER_OVERHEAD: u64 = 2;
+
+/// Queries one batch spends: its transfer aggregate and its prices.
+const BATCH_QUERIES: u64 = 2;
+
+/// How many of a tier's launches this run can still afford to measure, given
+/// the queries the run has already sent.
+///
+/// The recent tier asks first, so a backlog can only ever spend what the
+/// launches crossing checkpoints now left over; whatever is not reached stays
+/// due and the next run starts from it. Zero when not even one batch fits,
+/// which also skips the tier's two fixed queries.
+fn affordable_launches(tier_len: usize, issued: u64) -> usize {
+    let batches = OUTCOMES_RUN.saturating_sub(issued + TIER_OVERHEAD) / BATCH_QUERIES;
+    let launches = usize::try_from(batches)
+        .unwrap_or(usize::MAX)
+        .saturating_mul(outcomes::MINTS_PER_BATCH);
+    tier_len.min(launches)
+}
+
 /// Splits the due set into a recent tier and a backlog tier.
 ///
 /// A launch at or after `measured_at - RECENT_TIER_SLOTS` is recent; anything
@@ -1160,6 +1196,12 @@ fn measure_tier(
     total_due: usize,
     totals: &mut Totals,
 ) -> Result<(), String> {
+    let reach = affordable_launches(tier.len(), ctx.client.queries_issued());
+    println!(
+        "  {tier_name}: {} due, {reach} within this run's query allowance",
+        tier.len()
+    );
+    let tier = &tier[..reach];
     if tier.is_empty() {
         return Ok(());
     }
@@ -1174,7 +1216,7 @@ fn measure_tier(
     })?;
 
     let (price_from, price_to) = price_window(ctx.client, ctx.measured_at, &since);
-    println!("  {tier_name}: {} due, transfers since {since}", tier.len());
+    println!("  {tier_name}: transfers since {since}");
 
     for batch in tier.chunks(outcomes::MINTS_PER_BATCH) {
         let mints: Vec<String> = batch.iter().map(|(m, _)| m.to_string()).collect();
@@ -1765,6 +1807,21 @@ mod tests {
         );
         assert_eq!(resolved_time(&[row("")]), None, "an empty answer");
         assert_eq!(resolved_time(&[]), None, "no row");
+    }
+
+    /// Written as literals, not from the constants, so a change to the
+    /// allowance shows up here as a decision rather than passing silently.
+    /// After the head query a run has 17 left: two for the tier's times and
+    /// eight batches of two, so 3,200 launches. A tier smaller than that is
+    /// measured whole; a run with one query short of a batch starts none,
+    /// and one past its allowance cannot go negative.
+    #[test]
+    fn a_run_measures_only_what_its_query_allowance_reaches() {
+        assert_eq!(affordable_launches(10_000, 1), 3_200);
+        assert_eq!(affordable_launches(500, 1), 500);
+        assert_eq!(affordable_launches(10_000, 16), 400);
+        assert_eq!(affordable_launches(10_000, 17), 0);
+        assert_eq!(affordable_launches(10_000, 30), 0);
     }
 
     /// The recent tier reaches exactly twice past the last checkpoint, by

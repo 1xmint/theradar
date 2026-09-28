@@ -128,7 +128,10 @@ impl Budget {
     /// half of what remains -- 20 -- and the other 20 splits evenly between the
     /// hourly `--outcomes` job and `consider`, which both run once an hour: 10
     /// each. Stated as the division rather than the answer so the parts cannot
-    /// drift apart.
+    /// drift apart. **The `--outcomes` job's own ceiling is 20, not 10**,
+    /// because a healthy run already spent that (`OUTCOMES_RUN` in
+    /// `radar-backfill`'s `main.rs` says why), so the ceilings together
+    /// exceed the 120; this constant is unchanged by it.
     ///
     /// **This does not mean ten candidates.** `paid_tier` costs up to three
     /// CryptoHouse queries per candidate it examines -- `shape_at` and

@@ -140,7 +140,8 @@ impl Budget {
     /// Queries one pass may spend.
     ///
     /// The quota is 120 an hour, shared with `radar-follow` and the hourly
-    /// `--outcomes` cron on the same IP. Reserving 40 for those leaves 80, and
+    /// `--outcomes` cron on the same IP (which caps itself at 20 a run, see
+    /// `OUTCOMES_RUN` in `main.rs`). Reserving 40 for those leaves 80, and
     /// at one pass every [`PASS_INTERVAL_SECONDS`] that is this many per pass.
     /// Stated as the division rather than the answer so the two cannot drift.
     pub const PER_PASS: u32 = (80 * PASS_INTERVAL) / 3_600;

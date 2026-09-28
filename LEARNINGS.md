@@ -1800,6 +1800,10 @@ into a recent tier (still crossing checkpoints in normal operation, always
 about a 1.5-day window) and a backlog tier, each with its own bounded query and
 the recent tier's writes flushed before the backlog tier can fail -- so a wide,
 timeout-prone backlog scan can no longer block or delay current measurement.
+Draining the 264,774-launch backlog at full speed would then have taken the
+whole shared 120-an-hour CryptoHouse allowance for about a day, so a run now
+stops at `OUTCOMES_RUN` (20) queries, recent tier first, and the backlog
+drains in what is left over days (`a_run_measures_only_what_its_query_allowance_reaches`).
 `outcomes()` in `crates/radar-cli/src/brief.rs` gained `outcomes_health`,
 mirroring `decisions_health`: `Status::Fail` once the newest measurement falls
 more than `OUTCOMES_STALE_AFTER` (27,000 slots, about 2.4 hours at the ~11,300 slots an hour this store's
