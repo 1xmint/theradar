@@ -67,6 +67,30 @@ pub const ENTRY_OFFSET_SLOTS: u64 = 6_000;
 /// Slots in an hour, at the 150-a-minute figure [`SlotDelta`] uses.
 const SLOTS_PER_HOUR: u64 = 9_000;
 
+/// How late an exit reading may arrive after its horizon and still count as
+/// the reading that closes it.
+///
+/// `radar-backfill`'s checkpoint schedule (`CHECKPOINTS` in
+/// `crates/radar-backfill/src/checkpoints.rs`) measures every mint at fixed
+/// ages -- 9,000 / 54,000 / 216,000 slots -- and only once the mint's current
+/// age is at or past the checkpoint. So the reading that closes a horizon is
+/// never taken exactly on it; one checkpoint's width (an hour) is the
+/// tolerance for "still this checkpoint" rather than "recorded much later".
+const EXIT_HORIZON_TOLERANCE_SLOTS: u64 = SLOTS_PER_HOUR;
+
+/// The minimum slot gap an exit needs over its entry before the exit's price
+/// window can be trusted to have closed rather than reached back into the
+/// entry's own fill.
+///
+/// `radar-backfill`'s price window is six hours wide (`WINDOW_HOURS` in
+/// `crates/radar-backfill/src/prices.rs`), which is 54,000 slots at the
+/// nominal 400ms-per-slot rate. Slots run slower than that in practice, which
+/// makes a wall-clock window cover *fewer* slots than 54,000 -- the wrong
+/// direction to need a margin against. The margin here guards the other one:
+/// a stretch where slots ran faster than nominal, so a gap that looks wide
+/// enough at 54,000 slots is still inside the window. 25% headroom.
+const MIN_EXIT_GAP_SLOTS: u64 = 54_000 + 54_000 / 4;
+
 /// The feature names, index-aligned with [`Row::values`].
 ///
 /// A flat list rather than a struct with twenty-three fields because the
@@ -132,9 +156,9 @@ pub fn feature_index(name: &str) -> Option<usize> {
 pub enum Missing {
     /// Nothing was measured at or after T, so there is no entry to price from.
     NoEntry,
-    /// Nothing was measured at or before the horizon after the entry.
+    /// Nothing was measured at or after the horizon, within tolerance of it.
     NoExit,
-    /// The latest measurement before the horizon **is** the entry.
+    /// The exit **is** the entry: the same reading closes both ends.
     ///
     /// One reading divided by itself, which is a return of exactly zero and an
     /// identity rather than a measurement. This was 357,077 rows on the first
@@ -148,6 +172,14 @@ pub enum Missing {
     /// The exit's window held no fills, so its price is one nobody could have
     /// sold at.
     StaleExit,
+    /// The exit is later than the entry, but not by enough: its price window
+    /// reaches back far enough to have seen the entry's own fill.
+    ///
+    /// Distinct from `StaleExit` -- the window is not empty, it is just not
+    /// new. `is_some()` on that window says "fills happened", not "fills
+    /// happened after the entry", and this is the check that says the second
+    /// thing.
+    ExitWindowOverlapsEntry,
     /// A checkpoint carried no price at all.
     ///
     /// Distinct from the two above: those are prices that exist and are stale,
@@ -165,6 +197,7 @@ impl Missing {
             Self::OneObservationTwice => "one_observation_twice",
             Self::StaleEntry => "stale_entry",
             Self::StaleExit => "stale_exit",
+            Self::ExitWindowOverlapsEntry => "exit_window_overlaps_entry",
             Self::NoPrice => "no_price",
         }
     }
@@ -181,6 +214,7 @@ impl Missing {
             Self::OneObservationTwice,
             Self::StaleEntry,
             Self::StaleExit,
+            Self::ExitWindowOverlapsEntry,
             Self::NoPrice,
         ]
         .into_iter()
@@ -1051,9 +1085,13 @@ fn decision_features(builder: &mut RowBuilder, inputs: &Inputs<'_>) -> Result<()
 /// **Read from after T on purpose.** These take no watermark and never touch
 /// [`RowBuilder`], so no index confusion can put one in a feature column.
 ///
-/// The entry is the first checkpoint at or after T; the exit is the last
-/// checkpoint at or before the horizon, and it has to be a later measurement
-/// than the entry or the "return" is one reading divided by itself.
+/// The entry is the first checkpoint at or after T. The exit is the first
+/// checkpoint at or after the horizon -- **not** the last one at or before it,
+/// which is the reading the recorder takes to *close* an earlier checkpoint,
+/// not this one -- accepted only within [`EXIT_HORIZON_TOLERANCE_SLOTS`] of
+/// the horizon. It also has to be far enough past the entry, in both slots and
+/// window coverage, that the two readings could not be the same fill. This is
+/// the fourth time this label has measured an identity instead of a return.
 fn labels(
     inputs: &Inputs<'_>,
 ) -> (
@@ -1074,35 +1112,40 @@ fn labels(
     let gross = |hours: u64| -> Result<f64, Missing> {
         let entry = entry.ok_or(Missing::NoEntry)?;
         let horizon = inputs.launch_slot() + SlotDelta(hours * SLOTS_PER_HOUR);
-        let exit = latest_by(&series, horizon).ok_or(Missing::NoExit)?;
-        // Strictly later than the entry, not merely at or after T. The first
-        // live run made this exact mistake: most mints in the production store
-        // are measured once after T, so the latest measurement before the
-        // horizon *was* the entry, and the label came back as one reading
-        // divided by itself. That is a return of exactly zero, reported for
-        // 357,077 rows, and every median in every stratum was 0.0 bps -- a null
-        // that looked like a measurement and was an identity.
+        // The recorder (`radar-backfill`'s `needs_measuring`) only measures a
+        // mint once its age is *at or past* a checkpoint, so the reading that
+        // closes this horizon is never taken exactly on it -- `first_from`
+        // finds it, and the tolerance rejects one taken so much later that it
+        // is really a different, unscheduled measurement.
+        let exit = first_from(&series, horizon).ok_or(Missing::NoExit)?;
+        if exit.measured_at > horizon + SlotDelta(EXIT_HORIZON_TOLERANCE_SLOTS) {
+            return Err(Missing::NoExit);
+        }
+        // Strictly later than the entry. Most mints in the production store
+        // are measured once after T, so a naive "closest reading" search finds
+        // the entry again at every horizon, and dividing it by itself is a
+        // return of exactly zero. That was 357,077 rows on the first live run,
+        // and every median in every stratum was 0.0 bps -- a null that looked
+        // like a measurement and was an identity.
         if exit.measured_at <= entry.measured_at {
             return Err(Missing::OneObservationTwice);
         }
-        // And both prices have to be **fresh**, which is the same mistake two
-        // levels down. `last_price` is the price of the last observed fill, so
-        // a token that stops trading reports the identical number at every
-        // later measurement: two measurements, one observation, and a return of
-        // exactly zero. That is not a price that held steady -- it is a price
-        // nobody quoted, on a position that could not have been exited at all.
-        //
-        // Three runs found this three times. `last_transfer_slot` was the
-        // second attempt and it was the wrong field: a transfer is a token
-        // moving between wallets, which happens to dead coins constantly and is
-        // not a trade.
-        //
-        // `window_peak_price` is the right one and it was here all along. It is
-        // taken from **that measurement's own window** and is `None` when the
-        // window held no fills, so `is_some()` says "fills happened near this
-        // reading" -- which is precisely the question. Both ends need it: a
-        // stale entry price is a quote nobody could have bought at, and a stale
-        // exit price is one nobody could have sold at.
+        // Later is not the same as *fresh*. `last_price` is the price of the
+        // last observed fill, so if the exit's own price window reaches back
+        // far enough to have seen the entry's fill, the two readings can be
+        // the same price by construction rather than by the token holding
+        // steady -- `MIN_EXIT_GAP_SLOTS` is the recorder's window width, with
+        // margin, and this is the check that the gap clears it.
+        if exit.measured_at.saturating_since(entry.measured_at) <= SlotDelta(MIN_EXIT_GAP_SLOTS) {
+            return Err(Missing::ExitWindowOverlapsEntry);
+        }
+        // And each reading's own window has to have held a fill at all --
+        // `window_peak_price` is `None` when it did not, and `is_some()` here
+        // answers "did this reading see any trade", which the gap check above
+        // does not: a distant, gap-clearing exit can still be a quote nobody
+        // ever placed. Both ends need it: a stale entry is a quote nobody
+        // could have bought at, and a stale exit is one nobody could have sold
+        // at.
         //
         // It is absent on every row written before 2026-08-31, when the column
         // was added, so labels before then are refused rather than guessed.
