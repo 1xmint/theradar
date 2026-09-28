@@ -185,21 +185,18 @@ population it could not see, because a sample missing labels for want of any
 measurement is a different sample from one missing them because every exit price
 was stale.
 
-**Run 2026-09-27, plan 0014 Phase I: nothing found.**
+**Run 2026-09-28, plan 0014 Phase I: nothing found.**
 [`0026`](../docs/research/0026-the-walk-forward-protocol-and-what-it-found.md)
-ran both commands for the first time, on a 20-day window of the store
-(441040080..445363440, the oldest fifth — chosen after a full-store pass was
-killed for trending over the memory and time budget; `radar features` costs
-~2.1-2.4 GB regardless of window size on this box). 595,202 launches, 181,675
-with a 24h label. No fitted stratum could even be tried — the fit fold held
-zero labelled rows, for reasons not yet diagnosed. The four fixed strata
-(`creator_edge`'s thresholds and the refusal signals' complements) all showed
-a **0 bps median gross return** and a Wilson lower bound on the paid share no
-higher than 0.031, nowhere near the 0.5 the bar requires. Agrees in direction
-with research 0017's 0 bps: no stratum this table can name clears **456 bps**
-(charged as 850). This does not settle that no edge exists in this data —
-twelve of twenty-four features are still absent because the trades table is
-empty, and only 20 of the store's 46 days were run.
+ran both commands on the box for launches from 2026-08-31 to 2026-09-13
+(slots 443100000..446800000, watermark 451198556, `main` at `ca2ef05`).
+386,908 launches, 15,867 with a 24h label. The best of 44,042 fitted strata,
+`creator_edge`'s thresholds and the refusal signals all fail out of sample, and
+every stratum with more than nine rows has a **negative median gross return**
+before the 850 bps round trip. This does not settle that no edge exists: the
+labels cover 4% of launches and only coins still trading a day later (58% had
+no fills near the exit), the twelve trade-derived features are absent because
+the trades table is empty, and "24h" is about 19 real hours. Two earlier
+attempts were instrument faults, recorded in 0026.
 
 **Design 0010 §6.1 is superseded on the cost, and this file is why.** The
 design charged a `by_notional` band and then asked for 456 bps on top. The
