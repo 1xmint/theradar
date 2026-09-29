@@ -70,8 +70,10 @@ pub const NATIVE_SOL_MINT: &str = "So11111111111111111111111111111111111111111";
 /// left in a sell is a router fee or a tip. Checked on mainnet on 2026-09-29:
 /// such sells priced about a hundred times low, and 26% of native-SOL prices
 /// sat more than three times from their neighbours, against 2% for wrapped
-/// SOL. A buy sends its SOL to the curve as a real transfer, and those priced
-/// exactly. An unknown side is not a buy.
+/// SOL. A buy sends its SOL to the curve as a real transfer, which prices it
+/// exactly once the query reads the curve's own gain rather than the largest
+/// one -- a bot's landing tip is often larger, see
+/// [`super::query::trades_query`]. An unknown side is not a buy.
 #[must_use]
 pub fn native_quote_prices(side: Side) -> bool {
     side == Side::Buy
