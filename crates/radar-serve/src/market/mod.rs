@@ -288,6 +288,75 @@ fn in_one_quote(trades: Vec<market_fold::Trade>) -> (Option<String>, Vec<market_
     (Some(quote), kept)
 }
 
+/// How many priced trades on each side a price is judged against.
+const STRAY_NEIGHBOURS: usize = 5;
+
+/// How far a price may sit from the median of its neighbours, as a multiple
+/// either way, before it is taken for a mispaired leg rather than a trade.
+const STRAY_FACTOR: f64 = 3.0;
+
+/// Takes the price off any trade whose price cannot be a price of this coin.
+///
+/// The collector pairs a token leg with a quote leg from the same
+/// transaction, and a multi-hop swap offers it the wrong one: on 2026-09-29 a
+/// USDC coin trading near 153.7 recorded one sell at 0.0179, and one 5-minute
+/// bar spanned 8,577 times its low. A zero price came from a leg that moved no
+/// quote at all. Either one draws a wick that flattens every other bar.
+///
+/// **A price is judged against the median of up to [`STRAY_NEIGHBOURS`]
+/// priced trades each side of it in the same quote asset**, not against a
+/// running level, so a real move survives: in a steady climb each trade is its
+/// own window's median, and after a real crash the trades that follow vote
+/// with it. Only a price out of line with the trades either side of it goes.
+/// The trade stays -- a trade Radar cannot price is still a trade, the same
+/// rule the collector's fold follows -- only its price becomes `None`.
+///
+/// **The window is always centred, so it narrows toward either end of the
+/// tape, and the newest and oldest trades are judged on nothing.** At the
+/// edge nothing distinguishes the first trade of a crash from a mispaired
+/// leg, and a one-sided window would read the start of any steep real move as
+/// a stray. So the edge gets the benefit of the doubt: a stray there shows
+/// until the next trade arrives, and a real crash shows at once. That is also
+/// why the token header, which reads the newest trade, needs only
+/// [`drop_impossible_prices`].
+fn drop_stray_prices(trades: &mut [market_fold::Trade]) {
+    drop_impossible_prices(trades);
+    let mut by_quote: std::collections::BTreeMap<&str, Vec<(usize, f64)>> =
+        std::collections::BTreeMap::new();
+    for (i, trade) in trades.iter().enumerate() {
+        if let (Some(price), Some(quote)) = (trade.price, trade.quote_mint.as_deref()) {
+            by_quote.entry(quote).or_default().push((i, price));
+        }
+    }
+    let mut stray = Vec::new();
+    for priced in by_quote.values() {
+        for (n, &(i, price)) in priced.iter().enumerate() {
+            let half = STRAY_NEIGHBOURS.min(n).min(priced.len() - 1 - n);
+            let window = &priced[n - half..=n + half];
+            let mut prices: Vec<f64> = window.iter().map(|&(_, p)| p).collect();
+            prices.sort_by(f64::total_cmp);
+            let median = prices[prices.len() / 2];
+            if price > median * STRAY_FACTOR || price * STRAY_FACTOR < median {
+                stray.push(i);
+            }
+        }
+    }
+    for i in stray {
+        trades[i].price = None;
+    }
+}
+
+/// Takes the price off a trade whose price is zero, negative or not a number,
+/// which is never a price of anything (rule 9: absent is not zero). A zero
+/// comes from a quote leg that moved nothing.
+fn drop_impossible_prices(trades: &mut [market_fold::Trade]) {
+    for trade in trades.iter_mut() {
+        if trade.price.is_some_and(|p| !(p.is_finite() && p > 0.0)) {
+            trade.price = None;
+        }
+    }
+}
+
 /// Everything a market route needs, read off the store once and reused by
 /// every request until the background refresher (or, in a test with none
 /// configured, the next request) replaces it.
@@ -862,6 +931,18 @@ fn to_fold_trade(row: &MarketTrade) -> market_fold::Trade {
     }
 }
 
+/// The token header's price, the asset it is quoted in, and why there is none.
+/// The unit comes from the same trade as the number: a price with the wrong
+/// unit beside it is worse than no price.
+fn latest_price(
+    recent_trades: &[market_fold::Trade],
+) -> (Option<f64>, Option<String>, Option<&'static str>) {
+    match recent_trades.iter().find(|t| t.price.is_some()) {
+        Some(t) => (t.price, t.quote_mint.clone(), None),
+        None => (None, None, Some(why_no_price(recent_trades.is_empty()))),
+    }
+}
+
 /// Every stored trade for one mint, newest first, from the store's rows in
 /// `(as_of, mint, window)`.
 ///
@@ -894,18 +975,6 @@ fn to_fold_trade(row: &MarketTrade) -> market_fold::Trade {
 /// Named so the distinction is testable. Inside the `match` it was a guard no
 /// test reached, and both of its mutations -- always empty, never empty --
 /// swap one message for the other silently.
-/// The token header's price, the asset it is quoted in, and why there is none.
-/// The unit comes from the same trade as the number: a price with the wrong
-/// unit beside it is worse than no price.
-fn latest_price(
-    recent_trades: &[market_fold::Trade],
-) -> (Option<f64>, Option<String>, Option<&'static str>) {
-    match recent_trades.iter().find(|t| t.price.is_some()) {
-        Some(t) => (t.price, t.quote_mint.clone(), None),
-        None => (None, None, Some(why_no_price(recent_trades.is_empty()))),
-    }
-}
-
 const fn why_no_price(no_trades_at_all: bool) -> &'static str {
     if no_trades_at_all {
         "no recorded trades in this window"
@@ -1153,7 +1222,9 @@ pub async fn candles(
     let to = requested_to;
     let (from_s, to_s) = (from_epoch(from), from_epoch(to));
 
-    let (quote, trades) = in_one_quote(filter_tape(snapshot.trades(), mint, &from_s, &to_s));
+    let mut tape = filter_tape(snapshot.trades(), mint, &from_s, &to_s);
+    drop_stray_prices(&mut tape);
+    let (quote, trades) = in_one_quote(tape);
     let candles = market_fold::fold_candles(&trades, interval);
     Json(json!({
         "mint": mint.to_string(),
@@ -1415,7 +1486,8 @@ pub async fn token(
     };
     let from = reaching_back(to, DEFAULT_WINDOW_SECONDS);
     let (from_s, to_s) = (from_epoch(from), from_epoch(to));
-    let recent_trades = filter_tape(snapshot.trades(), mint, &from_s, &to_s);
+    let mut recent_trades = filter_tape(snapshot.trades(), mint, &from_s, &to_s);
+    drop_impossible_prices(&mut recent_trades);
 
     let (price, quote_mint, price_reason) = latest_price(&recent_trades);
 
@@ -2207,6 +2279,115 @@ mod tests {
         let (quote, kept) = in_one_quote(vec![fold_trade(Some(WSOL), None)]);
         assert_eq!(quote, None);
         assert!(kept.is_empty());
+    }
+
+    /// The prices `drop_stray_prices` leaves on trades in one quote, in order.
+    fn after_stray_filter(prices: &[f64]) -> Vec<Option<f64>> {
+        let mut trades: Vec<_> = prices
+            .iter()
+            .map(|&p| fold_trade(Some(USDC), Some(p)))
+            .collect();
+        drop_stray_prices(&mut trades);
+        trades.iter().map(|t| t.price).collect()
+    }
+
+    /// The production case: a USDC coin near 153.7 with one sell recorded at
+    /// 0.0179, a quote leg from another hop of the same swap. Its bar spanned
+    /// 8,577 times its low.
+    #[test]
+    fn a_price_far_out_of_line_with_its_neighbours_loses_its_price() {
+        assert_eq!(
+            after_stray_filter(&[153.7, 153.8, 0.0179, 153.6, 153.9]),
+            [Some(153.7), Some(153.8), None, Some(153.6), Some(153.9)]
+        );
+        assert_eq!(
+            after_stray_filter(&[24.0, 24.0, 2400.0, 24.0, 24.0]),
+            [Some(24.0), Some(24.0), None, Some(24.0), Some(24.0)]
+        );
+    }
+
+    /// A real move is not a stray: in a steady climb each price is its own
+    /// centred window's median, even at either end, and after a crash the
+    /// trades that follow vote with it.
+    #[test]
+    fn a_real_move_keeps_every_price() {
+        let climb = [1.0, 2.0, 4.0, 8.0, 16.0, 32.0, 64.0];
+        assert!(after_stray_filter(&climb).iter().all(Option::is_some));
+        let crash = [
+            1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01,
+        ];
+        assert!(after_stray_filter(&crash).iter().all(Option::is_some));
+    }
+
+    /// Up to five strays in a row are outvoted by the trades either side, so
+    /// the window has to reach past its immediate neighbours.
+    #[test]
+    fn a_run_of_strays_is_outvoted_by_the_trades_either_side() {
+        let mut prices = vec![100.0; 6];
+        prices.extend([1.0, 1.0, 1.0]);
+        prices.extend([100.0; 6]);
+        let kept = after_stray_filter(&prices);
+        assert_eq!(kept[6..9], [None, None, None]);
+        assert!(kept[..6].iter().chain(&kept[9..]).all(Option::is_some));
+    }
+
+    /// Three times the median either way is still a price; past it is not.
+    #[test]
+    fn a_price_exactly_three_times_off_is_kept_and_past_it_is_not() {
+        assert_eq!(
+            after_stray_filter(&[90.0, 90.0, 270.0, 90.0, 90.0])[2],
+            Some(270.0)
+        );
+        assert_eq!(
+            after_stray_filter(&[90.0, 90.0, 271.0, 90.0, 90.0])[2],
+            None
+        );
+        assert_eq!(
+            after_stray_filter(&[90.0, 90.0, 30.0, 90.0, 90.0])[2],
+            Some(30.0)
+        );
+        assert_eq!(after_stray_filter(&[90.0, 90.0, 29.0, 90.0, 90.0])[2], None);
+    }
+
+    /// The newest and oldest prices have no trade on one side, so nothing
+    /// judges them; one step in, a price has a neighbour each side.
+    #[test]
+    fn the_ends_of_the_tape_are_given_the_benefit_of_the_doubt() {
+        assert_eq!(after_stray_filter(&[1.0, 100.0]), [Some(1.0), Some(100.0)]);
+        assert_eq!(
+            after_stray_filter(&[100.0, 100.0, 1.0]),
+            [Some(100.0), Some(100.0), Some(1.0)]
+        );
+        assert_eq!(
+            after_stray_filter(&[100.0, 1.0, 100.0]),
+            [Some(100.0), None, Some(100.0)]
+        );
+    }
+
+    /// A SOL price is never judged against a USDC price.
+    #[test]
+    fn each_quote_is_judged_only_against_itself() {
+        let mut trades: Vec<_> = [(WSOL, 0.2), (USDC, 24.0)]
+            .into_iter()
+            .cycle()
+            .take(6)
+            .map(|(q, p)| fold_trade(Some(q), Some(p)))
+            .collect();
+        drop_stray_prices(&mut trades);
+        assert!(trades.iter().all(|t| t.price.is_some()));
+    }
+
+    /// Zero, negative and not-a-number are never prices, even alone.
+    #[test]
+    fn an_impossible_price_is_no_price() {
+        for bad in [0.0, -1.0, f64::NAN, f64::INFINITY] {
+            let mut trades = vec![fold_trade(Some(USDC), Some(bad))];
+            drop_stray_prices(&mut trades);
+            assert_eq!(trades[0].price, None, "{bad}");
+            let mut trades = vec![fold_trade(Some(USDC), Some(bad))];
+            drop_impossible_prices(&mut trades);
+            assert_eq!(trades[0].price, None, "{bad}");
+        }
     }
 
     /// A range must run forwards, and a zero-width one is a mistake.
