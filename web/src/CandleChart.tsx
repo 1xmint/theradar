@@ -717,7 +717,7 @@ function Chart({
       <div ref={containerRef} className="min-h-0 flex-1" />
       <p className="border-t border-[var(--color-line)] px-3 py-1 text-[10px] text-[var(--color-dim)]">
         {interval} candles, {formatStamp(from)} – {formatStamp(to)}
-        {narrower ? " — narrower than the requested range; this is what Radar has, not the whole history." : ""}
+        {narrower ? " — Radar may not have every trade in this range, so a gap can be missing data rather than quiet trading." : ""}
         {drawings.length > 0 ? " — your lines, kept in this browser." : ""}
       </p>
       {indicatorMessages.length > 0 && (
