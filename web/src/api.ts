@@ -713,6 +713,10 @@ export interface MarketToken {
    *  when they are. Null when metadata was found. */
   metadata_reason: string | null;
   price: number | null;
+  /** The asset `price` is quoted in -- from the same trade as the number. Never
+   *  dollars, and not always SOL. Null when there is no price or the server
+   *  cannot name the asset; show no unit then. Label with `format.quoteLabel`. */
+  quote_mint: string | null;
   price_reason: string | null;
   /** Why the header carries no decimals. Always present: decimals travel
    *  per-trade on the tape, not on the header. */
@@ -970,6 +974,8 @@ export interface OwnTrade {
   token_amount: number;
   quote_amount: number | null;
   price: number | null;
+  /** The asset `price` and `quote_amount` are in. Null when unknown. */
+  quote_mint: string | null;
   matched_by: MatchedBy;
 }
 

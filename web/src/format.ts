@@ -8,20 +8,6 @@
 //! failure with extra steps, so the type system is the enforcement here: there
 //! is nothing to test beyond what TypeScript already refuses to compile.
 
-/** A USD price, with enough precision to matter at meme-coin magnitudes.
- *  A $0.0000041 token rendered to two decimal places is "$0.00" on every row,
- *  which is a chart with no chart. */
-export function formatPrice(value: number): string {
-  if (value === 0) return "$0.00";
-  const abs = Math.abs(value);
-  if (abs >= 1) return `$${value.toFixed(2)}`;
-  if (abs >= 0.01) return `$${value.toFixed(4)}`;
-  // Small enough that fixed decimals would mostly print zeroes. Enough
-  // significant figures to compare two sub-cent prices against each other,
-  // which is the actual reading task at this magnitude.
-  return `$${value.toPrecision(3)}`;
-}
-
 /** A SOL-quoted amount, e.g. a position's value when Radar only has a
  *  wSOL-quoted trade to price it against. Never prefixed with "$" -- a
  *  SOL-quoted number is not a dollar figure, and labelling it as one is
@@ -37,7 +23,7 @@ export function formatSolAmount(value: number): string {
  *  with "$", for the same reason as `formatSolAmount`: this number was never
  *  in dollars. A meme-coin's SOL price is routinely far below `formatSolAmount`'s
  *  four fixed decimals (e.g. 0.0000002), which would print "0.0000" on every
- *  row -- so this mirrors `formatPrice`'s tiered precision instead, just
+ *  row -- so this mirrors a tiered precision instead, just
  *  without the "$". */
 export function formatSolPrice(value: number): string {
   if (value === 0) return "0.00";
@@ -55,6 +41,14 @@ export function formatSolPrice(value: number): string {
 export function formatChartPrice(value: number): string {
   if (value !== 0 && Math.abs(value) < 0.01) return value.toPrecision(5);
   return formatSolPrice(value);
+}
+
+/** A market price with its unit: `0.000179 SOL`. Every price Radar serves is
+ *  `quote_amount / token_amount` in whatever the trade paid in, never dollars.
+ *  A null quote mint shows no unit -- never an assumed SOL. */
+export function formatQuotedPrice(value: number, quoteMint: string | null): string {
+  const figure = formatSolPrice(value);
+  return !quoteMint ? figure : `${figure} ${quoteLabel(quoteMint)}`;
 }
 
 /** A large quantity -- market cap, liquidity, volume -- compacted to K/M/B. */

@@ -894,6 +894,18 @@ fn to_fold_trade(row: &MarketTrade) -> market_fold::Trade {
 /// Named so the distinction is testable. Inside the `match` it was a guard no
 /// test reached, and both of its mutations -- always empty, never empty --
 /// swap one message for the other silently.
+/// The token header's price, the asset it is quoted in, and why there is none.
+/// The unit comes from the same trade as the number: a price with the wrong
+/// unit beside it is worse than no price.
+fn latest_price(
+    recent_trades: &[market_fold::Trade],
+) -> (Option<f64>, Option<String>, Option<&'static str>) {
+    match recent_trades.iter().find(|t| t.price.is_some()) {
+        Some(t) => (t.price, t.quote_mint.clone(), None),
+        None => (None, None, Some(why_no_price(recent_trades.is_empty()))),
+    }
+}
+
 const fn why_no_price(no_trades_at_all: bool) -> &'static str {
     if no_trades_at_all {
         "no recorded trades in this window"
@@ -1405,11 +1417,7 @@ pub async fn token(
     let (from_s, to_s) = (from_epoch(from), from_epoch(to));
     let recent_trades = filter_tape(snapshot.trades(), mint, &from_s, &to_s);
 
-    let priced = recent_trades.iter().find(|t| t.price.is_some());
-    let (price, price_reason) = match priced {
-        Some(t) => (t.price, None),
-        None => (None, Some(why_no_price(recent_trades.is_empty()))),
-    };
+    let (price, quote_mint, price_reason) = latest_price(&recent_trades);
 
     let found = snapshot.launches().get(&mint);
     let (name, symbol, uri, metadata_reason) = match found {
@@ -1436,6 +1444,8 @@ pub async fn token(
         "published_at": Option::<String>::None,
         "metadata_reason": metadata_reason,
         "price": price,
+        // The unit of `price`, taken from the same trade. Never dollars.
+        "quote_mint": quote_mint,
         "price_reason": price_reason,
         "market_cap": Option::<f64>::None,
         "market_cap_reason": "supply is not computable without an unbounded transfer scan or a live account read, neither of which this build performs",
@@ -1930,6 +1940,7 @@ pub async fn history(
                 "token_amount": row.token_amount,
                 "quote_amount": row.quote_amount,
                 "price": row.price,
+                "quote_mint": row.quote_mint.map(|m| m.to_string()),
                 "matched_by": matched.as_str(),
             })
         })
@@ -2231,6 +2242,26 @@ mod tests {
             has_a_priced_fill(&[1u8]),
             "and one priced fill is something"
         );
+    }
+
+    /// The header's price names the asset of the trade it came from.
+    #[test]
+    fn the_token_price_carries_the_quote_of_the_trade_it_came_from() {
+        const USDC: &str = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
+        let mut newest = market_trade(A_MINT, "2026-09-29 00:00:02.000000", 2);
+        newest.price = Some(0.5);
+        newest.quote_mint = Some(USDC.parse().expect("a mint"));
+        let older = market_trade(A_MINT, "2026-09-29 00:00:01.000000", 1);
+        let tape = [to_fold_trade(&newest), to_fold_trade(&older)];
+        let (price, quote, reason) = latest_price(&tape);
+        assert_eq!(price, Some(0.5));
+        assert_eq!(quote.as_deref(), Some(USDC));
+        assert_eq!(reason, None);
+        let mut unpriced = market_trade(A_MINT, "2026-09-29 00:00:03.000000", 3);
+        unpriced.price = None;
+        let (price, quote, reason) = latest_price(&[to_fold_trade(&unpriced)]);
+        assert_eq!((price, quote), (None, None), "no price, so no unit");
+        assert!(reason.is_some());
     }
 
     /// An unpriced coin says which kind of unpriced it is.

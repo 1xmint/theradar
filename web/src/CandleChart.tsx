@@ -668,8 +668,8 @@ function Chart({
           <>
             {/* Not USD: `Fill.price` in radar-stream/src/decode.rs is
              *  quote_amount / token_amount against whichever quote leg the
-             *  pool paired with. `formatPrice` prefixes "$", which this
-             *  readout previously did too, on a number never in dollars. */}
+             *  pool paired with. This readout
+             *  once carried a "$" prefix on a number never in dollars. */}
             <span>O {formatChartPrice(readout.open)}</span>
             <span>H {formatChartPrice(readout.high)}</span>
             <span>L {formatChartPrice(readout.low)}</span>
