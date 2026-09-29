@@ -69,7 +69,7 @@ import {
   type IndicatorChoice,
 } from "./indicators";
 
-import {formatSolPrice, formatStamp, quoteLabel} from "./format";
+import {formatChartPrice, formatStamp, quoteLabel} from "./format";
 import { useApi } from "./useApi";
 
 /** How often the mounted chart refetches candles for the live feed, in
@@ -670,10 +670,10 @@ function Chart({
              *  quote_amount / token_amount against whichever quote leg the
              *  pool paired with. `formatPrice` prefixes "$", which this
              *  readout previously did too, on a number never in dollars. */}
-            <span>O {formatSolPrice(readout.open)}</span>
-            <span>H {formatSolPrice(readout.high)}</span>
-            <span>L {formatSolPrice(readout.low)}</span>
-            <span>C {formatSolPrice(readout.close)}</span>
+            <span>O {formatChartPrice(readout.open)}</span>
+            <span>H {formatChartPrice(readout.high)}</span>
+            <span>L {formatChartPrice(readout.low)}</span>
+            <span>C {formatChartPrice(readout.close)}</span>
             {/* The unit comes from the server, never assumed: many pump.fun
              *  coins trade against PUMP or USDC, and a fixed "SOL" here was
              *  as wrong for them as the "$" it replaced. No unit when the

@@ -47,6 +47,16 @@ export function formatSolPrice(value: number): string {
   return value.toPrecision(3);
 }
 
+/** A price on the chart: its axis and its OHLC readout. Five significant
+ *  figures below 0.01, where `formatSolPrice` keeps three: a quiet coin's
+ *  candles move in the fourth figure, and at three every axis label read the
+ *  same "0.000181" (production, 2026-09-29). Above 0.01 its fixed decimals
+ *  already carry five figures or more, so it defers. */
+export function formatChartPrice(value: number): string {
+  if (value !== 0 && Math.abs(value) < 0.01) return value.toPrecision(5);
+  return formatSolPrice(value);
+}
+
 /** A large quantity -- market cap, liquidity, volume -- compacted to K/M/B. */
 export function formatCompactUsd(value: number): string {
   const sign = value < 0 ? "-" : "";
