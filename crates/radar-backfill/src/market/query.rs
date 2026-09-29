@@ -194,6 +194,20 @@ fn quote_list() -> String {
 /// SOL is the only quote leg it is still chosen, and
 /// [`super::fold::fold_tape`] decides whether it can be trusted.
 ///
+/// **A native row is priced by what the token's sender received**, never by
+/// the largest native gain. A bot's buy pays the curve and, in the same
+/// transaction, a landing tip to a block builder, and the tip is often the
+/// larger: checked on mainnet on 2026-09-29, a buy that paid the curve 97,777
+/// lamports carried a tip about thirty times that, and 24 of 64 native rows
+/// on one coin priced 24-35x high. The account that sent the token is the
+/// curve, so its own net native gain is exactly what the trade cost. A row
+/// where that gain is not positive, or where more than one buyer shared the
+/// transaction (the token's largest gain and largest loss differ, so the curve
+/// received the sum of several buys while the token side names only the
+/// biggest), comes back with an empty `quote_mint` -- unpriced, not guessed.
+/// Against the old rule on the same coin: 26 tipped rows corrected, three
+/// multi-buyer buys unpriced, no single buy lost.
+///
 /// This makes the result a **recent-trades sample, not a complete window**, and
 /// the caller must record it as one. A tape showing the last hundred trades is
 /// what a trading screen wants; a window claiming completeness it does not have
@@ -254,6 +268,8 @@ pub fn trades_query(mints: &[String], from: &str, to: &str, per_mint: usize) -> 
                   any(decimals) AS dec, max(leg_authority) AS authority \
            FROM qflow \
            GROUP BY mint, tx_signature, account\
+         ), nat AS (\
+           SELECT tx_signature, account, net FROM qnet WHERE mint = '{native}'\
          ), qmint AS (\
            SELECT mint, tx_signature, max(net) AS gross, any(dec) AS dec, \
                   argMin(authority, net) AS payer \
@@ -277,11 +293,17 @@ pub fn trades_query(mints: &[String], from: &str, to: &str, per_mint: usize) -> 
                   AS token_destination, \
                 if(ifNull(ends.min_net, 0) = 0 AND ifNull(ends.max_net, 0) = 0, '', ends.sender_authority) \
                   AS token_authority, \
-                toString(s.quote_value) AS quote_value, toString(s.quote_decimals) AS quote_decimals, \
-                s.quote_mint AS quote_mint, s.quote_authority AS quote_authority \
+                if(s.quote_mint = '{native}', toString(greatest(ifNull(nat.net, 0), 0)), \
+                   toString(s.quote_value)) AS quote_value, \
+                toString(s.quote_decimals) AS quote_decimals, \
+                if(s.quote_mint = '{native}' AND (ifNull(nat.net, 0) <= 0 \
+                     OR -ifNull(ends.min_net, 0) != ifNull(ends.max_net, 0)), '', s.quote_mint) \
+                  AS quote_mint, \
+                s.quote_authority AS quote_authority \
          FROM t \
          LEFT JOIN ends ON t.mint = ends.mint AND t.tx_signature = ends.tx_signature \
          LEFT JOIN s ON t.tx_signature = s.tx_signature \
+         LEFT JOIN nat ON t.tx_signature = nat.tx_signature AND nat.account = ends.sender_authority \
          ORDER BY t.mint, t.block_timestamp DESC \n         LIMIT {per_mint} BY t.mint",
         quotes = quote_list(),
         native = super::fold::NATIVE_SOL_MINT,
@@ -453,6 +475,31 @@ mod tests {
             );
         }
         assert!(!sql.contains("max(gross) AS quote_value"), "{sql}");
+    }
+
+    /// A bot's landing tip out-gained the curve and priced its buy thirty
+    /// times high. Native SOL is read from the token sender's own gain, and
+    /// a transaction shared by several buyers is left unpriced.
+    #[test]
+    fn a_native_buy_is_priced_by_what_the_token_sender_received() {
+        let sql = trades_query(
+            &[MINT.to_owned()],
+            "2026-09-11 17:00:00",
+            "2026-09-11 17:05:00",
+            90,
+        );
+        assert!(
+            sql.contains("nat.account = ends.sender_authority"),
+            "native must be the sender's gain, not the largest: {sql}"
+        );
+        assert!(
+            sql.contains("toString(greatest(ifNull(nat.net, 0), 0))"),
+            "{sql}"
+        );
+        assert!(
+            sql.contains("-ifNull(ends.min_net, 0) != ifNull(ends.max_net, 0)"),
+            "a multi-buyer transaction must be unpriced: {sql}"
+        );
     }
 
     #[test]
