@@ -6,7 +6,7 @@
 
 import type { UTCTimestamp } from "lightweight-charts";
 import type { Candle } from "./api";
-import { formatSolPrice } from "./format";
+import { formatChartPrice } from "./format";
 
 /** "Candles" is the informative default; "Line" trades detail for a
  *  cleaner read of the close-price trend. */
@@ -70,7 +70,7 @@ export function toVolumeData(candles: readonly Candle[], upColor: string, downCo
 
 /** The candle whose bucket a given chart time falls in, for the OHLC readout
  *  in line mode -- a line series only reports `value` from the crosshair, not
- *  the open/high/low `formatSolPrice` needs to show. `null` when the time
+ *  the open/high/low `formatChartPrice` needs to show. `null` when the time
  *  does not name a bucket this response carries (e.g. the crosshair left the
  *  data entirely). */
 export function findCandleAtTime(candles: readonly Candle[], time: number): Candle | null {
@@ -80,13 +80,13 @@ export function findCandleAtTime(candles: readonly Candle[], time: number): Cand
 /** The price axis format for a SOL-quoted series. `lightweight-charts`'
  *  default is two fixed decimals, which renders every pump.fun-magnitude
  *  price (~2e-7 SOL) as "0.00" -- indistinguishable candles on an axis that
- *  looks precise. `formatSolPrice` supplies the same tiered precision the
- *  OHLC readout uses; `minMove` is set small enough that the axis does not
+ *  looks precise. `formatChartPrice` supplies the same precision the OHLC
+ *  readout uses; `minMove` is set small enough that the axis does not
  *  itself round a sub-cent move away. */
 export function solPriceFormat() {
   return {
     type: "custom" as const,
-    formatter: (price: number) => formatSolPrice(price),
+    formatter: (price: number) => formatChartPrice(price),
     // 1e-9 was only ~3.5% of a 2.8e-8 price, so a quiet coin's axis got one
     // or two labels. Well below any real tick, so it never rounds a move away.
     minMove: 1e-12,
