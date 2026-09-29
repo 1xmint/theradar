@@ -86,8 +86,8 @@ const DEFAULT_WINDOW_SECONDS: i64 = 30 * 60;
 ///
 /// A fixed one-hour default window gave a 15m chart 4 candles and a 1h or 1d
 /// chart exactly one -- the single-candle chart observed in production on
-/// 2026-09-29. Scaling the span by the interval instead keeps the bar count,
-/// and so the shape, roughly constant across timeframes.
+/// 2026-09-29. Scaling the span by the interval gives 300 bars up to the 24h
+/// ceiling -- 300 at 1m, 96 at 15m, 24 at 1h, 6 at 4h.
 const DEFAULT_CANDLE_BARS: i64 = 300;
 
 /// How far back a chart reaches when the caller names no range: the interval

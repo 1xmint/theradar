@@ -87,6 +87,8 @@ export function solPriceFormat() {
   return {
     type: "custom" as const,
     formatter: (price: number) => formatSolPrice(price),
-    minMove: 1e-9,
+    // 1e-9 was only ~3.5% of a 2.8e-8 price, so a quiet coin's axis got one
+    // or two labels. Well below any real tick, so it never rounds a move away.
+    minMove: 1e-12,
   };
 }

@@ -241,7 +241,13 @@ function Chart({
   const lineSeriesRef = useRef<ISeriesApi<"Line"> | null>(null);
   const volumeRef = useRef<ISeriesApi<"Histogram"> | null>(null);
   const indicatorSeriesRef = useRef<Map<string, ISeriesApi<"Line">>>(new Map());
-  const priceLineRef = useRef<Map<string, IPriceLine>>(new Map());
+  // Each price line remembers the series it was drawn on. After a
+  // Candles/Line toggle, `mainSeries()` is the *other* series, and
+  // `removePriceLine` on a series that does not own the line silently does
+  // nothing -- so "Clear lines" left the old line on screen.
+  const priceLineRef = useRef<
+    Map<string, { owner: ISeriesApi<"Candlestick"> | ISeriesApi<"Line">; line: IPriceLine }>
+  >(new Map());
   const trendSeriesRef = useRef<Map<string, ISeriesApi<"Line">>>(new Map());
 
   // "Candles" is the informative default; "Line" trades detail for a cleaner
@@ -503,7 +509,7 @@ function Chart({
     const series = mainSeries();
     if (!chart || !series) return;
 
-    for (const pl of priceLineRef.current.values()) series.removePriceLine(pl);
+    for (const { owner, line } of priceLineRef.current.values()) owner.removePriceLine(line);
     priceLineRef.current.clear();
     for (const s of trendSeriesRef.current.values()) chart.removeSeries(s);
     trendSeriesRef.current.clear();
@@ -518,7 +524,7 @@ function Chart({
           axisLabelVisible: true,
           title: "",
         });
-        priceLineRef.current.set(drawing.id, priceLine);
+        priceLineRef.current.set(drawing.id, { owner: series, line: priceLine });
       } else {
         const [first, second] = [drawing.from, drawing.to].sort((a, b) => a.time - b.time);
         if (!first || !second) continue;
@@ -666,6 +672,7 @@ function Chart({
             <span>H {formatSolPrice(readout.high)}</span>
             <span>L {formatSolPrice(readout.low)}</span>
             <span>C {formatSolPrice(readout.close)}</span>
+            <span>SOL</span>
           </>
         ) : (
           <span>&nbsp;</span>

@@ -42,8 +42,17 @@ export function useApi<T>(
     const controller = new AbortController();
     setLoad({ state: "loading" });
 
+    // A poll slower than `refreshMs` must not overlap the next one: the two
+    // replies could arrive out of order and the older one would win. So a
+    // tick is skipped while any fetch is still out.
+    let inFlight = false;
     const run = (silent: boolean) => {
+      if (inFlight) return;
+      inFlight = true;
       fetcher(controller.signal)
+        .finally(() => {
+          inFlight = false;
+        })
         .then((value) => {
           if (!controller.signal.aborted) setLoad({ state: "ready", value });
         })
