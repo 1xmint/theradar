@@ -1320,13 +1320,22 @@ fn coins_from_trades(trades: &[MarketTrade]) -> Vec<market_fold::Coin> {
             });
             let tx_count = u64::try_from(group.len()).unwrap_or(u64::MAX);
             let token_volume: f64 = group.iter().map(|t| t.token_amount).sum();
-            let priced: Vec<&&MarketTrade> = group.iter().filter(|t| t.price.is_some()).collect();
+            // Every price, change and volume below is in the quote asset of
+            // the newest priced fill, and only that one. A coin trading
+            // against both USDC (~0.044) and wrapped SOL (~0.00037) was
+            // listed at +11,764% by comparing a SOL price with a USDC one.
+            let newest_quote = group
+                .iter()
+                .rev()
+                .find(|t| t.price.is_some())
+                .and_then(|t| t.quote_mint);
+            let priced: Vec<&&MarketTrade> = group
+                .iter()
+                .filter(|t| t.price.is_some() && t.quote_mint == newest_quote)
+                .collect();
             let last_price = priced.last().and_then(|t| t.price);
             let first_price = priced.first().and_then(|t| t.price);
-            let quote_mint = priced
-                .last()
-                .and_then(|t| t.quote_mint)
-                .map(|m| m.to_string());
+            let quote_mint = newest_quote.map(|m| m.to_string());
             let quote_volume = has_a_priced_fill(&priced)
                 .then(|| priced.iter().filter_map(|t| t.quote_amount).sum::<f64>());
             // `market_fold::change_from`, not a second copy of it. These four
@@ -2932,6 +2941,52 @@ mod tests {
             .expect("mint 2");
         assert_eq!(b.price, None, "never priced in the window");
         assert_eq!(b.change_pct, None);
+    }
+
+    /// A coin traded against wrapped SOL and USDC is listed in the newest
+    /// fill's asset alone: its change and volume never mix the two. Before,
+    /// a SOL price of 0.00037 against a USDC price of 0.044 read as +11,764%.
+    #[test]
+    fn a_coin_is_listed_in_one_quote_asset() {
+        let usdc: Address = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
+            .parse()
+            .expect("quote mint");
+        let in_usdc = |ts: &str, sig: u8, price: f64| {
+            let mut t = trade(mint(1), ts, sig, Some(price), Some(price));
+            t.quote_mint = Some(usdc);
+            t
+        };
+        let rows = vec![
+            trade(
+                mint(1),
+                "2026-09-11 17:00:00.000000",
+                1,
+                Some(0.0004),
+                Some(0.0004),
+            ),
+            in_usdc("2026-09-11 17:01:00.000000", 2, 0.04),
+            trade(
+                mint(1),
+                "2026-09-11 17:02:00.000000",
+                3,
+                Some(0.0004),
+                Some(0.0004),
+            ),
+            in_usdc("2026-09-11 17:03:00.000000", 4, 0.044),
+        ];
+        let coins = coins_from_trades(&rows);
+        assert_eq!(coins[0].quote_mint, Some(usdc.to_string()));
+        assert_eq!(coins[0].price, Some(0.044));
+        assert!(
+            (coins[0].change_pct.expect("a change") - 10.0).abs() < 1e-9,
+            "0.04 to 0.044 USDC, not 0.0004 SOL to 0.044 USDC: {:?}",
+            coins[0].change_pct
+        );
+        assert!(
+            (coins[0].quote_volume.expect("a volume") - 0.084).abs() < 1e-12,
+            "USDC volume only: {:?}",
+            coins[0].quote_volume
+        );
     }
 
     #[test]
