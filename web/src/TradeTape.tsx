@@ -10,7 +10,7 @@
 import { market, type Trade } from "./api";
 import { capCaption, emptyTapeMessage } from "./honesty";
 import { Address, MarketFigure, Side } from "./Figures";
-import {explorerUrl, formatCompactNumber, formatPrice, formatStampTime} from "./format";
+import {explorerUrl, formatCompactNumber, formatQuotedPrice, formatStampTime} from "./format";
 import { useApi } from "./useApi";
 
 const LIMIT = 60;
@@ -77,7 +77,7 @@ function TapeRow({ trade }: { trade: Trade }) {
         <Side side={trade.side} />
       </td>
       <td className="py-1 text-right tabular-nums">
-        <MarketFigure value={trade.price} reason={trade.price === null ? "no route priced at fill time" : null} format={formatPrice} />
+        <MarketFigure value={trade.price} reason={trade.price === null ? "no route priced at fill time" : null} format={(v) => formatQuotedPrice(v, trade.quote_mint)} />
       </td>
       <td className="py-1 pl-3 text-right tabular-nums text-[var(--color-dim)]">
         {formatCompactNumber(trade.token_amount)}

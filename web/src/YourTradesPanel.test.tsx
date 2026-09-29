@@ -58,6 +58,7 @@ function aTrade(over: Record<string, unknown> = {}): Record<string, unknown> {
     token_amount: 1200,
     quote_amount: 3,
     price: 0.0025,
+    quote_mint: null,
     matched_by: "trader",
     ...over,
   };

@@ -18,7 +18,7 @@ import { Link } from "wouter";
 import type { MarketToken } from "./api";
 import { CoinImage } from "./CoinImage";
 import { MarketFigure } from "./Figures";
-import {formatAge, formatCompactUsd, formatPrice, formatSolAmount, shortenAddress} from "./format";
+import {formatAge, formatCompactUsd, formatQuotedPrice, formatSolAmount, shortenAddress} from "./format";
 import { isWalletSessionRefusal, positionsMessage, watchlistMessage, watchlistToggleFailure } from "./honesty";
 import { tokenPath } from "./routes";
 import { TradePanel } from "./TradePanel";
@@ -142,7 +142,7 @@ function Header({
       </div>
 
       <p className="mt-3 text-2xl font-semibold tabular-nums">
-        <MarketFigure value={token.price} reason={token.price_reason} format={formatPrice} />
+        <MarketFigure value={token.price} reason={token.price_reason} format={(v) => formatQuotedPrice(v, token.quote_mint)} />
       </p>
 
       <dl className="mt-3 grid grid-cols-2 gap-x-3 gap-y-2 text-xs">

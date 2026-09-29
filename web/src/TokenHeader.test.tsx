@@ -23,6 +23,7 @@ function token(overrides: Partial<MarketToken> = {}): MarketToken {
     published_at: null,
     metadata_reason: "no pump.fun launch was recorded for this mint",
     price: null,
+    quote_mint: null,
     price_reason: "no route priced",
     decimals_reason: "decimals travel per-trade",
     market_cap: null,

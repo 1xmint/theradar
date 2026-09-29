@@ -19,7 +19,7 @@
 import { market, type OwnTrade } from "./api";
 import { MarketFigure, Side } from "./Figures";
 import { yourTradesMessage, yourTradesRefusal } from "./honesty";
-import { formatCompactNumber, formatPrice, formatStampTime, transactionUrl } from "./format";
+import { formatCompactNumber, formatQuotedPrice, formatStampTime, transactionUrl } from "./format";
 import { useApi } from "./useApi";
 import { useWalletAddress } from "./Wallet";
 
@@ -121,7 +121,7 @@ function Row({ trade }: { trade: OwnTrade }) {
         <MarketFigure
           value={trade.price}
           reason={trade.price === null ? "Radar could not price this fill" : null}
-          format={formatPrice}
+          format={(v) => formatQuotedPrice(v, trade.quote_mint)}
         />
       </td>
       <td className="py-1 pr-3 text-right">

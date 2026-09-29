@@ -11,7 +11,7 @@
 import { useMemo } from "react";
 import type { MarketCoin, MarketCoins, MarketSort } from "./api";
 import { CoinImage } from "./CoinImage";
-import { formatChangePct, formatCompactNumber, formatPrice, quoteLabel } from "./format";
+import { formatChangePct, formatCompactNumber, formatQuotedPrice, quoteLabel } from "./format";
 import { MarketFigure } from "./Figures";
 import type { Load } from "./useApi";
 
@@ -232,7 +232,7 @@ function CoinRow({
           reason={
             coin.price === null ? "no trade in this window carried both legs" : null
           }
-          format={formatPrice}
+          format={(v) => formatQuotedPrice(v, coin.quote_mint)}
         />
       </td>
       <td className="py-1.5 text-right tabular-nums">
