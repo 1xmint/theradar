@@ -187,6 +187,13 @@ fn quote_list() -> String {
 /// asset** -- they are selected together by `argMax` over the same ordering,
 /// not picked one at a time.
 ///
+/// **Any other quote asset outranks native SOL**, whatever the sizes. A
+/// native row is a System Program transfer and never the swap itself: in one
+/// transaction that buys and sells, the wrap into the trader's own wrapped-SOL
+/// account can be the largest leg and would win on size alone. Where native
+/// SOL is the only quote leg it is still chosen, and
+/// [`super::fold::fold_tape`] decides whether it can be trusted.
+///
 /// This makes the result a **recent-trades sample, not a complete window**, and
 /// the caller must record it as one. A tape showing the last hundred trades is
 /// what a trading screen wants; a window claiming completeness it does not have
@@ -253,8 +260,10 @@ pub fn trades_query(mints: &[String], from: &str, to: &str, per_mint: usize) -> 
            FROM qnet \
            GROUP BY mint, tx_signature\
          ), s AS (\
-           SELECT tx_signature, argMax(mint, gross) AS quote_mint, max(gross) AS quote_value, \
-                  argMax(dec, gross) AS quote_decimals, argMax(payer, gross) AS quote_authority \
+           SELECT tx_signature, argMax(mint, (mint != '{native}', gross)) AS quote_mint, \
+                  argMax(gross, (mint != '{native}', gross)) AS quote_value, \
+                  argMax(dec, (mint != '{native}', gross)) AS quote_decimals, \
+                  argMax(payer, (mint != '{native}', gross)) AS quote_authority \
            FROM qmint \
            GROUP BY tx_signature\
          ) \
@@ -274,7 +283,8 @@ pub fn trades_query(mints: &[String], from: &str, to: &str, per_mint: usize) -> 
          LEFT JOIN ends ON t.mint = ends.mint AND t.tx_signature = ends.tx_signature \
          LEFT JOIN s ON t.tx_signature = s.tx_signature \
          ORDER BY t.mint, t.block_timestamp DESC \n         LIMIT {per_mint} BY t.mint",
-        quotes = quote_list()
+        quotes = quote_list(),
+        native = super::fold::NATIVE_SOL_MINT,
     )
 }
 
@@ -422,6 +432,27 @@ mod tests {
         for quote in QUOTE_MINTS {
             assert!(sql.contains(quote), "missing quote mint {quote}: {sql}");
         }
+    }
+
+    /// Size alone let the wrap into a trader's own wrapped-SOL account beat
+    /// the wrapped-SOL leg that paid the pool. Every quote column is chosen
+    /// by the same key, so they still describe one asset.
+    #[test]
+    fn any_other_quote_asset_outranks_native_sol() {
+        let sql = trades_query(
+            &[MINT.to_owned()],
+            "2026-09-11 17:00:00",
+            "2026-09-11 17:05:00",
+            90,
+        );
+        let key = format!("(mint != '{}', gross)", super::super::fold::NATIVE_SOL_MINT);
+        for column in ["mint", "gross", "dec", "payer"] {
+            assert!(
+                sql.contains(&format!("argMax({column}, {key})")),
+                "{column} must be chosen by {key}: {sql}"
+            );
+        }
+        assert!(!sql.contains("max(gross) AS quote_value"), "{sql}");
     }
 
     #[test]

@@ -357,6 +357,33 @@ fn drop_impossible_prices(trades: &mut [market_fold::Trade]) {
     }
 }
 
+/// Takes the price, quote amount and quote asset off a stored trade whose only
+/// quote leg was native SOL and which was not a buy.
+///
+/// The collector now refuses to price these
+/// ([`market_fold::native_quote_prices`] says why: the recorded amount is a
+/// fee or a tip, about a hundred times too low). Rows written before that
+/// change are still in the store and would keep drawing false wicks and
+/// wrong sale amounts, so they are corrected once, where the snapshot reads
+/// them.
+fn unprice_native_sells(trades: &mut [MarketTrade]) {
+    let native: Address = market_fold::NATIVE_SOL_MINT
+        .parse()
+        .expect("a valid address");
+    for trade in trades.iter_mut() {
+        let side = match trade.side {
+            MarketSide::Buy => market_fold::Side::Buy,
+            MarketSide::Sell => market_fold::Side::Sell,
+            MarketSide::Unknown => market_fold::Side::Unknown,
+        };
+        if trade.quote_mint == Some(native) && !market_fold::native_quote_prices(side) {
+            trade.price = None;
+            trade.quote_amount = None;
+            trade.quote_mint = None;
+        }
+    }
+}
+
 /// Everything a market route needs, read off the store once and reused by
 /// every request until the background refresher (or, in a test with none
 /// configured, the next request) replaces it.
@@ -397,7 +424,8 @@ impl Snapshot {
     pub fn build(store: &Reader, as_of: AsOf) -> Result<Self, StoreError> {
         let collected = market_tape_collected(store, as_of)?;
         let from = Slot(as_of.slot().get().saturating_sub(SNAPSHOT_WINDOW_SLOTS));
-        let trades = store.read_market_trades_range(as_of, Some(from))?;
+        let mut trades = store.read_market_trades_range(as_of, Some(from))?;
+        unprice_native_sells(&mut trades);
         let newest_ts = newest_ts_of(&trades);
         let launches = build_launch_index(store, as_of)?;
         Ok(Self {
@@ -423,7 +451,8 @@ impl Snapshot {
     pub fn refresh_trades(&self, store: &Reader, as_of: AsOf) -> Result<Self, StoreError> {
         let collected = market_tape_collected(store, as_of)?;
         let from = Slot(as_of.slot().get().saturating_sub(SNAPSHOT_WINDOW_SLOTS));
-        let trades = store.read_market_trades_range(as_of, Some(from))?;
+        let mut trades = store.read_market_trades_range(as_of, Some(from))?;
+        unprice_native_sells(&mut trades);
         let newest_ts = newest_ts_of(&trades);
         Ok(Self {
             watermark: as_of.slot(),
@@ -3032,6 +3061,56 @@ mod tests {
         assert_eq!(refreshed.trades().len(), 1);
         assert_eq!(refreshed.newest_ts(), snap.newest_ts());
         assert!(!refreshed.collected());
+    }
+
+    /// A stored native-SOL trade that was not a buy reaches no route with a
+    /// price: its recorded amount is a fee, not the sale. Checked through both
+    /// ways a snapshot reads the store, since each has its own read.
+    #[test]
+    fn a_snapshot_unprices_a_stored_native_sol_sell() {
+        let native: Address = market_fold::NATIVE_SOL_MINT.parse().expect("a mint");
+        let trade = |slot: u64, side: MarketSide, quote: Address| {
+            let mut t = market_trade(A_MINT, "2020-01-03 00:00:01.000000", slot);
+            t.signature =
+                radar_types::Signature::new([u8::try_from(slot % 200).expect("small"); 64]);
+            t.side = side;
+            t.quote_mint = Some(quote);
+            t
+        };
+        let wsol: Address = WSOL.parse().expect("a mint");
+        let (_dir, store) = store_of(&[
+            trade(400_001, MarketSide::Sell, native),
+            trade(400_002, MarketSide::Unknown, native),
+            trade(400_003, MarketSide::Buy, native),
+            trade(400_004, MarketSide::Sell, wsol),
+        ]);
+        let as_of = AsOf::at(radar_types::Slot(400_100));
+        let snap = Snapshot::build(&store, as_of).expect("the store reads");
+        let refreshed = snap.refresh_trades(&store, as_of).expect("the store reads");
+        for trades in [snap.trades(), refreshed.trades()] {
+            let by_slot = |slot: u64| {
+                trades
+                    .iter()
+                    .find(|t| t.slot.get() == slot)
+                    .expect("the trade is in the window")
+            };
+            for unpriced in [400_001, 400_002] {
+                let t = by_slot(unpriced);
+                assert_eq!(t.price, None, "{t:?}");
+                assert_eq!(t.quote_amount, None, "{t:?}");
+                assert_eq!(t.quote_mint, None, "{t:?}");
+            }
+            assert_eq!(
+                by_slot(400_003).price,
+                Some(2.0),
+                "a native buy keeps its price"
+            );
+            assert_eq!(
+                by_slot(400_004).price,
+                Some(2.0),
+                "a wrapped-SOL sell keeps its price"
+            );
+        }
     }
 
     /// One refresher, four ticks: build, skip, trades only, everything.

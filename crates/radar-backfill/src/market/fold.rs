@@ -58,6 +58,25 @@ pub fn adjust(raw_value: &str, decimals: &str) -> Option<f64> {
     Some(units / 10f64.powi(places))
 }
 
+/// Native SOL: lamports moved by the System Program, as distinct from the
+/// wrapped-SOL token `So1…112`.
+pub const NATIVE_SOL_MINT: &str = "So11111111111111111111111111111111111111111";
+
+/// Whether a native-SOL quote leg can price this trade. Only a buy's can.
+///
+/// CryptoHouse records a native row only for a System Program transfer. A
+/// pump.fun bonding-curve sell pays the seller by debiting the curve's
+/// lamports directly, which is no transfer at all, so the largest native row
+/// left in a sell is a router fee or a tip. Checked on mainnet on 2026-09-29:
+/// such sells priced about a hundred times low, and 26% of native-SOL prices
+/// sat more than three times from their neighbours, against 2% for wrapped
+/// SOL. A buy sends its SOL to the curve as a real transfer, and those priced
+/// exactly. An unknown side is not a buy.
+#[must_use]
+pub fn native_quote_prices(side: Side) -> bool {
+    side == Side::Buy
+}
+
 /// Which way a trade went, when it can be told.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -232,7 +251,10 @@ fn trade_from_row(row: &TapeRow, seen: &HashMap<&str, u64>) -> Option<Trade> {
     // The empty `quote_mint` is what a missing join match looks like -- see
     // `TapeRow`'s doc comment. Everything downstream of "no quote leg" stays
     // `None`, on purpose: a trade the join could not price is still a trade.
-    let has_quote_leg = !row.quote_mint.trim().is_empty();
+    // A native-SOL leg that cannot price the trade is no quote leg: see
+    // [`native_quote_prices`].
+    let has_quote_leg = !row.quote_mint.trim().is_empty()
+        && (row.quote_mint.trim() != NATIVE_SOL_MINT || native_quote_prices(side));
     let quote_amount = has_quote_leg
         .then(|| adjust(&row.quote_value, &row.quote_decimals))
         .flatten();
@@ -1182,6 +1204,48 @@ mod tests {
                 r
             })
             .collect()
+    }
+
+    /// A bonding-curve sell's native row is a fee or a tip, never the payout
+    /// (see [`native_quote_prices`]), so it must leave the trade unpriced
+    /// rather than priced about a hundred times low. A buy's native row, and
+    /// a wrapped-SOL sell, still price.
+    #[test]
+    fn only_a_buy_is_priced_from_native_sol() {
+        let buys = fold_tape(&rows_against_one_pool(NATIVE_SOL_MINT));
+        for t in &buys {
+            assert_eq!(t.side, Side::Buy);
+            assert!(t.price.is_some(), "a native buy prices: {t:?}");
+            assert_eq!(t.quote_mint.as_deref(), Some(NATIVE_SOL_MINT));
+        }
+
+        for quote in [
+            NATIVE_SOL_MINT,
+            "So11111111111111111111111111111111111111112",
+        ] {
+            let mut rows = rows_against_one_pool(quote);
+            for r in &mut rows {
+                std::mem::swap(&mut r.token_source, &mut r.token_destination);
+            }
+            let native = quote == NATIVE_SOL_MINT;
+            for t in fold_tape(&rows) {
+                assert_eq!(t.side, Side::Sell);
+                assert_eq!(t.price.is_none(), native, "{quote}: {t:?}");
+                assert_eq!(t.quote_amount.is_none(), native, "{quote}: {t:?}");
+                assert_eq!(t.quote_mint.is_none(), native, "{quote}: {t:?}");
+            }
+        }
+
+        let mut unknown = row(
+            "sig-u",
+            "2026-09-11 17:35:00.000000",
+            NATIVE_SOL_MINT,
+            "10000",
+        );
+        unknown.token_destination = unknown.token_source.clone();
+        let trades = fold_tape(&[unknown]);
+        assert_eq!(trades[0].side, Side::Unknown);
+        assert_eq!(trades[0].price, None, "an unknown side is not a buy");
     }
 
     #[test]
