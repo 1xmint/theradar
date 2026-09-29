@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { describe, expect, it } from "vitest";
-import { formatChartPrice, formatSolPrice } from "./format";
+import { formatChartPrice, formatSolPrice, quoteLabel } from "./format";
 
 describe("formatSolPrice", () => {
   it("never prefixes with '$' -- a SOL-quoted number is not a dollar figure", () => {
@@ -32,5 +32,22 @@ describe("formatChartPrice", () => {
   it("defers to formatSolPrice at zero and above a cent", () => {
     expect(formatChartPrice(0)).toBe("0.00");
     expect(formatChartPrice(1.2953886)).toBe("1.2954");
+  });
+});
+
+describe("quoteLabel", () => {
+  // Every address here is one production recorded as a quote on 2026-09-29.
+  it("names both SOL addresses the tape uses as SOL", () => {
+    expect(quoteLabel("So11111111111111111111111111111111111111112")).toBe("SOL");
+    expect(quoteLabel("So11111111111111111111111111111111111111111")).toBe("SOL");
+  });
+
+  it("names USDC and USDT by their real addresses", () => {
+    expect(quoteLabel("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v")).toBe("USDC");
+    expect(quoteLabel("Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB")).toBe("USDT");
+  });
+
+  it("abbreviates any other asset rather than guessing its name", () => {
+    expect(quoteLabel("pumpCmXqMfrsAkQ5r49WcJnRayYRqmXz6ae8H7H9Dfn")).toBe("pump…");
   });
 });
