@@ -4,6 +4,8 @@ import type { Candle } from "./api";
 import {
   findCandleAtTime,
   loadChartType,
+  loadLogScale,
+  saveLogScale,
   saveChartType,
   solPriceFormat,
   toCandlestickData,
@@ -99,5 +101,36 @@ describe("chart-type preference", () => {
     });
     expect(loadChartType()).toBe("candles");
     expect(() => saveChartType("line")).not.toThrow();
+  });
+});
+
+describe("log-scale preference", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    localStorage.clear();
+  });
+
+  it("is off when nothing is stored", () => {
+    expect(loadLogScale()).toBe(false);
+  });
+
+  it("round-trips a saved preference", () => {
+    saveLogScale(true);
+    expect(loadLogScale()).toBe(true);
+    saveLogScale(false);
+    expect(loadLogScale()).toBe(false);
+  });
+
+  it("is off, and does not throw, when localStorage throws", () => {
+    vi.stubGlobal("localStorage", {
+      getItem: () => {
+        throw new Error("blocked");
+      },
+      setItem: () => {
+        throw new Error("blocked");
+      },
+    });
+    expect(loadLogScale()).toBe(false);
+    expect(() => saveLogScale(true)).not.toThrow();
   });
 });

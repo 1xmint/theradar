@@ -39,6 +39,30 @@ export function saveChartType(type: ChartType): void {
   }
 }
 
+const LOG_SCALE_KEY = "radar.logScale";
+
+/** Reads whether the visitor wants a logarithmic price axis. Off (linear)
+ *  unless the literal `"1"` is stored, so a missing, corrupted or unreadable
+ *  value changes nothing for someone who never asked. `localStorage` is
+ *  wrapped in `try`/`catch` for the same reason as `loadChartType`. */
+export function loadLogScale(): boolean {
+  try {
+    return localStorage.getItem(LOG_SCALE_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+/** Persists the log-scale preference; a write failure is swallowed like
+ *  `saveChartType`'s. */
+export function saveLogScale(on: boolean): void {
+  try {
+    localStorage.setItem(LOG_SCALE_KEY, on ? "1" : "0");
+  } catch {
+    // Not persisted this time; the toggle still works for this session.
+  }
+}
+
 /** `Candle[]` as `lightweight-charts`' `CandlestickSeries` wants it. */
 export function toCandlestickData(candles: readonly Candle[]) {
   return candles.map((c) => ({

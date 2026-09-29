@@ -31,6 +31,7 @@ import {
   HistogramSeries,
   LineSeries,
   LineStyle,
+  PriceScaleMode,
   createChart,
   type IChartApi,
   type IPriceLine,
@@ -43,7 +44,9 @@ import { CANDLE_INTERVALS, market, type Candle, type CandleInterval } from "./ap
 import {
   findCandleAtTime,
   loadChartType,
+  loadLogScale,
   saveChartType,
+  saveLogScale,
   solPriceFormat,
   toCandlestickData,
   toLineData,
@@ -260,6 +263,11 @@ function Chart({
   // (registered once, below) working without re-subscribing on every toggle.
   // `chartTypeRef` is what those closures actually read.
   const [chartType, setChartType] = useState<ChartType>(() => loadChartType());
+  // A logarithmic price axis keeps every candle's shape when one real candle
+  // crashes 99.99% (a rug), which on a linear axis flattens all the others.
+  // Off by default. It is a scale option, not a series option, so it applies
+  // to the candle and line series alike.
+  const [logScale, setLogScale] = useState<boolean>(() => loadLogScale());
   const chartTypeRef = useRef<ChartType>(chartType);
   chartTypeRef.current = chartType;
 
@@ -439,6 +447,15 @@ function Chart({
     saveChartType(chartType);
   }, [chartType]);
 
+  // Declared after the chart-creation effect so a freshly mounted chart (new
+  // coin or interval) gets the saved mode too.
+  useEffect(() => {
+    chartRef.current?.priceScale("right").applyOptions({
+      mode: logScale ? PriceScaleMode.Logarithmic : PriceScaleMode.Normal,
+    });
+    saveLogScale(logScale);
+  }, [logScale]);
+
   // `fitContent()` only on the first data a given mint+interval loads. Every
   // 15s refresh after that must leave the reader's zoom and scroll alone --
   // firing it on every update was the bug: a reader who zoomed in got yanked
@@ -604,6 +621,19 @@ function Chart({
             </button>
           ))}
         </div>
+        <button
+          type="button"
+          onClick={() => setLogScale((on) => !on)}
+          aria-pressed={logScale}
+          title="Logarithmic price axis"
+          className={`rounded px-2 py-0.5 text-xs ${
+            logScale
+              ? "bg-[var(--color-ink)] text-[var(--color-text)]"
+              : "text-[var(--color-dim)] hover:text-[var(--color-text)]"
+          }`}
+        >
+          Log
+        </button>
         {INDICATOR_OPTIONS.map((choice) => {
           const key = indicatorChoiceKey(choice);
           const active = activeKeys.has(key);
