@@ -779,6 +779,10 @@ export interface Candles {
   covered: MarketWindow & { complete: boolean };
   /** The range the caller asked for, echoed back. */
   requested: MarketWindow;
+  /** The asset every candle's price is in, or null when the server cannot
+   *  name one. Not always SOL: many pump.fun coins trade against PUMP or
+   *  USDC. Label with `format.quoteLabel`; show no unit when null. */
+  quote_mint: string | null;
   candles: Candle[];
 }
 

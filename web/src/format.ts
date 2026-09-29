@@ -33,7 +33,7 @@ export function formatSolAmount(value: number): string {
 
 /** A SOL-quoted price -- e.g. a candle's OHLC, folded from `Fill.price`
  *  (`quote_amount / token_amount` against whichever quote leg the pool
- *  paired against, almost always wSOL for a pump.fun coin). Never prefixed
+ *  paired against -- wSOL, PUMP or USDC; the caller names it). Never prefixed
  *  with "$", for the same reason as `formatSolAmount`: this number was never
  *  in dollars. A meme-coin's SOL price is routinely far below `formatSolAmount`'s
  *  four fixed decimals (e.g. 0.0000002), which would print "0.0000" on every

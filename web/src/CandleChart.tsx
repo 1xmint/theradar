@@ -69,7 +69,7 @@ import {
   type IndicatorChoice,
 } from "./indicators";
 
-import {formatSolPrice, formatStamp} from "./format";
+import {formatSolPrice, formatStamp, quoteLabel} from "./format";
 import { useApi } from "./useApi";
 
 /** How often the mounted chart refetches candles for the live feed, in
@@ -197,6 +197,7 @@ export function CandleChart({ mint }: { mint: string }) {
             from={load.value.covered.from}
             to={load.value.covered.to}
             complete={load.value.covered.complete}
+            quoteMint={load.value.quote_mint}
           />
         )}
       </div>
@@ -225,6 +226,7 @@ function Chart({
   from,
   to,
   complete,
+  quoteMint,
 }: {
   mint: string;
   candles: Candle[];
@@ -234,6 +236,7 @@ function Chart({
   to: string;
   /** The server's own statement about whether it covered what was asked for. */
   complete: boolean;
+  quoteMint: string | null;
 }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const chartRef = useRef<IChartApi | null>(null);
@@ -663,16 +666,19 @@ function Chart({
       <div className="flex items-baseline gap-3 px-3 py-1 text-xs tabular-nums text-[var(--color-dim)]">
         {readout ? (
           <>
-            {/* SOL-quoted, not USD: `Fill.price` in radar-stream/src/decode.rs
-             *  is quote_amount / token_amount against whichever quote leg the
-             *  pool paired with -- almost always wSOL for a pump.fun coin.
-             *  `formatPrice` prefixes "$", which this readout previously did
-             *  too, on a number that was never in dollars. */}
+            {/* Not USD: `Fill.price` in radar-stream/src/decode.rs is
+             *  quote_amount / token_amount against whichever quote leg the
+             *  pool paired with. `formatPrice` prefixes "$", which this
+             *  readout previously did too, on a number never in dollars. */}
             <span>O {formatSolPrice(readout.open)}</span>
             <span>H {formatSolPrice(readout.high)}</span>
             <span>L {formatSolPrice(readout.low)}</span>
             <span>C {formatSolPrice(readout.close)}</span>
-            <span>SOL</span>
+            {/* The unit comes from the server, never assumed: many pump.fun
+             *  coins trade against PUMP or USDC, and a fixed "SOL" here was
+             *  as wrong for them as the "$" it replaced. No unit when the
+             *  server cannot name one. */}
+            {quoteMint && <span>{quoteLabel(quoteMint)}</span>}
           </>
         ) : (
           <span>&nbsp;</span>

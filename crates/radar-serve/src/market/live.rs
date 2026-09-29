@@ -126,6 +126,11 @@ pub fn candles(
     }
     let covered_from = clamped_start(requested_from, requested_to, MAX_CANDLE_WINDOW_SECONDS);
     let (minutes, complete) = tape.minutes(&mint, covered_from, requested_to);
+    // The asset these candles are priced in: the tape keeps each coin's
+    // candles in the first quote it traded against, which is often PUMP or
+    // USDC rather than SOL. `None` when no priced trade in that quote is
+    // still held, and then the chart names no unit rather than guessing one.
+    let quote = tape.last_price(&mint).map(|(_, q)| q.to_string());
     drop(tape);
 
     Json(json!({
@@ -133,6 +138,7 @@ pub fn candles(
         "interval": interval_name,
         "requested": { "from": from_epoch(requested_from), "to": from_epoch(requested_to) },
         "covered": { "from": from_epoch(covered_from), "to": from_epoch(requested_to), "complete": complete },
+        "quote_mint": quote,
         "candles": roll_up(&minutes, interval),
     }))
     .into_response()

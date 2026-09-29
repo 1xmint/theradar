@@ -1116,6 +1116,9 @@ pub async fn candles(
         "interval": params.interval.as_deref().unwrap_or("1m"),
         "requested": { "from": from_epoch(requested_from), "to": from_epoch(requested_to) },
         "covered": { "from": from_s, "to": to_s, "complete": true },
+        // Unknown, not SOL: this fold takes every priced trade whatever it
+        // was paid in, so the candles carry no single quote asset to name.
+        "quote_mint": null,
         "candles": candles,
     }))
     .into_response()

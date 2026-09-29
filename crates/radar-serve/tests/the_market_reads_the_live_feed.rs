@@ -305,6 +305,11 @@ async fn a_default_1h_request_reaches_back_a_day_not_an_hour() {
         24 * 60 * 60,
         "a 1h chart's default span is a full day, not a fixed hour: {body}"
     );
+    assert_eq!(
+        body["quote_mint"],
+        WSOL.to_string(),
+        "the chart names the asset its prices are in: {body}"
+    );
     let candles = body["candles"].as_array().unwrap();
     assert!(
         candles.len() > 1,
