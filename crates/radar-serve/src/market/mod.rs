@@ -267,11 +267,14 @@ fn filter_tape(
 /// asset with the most priced trades wins; a tie goes to the smaller address
 /// so the choice never depends on row order. A priced trade naming no quote
 /// asset has no unit to be drawn in and is left out.
+///
+/// Native SOL and wrapped SOL count as one asset, [`quote_asset`], and the
+/// asset returned for them is wrapped SOL.
 fn in_one_quote(trades: Vec<market_fold::Trade>) -> (Option<String>, Vec<market_fold::Trade>) {
     let mut priced: std::collections::BTreeMap<&str, usize> = std::collections::BTreeMap::new();
     for trade in &trades {
         if let (Some(_), Some(quote)) = (trade.price, trade.quote_mint.as_deref()) {
-            *priced.entry(quote).or_default() += 1;
+            *priced.entry(quote_asset(quote)).or_default() += 1;
         }
     }
     let Some(quote) = priced
@@ -283,9 +286,32 @@ fn in_one_quote(trades: Vec<market_fold::Trade>) -> (Option<String>, Vec<market_
     };
     let kept = trades
         .into_iter()
-        .filter(|t| t.quote_mint.as_deref() == Some(quote.as_str()))
+        .filter(|t| t.quote_mint.as_deref().map(quote_asset) == Some(quote.as_str()))
         .collect();
     (Some(quote), kept)
+}
+
+/// Wrapped SOL, the mint SOL trades under in a token account.
+const WRAPPED_SOL: &str = "So11111111111111111111111111111111111111112";
+
+/// The address the collector records when a trade paid plain lamports rather
+/// than wrapped SOL (`radar_backfill::extract::QUOTE_MINTS`). It is not a
+/// mint, and it is the same money as [`WRAPPED_SOL`].
+const NATIVE_SOL: &str = "So11111111111111111111111111111111111111111";
+
+/// The asset a quote mint is grouped under when prices are compared.
+///
+/// One coin's trades arrive quoted in both SOL addresses, and on 2026-09-29
+/// the busiest SOL-quoted coins in production carried both. Counting them as
+/// two assets splits one market in half: the chart draws whichever half had
+/// more trades and drops the rest. Only grouping is changed here; a trade
+/// keeps the address it was recorded with.
+fn quote_asset(mint: &str) -> &str {
+    if mint == NATIVE_SOL {
+        WRAPPED_SOL
+    } else {
+        mint
+    }
 }
 
 /// How many priced trades on each side a price is judged against.
@@ -325,7 +351,10 @@ fn drop_stray_prices(trades: &mut [market_fold::Trade]) {
         std::collections::BTreeMap::new();
     for (i, trade) in trades.iter().enumerate() {
         if let (Some(price), Some(quote)) = (trade.price, trade.quote_mint.as_deref()) {
-            by_quote.entry(quote).or_default().push((i, price));
+            by_quote
+                .entry(quote_asset(quote))
+                .or_default()
+                .push((i, price));
         }
     }
     let mut stray = Vec::new();
@@ -2273,6 +2302,23 @@ mod tests {
         assert_eq!(kept.len(), 2);
     }
 
+    /// Native and wrapped SOL are one asset: together they outnumber USDC
+    /// here though neither does alone, and each trade keeps its own address.
+    #[test]
+    fn native_and_wrapped_sol_are_counted_as_one_quote() {
+        const NATIVE: &str = "So11111111111111111111111111111111111111111";
+        let (quote, kept) = in_one_quote(vec![
+            fold_trade(Some(NATIVE), Some(1.3)),
+            fold_trade(Some(USDC), Some(180.0)),
+            fold_trade(Some(WSOL), Some(1.4)),
+            fold_trade(Some(USDC), Some(181.0)),
+            fold_trade(Some(NATIVE), Some(1.5)),
+        ]);
+        assert_eq!(quote.as_deref(), Some(WSOL));
+        let recorded: Vec<Option<&str>> = kept.iter().map(|t| t.quote_mint.as_deref()).collect();
+        assert_eq!(recorded, vec![Some(NATIVE), Some(WSOL), Some(NATIVE)]);
+    }
+
     /// No priced trade names no unit and draws nothing, rather than guessing.
     #[test]
     fn nothing_priced_names_no_quote() {
@@ -2375,6 +2421,33 @@ mod tests {
             .collect();
         drop_stray_prices(&mut trades);
         assert!(trades.iter().all(|t| t.price.is_some()));
+    }
+
+    /// A native-SOL price is judged against the wrapped-SOL trades around it,
+    /// because they are the same market.
+    #[test]
+    fn a_native_sol_stray_is_judged_against_wrapped_sol_neighbours() {
+        const NATIVE: &str = "So11111111111111111111111111111111111111111";
+        // Alone in a group of its own the stray would be that group's edge and
+        // kept; only judged with the wrapped-SOL trades is it out of line.
+        let mut trades = vec![
+            fold_trade(Some(WSOL), Some(1.0)),
+            fold_trade(Some(WSOL), Some(1.0)),
+            fold_trade(Some(WSOL), Some(1.0)),
+            fold_trade(Some(NATIVE), Some(100.0)),
+            fold_trade(Some(WSOL), Some(1.0)),
+            fold_trade(Some(WSOL), Some(1.0)),
+            fold_trade(Some(WSOL), Some(1.0)),
+        ];
+        drop_stray_prices(&mut trades);
+        let prices: Vec<Option<f64>> = trades.iter().map(|t| t.price).collect();
+        assert_eq!(prices[3], None);
+        assert!(
+            prices
+                .iter()
+                .enumerate()
+                .all(|(i, p)| i == 3 || p.is_some())
+        );
     }
 
     /// Zero, negative and not-a-number are never prices, even alone.

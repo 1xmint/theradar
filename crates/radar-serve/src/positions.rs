@@ -92,6 +92,10 @@ const CACHE_CAPACITY: usize = 2048;
 /// price checked before SOL's holding is called priced.
 const WRAPPED_SOL_MINT: &str = "So11111111111111111111111111111111111111112";
 
+/// The address the collector records for a trade paid in plain lamports
+/// (`radar_backfill::extract::QUOTE_MINTS`). Not a mint: SOL itself.
+const NATIVE_SOL: &str = "So11111111111111111111111111111111111111111";
+
 /// Circulating USDC on Solana.
 const USDC_MINT: &str = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 
@@ -109,7 +113,10 @@ const USDT_MINT: &str = "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB";
 /// these three.
 fn quote_name(mint: Address) -> Option<&'static str> {
     match mint.to_string().as_str() {
-        WRAPPED_SOL_MINT => Some("SOL"),
+        // The collector records a trade paid in plain lamports under the
+        // native-SOL address; it is the same money as wrapped SOL, and without
+        // this a coin last traded that way showed no value.
+        WRAPPED_SOL_MINT | NATIVE_SOL => Some("SOL"),
         USDC_MINT => Some("USDC"),
         USDT_MINT => Some("USDT"),
         _ => None,
@@ -796,6 +803,7 @@ mod tests {
     #[test]
     fn quote_name_never_invents_a_currency_for_an_unrecognised_mint() {
         assert_eq!(quote_name(WRAPPED_SOL_MINT.parse().unwrap()), Some("SOL"));
+        assert_eq!(quote_name(NATIVE_SOL.parse().unwrap()), Some("SOL"));
         assert_eq!(quote_name(USDC_MINT.parse().unwrap()), Some("USDC"));
         assert_eq!(quote_name(USDT_MINT.parse().unwrap()), Some("USDT"));
         assert_eq!(quote_name(wallet_n(1)), None);
