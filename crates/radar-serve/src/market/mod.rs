@@ -256,6 +256,38 @@ fn filter_tape(
     trades
 }
 
+/// The quote asset most of these priced trades were paid in, and only the
+/// trades paid in it.
+///
+/// A coin trades against several assets -- SOL, USDC, PUMP -- and a price
+/// is a number in exactly one of them. Folding them into one candle drew
+/// bars whose high was up to 2e8 times their low (13 of the 15 busiest coins
+/// in production on 2026-09-29), and one such bar squashes every other bar
+/// on the chart flat. So a chart is drawn in one asset and names it. The
+/// asset with the most priced trades wins; a tie goes to the smaller address
+/// so the choice never depends on row order. A priced trade naming no quote
+/// asset has no unit to be drawn in and is left out.
+fn in_one_quote(trades: Vec<market_fold::Trade>) -> (Option<String>, Vec<market_fold::Trade>) {
+    let mut priced: std::collections::BTreeMap<&str, usize> = std::collections::BTreeMap::new();
+    for trade in &trades {
+        if let (Some(_), Some(quote)) = (trade.price, trade.quote_mint.as_deref()) {
+            *priced.entry(quote).or_default() += 1;
+        }
+    }
+    let Some(quote) = priced
+        .into_iter()
+        .max_by(|a, b| a.1.cmp(&b.1).then_with(|| b.0.cmp(a.0)))
+        .map(|(quote, _)| quote.to_owned())
+    else {
+        return (None, Vec::new());
+    };
+    let kept = trades
+        .into_iter()
+        .filter(|t| t.quote_mint.as_deref() == Some(quote.as_str()))
+        .collect();
+    (Some(quote), kept)
+}
+
 /// Everything a market route needs, read off the store once and reused by
 /// every request until the background refresher (or, in a test with none
 /// configured, the next request) replaces it.
@@ -1109,16 +1141,14 @@ pub async fn candles(
     let to = requested_to;
     let (from_s, to_s) = (from_epoch(from), from_epoch(to));
 
-    let trades = filter_tape(snapshot.trades(), mint, &from_s, &to_s);
+    let (quote, trades) = in_one_quote(filter_tape(snapshot.trades(), mint, &from_s, &to_s));
     let candles = market_fold::fold_candles(&trades, interval);
     Json(json!({
         "mint": mint.to_string(),
         "interval": params.interval.as_deref().unwrap_or("1m"),
         "requested": { "from": from_epoch(requested_from), "to": from_epoch(requested_to) },
         "covered": { "from": from_s, "to": to_s, "complete": true },
-        // Unknown, not SOL: this fold takes every priced trade whatever it
-        // was paid in, so the candles carry no single quote asset to name.
-        "quote_mint": null,
+        "quote_mint": quote,
         "candles": candles,
     }))
     .into_response()
@@ -2090,6 +2120,82 @@ mod tests {
             86_400,
             "1h: 300 bars would be 300h, clamped to the day ceiling"
         );
+    }
+
+    fn fold_trade(quote: Option<&str>, price: Option<f64>) -> market_fold::Trade {
+        let mut trade = to_fold_trade(&market_trade(A_MINT, "2026-09-29 12:00:00", 1));
+        trade.quote_mint = quote.map(str::to_owned);
+        trade.price = price;
+        trade
+    }
+
+    const USDC: &str = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
+
+    /// A chart is drawn in the asset most priced trades used, and only in it:
+    /// a USDC price beside a SOL price in one bar is what drew candles whose
+    /// high was 2e8 times their low (production, 2026-09-29).
+    #[test]
+    fn a_chart_is_drawn_in_the_quote_most_priced_trades_used() {
+        let trades = vec![
+            fold_trade(Some(USDC), Some(180.0)),
+            fold_trade(Some(WSOL), Some(1.3)),
+            fold_trade(Some(USDC), Some(181.0)),
+            // Unpriced trades carry no price to count, however many there are.
+            fold_trade(Some(WSOL), None),
+            fold_trade(Some(WSOL), None),
+            fold_trade(Some(WSOL), None),
+            // A price in no named asset has no unit to be drawn in.
+            fold_trade(None, Some(5.0)),
+        ];
+        let (quote, kept) = in_one_quote(trades);
+        assert_eq!(quote.as_deref(), Some(USDC));
+        let prices: Vec<Option<f64>> = kept.iter().map(|t| t.price).collect();
+        assert_eq!(
+            prices,
+            vec![Some(180.0), Some(181.0)],
+            "only the USDC fills"
+        );
+    }
+
+    /// A tie goes to the smaller address, so the unit a chart is drawn in
+    /// does not flip with the order the rows happened to arrive in.
+    #[test]
+    fn a_tie_between_quotes_goes_to_the_smaller_address_in_either_order() {
+        for trades in [
+            vec![
+                fold_trade(Some(WSOL), Some(1.3)),
+                fold_trade(Some(USDC), Some(180.0)),
+            ],
+            vec![
+                fold_trade(Some(USDC), Some(180.0)),
+                fold_trade(Some(WSOL), Some(1.3)),
+            ],
+        ] {
+            let (quote, kept) = in_one_quote(trades);
+            assert_eq!(quote.as_deref(), Some(USDC), "'E' sorts before 'S'");
+            assert_eq!(kept.len(), 1);
+        }
+    }
+
+    /// More priced trades beat the smaller address: the tie rule is only for
+    /// a tie, and SOL's address sorts after USDC's.
+    #[test]
+    fn the_quote_with_more_priced_trades_wins_over_the_smaller_address() {
+        let (quote, kept) = in_one_quote(vec![
+            fold_trade(Some(WSOL), Some(1.3)),
+            fold_trade(Some(USDC), Some(180.0)),
+            fold_trade(Some(WSOL), Some(1.4)),
+        ]);
+        assert_eq!(quote.as_deref(), Some(WSOL));
+        assert_eq!(kept.len(), 2);
+    }
+
+    /// No priced trade names no unit and draws nothing, rather than guessing.
+    #[test]
+    fn nothing_priced_names_no_quote() {
+        let (quote, kept) = in_one_quote(vec![fold_trade(Some(WSOL), None)]);
+        assert_eq!(quote, None);
+        assert!(kept.is_empty());
     }
 
     /// A range must run forwards, and a zero-width one is a mistake.
