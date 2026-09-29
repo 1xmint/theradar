@@ -101,24 +101,31 @@ export function shortenAddress(value: string, keep = 4): string {
     : value;
 }
 
-/** Where an address explorer link points. Solscan, because it is what the
- *  rest of this interface's operator tooling already assumes for a Solana
- *  address, and picking a second explorer would be a second thing to keep
- *  consistent for no reader benefit. */
-/** The three quote assets by name, anything else abbreviated. */
+/** The quote assets by name, anything else abbreviated.
+ *
+ *  SOL has two addresses in the tape: wrapped SOL (`…112`) and the address
+ *  the indexer uses for plain lamport transfers (`…111`). Both are SOL, and
+ *  the second one showed as "So11…" beside prices until 2026-09-29. The USDT
+ *  address here was also wrong until then, so no USDT price was ever
+ *  labelled; it is now the one in `radar-backfill`'s `QUOTE_MINTS`. */
 export function quoteLabel(mint: string): string {
   switch (mint) {
     case "So11111111111111111111111111111111111111112":
+    case "So11111111111111111111111111111111111111111":
       return "SOL";
     case "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v":
       return "USDC";
-    case "Es9vMFrzaCERmJfrF4H2FYD4KConky2wcgqDfLpRsXsn":
+    case "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB":
       return "USDT";
     default:
       return `${mint.slice(0, 4)}…`;
   }
 }
 
+/** Where an address explorer link points. Solscan, because it is what the
+ *  rest of this interface's operator tooling already assumes for a Solana
+ *  address, and picking a second explorer would be a second thing to keep
+ *  consistent for no reader benefit. */
 export function explorerUrl(address: string): string {
   return `https://solscan.io/account/${encodeURIComponent(address)}`;
 }
