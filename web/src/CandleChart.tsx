@@ -41,6 +41,16 @@ import {
 } from "lightweight-charts";
 import { CANDLE_INTERVALS, market, type Candle, type CandleInterval } from "./api";
 import {
+  findCandleAtTime,
+  loadChartType,
+  saveChartType,
+  solPriceFormat,
+  toCandlestickData,
+  toLineData,
+  toVolumeData,
+  type ChartType,
+} from "./candles";
+import {
   clearDrawings,
   loadDrawings,
   newDrawingId,
@@ -59,8 +69,14 @@ import {
   type IndicatorChoice,
 } from "./indicators";
 
-import {formatPrice, formatStamp} from "./format";
+import {formatSolPrice, formatStamp, quoteLabel} from "./format";
 import { useApi } from "./useApi";
+
+/** How often the mounted chart refetches candles for the live feed, in
+ *  milliseconds. Both server paths read a local tape or store on the request
+ *  path (see the PR body) -- there is no CryptoHouse query to rate-limit
+ *  against, so this only needs to be fast enough to feel live. */
+const CANDLE_REFRESH_MS = 15_000;
 
 /**
  * The chart's colours, as sRGB rather than as the palette's `oklch()`.
@@ -135,6 +151,7 @@ export function CandleChart({ mint }: { mint: string }) {
   const load = useApi(
     (signal) => market.candles(mint, { interval }, signal),
     [mint, interval],
+    CANDLE_REFRESH_MS,
   );
 
   return (
@@ -180,6 +197,7 @@ export function CandleChart({ mint }: { mint: string }) {
             from={load.value.covered.from}
             to={load.value.covered.to}
             complete={load.value.covered.complete}
+            quoteMint={load.value.quote_mint}
           />
         )}
       </div>
@@ -208,6 +226,7 @@ function Chart({
   from,
   to,
   complete,
+  quoteMint,
 }: {
   mint: string;
   candles: Candle[];
@@ -217,15 +236,40 @@ function Chart({
   to: string;
   /** The server's own statement about whether it covered what was asked for. */
   complete: boolean;
+  quoteMint: string | null;
 }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const chartRef = useRef<IChartApi | null>(null);
-  const seriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
+  const candleSeriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
+  const lineSeriesRef = useRef<ISeriesApi<"Line"> | null>(null);
   const volumeRef = useRef<ISeriesApi<"Histogram"> | null>(null);
   const indicatorSeriesRef = useRef<Map<string, ISeriesApi<"Line">>>(new Map());
-  const priceLineRef = useRef<Map<string, IPriceLine>>(new Map());
+  // Each price line remembers the series it was drawn on. After a
+  // Candles/Line toggle, `mainSeries()` is the *other* series, and
+  // `removePriceLine` on a series that does not own the line silently does
+  // nothing -- so "Clear lines" left the old line on screen.
+  const priceLineRef = useRef<
+    Map<string, { owner: ISeriesApi<"Candlestick"> | ISeriesApi<"Line">; line: IPriceLine }>
+  >(new Map());
   const trendSeriesRef = useRef<Map<string, ISeriesApi<"Line">>>(new Map());
-  const [crosshair, setCrosshair] = useState<Candle | null>(null);
+
+  // "Candles" is the informative default; "Line" trades detail for a cleaner
+  // read of the close-price trend. Both series exist from mount and only one
+  // is ever visible -- swapping which one is *visible* rather than tearing
+  // one down and building the other keeps the crosshair/click subscriptions
+  // (registered once, below) working without re-subscribing on every toggle.
+  // `chartTypeRef` is what those closures actually read.
+  const [chartType, setChartType] = useState<ChartType>(() => loadChartType());
+  const chartTypeRef = useRef<ChartType>(chartType);
+  chartTypeRef.current = chartType;
+
+  /** The series the reader is currently looking at -- what the crosshair,
+   *  click-to-place and price-line handlers must all act on. */
+  const mainSeries = useCallback((): ISeriesApi<"Candlestick"> | ISeriesApi<"Line"> | null => {
+    return chartTypeRef.current === "line" ? lineSeriesRef.current : candleSeriesRef.current;
+  }, []);
+
+  const [crosshairTime, setCrosshairTime] = useState<number | null>(null);
 
   const [indicatorChoices, setIndicatorChoices] = useState<IndicatorChoice[]>(() =>
     loadIndicatorChoices(),
@@ -276,20 +320,37 @@ function Chart({
         fontSize: 11,
       },
       grid: {
-        vertLines: { color: CHART_COLORS.line },
+        // Vertical grid lines mostly repeat the time-axis labels; drawn this
+        // faint they still give the eye a column to line a candle up against
+        // without competing with the candles themselves.
+        vertLines: { color: CHART_COLORS.faint, style: LineStyle.SparseDotted },
         horzLines: { color: CHART_COLORS.line },
       },
       rightPriceScale: { borderColor: CHART_COLORS.line },
-      timeScale: { borderColor: CHART_COLORS.line, timeVisible: true },
+      timeScale: {
+        borderColor: CHART_COLORS.line,
+        timeVisible: true,
+        // A little daylight past the last candle so the newest bar is not
+        // drawn flush against the price-scale border.
+        rightOffset: 4,
+      },
       crosshair: { mode: 0 },
     });
 
-    const series = chart.addSeries(CandlestickSeries, {
+    const candleSeries = chart.addSeries(CandlestickSeries, {
       upColor: CHART_COLORS.up,
       downColor: CHART_COLORS.down,
       borderVisible: false,
       wickUpColor: CHART_COLORS.up,
       wickDownColor: CHART_COLORS.down,
+      priceFormat: solPriceFormat(),
+    });
+
+    const lineSeries = chart.addSeries(LineSeries, {
+      color: CHART_COLORS.up,
+      lineWidth: 2,
+      priceFormat: solPriceFormat(),
+      visible: false,
     });
 
     const volume = chart.addSeries(HistogramSeries, {
@@ -300,32 +361,24 @@ function Chart({
     volume.priceScale().applyOptions({ scaleMargins: { top: 0.8, bottom: 0 } });
 
     chartRef.current = chart;
-    seriesRef.current = series;
+    candleSeriesRef.current = candleSeries;
+    lineSeriesRef.current = lineSeries;
     volumeRef.current = volume;
 
     chart.subscribeCrosshairMove((param: MouseEventParams<Time>) => {
-      const point = param.seriesData.get(series);
-      if (point && "open" in point) {
-        setCrosshair({
-          time: Number(param.time),
-          open: point.open,
-          high: point.high,
-          low: point.low,
-          close: point.close,
-          volume: 0,
-        });
-      } else {
-        setCrosshair(null);
-      }
+      setCrosshairTime(param.time === undefined ? null : Number(param.time));
     });
 
     // Drawing placement: armed by the toolbar below, disarmed after the click
     // (or clicks) that complete a shape. Reads `placingRef` and
     // `addDrawingRef` rather than closed-over state, since this subscription
-    // is made once at mount and both change afterwards.
+    // is made once at mount and both change afterwards. `mainSeries()` reads
+    // `chartTypeRef` for the same reason: candles/line can toggle long after
+    // this subscription was made.
     chart.subscribeClick((param: MouseEventParams<Time>) => {
       const mode = placingRef.current;
-      if (!mode || !param.point || param.time === undefined) return;
+      const series = mainSeries();
+      if (!mode || !series || !param.point || param.time === undefined) return;
       const price = series.coordinateToPrice(param.point.y);
       if (price === null) return;
       const time = Number(param.time);
@@ -367,7 +420,8 @@ function Chart({
       resize.disconnect();
       chart.remove();
       chartRef.current = null;
-      seriesRef.current = null;
+      candleSeriesRef.current = null;
+      lineSeriesRef.current = null;
       volumeRef.current = null;
       indicatorSeriesRef.current.clear();
       priceLineRef.current.clear();
@@ -376,28 +430,35 @@ function Chart({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Toggling chart type swaps which series is *visible* rather than adding or
+  // removing one -- see the ref declarations above for why. Persisted so the
+  // next visit (or the next mint) opens the way this one was left.
   useEffect(() => {
-    const series = seriesRef.current;
+    candleSeriesRef.current?.applyOptions({ visible: chartType === "candles" });
+    lineSeriesRef.current?.applyOptions({ visible: chartType === "line" });
+    saveChartType(chartType);
+  }, [chartType]);
+
+  // `fitContent()` only on the first data a given mint+interval loads. Every
+  // 15s refresh after that must leave the reader's zoom and scroll alone --
+  // firing it on every update was the bug: a reader who zoomed in got yanked
+  // back out on the next poll.
+  const fitKeyRef = useRef<string | null>(null);
+  useEffect(() => {
+    const candle = candleSeriesRef.current;
+    const line = lineSeriesRef.current;
     const volume = volumeRef.current;
-    if (!series || !volume) return;
-    series.setData(
-      candles.map((c) => ({
-        time: c.time as UTCTimestamp,
-        open: c.open,
-        high: c.high,
-        low: c.low,
-        close: c.close,
-      })),
-    );
-    volume.setData(
-      candles.map((c) => ({
-        time: c.time as UTCTimestamp,
-        value: c.volume,
-        color: c.close >= c.open ? CHART_COLORS.upSoft : CHART_COLORS.downSoft,
-      })),
-    );
-    chartRef.current?.timeScale().fitContent();
-  }, [candles]);
+    if (!candle || !line || !volume) return;
+    candle.setData(toCandlestickData(candles));
+    line.setData(toLineData(candles));
+    volume.setData(toVolumeData(candles, CHART_COLORS.upSoft, CHART_COLORS.downSoft));
+
+    const fitKey = `${mint}:${interval}`;
+    if (fitKeyRef.current !== fitKey) {
+      fitKeyRef.current = fitKey;
+      chartRef.current?.timeScale().fitContent();
+    }
+  }, [candles, mint, interval]);
 
   // Indicators: recomputed from *this* interval's candles every time either
   // changes. Switching timeframe therefore recomputes from the new interval's
@@ -412,7 +473,7 @@ function Chart({
 
     const times = candles.map((c) => c.time);
     const closes = candles.map((c) => c.close);
-    const volumes = candles.map((c) => c.volume);
+    const volumes = candles.map((c) => c.quote_volume);
     const messages: string[] = [];
 
     indicatorChoices.forEach((choice, i) => {
@@ -448,10 +509,10 @@ function Chart({
   // straight segment between exactly two points without needing a plugin.
   useEffect(() => {
     const chart = chartRef.current;
-    const series = seriesRef.current;
+    const series = mainSeries();
     if (!chart || !series) return;
 
-    for (const pl of priceLineRef.current.values()) series.removePriceLine(pl);
+    for (const { owner, line } of priceLineRef.current.values()) owner.removePriceLine(line);
     priceLineRef.current.clear();
     for (const s of trendSeriesRef.current.values()) chart.removeSeries(s);
     trendSeriesRef.current.clear();
@@ -466,7 +527,7 @@ function Chart({
           axisLabelVisible: true,
           title: "",
         });
-        priceLineRef.current.set(drawing.id, priceLine);
+        priceLineRef.current.set(drawing.id, { owner: series, line: priceLine });
       } else {
         const [first, second] = [drawing.from, drawing.to].sort((a, b) => a.time - b.time);
         if (!first || !second) continue;
@@ -484,7 +545,10 @@ function Chart({
         trendSeriesRef.current.set(drawing.id, line);
       }
     }
-  }, [drawings]);
+    // `chartType` is a dependency, not just a read through `mainSeries()`:
+    // toggling chart type must reattach a horizontal line to the series that
+    // is now visible, or it stays on a hidden one and looks like it vanished.
+  }, [drawings, chartType]);
 
   const toggleIndicator = useCallback((choice: IndicatorChoice) => {
     setIndicatorChoices((prev) => {
@@ -506,8 +570,12 @@ function Chart({
     [indicatorChoices],
   );
 
+  // `crosshairTime` only ever names a bucket this response carries --
+  // `findCandleAtTime` looks the OHLC back up rather than the crosshair
+  // handler carrying it, since a line series' own crosshair data is just a
+  // `value` (the close), not open/high/low.
   const last = candles.at(-1) ?? null;
-  const readout = crosshair ?? last;
+  const readout = (crosshairTime === null ? null : findCandleAtTime(candles, crosshairTime)) ?? last;
 
   // The server says whether it covered the range asked for. It used to be
   // inferred here by comparing the returned candles' edges against the
@@ -519,6 +587,23 @@ function Chart({
   return (
     <div className="flex h-full flex-col">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-[var(--color-line)] px-3 py-1.5">
+        <div className="flex gap-1">
+          {(["candles", "line"] as const).map((type) => (
+            <button
+              key={type}
+              type="button"
+              onClick={() => setChartType(type)}
+              aria-pressed={type === chartType}
+              className={`rounded px-2 py-0.5 text-xs capitalize ${
+                type === chartType
+                  ? "bg-[var(--color-ink)] text-[var(--color-text)]"
+                  : "text-[var(--color-dim)] hover:text-[var(--color-text)]"
+              }`}
+            >
+              {type}
+            </button>
+          ))}
+        </div>
         {INDICATOR_OPTIONS.map((choice) => {
           const key = indicatorChoiceKey(choice);
           const active = activeKeys.has(key);
@@ -581,10 +666,19 @@ function Chart({
       <div className="flex items-baseline gap-3 px-3 py-1 text-xs tabular-nums text-[var(--color-dim)]">
         {readout ? (
           <>
-            <span>O {formatPrice(readout.open)}</span>
-            <span>H {formatPrice(readout.high)}</span>
-            <span>L {formatPrice(readout.low)}</span>
-            <span>C {formatPrice(readout.close)}</span>
+            {/* Not USD: `Fill.price` in radar-stream/src/decode.rs is
+             *  quote_amount / token_amount against whichever quote leg the
+             *  pool paired with. `formatPrice` prefixes "$", which this
+             *  readout previously did too, on a number never in dollars. */}
+            <span>O {formatSolPrice(readout.open)}</span>
+            <span>H {formatSolPrice(readout.high)}</span>
+            <span>L {formatSolPrice(readout.low)}</span>
+            <span>C {formatSolPrice(readout.close)}</span>
+            {/* The unit comes from the server, never assumed: many pump.fun
+             *  coins trade against PUMP or USDC, and a fixed "SOL" here was
+             *  as wrong for them as the "$" it replaced. No unit when the
+             *  server cannot name one. */}
+            {quoteMint && <span>{quoteLabel(quoteMint)}</span>}
           </>
         ) : (
           <span>&nbsp;</span>

@@ -388,6 +388,15 @@ exclude_re = [
     # further back than the ceiling being pulled up to it -- is covered and
     # its mutants are caught.
     'replace > with >= in clamped_start',
+
+    # `default_candle_span` returns the ceiling when `interval * bars` is past
+    # it and the product otherwise. `>` and `>=` differ only where the two are
+    # equal (an interval of 288s, which no chart offers), and there both arms
+    # return the same number. The function holds the only `>`, so the name
+    # does not hide another mutant.
+    # Reported by CI on 2026-09-29 at crates/radar-serve/src/market/mod.rs:104:13.
+    'replace > with >= in default_candle_span',
+
     'delete ! in fold_holders',
 
     # `assemble::write_shortvec`: same argument as `compact_u16` above, in the

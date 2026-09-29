@@ -725,25 +725,30 @@ export interface MarketToken {
   liquidity_reason: string | null;
 }
 
+/** The server still accepts "1d" (`interval_seconds` in
+ *  `crates/radar-serve/src/market/mod.rs`) -- only the timeframe *buttons*
+ *  drop it. The live feed keeps one day of minutes (`CANDLE_MINUTES` in
+ *  `radar-stream/src/tape.rs`), so a 1D chart is at most two 1-day candles:
+ *  a button offering a "shape" that can never be more than two bars is worse
+ *  than not offering it. */
 export type CandleInterval = "1m" | "5m" | "15m" | "1h" | "4h" | "1d";
 
-export const CANDLE_INTERVALS: readonly CandleInterval[] = [
-  "1m",
-  "5m",
-  "15m",
-  "1h",
-  "4h",
-  "1d",
-];
+export const CANDLE_INTERVALS: readonly CandleInterval[] = ["1m", "5m", "15m", "1h", "4h"];
 
-/** One bar. `time` is Unix seconds, which is what `lightweight-charts` wants. */
+/** One bar. Field names match `radar_backfill::market::fold::Candle` exactly
+ *  -- see `candleContract.test.ts`, which parses the Rust struct and checks
+ *  it. `time` is Unix seconds, which is what `lightweight-charts` wants;
+ *  `bucket_start` is the same instant as a UTC text stamp, unused here. */
 export interface Candle {
   time: number;
+  bucket_start: string;
   open: number;
   high: number;
   low: number;
   close: number;
-  volume: number;
+  quote_volume: number;
+  token_volume: number;
+  trade_count: number;
 }
 
 export interface CandlesQuery {
@@ -774,6 +779,10 @@ export interface Candles {
   covered: MarketWindow & { complete: boolean };
   /** The range the caller asked for, echoed back. */
   requested: MarketWindow;
+  /** The asset every candle's price is in, or null when the server cannot
+   *  name one. Not always SOL: many pump.fun coins trade against PUMP or
+   *  USDC. Label with `format.quoteLabel`; show no unit when null. */
+  quote_mint: string | null;
   candles: Candle[];
 }
 

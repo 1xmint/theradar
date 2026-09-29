@@ -82,23 +82,40 @@ use serde_json::{Value, json};
 /// changes how far back the newest trades are found, never how many come back.
 const DEFAULT_WINDOW_SECONDS: i64 = 30 * 60;
 
-/// How far back a chart reaches when the caller names no range.
+/// How many bars a default chart aims to show, whatever the interval.
+///
+/// A fixed one-hour default window gave a 15m chart 4 candles and a 1h or 1d
+/// chart exactly one -- the single-candle chart observed in production on
+/// 2026-09-29. Scaling the span by the interval gives 300 bars up to the 24h
+/// ceiling -- 300 at 1m, 96 at 15m, 24 at 1h, 6 at 4h.
+const DEFAULT_CANDLE_BARS: i64 = 300;
+
+/// How far back a chart reaches when the caller names no range: the interval
+/// times [`DEFAULT_CANDLE_BARS`], clamped to [`MAX_CANDLE_WINDOW_SECONDS`].
 ///
 /// Wider than the tape's window because the two answer different questions: a
 /// tape shows what just happened, a chart shows a shape, and a shape needs
-/// more than two minutes of it. Bounded rather than unbounded because the
+/// more than two minutes of it. Clamped rather than unbounded because the
 /// response states the range it actually covered, and a caller asking for a
 /// day of a coin collected for ten minutes should be told that plainly rather
 /// than handed a day-shaped axis with ten minutes drawn on it.
-const DEFAULT_CANDLE_WINDOW_SECONDS: i64 = 60 * 60;
+const fn default_candle_span(interval_seconds: i64) -> i64 {
+    let span = interval_seconds * DEFAULT_CANDLE_BARS;
+    if span > MAX_CANDLE_WINDOW_SECONDS {
+        MAX_CANDLE_WINDOW_SECONDS
+    } else {
+        span
+    }
+}
 
 /// The window `/v1/market/coins` ranks activity over.
 const COINS_WINDOW_SECONDS: i64 = 10 * 60;
 
 /// A chart reaches further back than a tape: a shape needs more than two
 /// minutes of itself. Held at compile time so the two windows cannot be
-/// reordered by an edit to either.
-const _: () = assert!(DEFAULT_CANDLE_WINDOW_SECONDS > DEFAULT_WINDOW_SECONDS);
+/// reordered by an edit to either. Checked against the 1m default span, the
+/// narrowest one `default_candle_span` produces.
+const _: () = assert!(default_candle_span(60) > DEFAULT_WINDOW_SECONDS);
 
 /// A tape narrower than one collector pass shows an empty sliver of a busy
 /// coin -- the defect that made four of the four busiest coins look untraded
@@ -1079,7 +1096,7 @@ pub async fn candles(
         Err(r) => return *r,
     };
     let requested_from = match params.from.as_deref().map(parse_stamp).transpose() {
-        Ok(v) => v.unwrap_or(reaching_back(requested_to, DEFAULT_CANDLE_WINDOW_SECONDS)),
+        Ok(v) => v.unwrap_or(reaching_back(requested_to, default_candle_span(interval))),
         Err(r) => return *r,
     };
     if is_a_backwards_range(requested_from, requested_to) {
@@ -1099,6 +1116,9 @@ pub async fn candles(
         "interval": params.interval.as_deref().unwrap_or("1m"),
         "requested": { "from": from_epoch(requested_from), "to": from_epoch(requested_to) },
         "covered": { "from": from_s, "to": to_s, "complete": true },
+        // Unknown, not SOL: this fold takes every priced trade whatever it
+        // was paid in, so the candles carry no single quote asset to name.
+        "quote_mint": null,
         "candles": candles,
     }))
     .into_response()
@@ -2036,20 +2056,40 @@ mod tests {
 
     /// The default windows are the spans their names claim.
     ///
-    /// Both are written as products -- `60 * 60` and `10 * 60` -- and a mutant
-    /// turning either into a sum or a quotient leaves a plausible-looking small
-    /// number: 120 seconds for the chart, 70 for the coin list. Neither errors,
-    /// and both quietly show a reader a couple of minutes of market while the
-    /// interface says an hour.
+    /// Written as a product -- `10 * 60` -- and a mutant turning it into a sum
+    /// or a quotient leaves a plausible-looking small number: 70 seconds for
+    /// the coin list. Neither errors, and it quietly shows a reader a couple
+    /// of minutes of market while the interface says ten.
     #[test]
     fn the_default_windows_are_the_spans_their_names_claim() {
-        assert_eq!(DEFAULT_CANDLE_WINDOW_SECONDS, 3_600, "an hour of chart");
         assert_eq!(COINS_WINDOW_SECONDS, 600, "ten minutes of activity");
         assert_eq!(DEFAULT_WINDOW_SECONDS, 1_800, "half an hour of tape");
         assert_eq!(MAX_CANDLE_WINDOW_SECONDS, 86_400, "a day is the ceiling");
         // That a chart reaches further back than a tape is held at compile
         // time beside the constants themselves -- clippy rightly refuses an
         // assertion whose value is already known.
+    }
+
+    /// The default chart span scales with the interval, so a 1h or 1d chart
+    /// is not stuck at a single candle the way the fixed one-hour default
+    /// left it (observed in production 2026-09-29).
+    #[test]
+    fn default_candle_span_scales_with_the_interval_and_clamps_to_the_ceiling() {
+        assert_eq!(
+            default_candle_span(60),
+            18_000,
+            "1m: 300 bars of a minute each"
+        );
+        assert_eq!(
+            default_candle_span(300),
+            86_400,
+            "5m: 300 bars would be 25h, clamped to the day ceiling"
+        );
+        assert_eq!(
+            default_candle_span(3_600),
+            86_400,
+            "1h: 300 bars would be 300h, clamped to the day ceiling"
+        );
     }
 
     /// A range must run forwards, and a zero-width one is a mistake.

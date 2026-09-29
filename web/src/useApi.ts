@@ -28,25 +28,50 @@ export type Load<T> =
 export function useApi<T>(
   fetcher: (signal: AbortSignal) => Promise<T>,
   deps: readonly unknown[],
+  /** When set, silently refetches on this interval after the initial load,
+   *  for a panel that should feel live (the chart, on a mint's own feed).
+   *  A refresh that fails does not flip a `"ready"` panel to `"failed"` --
+   *  that would blank a working chart over one dropped poll -- and it never
+   *  sets `"loading"`, which would flash the placeholder and drop scroll
+   *  position on every tick. Only the *initial* fetch can reach `"failed"`. */
+  refreshMs?: number,
 ): Load<T> {
   const [load, setLoad] = useState<Load<T>>({ state: "loading" });
 
   useEffect(() => {
     const controller = new AbortController();
     setLoad({ state: "loading" });
-    fetcher(controller.signal)
-      .then((value) => {
-        if (!controller.signal.aborted) setLoad({ state: "ready", value });
-      })
-      .catch((e: unknown) => {
-        if (controller.signal.aborted) return;
-        if (e instanceof ApiError) {
-          setLoad({ state: "failed", status: e.status, detail: e.detail });
-        } else {
-          setLoad({ state: "failed", status: 0, detail: String(e) });
-        }
-      });
-    return () => controller.abort();
+
+    // A poll slower than `refreshMs` must not overlap the next one: the two
+    // replies could arrive out of order and the older one would win. So a
+    // tick is skipped while any fetch is still out.
+    let inFlight = false;
+    const run = (silent: boolean) => {
+      if (inFlight) return;
+      inFlight = true;
+      fetcher(controller.signal)
+        .finally(() => {
+          inFlight = false;
+        })
+        .then((value) => {
+          if (!controller.signal.aborted) setLoad({ state: "ready", value });
+        })
+        .catch((e: unknown) => {
+          if (controller.signal.aborted || silent) return;
+          if (e instanceof ApiError) {
+            setLoad({ state: "failed", status: e.status, detail: e.detail });
+          } else {
+            setLoad({ state: "failed", status: 0, detail: String(e) });
+          }
+        });
+    };
+
+    run(false);
+    const timer = refreshMs ? window.setInterval(() => run(true), refreshMs) : undefined;
+    return () => {
+      controller.abort();
+      if (timer !== undefined) window.clearInterval(timer);
+    };
     // `fetcher` is deliberately not a dependency: callers pass a fresh closure
     // every render, and `deps` names the values that actually identify the
     // request (a mint, an interval, a limit). Depending on the closure too

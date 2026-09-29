@@ -255,6 +255,68 @@ async fn holders_are_by_wallet_with_the_pool_marked() {
     assert_eq!(holders[1]["pool"], false);
 }
 
+/// A 1h chart with no `from` used to default to one hour of window --
+/// `DEFAULT_CANDLE_WINDOW_SECONDS` fixed at 3600 regardless of interval --
+/// which rolled up to exactly one candle, the single-candle chart observed in
+/// production on 2026-09-29. The default now scales with the interval
+/// (`default_candle_span`), so a 1h request reaches back the full 24h the
+/// feed can hold and rolls up to several candles, not one.
+#[tokio::test]
+async fn a_default_1h_request_reaches_back_a_day_not_an_hour() {
+    const HOURS: i64 = 5;
+    let live = Arc::new(Live::new(usize::MAX));
+    {
+        let mut tape = live.tape();
+        tape.apply(
+            0,
+            Signature::new([1; 64]),
+            T0,
+            Decoded {
+                launches: vec![LaunchSeen {
+                    mint: COIN,
+                    name: "Radar Test".into(),
+                    symbol: "RDR".into(),
+                    uri: "https://example.invalid".into(),
+                    creator: TRADER,
+                }],
+                ..Decoded::default()
+            },
+        );
+        for i in 0..=(HOURS * 60) {
+            tape.apply(
+                1 + u64::try_from(i).unwrap(),
+                Signature::new([2; 64]),
+                T0 + i * 60,
+                Decoded {
+                    fills: vec![fill(COIN, 0.001, MarketSide::Buy)],
+                    ..Decoded::default()
+                },
+            );
+        }
+    }
+    let (status, body) = get(live, &format!("/v1/market/candles/{COIN}?interval=1h")).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    // `requested.from`/`to` are formatted by `from_epoch`; parse them back
+    // with its inverse, `to_epoch`, to compare the window width.
+    let from_ts = radar_store::to_epoch(body["requested"]["from"].as_str().unwrap()).unwrap();
+    let to_ts = radar_store::to_epoch(body["requested"]["to"].as_str().unwrap()).unwrap();
+    assert_eq!(
+        to_ts - from_ts,
+        24 * 60 * 60,
+        "a 1h chart's default span is a full day, not a fixed hour: {body}"
+    );
+    assert_eq!(
+        body["quote_mint"],
+        WSOL.to_string(),
+        "the chart names the asset its prices are in: {body}"
+    );
+    let candles = body["candles"].as_array().unwrap();
+    assert!(
+        candles.len() > 1,
+        "several hours of minutes should roll up to more than one 1h candle: {body}"
+    );
+}
+
 #[tokio::test]
 async fn a_feed_with_nothing_yet_says_so_instead_of_an_empty_market() {
     let empty = Arc::new(Live::new(usize::MAX));

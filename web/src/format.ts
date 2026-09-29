@@ -31,6 +31,22 @@ export function formatSolAmount(value: number): string {
   return value.toFixed(4);
 }
 
+/** A SOL-quoted price -- e.g. a candle's OHLC, folded from `Fill.price`
+ *  (`quote_amount / token_amount` against whichever quote leg the pool
+ *  paired against -- wSOL, PUMP or USDC; the caller names it). Never prefixed
+ *  with "$", for the same reason as `formatSolAmount`: this number was never
+ *  in dollars. A meme-coin's SOL price is routinely far below `formatSolAmount`'s
+ *  four fixed decimals (e.g. 0.0000002), which would print "0.0000" on every
+ *  row -- so this mirrors `formatPrice`'s tiered precision instead, just
+ *  without the "$". */
+export function formatSolPrice(value: number): string {
+  if (value === 0) return "0.00";
+  const abs = Math.abs(value);
+  if (abs >= 1) return value.toFixed(4);
+  if (abs >= 0.01) return value.toFixed(6);
+  return value.toPrecision(3);
+}
+
 /** A large quantity -- market cap, liquidity, volume -- compacted to K/M/B. */
 export function formatCompactUsd(value: number): string {
   const sign = value < 0 ? "-" : "";
