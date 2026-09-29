@@ -1148,7 +1148,10 @@ pub async fn trades(
     trades.truncate(limit);
     Json(json!({
         "mint": mint.to_string(),
-        "window": { "from": from_s, "to": to_s, "complete": true },
+        // Never `true` from the store: the collector keeps the newest trades
+        // per coin per pass, so a busy coin's tape is a sample with holes in
+        // it (see `radar_backfill::market::query::trades_query`).
+        "window": { "from": from_s, "to": to_s, "complete": false },
         "trades": trades,
     }))
     .into_response()
@@ -1259,7 +1262,10 @@ pub async fn candles(
         "mint": mint.to_string(),
         "interval": params.interval.as_deref().unwrap_or("1m"),
         "requested": { "from": from_epoch(requested_from), "to": from_epoch(requested_to) },
-        "covered": { "from": from_s, "to": to_s, "complete": true },
+        // A sample, never `true`: see the trades route. On 2026-09-29 a coin
+        // the chain showed trading 20-90 times a minute drew an hour with no
+        // candles while this said the range was complete.
+        "covered": { "from": from_s, "to": to_s, "complete": false },
         "quote_mint": quote,
         "candles": candles,
     }))

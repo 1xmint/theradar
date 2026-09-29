@@ -313,4 +313,7 @@ async fn a_collected_store_answers_the_tape_and_the_chart() {
     let chart = get_json(&state, &format!("/v1/market/candles/{A_MINT}")).await;
     let candles = chart["candles"].as_array().expect("a candles array");
     assert_eq!(candles.len(), 1, "one trade folds to one candle: {chart}");
+    // The stored tape is a per-coin sample, never a complete window.
+    assert_eq!(tape["window"]["complete"], false, "{tape}");
+    assert_eq!(chart["covered"]["complete"], false, "{chart}");
 }

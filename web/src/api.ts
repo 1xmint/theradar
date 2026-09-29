@@ -778,7 +778,9 @@ export interface Candles {
    * asked for: a coin younger than the window, or one the collector has not
    * reached. Parse with `format.parseStamp`, never `new Date(x * 1000)`,
    * which produced the literal words "Invalid Date" under a TIME header until
-   * 2026-09-12.
+   * 2026-09-12. `complete` is false whenever Radar holds only a sample of
+   * the coin's trades -- always, for the stored tape -- so an empty stretch
+   * may be missing data rather than a quiet market.
    */
   covered: MarketWindow & { complete: boolean };
   /** The range the caller asked for, echoed back. */

@@ -3,10 +3,14 @@
 //! scale to the logarithmic mode (and back), and a chart mounted afterwards --
 //! a new coin or interval -- opens in the saved mode. `lightweight-charts`
 //! draws to a canvas jsdom does not have, so it is replaced by a recorder.
+//! The same harness checks the footnote an incomplete tape carries.
 
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { PriceScaleMode } from "lightweight-charts";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+// Read by the mocked `market.candles` below at call time.
+const covered = vi.hoisted(() => ({ complete: true }));
 
 const applyOptions = vi.fn();
 const priceScale = vi.fn(() => ({ applyOptions }));
@@ -42,7 +46,11 @@ vi.mock("./api", async (importActual) => {
       candles: vi.fn(async () => ({
         mint: "M",
         interval: "15m",
-        covered: { from: "2026-09-01 00:00:00", to: "2026-09-01 01:00:00", complete: true },
+        covered: {
+          from: "2026-09-01 00:00:00",
+          to: "2026-09-01 01:00:00",
+          complete: covered.complete,
+        },
         requested: { from: "2026-09-01 00:00:00", to: "2026-09-01 01:00:00" },
         quote_mint: null,
         candles: [
@@ -78,6 +86,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  covered.complete = true;
   localStorage.clear();
 });
 
@@ -119,5 +128,21 @@ describe("the chart's Log switch", () => {
     fireEvent.click(screen.getByRole("button", { name: "line" }));
     expect(screen.getByRole("button", { name: "Log" }).getAttribute("aria-pressed")).toBe("true");
     expect(applyOptions).toHaveBeenLastCalledWith({ mode: PriceScaleMode.Logarithmic });
+  });
+});
+
+describe("the chart's coverage footnote", () => {
+  const GAP = /a gap can be missing data rather than quiet trading/;
+
+  it("says a gap may be missing data when the server does not claim every trade", async () => {
+    covered.complete = false;
+    render(<CandleChart mint="M" />);
+    expect(await screen.findByText(GAP)).toBeTruthy();
+  });
+
+  it("says nothing of the kind when the server covered the range", async () => {
+    render(<CandleChart mint="M" />);
+    await logButton();
+    expect(screen.queryByText(GAP)).toBeNull();
   });
 });
