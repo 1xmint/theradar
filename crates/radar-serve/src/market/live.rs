@@ -25,10 +25,10 @@ use radar_types::Address;
 use serde_json::json;
 
 use super::{
-    COINS_WINDOW_SECONDS, DEFAULT_CANDLE_WINDOW_SECONDS, DEFAULT_HOLDERS_LIMIT,
-    DEFAULT_TRADE_LIMIT, DEFAULT_WINDOW_SECONDS, Degradation, MAX_CANDLE_WINDOW_SECONDS,
-    MAX_COINS_LIMIT, MAX_HOLDERS_LIMIT, MAX_TRADE_LIMIT, clamped_start, is_a_backwards_range,
-    reaching_back, sort_coins, to_fold_trade,
+    COINS_WINDOW_SECONDS, DEFAULT_HOLDERS_LIMIT, DEFAULT_TRADE_LIMIT, DEFAULT_WINDOW_SECONDS,
+    Degradation, MAX_CANDLE_WINDOW_SECONDS, MAX_COINS_LIMIT, MAX_HOLDERS_LIMIT, MAX_TRADE_LIMIT,
+    clamped_start, default_candle_span, is_a_backwards_range, reaching_back, sort_coins,
+    to_fold_trade,
 };
 
 /// Said while the feed is configured and nothing has arrived yet.
@@ -120,7 +120,7 @@ pub fn candles(
     };
     let requested_to = to.unwrap_or_else(|| window_end(newest));
     let requested_from =
-        from.unwrap_or_else(|| reaching_back(requested_to, DEFAULT_CANDLE_WINDOW_SECONDS));
+        from.unwrap_or_else(|| reaching_back(requested_to, default_candle_span(interval)));
     if is_a_backwards_range(requested_from, requested_to) {
         return super::bad_request("from must be before to");
     }
