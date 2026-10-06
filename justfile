@@ -70,6 +70,10 @@ check: _disk build tests lint fmt
 # Everything runnable off a GitHub runner.
 ci: build tests lint fmt cargo-deny licence-headers
 
+# Linux-only socket and subprocess boundary; a fake CLI uses no credentials.
+private-setup:
+    setpriv --no-new-privs python3 -m unittest discover -s deploy -p 'test_codex_bridge.py' -v
+
 # --- required checks, one recipe per status-check context ---------------------
 
 # Compile every target, with the lockfile as committed.
@@ -95,6 +99,10 @@ tests:
         echo "Either tests were skipped or the harness is lying. Raise MIN_TESTS in" >&2
         echo "the justfile when the suite grows; never lower it to make this pass." >&2
         exit 1
+    fi
+    # Linux peer credentials are exercised by the existing required tests job.
+    if [ "$(uname -s)" = "Linux" ]; then
+        just private-setup
     fi
 
 # Pedantic clippy, denied. The workspace lint table sets the levels; this runs them.

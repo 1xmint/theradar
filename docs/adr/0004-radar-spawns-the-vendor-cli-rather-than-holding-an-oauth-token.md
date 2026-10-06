@@ -144,6 +144,24 @@ reads credentials, grants a Privy delegation, or reaches the execution path.
 
 ## Related decisions
 
+### Deployment amendment — retain NoNewPrivileges (2026-10-06)
+
+Live inspection found `NoNewPrivileges=yes` on `radar-serve`, so the documented
+sudo wrapper could not switch to the isolated CLI user. The deployment now uses
+a local socket-activated service running as `radar-agent`; Radar's command
+configuration names its unprivileged client. Both services retain
+`NoNewPrivileges`. Systemd socket permissions and Linux peer credentials admit
+only guardian. The broker accepts three fixed commands and supplies the CLI's
+cwd, cleared environment and read-only inference flags itself. It serializes
+CLI operations and kills a process group when its client disconnects. It never
+opens credentials and has no connection to the signer.
+
+The change is a deployment implementation of the existing credential-isolation
+decision; it does not authorize a model call or funds. Linux tests use a fake
+CLI to check refused commands, refused peers, stdin/environment boundaries and
+disconnect cleanup. Production namespace compatibility still needs the owner's
+one-time administrator install and a real login-status check.
+
 - AGENTS.md rule 1 — model judgement never authorises capital. This decision is
   about a credential rather than about capital, but it is the same shape: the
   component that handles untrusted content holds as little authority as possible.

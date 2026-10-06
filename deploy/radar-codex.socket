@@ -1,0 +1,13 @@
+# SPDX-License-Identifier: Apache-2.0
+[Unit]
+Description=Radar vendor CLI local socket
+
+[Socket]
+ListenStream=/run/radar-codex.sock
+SocketUser=radar-agent
+SocketGroup=guardian
+SocketMode=0660
+RemoveOnStop=true
+
+[Install]
+WantedBy=sockets.target

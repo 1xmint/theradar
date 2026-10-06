@@ -13,7 +13,7 @@ benefit of the doubt on everything else.
 
 ## Index
 
-**29 of these 39 name something mechanical that would catch a
+**30 of these 40 name something mechanical that would catch a
 recurrence. 10 name only a habit, and say so** — which is this file's opening
 standard rather than a gap in it. The habit-only rows are the ones worth reading
 twice; nothing will stop those repeating except somebody remembering.
@@ -64,6 +64,7 @@ quietly absent.
 | [37](#37-a-query-window-that-grew-with-the-stores-age-crossed-a-vendor-limit-nobody-chose-and-a-health-check-that-could-not-see-its-own-age-said-ok-through-285-failed-runs) | A query window that grew with the store's age crossed a vendor limit nobody chose, and a health check that could not see its own age said `ok` through 285 failed runs | `earliest_due_slot_ignores_launches_that_are_not_due`,… |
 | [38](#38-every-wallet-exception-was-reported-as-cancellation) | Every wallet exception was reported as cancellation | `siws.test.ts` and `Wallet.test.tsx` preserve technical errors and retry |
 | [39](#39-local-tool-versions-gave-a-different-answer-from-ci) | Local tool versions gave a different answer from CI | CI's locked npm install and workspace lint gate |
+| [40](#40-a-sudo-wrapper-conflicted-with-the-services-hardening) | A sudo wrapper conflicted with the service's hardening | the fixed-command bridge tests under NoNewPrivileges |
 
 ---
 
@@ -1863,3 +1864,23 @@ value, and correct the module paths in the compiler's automatic suggestions.
 A local pass under a different tool version is evidence for that version only;
 it cannot stand in for the required CI result. Rust 1.99 workspace clippy passed
 after these test-only corrections.
+
+## 40. A sudo wrapper conflicted with the service's hardening
+
+**2026-10-06.** The CLI isolation runbook used sudo to switch to radar-agent,
+while the deployed Radar service had `NoNewPrivileges=yes`. Both instructions
+were individually reasonable, and the wrapper could not work inside that
+service. Check the live service's restrictions before presenting its admin setup
+as ready. The first setup script was replaced with a refusing placeholder before
+preparing a socket service that retains Radar's hardening.
+
+The client now reaches a socket-activated process already running as radar-agent.
+It supplies three fixed vendor commands, checks the peer UID, bounds transport
+input/output, and cleans up a CLI when its client disconnects. No sudo rule or
+privilege change is part of a Radar request.
+
+**What catches a recurrence:** `just private-setup` runs the fixed-command bridge
+tests with `setpriv --no-new-privs`. The process invocation check requires the
+vendor CLI directly, and the peer-boundary test fails with the refusal removed.
+Actual installed service compatibility remains a deployment check, not a claim
+from those fake-CLI tests.

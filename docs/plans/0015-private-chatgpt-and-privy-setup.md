@@ -104,6 +104,26 @@ used to bypass this boundary. PR 334 contains this increment.
 
 ## Next actions
 
+### Administrator setup increment
+
+The owner authorized server setup and confirmed admin access. SSH still requires
+interactive sudo password entry. Prepared `deploy/setup-private-connections.py`
+for that entry and hidden Privy app-secret input on the owner's own terminal.
+The script keeps root-only backups, preserves unrelated env settings, installs
+the supplied app ID, and sets private admission closed without a money or
+inference allowance. It applies no signer configuration and does not restart Radar.
+
+Live systemd inspection exposed `NoNewPrivileges=yes` on Radar: the old documented
+sudo wrapper cannot work there. Replaced that deployment approach with a socket
+service under radar-agent, retaining service hardening. Tests exercise command
+and peer refusals, cleared environment/stdin, separate output streams, and
+process-group cleanup using a fake CLI. They make no vendor or trading call.
+
+Documentation commit `97e7543`'s CI run `37528427538` failed one chart test at its
+initial mode assertion; the same unchanged code passed the preceding code CI.
+Wait for the chart effect before asserting its mode, as the neighboring saved-mode
+test already does. The scoped five tests and full 343 web tests/build pass locally.
+
 1. Complete: PR 334, CI and release runs above, artifact hash, fixed deployment,
    live build, public headers, and challenge format verified at `49415d5`.
 2. Use the supplied public Privy app ID and obtain the dedicated Solana wallet ID. Configure
@@ -124,10 +144,14 @@ used to bypass this boundary. PR 334 contains this increment.
 **Stopped at:** deployed connection and diagnostics increment at `49415d5`.
 ChatGPT and Privy are not connected in production; no autonomous trading loop
 has been enabled. The branch's broader private-autonomy work remains in progress.
-**Next action:** owner checks both Privy security boxes and continues onboarding.
-Use administrator access to install the isolated Codex wrapper and service
-configuration from the deploy guide. Obtain the owner's Privy DID and dedicated
-wallet ID to configure private admission, then continue steps 2–5.
+**Next action:** finish the setup script's Linux checks and branch CI, upload the
+four deployment files together, and have the owner run the reviewed admin command
+with sudo password and hidden Privy secret entry. The first uploaded sudo-wrapper
+version was replaced with a refusing placeholder after finding NoNewPrivileges;
+do not run that version. Once the corrected setup reports saved, apply env through
+the verified artifact and fixed deployment, test the CLI client from Radar's
+service restrictions, then complete ChatGPT device login as the operator.
+Obtain the owner's Privy DID and dedicated wallet ID to configure private admission.
 **Do not:** claim a wallet is delegated from an app ID, treat connected ChatGPT
 as capital authority, expose the private site, copy existing subscription
 credentials between hosts, invent money limits, or turn on automated trading.

@@ -1,0 +1,24 @@
+# SPDX-License-Identifier: Apache-2.0
+[Unit]
+Description=Radar isolated vendor CLI
+Requires=radar-codex.socket
+After=network-online.target
+
+[Service]
+User=radar-agent
+Group=radar-agent
+WorkingDirectory=/var/lib/radar-agent/work
+ExecStart=/usr/bin/python3 /usr/local/lib/radar/radar-codex-bridge.py --serve
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/radar-agent
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryMax=512M
+TasksMax=64
+KillMode=control-group

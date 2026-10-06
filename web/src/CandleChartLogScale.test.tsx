@@ -99,7 +99,9 @@ describe("the chart's Log switch", () => {
     render(<CandleChart mint="M" />);
     const button = await logButton();
     expect(button.getAttribute("aria-pressed")).toBe("false");
-    expect(applyOptions).toHaveBeenLastCalledWith({ mode: PriceScaleMode.Normal });
+    await waitFor(() =>
+      expect(applyOptions).toHaveBeenLastCalledWith({ mode: PriceScaleMode.Normal }),
+    );
 
     fireEvent.click(button);
     expect(button.getAttribute("aria-pressed")).toBe("true");

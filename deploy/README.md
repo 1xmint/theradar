@@ -326,6 +326,29 @@ The startup log says which state it is in, every start:
 
 ### The reading assistant, when you want it
 
+For the initial private setup on the existing `guardian` VPS, use
+[`setup-private-connections.py`](setup-private-connections.py):
+
+```sh
+sudo python3 /tmp/radar-private-setup.py cmthhkznr0a3u0cl86prxlb7x
+```
+
+Upload that script and the adjacent `radar-codex-bridge.py`, `radar-codex.socket`
+and `radar-codex.service` files from this checkout first. It requires the existing
+`radar-agent` account and vendor CLI, prompts for a missing Privy app secret
+with hidden input, and retains root-only backups before replacing files. It
+installs a root-owned Codex client and a socket-activated service allowing only
+device login, login status, and a fixed stdin-only, read-only inference command.
+The CLI runs from its isolated home with a cleared environment. No sudo rule is
+added: Radar's `NoNewPrivileges` protection remains enabled.
+
+The script configures the supplied Privy app and closes customer admission.
+It does not configure wallet delegation, a signer, money limits or an inference
+allowance, and refuses an existing active inference configuration for review.
+It does not restart the service: apply with the verified artifact and fixed
+`radar-deploy` procedure below. Then use `/automation` for ChatGPT login. Privy
+embedded-wallet login and the owner's admission allowlist remain separate steps.
+
 Off unless a provider *and* a budget are configured, and it holds no credential
 of its own. The subscription path spawns the vendor CLI, which owns `auth.json`
 and its own refresh; Radar has no code that reads, writes or stores a token.
@@ -339,32 +362,23 @@ sudo useradd --system --create-home --home-dir /var/lib/radar-agent      --shell
 sudo install -d -o radar-agent -g radar-agent -m700 /var/lib/radar-agent/.codex
 ```
 
-Seed the credential once, interactively. This is the only step that needs a
-human, and it needs the vendor CLI installed on the box first — check with
-`which codex`:
+The setup script installs the local socket service as that user. A `sudo`
+wrapper cannot work inside the hardened `radar-serve.service`, because
+`NoNewPrivileges=true` prevents its change of user. Disabling that protection
+would let every other child change privilege too.
 
-```
-sudo -u radar-agent env CODEX_HOME=/var/lib/radar-agent/.codex      codex login --device-auth
-```
+Systemd owns `/run/radar-codex.sock`, with mode 0660 and group `guardian`.
+The service also checks Linux peer credentials for guardian's UID. It accepts
+three exact operations; no caller chooses an executable, cwd, environment,
+config override or CLI flags. Requests and output are bounded, and a disconnected
+client terminates the CLI's process group. Calls are serialized, including
+refresh and login. The 128 KiB prompt cap is a transport limit, not a money limit.
 
-Then a wrapper that drops to that user, so `radar-serve` never runs the CLI as
-itself. **It must pass its arguments through**, because Radar supplies the
-subcommand: `exec -` to ask a question and `login --device-auth` to link the
-credential.
-
-```
-sudo tee /usr/local/bin/radar-codex >/dev/null <<'SH'
-#!/bin/sh
-exec sudo -n -u radar-agent env CODEX_HOME=/var/lib/radar-agent/.codex codex "$@"
-SH
-sudo chmod 755 /usr/local/bin/radar-codex
-```
-
-`guardian` needs `NOPASSWD` for exactly that one command and nothing else. Radar
-clears the child's environment and passes only `PATH`, `HOME`, `CODEX_HOME`,
-`LANG`, `LC_ALL` and `TMPDIR`, so nothing else in `/etc/radar/radar.env` reaches
-the CLI, and the prompt goes in on stdin rather than as an argument — arguments
-are visible in `ps` to every user on the box.
+The client forwards `exec -`, `login --device-auth`, or `login status` to that
+service. The service supplies a cleared environment and read-only inference
+sandbox, and the prompt still reaches the CLI on stdin. Nothing in
+`/etc/radar/radar.env` reaches the vendor process. The broker never opens its
+credential file; the vendor CLI continues to own it.
 
 ### Linking is a button, not an SSH session
 
@@ -385,7 +399,7 @@ refresh token expires after roughly 14–30 days of inactivity, and re-linking
 should be a click rather than a procedure somebody has to remember.
 
 ```
-sudo -u radar-agent env CODEX_HOME=/var/lib/radar-agent/.codex      codex login --device-auth
+/usr/local/bin/radar-codex login --device-auth
 ```
 
 Only one flow runs at a time. The credential is single-writer, so a second
