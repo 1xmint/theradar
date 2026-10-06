@@ -129,7 +129,7 @@ CI run `37530529280`. Its required tests job ran the four Linux bridge tests wit
 NoNewPrivileges set. The same tests passed on the VPS, and removing the peer
 refusal failed the peer-boundary test. Python/client-shell syntax and
 `systemd-analyze verify` passed. All four deployment source hashes matched the
-uploaded files. The active `/tmp/radar-private-setup.py` now has SHA256
+uploaded files. That version of `/tmp/radar-private-setup.py` had SHA256
 `d36775b7213553276a16f87fdec35c1c1013bb819f6461f898a332057c13a72c`.
 No administrator install, secret entry or vendor login has occurred yet.
 The owner's next attempt stopped at the setup script's duplicate-setting check
@@ -137,6 +137,13 @@ for RADAR_CUSTOMER_SALT, before any mutation. Match EnvironmentFile's last-value
 behavior instead of refusing an existing repeated assignment. Preserve both salt
 lines verbatim; do not rotate the effective salt. Two fixture regressions check
 last-value selection and unrelated-line preservation, without reading live salts.
+Fix commit `c0546a45c185f561c1017595222a237f74ebd6ac` passed every job in CI run
+`37532736530`. All six Linux setup/bridge tests also passed on the VPS with
+NoNewPrivileges set; restoring the duplicate refusal failed both new regressions.
+The corrected script is uploaded as `/tmp/radar-private-setup.py`, with matching
+local and remote SHA256
+`06128a7c2298a49a7f86f0d9845ce6c07b7922f2eacc745700506736a38a96c7`.
+Remote Python compilation passed. The other three deployment files are unchanged.
 
 1. Complete: PR 334, CI and release runs above, artifact hash, fixed deployment,
    live build, public headers, and challenge format verified at `49415d5`.
@@ -162,7 +169,8 @@ has been enabled. The branch's broader private-autonomy work remains in progress
 `ssh -t guardian-vps-tail "sudo python3 /tmp/radar-private-setup.py cmthhkznr0a3u0cl86prxlb7x"`.
 Sudo password and Privy app secret go only into that interactive terminal.
 The first uploaded sudo-wrapper version was superseded by the verified socket
-setup. Once the corrected setup reports saved, apply env through
+setup; its duplicate-setting refusal was corrected at `c0546a4` and the replacement
+upload verified after CI passed. Once this setup reports saved, apply env through
 the verified artifact and fixed deployment, test the CLI client from Radar's
 service restrictions, then complete ChatGPT device login as the operator.
 Obtain the owner's Privy DID and dedicated wallet ID to configure private admission.
