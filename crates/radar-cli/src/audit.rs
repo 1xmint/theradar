@@ -553,7 +553,7 @@ mod tests {
         // Broken says nothing here. Its words are the error, which is what an
         // operator's shell shows them -- printing them twice would read as two
         // faults.
-        assert!(
+        assert_eq!(
             verify_lines(
                 &Verified::Broken {
                     at: 2,
@@ -562,8 +562,8 @@ mod tests {
                 0,
                 None,
                 None
-            )
-            .is_empty()
+            ),
+            [] as [String; 0]
         );
     }
 
@@ -592,6 +592,9 @@ mod tests {
 
         // A week the journal holds nothing about is empty rather than
         // everything, which is what the inverted comparison would give.
-        assert!(events_of_week(&events, "2026-W99").is_empty());
+        assert_eq!(
+            events_of_week(&events, "2026-W99"),
+            [] as [&radar_journal::Event; 0]
+        );
     }
 }

@@ -378,6 +378,9 @@ mod tests {
 
         // And the other side: nothing missing prints no heading, rather than a
         // heading over an empty list.
-        assert!(missingness_lines(&report_with(Vec::new(), 812)).is_empty());
+        assert_eq!(
+            missingness_lines(&report_with(Vec::new(), 812)),
+            [] as [String; 0]
+        );
     }
 }

@@ -3304,7 +3304,7 @@ mod tests {
             None,
         );
         assert_eq!(record.kernel_outcome, None);
-        assert!(record.kernel_reasons.is_empty());
+        assert_eq!(record.kernel_reasons, [] as [String; 0]);
     }
 
     #[test]
@@ -4014,7 +4014,7 @@ mod tests {
             1,
             "and the refusal is still recorded"
         );
-        assert!(pass.proposals.is_empty());
+        assert_eq!(pass.proposals, [] as [radar_risk::Proposal; 0]);
     }
 
     #[test]

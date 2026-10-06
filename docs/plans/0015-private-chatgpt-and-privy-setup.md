@@ -11,15 +11,20 @@
 Josh explicitly chose a private tool, fully autonomous execution, and a Privy
 wallet. He already has a Privy app and is completing its security checklist.
 This resumes the direction in [design 0017](../design/0017-a-private-autonomous-trader.md)
-and [plan 0011](0011-private-autonomous-trader.md). It supplies neither the app
-identifier nor a wallet, delegation, capital mandate or inference allowance.
-Those remain unset; no real trade is authorized by this increment.
+and [plan 0011](0011-private-autonomous-trader.md). It supplies no
+wallet, delegation, capital mandate or inference allowance. Josh supplied the
+public app ID `cmthhkznr0a3u0cl86prxlb7x` during this session. Server configuration
+and the remaining identifiers and limits stay unset; no real trade is authorized.
 
 ## This increment
 
 - Classify wallet exceptions by code: only 4001 is cancellation. Preserve
   technical failures and their stage, allow retry, reject malformed responses,
   and detect Solflare's namespaced provider. Display feedback below the button.
+- Format SIWS issue times as ISO UTC and random nonces as alphanumeric hex.
+  The live response used epoch seconds and base64url, contrary to the wallet
+  specification. A wallet-side rejection is plausible, not yet confirmed by
+  the owner's browser.
 - Add the operator-only `/automation` page, reached by **Private setup** in the
   terminal. It connects ChatGPT, reports Privy app configuration, and states
   that autonomous execution is not connected. `/ask` contains only chat.
@@ -50,6 +55,17 @@ restoring the fix passed all five chat-route tests. Plumbing and static copy are
 mutation subjects; CI owns the wider mutation gate.
 Removing the application frame header failed the CSP/header regression.
 
+The first CI web job at `39b9511` failed before tests: npm 10 required the
+nested TypeScript 5 peer that npm 11 removed when updating source-map-js.
+Restore that existing lockfile entry and verify `npm@10.9.9 ci` explicitly.
+Do not deploy the first release artifact; it predates the SIWS format fix.
+CI's Rust 1.99 lint also rejected ten pre-existing empty-vector assertions in
+the CLI and stream tests. Their diagnostic comparisons are updated as a release
+prerequisite, without changing the predicates or production behavior. The first
+run's tests and all four mutation shards passed; web and lint were the failures.
+The restored npm 10 install passed, followed by all 343 web tests and the build.
+Reapplying both old SIWS field encodings failed their new regressions.
+
 Live inspection on 2026-10-06 returned build
 `a4d24f7f1db0a7bdb2a9ef271b2981e8dfc087a1`, `agent.configured=false`,
 `trading=true`, `policyClosed=true`. The environment had no Privy app or model
@@ -63,7 +79,7 @@ that the public response carried them.
 1. Finish validation, open the PR, let required CI finish, then build and deploy
    through the established artifact/hash and radar-deploy procedure. Verify
    the live build and public HTML headers before marking Privy's checkboxes.
-2. Obtain the public Privy app ID and dedicated Solana wallet ID. Configure
+2. Use the supplied public Privy app ID and obtain the dedicated Solana wallet ID. Configure
    application credentials securely on the server; keep the authorization key
    only in the separate signer. Do not put secrets in chat or the web bundle.
 3. Install the isolated Codex wrapper per the deploy guide and set

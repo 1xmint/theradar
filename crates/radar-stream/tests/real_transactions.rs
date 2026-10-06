@@ -271,8 +271,8 @@ fn a_route_the_fee_payer_is_not_party_to_yields_no_trade() {
 #[test]
 fn a_transaction_that_moved_nothing_yields_nothing() {
     let d = decoded("nothing_moved");
-    assert!(d.fills.is_empty());
-    assert!(d.launches.is_empty());
+    assert_eq!(d.fills, [] as [radar_stream::decode::Fill; 0]);
+    assert_eq!(d.launches, [] as [radar_stream::decode::LaunchSeen; 0]);
 }
 
 #[test]

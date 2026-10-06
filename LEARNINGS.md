@@ -1831,6 +1831,12 @@ decline. A locked extension, pending request or invalid sign-in message therefor
 looked like the owner had dismissed a prompt. The reported exception was lost,
 so the actual cause of this owner's failure remains unknown.
 
+A live challenge also exposed nonstandard SIWS fields: epoch seconds instead
+of an ISO timestamp, and base64url nonces containing punctuation where the
+specification requires alphanumeric characters. Format those fields using the
+existing civil timestamp helper and 32 random bytes encoded as hex. These are
+verified format defects, not proof of the owner's exact wallet exception.
+
 Only the wallet's explicit 4001 rejection code now means cancellation. Other
 exceptions retain their code, stage and message; the UI gives a retry path and
 separates feedback from the header button. Malformed server responses also end
@@ -1839,3 +1845,5 @@ the pending state without creating a session.
 **What catches a recurrence:** `siws.test.ts` distinguishes rejected prompts from
 connection and signing failures; `Wallet.test.tsx` checks technical feedback and
 retry. Reversing the 4001 comparison by hand failed four regressions.
+The customer timestamp test and HTTP challenge bootstrap test cover the fields
+the old server-only signature round trip accepted without involving a wallet.

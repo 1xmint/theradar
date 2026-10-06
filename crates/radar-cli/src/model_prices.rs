@@ -370,8 +370,14 @@ mod tests {
 
     #[test]
     fn a_configuration_matching_the_catalog_reports_nothing() {
-        assert!(drift(&luna(), Some(200_000), Some(1_200_000), "none").is_empty());
-        assert!(drift(&mini(), Some(150_000), Some(600_000), "").is_empty());
+        assert_eq!(
+            drift(&luna(), Some(200_000), Some(1_200_000), "none"),
+            [] as [String; 0]
+        );
+        assert_eq!(
+            drift(&mini(), Some(150_000), Some(600_000), ""),
+            [] as [String; 0]
+        );
     }
 
     #[test]
@@ -415,7 +421,10 @@ mod tests {
             drift(&luna(), Some(200_000), Some(1_200_000), "   ").len(),
             1
         );
-        assert!(drift(&mini(), Some(150_000), Some(600_000), "  ").is_empty());
+        assert_eq!(
+            drift(&mini(), Some(150_000), Some(600_000), "  "),
+            [] as [String; 0]
+        );
     }
 
     #[test]

@@ -138,7 +138,7 @@ impl Challenge {
              Issued At: {issued_at}",
             domain = self.domain,
             nonce = self.nonce,
-            issued_at = self.issued_at,
+            issued_at = radar_types::civil::timestamp_from_seconds(self.issued_at),
         )
     }
 }
@@ -248,6 +248,22 @@ mod tests {
             verify(&good(), &challenge(), ISSUED + 10),
             Ok(address_of(&key))
         );
+    }
+
+    #[test]
+    fn the_wallet_receives_an_iso_timestamp_not_epoch_seconds() {
+        // SIWS requires an ISO datetime. Phantom scrutinizes this field before
+        // a signature prompt, so a server-only signature round trip misses it.
+        let message = challenge().message(&address_of(&wallet()));
+        let issued = message
+            .lines()
+            .find_map(|line| line.strip_prefix("Issued At: "))
+            .expect("issue time");
+        assert_eq!(
+            radar_types::civil::seconds_from_timestamp(issued),
+            Some(ISSUED)
+        );
+        assert!(issued.ends_with('Z'));
     }
 
     #[test]
