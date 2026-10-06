@@ -132,6 +132,11 @@ refusal failed the peer-boundary test. Python/client-shell syntax and
 uploaded files. The active `/tmp/radar-private-setup.py` now has SHA256
 `d36775b7213553276a16f87fdec35c1c1013bb819f6461f898a332057c13a72c`.
 No administrator install, secret entry or vendor login has occurred yet.
+The owner's next attempt stopped at the setup script's duplicate-setting check
+for RADAR_CUSTOMER_SALT, before any mutation. Match EnvironmentFile's last-value
+behavior instead of refusing an existing repeated assignment. Preserve both salt
+lines verbatim; do not rotate the effective salt. Two fixture regressions check
+last-value selection and unrelated-line preservation, without reading live salts.
 
 1. Complete: PR 334, CI and release runs above, artifact hash, fixed deployment,
    live build, public headers, and challenge format verified at `49415d5`.

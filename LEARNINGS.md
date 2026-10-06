@@ -13,7 +13,7 @@ benefit of the doubt on everything else.
 
 ## Index
 
-**30 of these 40 name something mechanical that would catch a
+**31 of these 41 name something mechanical that would catch a
 recurrence. 10 name only a habit, and say so** — which is this file's opening
 standard rather than a gap in it. The habit-only rows are the ones worth reading
 twice; nothing will stop those repeating except somebody remembering.
@@ -65,6 +65,7 @@ quietly absent.
 | [38](#38-every-wallet-exception-was-reported-as-cancellation) | Every wallet exception was reported as cancellation | `siws.test.ts` and `Wallet.test.tsx` preserve technical errors and retry |
 | [39](#39-local-tool-versions-gave-a-different-answer-from-ci) | Local tool versions gave a different answer from CI | CI's locked npm install and workspace lint gate |
 | [40](#40-a-sudo-wrapper-conflicted-with-the-services-hardening) | A sudo wrapper conflicted with the service's hardening | the fixed-command bridge tests under NoNewPrivileges |
+| [41](#41-an-installer-refused-valid-repeated-environment-settings) | An installer refused valid repeated environment settings | setup fixtures for last-value selection and salt preservation |
 
 ---
 
@@ -1884,3 +1885,17 @@ tests with `setpriv --no-new-privs`. The process invocation check requires the
 vendor CLI directly, and the peer-boundary test fails with the refusal removed.
 Actual installed service compatibility remains a deployment check, not a claim
 from those fake-CLI tests.
+
+## 41. An installer refused valid repeated environment settings
+
+**2026-10-06.** The private connection installer rejected a repeated
+RADAR_CUSTOMER_SALT before making any changes. EnvironmentFile permits repeated
+assignments and uses the last value; requiring unique names imposed a new rule
+on an existing service configuration. Read settings with the same last-value
+behavior, and preserve unrelated lines when saving connection settings. Both
+salt assignments remain in place, so this change does not rotate the effective salt.
+
+**What catches a recurrence:** the two setup fixture tests select the last
+assignment and preserve both salt lines while replacing connection settings.
+Reapplying the duplicate refusal fails both tests. No live salt value was read
+or printed to construct those fixtures.

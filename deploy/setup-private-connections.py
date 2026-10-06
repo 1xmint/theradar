@@ -51,6 +51,26 @@ def cli_files():
             'exec /usr/bin/python3 /usr/local/lib/radar/radar-codex-bridge.py "$@"\n')
 
 
+def settings_from(original):
+    settings = {}
+    for line in original.splitlines():
+        match = re.fullmatch(r"\s*([A-Z][A-Z0-9_]*)\s*=(.*)", line)
+        if match:
+            # EnvironmentFile applies the last assignment. Unrelated lines,
+            # including existing salts, are preserved when saving below.
+            settings[match[1]] = match[2].strip().strip("\"'")
+    return settings
+
+
+def updated_settings(original, updates):
+    kept = [line for line in original.splitlines() if not any(
+        re.match(rf"\s*{name}\s*=", line) for name in updates
+    )]
+    return "\n".join(kept) + "\n" + "\n".join(
+        f"{name}={json.dumps(value)}" for name, value in updates.items()
+    ) + "\n"
+
+
 def main():
     if os.geteuid() != 0:
         refuse("Run with sudo in your own SSH terminal.")
@@ -61,13 +81,7 @@ def main():
     if env_path.is_symlink() or not env_path.is_file():
         refuse("Expected an existing regular /etc/radar/radar.env")
     original = env_path.read_text()
-    settings = {}
-    for line in original.splitlines():
-        match = re.fullmatch(r"\s*([A-Z][A-Z0-9_]*)\s*=(.*)", line)
-        if match:
-            if match[1] in settings:
-                refuse(f"Resolve duplicate setting first: {match[1]}")
-            settings[match[1]] = match[2].strip().strip("\"'")
+    settings = settings_from(original)
     for name in ("RADAR_MODEL_API_KEY", "RADAR_MODEL_OPENAI_KEY", "RADAR_MODEL_DAILY_USD"):
         if settings.get(name):
             refuse(f"Existing {name}: review the active inference configuration first.")
@@ -122,13 +136,7 @@ def main():
     run("/usr/bin/systemctl", "daemon-reload")
     run("/usr/bin/systemctl", "enable", "--now", "radar-codex.socket")
 
-    kept = [line for line in original.splitlines() if not any(
-        re.match(rf"\s*{name}\s*=", line) for name in updates
-    )]
-    updated = "\n".join(kept) + "\n" + "\n".join(
-        f"{name}={json.dumps(value)}" for name, value in updates.items()
-    ) + "\n"
-    install(env_path, updated, 0o600)
+    install(env_path, updated_settings(original, updates), 0o600)
     print("Setup saved. Customer admission remains closed; inference has no allowance.")
     print("Apply through the verified artifact and fixed radar-deploy procedure.")
     print("Then open /automation as the operator and choose Connect ChatGPT.")

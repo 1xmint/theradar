@@ -96,5 +96,27 @@ class BridgeTests(unittest.TestCase):
         self.assertIsNotNone(self.spawned[0].poll(), "CLI survived client disconnection")
 
 
+@unittest.skipUnless(sys.platform == "linux", "Administrator setup targets the Linux VPS")
+class SetupTests(unittest.TestCase):
+    def setUp(self):
+        spec = importlib.util.spec_from_file_location("setup", Path(__file__).with_name("setup-private-connections.py"))
+        self.setup = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(self.setup)
+
+    def test_duplicate_settings_use_the_effective_last_value(self):
+        original = '# comment\nRADAR_CUSTOMER_SALT=old-fixture\nRADAR_CUSTOMER_SALT="current-fixture"\n'
+        self.assertEqual(self.setup.settings_from(original)["RADAR_CUSTOMER_SALT"], "current-fixture")
+
+    def test_updating_connections_preserves_both_salt_assignments(self):
+        original = ('# keep this\nRADAR_CUSTOMER_SALT=old-fixture\n'
+                    'RADAR_CUSTOMER_SALT="current-fixture"\nRADAR_MODEL_CODEX=old\n'
+                    'RADAR_MODEL_CODEX=older\nRADAR_CUSTOMER_ACCESS=closed\n')
+        updated = self.setup.updated_settings(original, {"RADAR_MODEL_CODEX": "/usr/local/bin/radar-codex"})
+        self.assertEqual(updated, '# keep this\nRADAR_CUSTOMER_SALT=old-fixture\n'
+                         'RADAR_CUSTOMER_SALT="current-fixture"\nRADAR_CUSTOMER_ACCESS=closed\n'
+                         'RADAR_MODEL_CODEX="/usr/local/bin/radar-codex"\n')
+        self.assertEqual(self.setup.settings_from(updated)["RADAR_CUSTOMER_SALT"], "current-fixture")
+
+
 if __name__ == "__main__":
     unittest.main()
