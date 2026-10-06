@@ -2,7 +2,7 @@
 # Plan 0015 — Private ChatGPT and Privy setup
 
 **Status:** in progress; connection UI, sign-in fixes and security headers deployed;
-ChatGPT and Privy server setup remains.
+private server setup installed; ChatGPT login and wallet delegation remain.
 **Date:** 2026-10-06.
 **Branch:** fix/wallet-signin-diagnostics.
 **Base:** b55a47651c81ed8a1134f00deaeabc9b6cc4d792.
@@ -14,8 +14,8 @@ wallet. He already has a Privy app and is completing its security checklist.
 This resumes the direction in [design 0017](../design/0017-a-private-autonomous-trader.md)
 and [plan 0011](0011-private-autonomous-trader.md). It supplies no
 wallet, delegation, capital mandate or inference allowance. Josh supplied the
-public app ID `cmthhkznr0a3u0cl86prxlb7x` during this session. Server configuration
-and the remaining identifiers and limits stay unset; no real trade is authorized.
+public app ID `cmthhkznr0a3u0cl86prxlb7x` during this session. Its server setup is
+now installed; wallet identifiers and limits remain unset. No real trade is authorized.
 
 ## This increment
 
@@ -145,6 +145,21 @@ local and remote SHA256
 `06128a7c2298a49a7f86f0d9845ce6c07b7922f2eacc745700506736a38a96c7`.
 Remote Python compilation passed. The other three deployment files are unchanged.
 
+The owner reported completing setup. Live inspection then confirmed an active
+radar-codex socket, root-owned client/library, socket ownership radar-agent:guardian
+with mode 0660, and env mode 0600. `setpriv --no-new-privs
+/usr/local/bin/radar-codex login status` reached the installed vendor CLI and
+returned "Not logged in". No secret contents were inspected.
+Rechecked the `49415d5` release manifest and local binary hash, uploaded it to
+`/tmp/radar-serve.new`, and ran the fixed `sudo radar-deploy`. Public `/health`
+still reports the exact build and `policyClosed=true`; public customer config
+now returns the supplied Privy app ID instead of 503. Radar retains
+`NoNewPrivileges=yes` and `ProtectHome=read-only`. No inference allowance was
+set, so `agent.configured=false` remains expected. This verifies installed app
+configuration, not Privy credential validity or wallet delegation.
+Opening `/automation` in the agent's browser was blocked by its client before
+the page loaded; the owner must use their operator browser to complete linking.
+
 1. Complete: PR 334, CI and release runs above, artifact hash, fixed deployment,
    live build, public headers, and challenge format verified at `49415d5`.
 2. Use the supplied public Privy app ID and obtain the dedicated Solana wallet ID. Configure
@@ -163,16 +178,14 @@ Remote Python compilation passed. The other three deployment files are unchanged
 ## Handback
 
 **Stopped at:** deployed connection and diagnostics increment at `49415d5`.
-ChatGPT and Privy are not connected in production; no autonomous trading loop
-has been enabled. The branch's broader private-autonomy work remains in progress.
-**Next action:** owner runs the uploaded, reviewed admin setup:
-`ssh -t guardian-vps-tail "sudo python3 /tmp/radar-private-setup.py cmthhkznr0a3u0cl86prxlb7x"`.
-Sudo password and Privy app secret go only into that interactive terminal.
-The first uploaded sudo-wrapper version was superseded by the verified socket
-setup; its duplicate-setting refusal was corrected at `c0546a4` and the replacement
-upload verified after CI passed. Once this setup reports saved, apply env through
-the verified artifact and fixed deployment, test the CLI client from Radar's
-service restrictions, then complete ChatGPT device login as the operator.
+Private server setup is installed and applied. ChatGPT is not logged in; the
+Privy app is configured, while wallet delegation remains unverified. No autonomous
+trading loop has been enabled. The broader private-autonomy work remains in progress.
+**Next action:** owner opens `https://radar.heyvera.org/automation` in their operator
+browser, selects Connect ChatGPT, and completes the displayed device login.
+Verify that linking succeeds through the actual Radar service restrictions.
+The installed client was verified with NoNewPrivileges, not all service namespaces.
+Choose an inference allowance separately before testing a model call.
 Obtain the owner's Privy DID and dedicated wallet ID to configure private admission.
 **Do not:** claim a wallet is delegated from an app ID, treat connected ChatGPT
 as capital authority, expose the private site, copy existing subscription
