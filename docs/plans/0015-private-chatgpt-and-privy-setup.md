@@ -124,6 +124,15 @@ initial mode assertion; the same unchanged code passed the preceding code CI.
 Wait for the chart effect before asserting its mode, as the neighboring saved-mode
 test already does. The scoped five tests and full 343 web tests/build pass locally.
 
+Setup code commit `d56f50a1ea6c9fb2f72bdce9f1f1831f462b2a51` passed all jobs in
+CI run `37530529280`. Its required tests job ran the four Linux bridge tests with
+NoNewPrivileges set. The same tests passed on the VPS, and removing the peer
+refusal failed the peer-boundary test. Python/client-shell syntax and
+`systemd-analyze verify` passed. All four deployment source hashes matched the
+uploaded files. The active `/tmp/radar-private-setup.py` now has SHA256
+`d36775b7213553276a16f87fdec35c1c1013bb819f6461f898a332057c13a72c`.
+No administrator install, secret entry or vendor login has occurred yet.
+
 1. Complete: PR 334, CI and release runs above, artifact hash, fixed deployment,
    live build, public headers, and challenge format verified at `49415d5`.
 2. Use the supplied public Privy app ID and obtain the dedicated Solana wallet ID. Configure
@@ -144,11 +153,11 @@ test already does. The scoped five tests and full 343 web tests/build pass local
 **Stopped at:** deployed connection and diagnostics increment at `49415d5`.
 ChatGPT and Privy are not connected in production; no autonomous trading loop
 has been enabled. The branch's broader private-autonomy work remains in progress.
-**Next action:** finish the setup script's Linux checks and branch CI, upload the
-four deployment files together, and have the owner run the reviewed admin command
-with sudo password and hidden Privy secret entry. The first uploaded sudo-wrapper
-version was replaced with a refusing placeholder after finding NoNewPrivileges;
-do not run that version. Once the corrected setup reports saved, apply env through
+**Next action:** owner runs the uploaded, reviewed admin setup:
+`ssh -t guardian-vps-tail "sudo python3 /tmp/radar-private-setup.py cmthhkznr0a3u0cl86prxlb7x"`.
+Sudo password and Privy app secret go only into that interactive terminal.
+The first uploaded sudo-wrapper version was superseded by the verified socket
+setup. Once the corrected setup reports saved, apply env through
 the verified artifact and fixed deployment, test the CLI client from Radar's
 service restrictions, then complete ChatGPT device login as the operator.
 Obtain the owner's Privy DID and dedicated wallet ID to configure private admission.
