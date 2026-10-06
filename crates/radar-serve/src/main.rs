@@ -481,7 +481,7 @@ fn build_state(
         customer,
         customer_keys: customer::KeyCache::new(),
         privy,
-        linker: radar_serve::link::Linker::new(),
+        linker: radar_serve::link::Linker::from_vars(&|key| std::env::var(key).ok()),
         scoreboard: radar_serve::cache::Cache::new(),
         token: radar_serve::cache::Cache::new(),
         // The domain a sign-in is bound to. Unset means no customer sign-in,

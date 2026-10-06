@@ -380,11 +380,11 @@ pub fn app(state: Arc<AppState>) -> Router {
         // paywall that admits its own shape is halfway to one that fails open.
         .fallback(interface);
 
+    // Linking a subscription precedes giving inference a spending budget.
+    // Named even when unconfigured, so GET returns JSON rather than the SPA.
+    router = router.route("/v1/link", post(link::begin).get(link::status));
     if state.chat.is_some() {
-        router = router
-            .route("/v1/chat", post(chat::ask))
-            .route("/v1/link", post(link::begin))
-            .route("/v1/link", get(link::status));
+        router = router.route("/v1/chat", post(chat::ask));
     }
 
     if state.x402.is_some() {

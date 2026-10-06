@@ -13,7 +13,7 @@ benefit of the doubt on everything else.
 
 ## Index
 
-**26 of these 36 name something mechanical that would catch a
+**28 of these 38 name something mechanical that would catch a
 recurrence. 10 name only a habit, and say so** — which is this file's opening
 standard rather than a gap in it. The habit-only rows are the ones worth reading
 twice; nothing will stop those repeating except somebody remembering.
@@ -62,6 +62,7 @@ quietly absent.
 | [35](#35-a-measured-zero-was-read-as-a-verdict-and-a-first-reaction-was-filed-as-doctrine) | A measured zero was read as a verdict, and a first reaction was filed as doctrine | habit only, and it says so |
 | [36](#36-a-freshness-check-tested-the-wrong-property-and-a-wrong-horizon-hid-behind-it) | A freshness check tested the wrong property, and a wrong horizon hid behind it | `the_six_hour_label_is_always_refused_for_overlapping_its_own_entry`,… |
 | [37](#37-a-query-window-that-grew-with-the-stores-age-crossed-a-vendor-limit-nobody-chose-and-a-health-check-that-could-not-see-its-own-age-said-ok-through-285-failed-runs) | A query window that grew with the store's age crossed a vendor limit nobody chose, and a health check that could not see its own age said `ok` through 285 failed runs | `earliest_due_slot_ignores_launches_that_are_not_due`,… |
+| [38](#38-every-wallet-exception-was-reported-as-cancellation) | Every wallet exception was reported as cancellation | `siws.test.ts` and `Wallet.test.tsx` preserve technical errors and retry |
 
 ---
 
@@ -1821,3 +1822,20 @@ next to it fail if the health check goes back to reporting a count instead of an
 age. The general lesson: a window that grows with the store's age will cross
 someone else's limit on a date nobody chose, and a health check that reports a
 count without its age cannot see a stopped pass.
+
+## 38. Every wallet exception was reported as cancellation
+
+**2026-10-06.** The owner saw "Connect walletSign-in cancelled." Both wallet
+connection and message-signing catches converted every exception into a user
+decline. A locked extension, pending request or invalid sign-in message therefore
+looked like the owner had dismissed a prompt. The reported exception was lost,
+so the actual cause of this owner's failure remains unknown.
+
+Only the wallet's explicit 4001 rejection code now means cancellation. Other
+exceptions retain their code, stage and message; the UI gives a retry path and
+separates feedback from the header button. Malformed server responses also end
+the pending state without creating a session.
+
+**What catches a recurrence:** `siws.test.ts` distinguishes rejected prompts from
+connection and signing failures; `Wallet.test.tsx` checks technical feedback and
+retry. Reversing the 4001 comparison by hand failed four regressions.

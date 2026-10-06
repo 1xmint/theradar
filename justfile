@@ -59,7 +59,7 @@ cargo := env("RADAR_CARGO", "cargo")
 # the bot's files -- 11 in brief.rs (the analyst, contest and vault checks), 5
 # in seven_days.rs, 6 in radar-backfill's analyst_log.rs and 3 for the watched
 # seven-day checkpoint in checkpoints.rs.
-export MIN_TESTS := "1954"
+export MIN_TESTS := "1958"
 
 _default:
     @just --list --unsorted
@@ -370,7 +370,7 @@ licence-headers:
 # "refused, or is rate-limited" case became three: a 400 still ends the poll
 # immediately, a `busy` 503 keeps polling past its first refusal, and a
 # `chain_unreadable` 502 followed by a landed read still shows "Landed".
-export MIN_WEB_TESTS := "327"
+export MIN_WEB_TESTS := "343"
 
 # The public site at cabalhunter.org. Lower because it has five pages, and it
 # exists for the same reason MIN_WEB_TESTS does: `vitest run` exits zero when it

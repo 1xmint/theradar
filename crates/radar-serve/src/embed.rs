@@ -14,7 +14,7 @@
 //! interface is answered with a page saying how to build it, rather than a 404
 //! that reads like a broken deploy.
 
-use axum::http::{StatusCode, header};
+use axum::http::{HeaderValue, StatusCode, header};
 use axum::response::{Html, IntoResponse, Response};
 
 /// The Vite build output.
@@ -30,6 +30,43 @@ struct Assets;
 /// why hashed asset names matter: `/assets/index-CxPhWFgt.js` either exists or
 /// the deploy is broken, and it will never be a route.
 pub fn serve(path: &str) -> Response {
+    let mut response = asset_or_shell(path);
+    // Cloudflare can proxy directly to this process. Headers present only in
+    // Caddy's config do not protect that path (observed 2026-10-06).
+    let headers = response.headers_mut();
+    headers.insert(header::X_FRAME_OPTIONS, HeaderValue::from_static("DENY"));
+    headers.insert(
+        header::X_CONTENT_TYPE_OPTIONS,
+        HeaderValue::from_static("nosniff"),
+    );
+    headers.insert(
+        header::REFERRER_POLICY,
+        HeaderValue::from_static("strict-origin-when-cross-origin"),
+    );
+    headers.insert(
+        header::CONTENT_SECURITY_POLICY,
+        HeaderValue::from_static(CSP),
+    );
+    response
+}
+
+/// Privy's documented web-client origins, with scripts still restricted to
+/// this bundle and Turnstile. Inline styles are needed by the wallet UI;
+/// HTTPS fetches and images preserve CoinImage's creator-hosted metadata.
+/// X-Frame-Options/frame-ancestors govern who embeds Radar; frame-src governs
+/// the wallet iframe Radar embeds. They must not be confused.
+const CSP: &str = "default-src 'none'; script-src 'self' https://challenges.cloudflare.com; \
+    style-src 'self' 'unsafe-inline'; \
+    connect-src 'self' https: wss://relay.walletconnect.com \
+    wss://relay.walletconnect.org wss://www.walletlink.org https://*.rpc.privy.systems \
+    https://explorer-api.walletconnect.com https://api.mainnet-beta.solana.com; \
+    frame-src https://auth.privy.io https://verify.walletconnect.com \
+    https://verify.walletconnect.org https://challenges.cloudflare.com; \
+    child-src https://auth.privy.io https://verify.walletconnect.com https://verify.walletconnect.org; \
+    worker-src 'self'; img-src 'self' https: data: blob:; font-src 'self'; \
+    form-action 'none'; frame-ancestors 'none'; base-uri 'none'; object-src 'none'; manifest-src 'self'";
+
+fn asset_or_shell(path: &str) -> Response {
     let trimmed = path.trim_start_matches('/');
     if let Some(asset) = Assets::get(trimmed) {
         let mime = mime_of(trimmed);
@@ -102,6 +139,48 @@ fn mime_of(path: &str) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn direct_application_responses_protect_the_shell_and_allow_the_wallet_iframe() {
+        for path in ["/", "/index.html", "/automation", "/token/example"] {
+            let response = serve(path);
+            assert_eq!(response.headers()[header::X_FRAME_OPTIONS], "DENY");
+            assert_eq!(
+                response.headers()[header::X_CONTENT_TYPE_OPTIONS],
+                "nosniff"
+            );
+            let policy = response.headers()[header::CONTENT_SECURITY_POLICY]
+                .to_str()
+                .expect("CSP");
+            let directives: std::collections::BTreeMap<_, _> = policy
+                .split(';')
+                .map(str::trim)
+                .filter_map(|part| part.split_once(' '))
+                .collect();
+            assert_eq!(directives["frame-ancestors"], "'none'");
+            assert!(
+                directives["frame-src"]
+                    .split_whitespace()
+                    .any(|origin| origin == "https://auth.privy.io")
+            );
+            assert!(
+                directives["connect-src"]
+                    .split_whitespace()
+                    .any(|origin| origin == "https:")
+            );
+            assert!(
+                directives["img-src"]
+                    .split_whitespace()
+                    .any(|origin| origin == "https:")
+            );
+            assert!(!directives["script-src"].contains("unsafe"));
+            assert!(
+                !directives["script-src"]
+                    .split_whitespace()
+                    .any(|origin| origin == "*" || origin == "https:")
+            );
+        }
+    }
 
     #[test]
     fn a_stylesheet_is_never_served_as_something_a_browser_ignores() {

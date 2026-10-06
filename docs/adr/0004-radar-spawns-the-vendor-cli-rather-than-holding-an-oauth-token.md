@@ -126,7 +126,23 @@ is partly written by whoever named a token.
 The prompt goes in on **stdin**, not as an argument. Arguments are visible in
 `ps` to every user on the box.
 
-## Related
+## Amendment — connecting before allowing inference (2026-10-06)
+
+The owner reaffirmed private use and fully autonomous execution through a Privy
+wallet. Subscription linking remains a vendor-CLI operation; this does not
+authorize inference spend or wallet signatures.
+
+The operator opens `/automation` and presses **Connect ChatGPT**. With a valid,
+unambiguous `RADAR_MODEL_CODEX` configuration, `/v1/link` works before an
+inference budget is chosen. `/v1/chat` still requires the provider, a positive
+budget and a durable ledger. An unconfigured linking endpoint returns JSON 404,
+including GET, rather than the application shell.
+
+The CLI continues to own credentials and refresh. The UI reports completion of
+the current linking attempt, not persistent authentication health. No new code
+reads credentials, grants a Privy delegation, or reaches the execution path.
+
+## Related decisions
 
 - AGENTS.md rule 1 — model judgement never authorises capital. This decision is
   about a credential rather than about capital, but it is the same shape: the

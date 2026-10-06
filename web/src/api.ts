@@ -103,12 +103,18 @@ async function send<T>(path: string, body?: unknown): Promise<T> {
 }
 
 export const agent = {
+  /** Configuration is separate from authentication and successful inference. */
+  configuration: (signal?: AbortSignal) => get<{ agent: { configured: boolean } }>("/health", signal),
   /** Starts a device-authorisation flow, or returns the one already open. */
   link: () => send<Progress>("/v1/link"),
   /** Where the current flow has got to. */
   linkStatus: (signal?: AbortSignal) => get<Progress>("/v1/link", signal),
   /** Asks a question. */
   ask: (question: string) => send<Answered>("/v1/chat", { question }),
+};
+
+export const connections = {
+  privy: (signal?: AbortSignal) => get<{ privy_app_id: string }>("/v1/customer/config", signal),
 };
 
 /**

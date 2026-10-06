@@ -1,10 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 //! The reading assistant: linking it, and asking it things.
 //!
-//! Two panels that only exist when a provider is configured. The server does not
-//! mount `/v1/chat` or `/v1/link` otherwise, so a 404 here means "not
-//! configured" rather than "broken" — and the component renders nothing at all
-//! rather than a button that cannot work.
+//! Chat needs a provider and inference budget. SubscriptionLink needs only the
+//! subscription provider, and lives on the operator-only /automation page.
 //!
 //! # What a reply is allowed to be
 //!
@@ -25,22 +23,14 @@
 //! `Audience::Customer`, so the two halves of this component do not share an
 //! audience, and the link panel is the half that must not ship to customers.
 //!
-//! Nothing enforces that yet, because nothing needs to: no customer
-//! authenticator is configured, so every route falls back to the operator
-//! check. The day `RADAR_PRIVY_APP_ID` is set, this component begins showing a
-//! customer a panel whose every request is refused.
-//!
-//! Two things follow, and both belong to the screen split rather than here:
-//! `Link` moves to the operator surface, and `/v1/chat` gains per-customer
-//! metering -- today it reserves against one **global** daily budget with no
-//! customer in the path, so the first signed-up account could spend the whole
-//! day's allowance.
+//! The public /ask page renders only Chat. Linking stays on /automation,
+//! whose HTML and /v1/link requests require operator identity.
 
 import { useCallback, useEffect, useState } from "react";
 import { agent, ApiError, type Answered, type Progress } from "./api";
 
 /**
- * Renders both panels, or nothing if the agent is not configured.
+ * Renders chat, or nothing if inference is not configured.
  *
  * `alwaysShow` is for the tab that exists to show this: a tab that renders
  * empty is worse than one that says why it is empty, because the reader cannot
@@ -52,8 +42,8 @@ export function Agent({ alwaysShow = false }: { alwaysShow?: boolean }) {
   useEffect(() => {
     const controller = new AbortController();
     agent
-      .linkStatus(controller.signal)
-      .then(() => setAvailable(true))
+      .configuration(controller.signal)
+      .then((status) => setAvailable(status.agent.configured))
       .catch((error: unknown) => {
         if (controller.signal.aborted) return;
         // 404 is the configured answer for "no provider", so it is the one
@@ -77,23 +67,30 @@ export function Agent({ alwaysShow = false }: { alwaysShow?: boolean }) {
 
   return (
     <section>
-      <Link />
       <Chat />
     </section>
   );
 }
 
 /** The credential-linking panel. */
-function Link() {
+export function SubscriptionLink() {
   const [progress, setProgress] = useState<Progress>({ state: "idle" });
+  const [available, setAvailable] = useState<boolean | null | "unknown">(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const refresh = useCallback((signal?: AbortSignal) => {
     agent
       .linkStatus(signal)
-      .then(setProgress)
-      .catch(() => {
+      .then((next) => { setProgress(next); setAvailable(true); })
+      .catch((cause: unknown) => {
+        if (signal?.aborted) return;
+        if (cause instanceof ApiError && cause.status === 404) {
+          setAvailable(false);
+        } else {
+          setAvailable((previous) => previous === true ? true : "unknown");
+          setError(cause instanceof ApiError ? cause.detail : String(cause));
+        }
         // A failed poll is not a failed flow. Leaving the last known state up
         // beats replacing a live code with an error the operator cannot act on.
       });
@@ -102,10 +99,15 @@ function Link() {
   useEffect(() => {
     const controller = new AbortController();
     refresh(controller.signal);
+    return () => controller.abort();
+  }, [refresh]);
+
+  useEffect(() => {
+    const controller = new AbortController();
     // Polled only while a flow is open. A timer that runs forever on an idle
     // page is a request every two seconds for as long as the tab is left open.
     if (progress.state !== "waiting") return () => controller.abort();
-    const timer = setInterval(() => refresh(), 3000);
+    const timer = setInterval(() => refresh(controller.signal), 3000);
     return () => {
       controller.abort();
       clearInterval(timer);
@@ -149,21 +151,27 @@ function Link() {
           </p>
         </>
       ) : (
-        <div className="flex items-center justify-between gap-4">
+        <div className="flex flex-col items-start justify-between gap-4 sm:flex-row sm:items-center">
           <p className="text-sm text-[var(--color-dim)]">
             {progress.state === "linked"
               ? "Linked. The CLI holds the credential and refreshes it on its own."
               : progress.state === "failed"
                 ? `The last attempt ended: ${progress.status}`
-                : "Radar never stores a token — the vendor CLI does. Linking opens a code you enter in a browser."}
+                : available === false
+                  ? "ChatGPT connection is not configured on this instance. Install the isolated Codex wrapper and set RADAR_MODEL_CODEX on the server."
+                  : available === "unknown"
+                    ? "Could not check the ChatGPT connection. Reload to try again."
+                  : available === null
+                    ? "Checking the ChatGPT connection…"
+                    : "Connect your ChatGPT account using a one-time code. The sign-in completes in your browser."}
           </p>
           <button
             type="button"
             onClick={begin}
-            disabled={busy}
+            disabled={busy || available !== true}
             className="shrink-0 rounded-md border border-[var(--color-line)] px-3 py-1.5 text-sm hover:border-[var(--color-dim)] disabled:opacity-50"
           >
-            {busy ? "Starting…" : progress.state === "linked" ? "Re-link" : "Link"}
+            {busy ? "Starting…" : progress.state === "linked" ? "Reconnect ChatGPT" : "Connect ChatGPT"}
           </button>
         </div>
       )}

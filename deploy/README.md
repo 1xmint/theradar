@@ -368,10 +368,16 @@ are visible in `ps` to every user on the box.
 
 ### Linking is a button, not an SSH session
 
-Once the wrapper is in place, **the interface links the credential itself**.
-Sign in, press **Link**, and the page shows a verification URL and a short code
+Once the wrapper is in place and `RADAR_MODEL_CODEX` names it, **the interface
+links the credential itself** at `/automation`. Sign in as the operator, press
+**Connect ChatGPT**, and the page shows a verification URL and a short code
 to enter in a browser. Neither is a credential — that is what device
 authorisation is — so nothing secret crosses the page.
+
+Linking does not require an inference budget. Leave `RADAR_MODEL_DAILY_USD`
+unset until an allowance is chosen: `/v1/link` still works, while `/v1/chat`
+remains unavailable. An idle linking flow says nothing about an existing stored
+credential; only successful completion of this attempt is reported as linked.
 
 The seeding command below still works and is the fallback when the interface is
 not reachable. The button matters most for the case nobody plans for: the

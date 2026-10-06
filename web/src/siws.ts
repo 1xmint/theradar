@@ -42,6 +42,8 @@ export interface WalletProvider {
 export type SignInError =
   | { kind: "no-wallet" }
   | { kind: "declined" }
+  | { kind: "wallet-error"; step: "connect" | "sign"; code: number | undefined; detail: string }
+  | { kind: "invalid-response" }
   | { kind: "refused"; status: number; detail: string }
   | { kind: "unreachable"; detail: string };
 
@@ -56,6 +58,7 @@ export interface WalletSession {
 export interface WalletWindow {
   phantom?: { solana?: WalletProvider };
   solana?: WalletProvider;
+  solflare?: WalletProvider;
 }
 
 /**
@@ -72,7 +75,18 @@ export function detect(
 ): WalletProvider | null {
   // `window.phantom.solana` is the namespaced form and is preferred. The bare
   // `window.solana` is the legacy one, still set by several wallets.
-  return win.phantom?.solana ?? win.solana ?? null;
+  return win.phantom?.solana ?? win.solana ?? win.solflare ?? null;
+}
+
+/** Only a wallet's explicit rejection code means the user cancelled. */
+function walletError(cause: unknown, step: "connect" | "sign"): SignInError {
+  const code = cause !== null && typeof cause === "object" && "code" in cause
+    && typeof cause.code === "number" ? cause.code : undefined;
+  if (code === 4001) return { kind: "declined" };
+  const detail = cause instanceof Error ? cause.message
+    : cause !== null && typeof cause === "object" && "message" in cause
+      ? String(cause.message) : String(cause);
+  return { kind: "wallet-error", step, code, detail };
 }
 
 /** What the server said, or a transport failure. */
@@ -96,7 +110,12 @@ async function post(
       error: { kind: "unreachable", detail: String(cause) },
     };
   }
-  const text = await response.text();
+  let text: string;
+  try {
+    text = await response.text();
+  } catch (cause) {
+    return { ok: false, error: { kind: "unreachable", detail: String(cause) } };
+  }
   if (!response.ok) {
     let detail = text;
     try {
@@ -112,7 +131,12 @@ async function post(
       error: { kind: "refused", status: response.status, detail },
     };
   }
-  return { ok: true, json: JSON.parse(text) as unknown };
+  try {
+    return { ok: true, json: JSON.parse(text) as unknown };
+  } catch {
+    // An Access login page or proxy response must not leave the button waiting.
+    return { ok: false, error: { kind: "invalid-response" } };
+  }
 }
 
 /** Base64, from bytes, without pulling in a library. */
@@ -139,17 +163,20 @@ export async function signIn(
   try {
     const { publicKey } = await provider.connect();
     address = publicKey.toString();
-  } catch {
-    // The customer closed the wallet popup. Not an error to report loudly —
-    // declining to connect is a normal thing to do.
-    return { ok: false, error: { kind: "declined" } };
+  } catch (cause) {
+    return { ok: false, error: walletError(cause, "connect") };
   }
 
   const challenge = await post(fetchImpl, "/v1/customer/siws/challenge", {
     address,
   });
   if (!challenge.ok) return challenge;
-  const { message } = challenge.json as { message: string };
+  if (!challenge.json || typeof challenge.json !== "object"
+    || !("message" in challenge.json) || typeof challenge.json.message !== "string"
+    || challenge.json.message.length === 0) {
+    return { ok: false, error: { kind: "invalid-response" } };
+  }
+  const { message } = challenge.json;
 
   let signature: Uint8Array;
   try {
@@ -159,8 +186,8 @@ export async function signIn(
       "utf8",
     );
     signature = signed.signature;
-  } catch {
-    return { ok: false, error: { kind: "declined" } };
+  } catch (cause) {
+    return { ok: false, error: walletError(cause, "sign") };
   }
 
   const verified = await post(fetchImpl, "/v1/customer/siws/verify", {
@@ -175,6 +202,11 @@ export async function signIn(
     address: string;
     expires_in_seconds: number;
   };
+  if (!body || typeof body.token !== "string" || body.token.length === 0
+    || body.address !== address || !Number.isFinite(body.expires_in_seconds)
+    || body.expires_in_seconds <= 0) {
+    return { ok: false, error: { kind: "invalid-response" } };
+  }
   return {
     ok: true,
     session: {
