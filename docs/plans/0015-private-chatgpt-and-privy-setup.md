@@ -65,6 +65,10 @@ prerequisite, without changing the predicates or production behavior. The first
 run's tests and all four mutation shards passed; web and lint were the failures.
 The restored npm 10 install passed, followed by all 343 web tests and the build.
 Reapplying both old SIWS field encodings failed their new regressions.
+The next CI run passed web and its mutation shards but exposed the same new
+lint in more crates. A workspace check with Rust 1.99 and `--keep-going`
+collected all remaining diagnostics. Only test assertions changed, and the
+full Rust 1.99 workspace clippy gate now passes. No lint was suppressed.
 
 Live inspection on 2026-10-06 returned build
 `a4d24f7f1db0a7bdb2a9ef271b2981e8dfc087a1`, `agent.configured=false`,

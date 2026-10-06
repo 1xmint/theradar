@@ -721,7 +721,7 @@ mod tests {
         // `0`, `O`, `I` and `l` are not in the alphabet, so a string containing
         // one is not an address and splitting on it is correct.
         let with_zero = "0".repeat(44);
-        assert!(addresses_in(&with_zero).is_empty());
+        assert_eq!(addresses_in(&with_zero), [] as [std::string::String; 0]);
         for confusable in ['0', 'O', 'I', 'l'] {
             assert!(
                 !BASE58.contains(confusable),
@@ -811,8 +811,11 @@ mod tests {
     fn a_question_naming_nothing_seeds_nothing() {
         // The common case. A question about the funnel costs no instrument
         // calls at all before the first turn.
-        assert!(plan("why do we refuse so much?").is_empty());
-        assert!(plan("").is_empty());
+        assert_eq!(
+            plan("why do we refuse so much?"),
+            [] as [(std::string::String, &str); 0]
+        );
+        assert_eq!(plan(""), [] as [(std::string::String, &str); 0]);
     }
 
     #[test]

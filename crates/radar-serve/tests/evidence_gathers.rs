@@ -162,7 +162,10 @@ fn an_empty_store_yields_no_evidence_rather_than_an_error() {
     // show it.
     let dir = tempfile::tempdir().expect("tempdir");
     let store = Reader::open(dir.path());
-    assert!(evidence::gather(&registry(), &store, &format!("about {}", creator())).is_empty());
+    assert_eq!(
+        evidence::gather(&registry(), &store, &format!("about {}", creator())),
+        [] as [radar_agent::Fact; 0]
+    );
 }
 
 #[test]
@@ -171,5 +174,8 @@ fn a_question_naming_no_address_costs_no_instrument_calls() {
     // funnel should not invoke anything at all.
     let dir = populated();
     let store = Reader::open(dir.path());
-    assert!(evidence::gather(&registry(), &store, "why do we refuse so much?").is_empty());
+    assert_eq!(
+        evidence::gather(&registry(), &store, "why do we refuse so much?"),
+        [] as [radar_agent::Fact; 0]
+    );
 }

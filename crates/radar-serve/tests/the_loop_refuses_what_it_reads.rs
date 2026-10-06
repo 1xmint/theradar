@@ -316,7 +316,7 @@ fn injected_metadata_quoted_back_by_an_instrument_does_not_change_what_the_loop_
         Bounds::SHIPPED.max_turns,
         "the persuaded model asked until its turns ran out"
     );
-    assert!(!hostile.refusals.is_empty());
+    assert_ne!(hostile.refusals, [] as [std::string::String; 0]);
     assert!(
         hostile
             .refusals

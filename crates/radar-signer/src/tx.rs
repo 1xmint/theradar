@@ -440,6 +440,9 @@ mod tests {
         let bytes = legacy(&[(1, &[0], &[1]), (2, &[0], &[1])], 3);
         let m = decode(&bytes).expect("decodes");
         assert_eq!(m.programs_outside(&[[1u8; 32]]), vec![[2u8; 32]]);
-        assert!(m.programs_outside(&[[1u8; 32], [2u8; 32]]).is_empty());
+        assert_eq!(
+            m.programs_outside(&[[1u8; 32], [2u8; 32]]),
+            [] as [[u8; 32]; 0]
+        );
     }
 }

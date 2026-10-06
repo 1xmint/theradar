@@ -271,7 +271,7 @@ fn a_program_outside_the_allowlist_is_refused() {
         unbounded(Slot(1_000)),
     )
     .expect_err("pump.fun is not on this allowlist");
-    assert!(!rejections.is_empty());
+    assert_ne!(rejections, [] as [radar_signer::Rejection; 0]);
 }
 
 #[test]

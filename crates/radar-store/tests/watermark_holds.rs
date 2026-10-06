@@ -192,13 +192,14 @@ fn a_watermark_before_everything_returns_nothing_rather_than_everything() {
 
     let reader = Reader::open(dir.path());
     let ancient = AsOf::at(Slot(1));
-    assert!(
-        reader
-            .read(Table::Launches, ancient)
-            .expect("read")
-            .is_empty()
+    assert_eq!(
+        reader.read(Table::Launches, ancient).expect("read"),
+        [] as [radar_store::Event; 0]
     );
-    assert!(reader.read_outcomes(ancient).expect("read").is_empty());
+    assert_eq!(
+        reader.read_outcomes(ancient).expect("read"),
+        [] as [radar_store::Outcome; 0]
+    );
 }
 
 #[test]

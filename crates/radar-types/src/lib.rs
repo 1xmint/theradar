@@ -116,6 +116,6 @@ mod build_tests {
         // survived. Re-apply any of them: this fails.
         assert_eq!(build_sha(), None, "a test build has no RADAR_BUILD_SHA");
         assert_eq!(build_sha_or_unknown(), "unknown");
-        assert!(!build_sha_or_unknown().is_empty());
+        assert_ne!(build_sha_or_unknown(), "");
     }
 }

@@ -164,7 +164,7 @@ async fn one_wallets_list_is_invisible_to_another() {
 
     // And A's own delete works.
     let (_, body) = call(&router, Method::DELETE, &one_coin, Some(&a_session)).await;
-    assert!(coins(&body).is_empty());
+    assert_eq!(coins(&body), [] as [std::string::String; 0]);
 }
 
 #[tokio::test(flavor = "multi_thread")]

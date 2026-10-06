@@ -13,7 +13,7 @@ benefit of the doubt on everything else.
 
 ## Index
 
-**28 of these 38 name something mechanical that would catch a
+**29 of these 39 name something mechanical that would catch a
 recurrence. 10 name only a habit, and say so** — which is this file's opening
 standard rather than a gap in it. The habit-only rows are the ones worth reading
 twice; nothing will stop those repeating except somebody remembering.
@@ -63,6 +63,7 @@ quietly absent.
 | [36](#36-a-freshness-check-tested-the-wrong-property-and-a-wrong-horizon-hid-behind-it) | A freshness check tested the wrong property, and a wrong horizon hid behind it | `the_six_hour_label_is_always_refused_for_overlapping_its_own_entry`,… |
 | [37](#37-a-query-window-that-grew-with-the-stores-age-crossed-a-vendor-limit-nobody-chose-and-a-health-check-that-could-not-see-its-own-age-said-ok-through-285-failed-runs) | A query window that grew with the store's age crossed a vendor limit nobody chose, and a health check that could not see its own age said `ok` through 285 failed runs | `earliest_due_slot_ignores_launches_that_are_not_due`,… |
 | [38](#38-every-wallet-exception-was-reported-as-cancellation) | Every wallet exception was reported as cancellation | `siws.test.ts` and `Wallet.test.tsx` preserve technical errors and retry |
+| [39](#39-local-tool-versions-gave-a-different-answer-from-ci) | Local tool versions gave a different answer from CI | CI's locked npm install and workspace lint gate |
 
 ---
 
@@ -1847,3 +1848,18 @@ connection and signing failures; `Wallet.test.tsx` checks technical feedback and
 retry. Reversing the 4001 comparison by hand failed four regressions.
 The customer timestamp test and HTTP challenge bootstrap test cover the fields
 the old server-only signature round trip accepted without involving a wallet.
+
+## 39. Local tool versions gave a different answer from CI
+
+**2026-10-06.** Updating source-map-js with npm 11 also removed a nested
+TypeScript peer. Local npm ci passed, but CI's npm 10 refused the lockfile.
+Restore the original peer entry and verify the install with npm 10.9.9.
+The local stable Rust alias was 1.97 while CI had advanced to 1.99; its new
+empty-collection assertion lint then rejected existing tests across the
+workspace. Preserve each predicate while comparing against a typed empty
+value, and correct the module paths in the compiler's automatic suggestions.
+
+**What catches a recurrence:** CI's locked npm install and workspace lint gate.
+A local pass under a different tool version is evidence for that version only;
+it cannot stand in for the required CI result. Rust 1.99 workspace clippy passed
+after these test-only corrections.

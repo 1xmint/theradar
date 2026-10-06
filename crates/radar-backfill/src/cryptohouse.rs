@@ -408,7 +408,7 @@ mod tests {
     #[test]
     fn an_empty_body_is_zero_rows_not_an_error() {
         let rows: Vec<Row> = parse_rows("").expect("parses");
-        assert!(rows.is_empty());
+        assert_eq!(rows, [] as [crate::cryptohouse::tests::Row; 0]);
     }
 
     #[test]

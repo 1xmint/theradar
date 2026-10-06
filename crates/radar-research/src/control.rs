@@ -669,7 +669,7 @@ mod tests {
         let r = evaluate(&[decision(1, 4_000, Conclusion::Passed)], &outcomes);
         assert_eq!(r.selected, 0, "a refusal is not a proposal");
         assert_eq!(r.control, 0, "nor is it an untouched token");
-        assert!(r.strata.is_empty());
+        assert_eq!(r.strata, [] as [crate::control::Stratum; 0]);
     }
 
     #[test]
@@ -687,7 +687,7 @@ mod tests {
             "the selected side is well filled"
         );
         assert_eq!(r.control, 0);
-        assert!(r.comparable().is_empty());
+        assert_eq!(r.comparable(), [] as [&crate::control::Stratum; 0]);
         assert!(matches!(r.verdict(), Verdict::NoComparableStratum { .. }));
     }
 
@@ -954,7 +954,7 @@ mod tests {
         assert_eq!(bands[0].median(), Some(-1_000));
         assert_eq!(bands[4].label, "$60+");
         assert_eq!(bands[4].median(), Some(5_000));
-        assert!(bands[1].returns_bps.is_empty());
+        assert_eq!(bands[1].returns_bps, [] as [i64; 0]);
     }
 
     #[test]

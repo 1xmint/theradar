@@ -241,7 +241,10 @@ mod tests {
 
     #[test]
     fn folding_nothing_yields_nothing() {
-        assert!(fold_positions(Vec::new()).is_empty());
+        assert_eq!(
+            fold_positions(Vec::new()),
+            [] as [crate::position::Position; 0]
+        );
     }
 
     #[test]
