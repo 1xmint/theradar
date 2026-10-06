@@ -184,6 +184,15 @@ means any token from any application in the team opens Radar — with a signatur
 that verifies perfectly, which is why the audience check is the one worth
 getting right.
 
+When adding an operator page, add its hostname/path to the **same Access
+application** whose AUD Radar verifies. The `/automation` page and `/v1/link`
+must use that application and its existing owner policy. Creating separate
+applications for each path produces different audiences that Radar will refuse.
+Verify each changed operator path through Cloudflare without a session: it must
+redirect to Access login, with the configured AUD in the redirect's `kid`.
+Then verify the page and API together in the owner's authenticated browser.
+An origin-side refusal alone does not prove the edge offers a login flow.
+
 Radar verifies the **signature** on `Cf-Access-Jwt-Assertion` against
 Cloudflare's published keys. It does **not** read
 `Cf-Access-Authenticated-User-Email`: that header is a claim by whoever sent the

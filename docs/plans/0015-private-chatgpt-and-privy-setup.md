@@ -160,6 +160,21 @@ configuration, not Privy credential validity or wallet delegation.
 Opening `/automation` in the agent's browser was blocked by its client before
 the page loaded; the owner must use their operator browser to complete linking.
 
+The owner then reported "no Cloudflare Access assertion" and authorized control
+of their logged-in Cloudflare browser. Dashboard inspection confirmed the new
+`/automation` route had no Access application. Added that destination to existing
+Radar app `c8b869e6-f831-4448-ba90-de3f7c324be9`, retaining its Josh-only policy.
+Its AUD matches the installed Radar configuration. Cloudflare reported success;
+an unauthenticated request now redirects to login with that exact audience.
+The separate Radar link app `6194bf19-ac25-4a2d-8f57-6ca2cb554595` issues a different
+audience, so `/v1/link` must move into the main application too. The main-app
+form is prepared, but Cloudflare refuses the duplicate destination. Deleting
+the obsolete single-route app requires explicit action-time confirmation under
+browser-control policy; that question is pending. No deletion has occurred.
+Brave blocked the login redirect with ERR_BLOCKED_BY_CLIENT after the page was
+reloaded. No browser protection was disabled or bypassed. Owner sign-in remains
+unverified.
+
 1. Complete: PR 334, CI and release runs above, artifact hash, fixed deployment,
    live build, public headers, and challenge format verified at `49415d5`.
 2. Use the supplied public Privy app ID and obtain the dedicated Solana wallet ID. Configure
@@ -181,8 +196,11 @@ the page loaded; the owner must use their operator browser to complete linking.
 Private server setup is installed and applied. ChatGPT is not logged in; the
 Privy app is configured, while wallet delegation remains unverified. No autonomous
 trading loop has been enabled. The broader private-autonomy work remains in progress.
-**Next action:** owner opens `https://radar.heyvera.org/automation` in their operator
-browser, selects Connect ChatGPT, and completes the displayed device login.
+**Next action:** obtain pending confirmation to delete the obsolete Radar link
+Access application, then save `/v1/link` into the prepared main Radar application.
+Verify both paths redirect with the installed AUD. Owner resolves the Brave login
+block in their browser, opens `/automation`, selects Connect ChatGPT, and completes
+the displayed device login.
 Verify that linking succeeds through the actual Radar service restrictions.
 The installed client was verified with NoNewPrivileges, not all service namespaces.
 Choose an inference allowance separately before testing a model call.

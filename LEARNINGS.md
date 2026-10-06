@@ -13,8 +13,8 @@ benefit of the doubt on everything else.
 
 ## Index
 
-**31 of these 41 name something mechanical that would catch a
-recurrence. 10 name only a habit, and say so** — which is this file's opening
+**31 of these 42 name something mechanical that would catch a
+recurrence. 11 name only a habit, and say so** — which is this file's opening
 standard rather than a gap in it. The habit-only rows are the ones worth reading
 twice; nothing will stop those repeating except somebody remembering.
 
@@ -66,6 +66,7 @@ quietly absent.
 | [39](#39-local-tool-versions-gave-a-different-answer-from-ci) | Local tool versions gave a different answer from CI | CI's locked npm install and workspace lint gate |
 | [40](#40-a-sudo-wrapper-conflicted-with-the-services-hardening) | A sudo wrapper conflicted with the service's hardening | the fixed-command bridge tests under NoNewPrivileges |
 | [41](#41-an-installer-refused-valid-repeated-environment-settings) | An installer refused valid repeated environment settings | setup fixtures for last-value selection and salt preservation |
+| [42](#42-a-new-operator-page-was-not-added-to-the-edge-login-gate) | A new operator page was not added to the edge login gate | habit only: verify each new page's login redirect and audience |
 
 ---
 
@@ -1899,3 +1900,23 @@ salt assignments remain in place, so this change does not rotate the effective s
 assignment and preserve both salt lines while replacing connection settings.
 Reapplying the duplicate refusal fails both tests. No live salt value was read
 or printed to construct those fixtures.
+
+## 42. A new operator page was not added to the edge login gate
+
+**2026-10-06.** The new `/automation` page correctly required an operator token
+at the origin, but its path was absent from Cloudflare Access. An anonymous
+request reached Radar directly and returned "no Cloudflare Access assertion"
+instead of entering a login flow. Earlier public-route and origin checks did
+not establish that the owner could reach this new page.
+
+The existing `/v1/link` Access application also had a different audience from
+the main Radar application the origin trusts. A shared owner policy does not
+make two applications issue interchangeable tokens. Put cooperating pages and
+APIs in the same trusted application. Cloudflare refuses duplicate destinations
+across applications; moving a route requires retiring its previous application
+or removing that destination first.
+
+**What catches a recurrence:** habit only. Verify each new operator page and API
+through the edge without a session: a login redirect must carry the configured
+audience. Then exercise the authenticated page and its API together. Unit tests
+cannot establish the current dashboard's external route configuration.
