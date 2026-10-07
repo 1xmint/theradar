@@ -736,9 +736,9 @@ issuance/reservation process before the live trusted snapshot adapter.
   tests passed. No broad local mutation or release build.
 - [ ] Full CI including all mutation shards at the code commit.
 
-First issuer CI 37652941215 exposed six missing observations (exact input-size
+First issuer CI 37652941215 exposed seven missing observations (exact file/input-size
 and current-slot boundaries and nonce/mint correlation) plus an equivalent
-operator-signature guard. Added the observations; reapplying all six exact
+operator-signature guard. Added the observations; reapplying all seven exact
 reported mutations fails their tests. The duplicate guard is removed: startup
 already permits only self-authorising policies. Linux's Rust 1.99.0 also caught
 three assertion-style lints absent under local 1.97.1; fixed without suppression.

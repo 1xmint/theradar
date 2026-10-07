@@ -454,6 +454,19 @@ fn conversion_rounds_down_and_fee_and_time_evidence_bound_the_proof() {
 fn unusable_private_files_and_overlong_input_stop_without_issuing() {
     let fixture = Fixture::new();
     let config_path = fixture.dir.path().join("config.json");
+    let mut exact = fixture.config.to_string();
+    exact.extend(std::iter::repeat_n(' ', 1_048_576 - exact.len()));
+    std::fs::write(&config_path, exact).expect("maximum-size valid JSON");
+    let output = fixture
+        .command()
+        .stdin(Stdio::null())
+        .output()
+        .expect("startup at file boundary");
+    assert!(output.status.success(), "{:?}", output.stderr);
+    assert_eq!(
+        serde_json::from_slice::<Value>(&output.stdout).expect("ready")["outcome"],
+        "ready"
+    );
     let mut large = fixture.config.to_string();
     large.extend(std::iter::repeat_n(' ', 1_048_577));
     std::fs::write(&config_path, large).expect("oversize valid JSON");

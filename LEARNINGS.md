@@ -2058,12 +2058,14 @@ failure; restoring the subtraction passes.
 **Found:** 2026-10-07, CI 37652941215. The offline issuer's valid-proof tests
 did not inspect the proposal's journal nonce/mint links, exercise a proposal
 observed exactly at the current slot, or distinguish complete maximum-size
-input from a truncated or unterminated line. Six mutations of those behaviors
+input from a truncated or unterminated line. The final shard also exposed the
+maximum private-file boundary: an exact 1 MiB valid configuration must load.
+Seven mutations of those behaviors
 survived even though proof verification and outstanding-capital checks passed.
 The proof is one output; its durable correlation and the framing boundary are
 other outputs, and each must be observed where it matters.
 
-A seventh survivor was redundant: startup rejects every policy requiring
+An eighth survivor was redundant: startup rejects every policy requiring
 operator approval, so the kernel cannot return an operator-required decision.
 The duplicate match guard was removed rather than adding an exclusion or a
 test for an unreachable condition. Linux CI also ran Rust 1.99.0 while the
@@ -2075,6 +2077,7 @@ that repeats learning 39, and the assertions now show lengths on failure.
 the current-slot decision and journal correlation; subsequent operation events
 link to the proposing event instead of repeating its nonce and mint.
 `the_input_size_boundary_accepts_a_complete_line_and_refuses_truncation` checks
-both exact line-size boundaries and missing newline. Reapplying each of the six
+both exact line-size boundaries and missing newline; the private-file test
+loads an exact maximum-size valid configuration. Reapplying each of the seven
 reported mutations fails the corresponding test. Required CI checks the code
 against the runner's actual compiler; local lint alone is not that check.
