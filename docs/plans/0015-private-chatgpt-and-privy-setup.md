@@ -734,7 +734,9 @@ issuance/reservation process before the live trusted snapshot adapter.
   creator and fails its process regression. Both guards restored.
 - [x] All-target signer Clippy passed with warnings denied; all 33 conformance
   tests passed. No broad local mutation or release build.
-- [ ] Full CI including all mutation shards at the code commit.
+- [x] Full CI 37655321913 passed at `6b05ae4eada70cb9bd019f8d6d109b9a0cb78195`:
+  2,410 Rust tests, 352 web tests, site/build/lint/MSRV checks, all four mutation
+  shards and the final gate.
 
 First issuer CI 37652941215 exposed seven missing observations (exact file/input-size
 and current-slot boundaries and nonce/mint correlation) plus an equivalent
@@ -745,11 +747,18 @@ three assertion-style lints absent under local 1.97.1; fixed without suppression
 Restored source passes 124 signer tests and all-target scoped Clippy. No mutation
 exclusion or local broad mutation run was used.
 
-**Handback in progress:** offline issuer only. Do not deploy keys or enable live
+**Handback:** the offline issuer and CI repairs are implemented and verified in
+PR 334. Do not deploy keys or enable live
 delegation. Next replace operator-provisioned evidence with an independently
 measured wallet/market adapter, activate site mandates outside Serve's write
 authority, and implement confirmation/loss reconciliation before lifting the
 single-flight restriction. Missing operator financial, fee, freshness and
 expiry settings have no live defaults. Protected directories, identity
 separation and checkpoints remain deployment prerequisites. Production stays
-at Serve `3f38ee0`, closed policy, inactive signer.
+at the last verified Serve `3f38ee0`, closed policy, inactive signer. The final
+SSH health recheck timed out on 2026-10-07; current VPS status is unverified.
+No deployment, real issuer key, delegation, signature or trade occurred in
+this increment. No local Cargo or issuer process remains; target is 27.2 GiB
+with 120.5 GiB free. The previously rejected ignored mutation-output cleanup
+was not retried. This follow-up changes only the verification handback; its
+own CI may be pending, while the code commit above passed fully.
