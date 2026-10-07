@@ -112,3 +112,109 @@ fn a_failed_program_read_exits_without_partial_json_or_provider_details() {
     assert!(!error.contains("provider-private-detail"));
     assert_eq!(server.join().expect("RPC fixture").len(), 2);
 }
+
+fn curve_response() -> Value {
+    let mut mint = vec![0; 82];
+    mint[36..44].copy_from_slice(&1_000_000u64.to_le_bytes());
+    mint[44] = 6;
+    mint[45] = 1;
+    let mut curve = radar_pumpfun::curve::DISCRIMINATOR.to_vec();
+    for amount in [
+        1_000_000u64,
+        30_000_000_000,
+        500_000,
+        1_000_000_000,
+        1_000_000,
+    ] {
+        curve.extend_from_slice(&amount.to_le_bytes());
+    }
+    curve.push(0);
+    curve.extend_from_slice(&[0x33; 32]);
+    let mut fees = radar_pumpfun::fees::FEE_CONFIG_DISCRIMINATOR.to_vec();
+    fees.extend_from_slice(&[0; 33]);
+    for fee in [0u64, 95, 30] {
+        fees.extend_from_slice(&fee.to_le_bytes());
+    }
+    fees.extend_from_slice(&1u32.to_le_bytes());
+    fees.extend_from_slice(&0u128.to_le_bytes());
+    for fee in [0u64, 95, 30] {
+        fees.extend_from_slice(&fee.to_le_bytes());
+    }
+    let accounts: Vec<Value> = [
+        (mint,radar_pumpfun::token::SPL_TOKEN_PROGRAM),
+        (curve,radar_pumpfun::pda::PROGRAM_ID),
+        (fees,radar_pumpfun::pda::FEE_PROGRAM),
+    ].into_iter().map(|(data,owner)|json!({"data":[radar_types::b64::encode(&data),"base64"],"owner":owner.to_string()})).collect();
+    json!({"result":{"context":{"slot":778},"value":accounts}})
+}
+
+#[test]
+fn the_curve_exit_command_reads_only_the_derived_accounts_at_one_finalized_context() {
+    let (endpoint, server) = fixture(vec![curve_response()]);
+    let mint = radar_types::Address::new([0x22; 32]);
+    let before = now();
+    let output = Command::new(env!("CARGO_BIN_EXE_radar"))
+        .args([
+            "curve-exit",
+            "--mint",
+            &mint.to_string(),
+            "--raw-tokens",
+            "1000",
+            "--rpc",
+            &endpoint,
+        ])
+        .output()
+        .expect("command");
+    let after = now();
+    assert!(output.status.success(), "{:?}", output.stderr);
+    let quote: Value = serde_json::from_slice(&output.stdout).expect("JSON quote");
+    assert_eq!(quote["slot"], "778");
+    assert_eq!(quote["mint"], mint.to_string());
+    assert_eq!(quote["gross_lamports"], "29970030");
+    assert_eq!(quote["venue_fee_upper_lamports"], "374626");
+    assert_eq!(quote["net_lamports_at_observed_state"], "29595404");
+    assert_eq!(quote["raw_tokens"], "1000");
+    assert_eq!(quote["authority"], "read_only");
+    let started = quote["read_started_at_unix_secs"].as_u64().expect("start");
+    let completed = quote["read_completed_at_unix_secs"]
+        .as_u64()
+        .expect("completion");
+    assert!(before <= started && started <= completed && completed <= after);
+    let calls = server.join().expect("RPC fixture");
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0]["method"], "getMultipleAccounts");
+    assert_eq!(
+        calls[0]["params"],
+        json!([
+            [mint.to_string(),radar_pumpfun::pda::bonding_curve(&mint).expect("curve").to_string(),radar_pumpfun::pda::fee_config().expect("fees").to_string()],
+            {"encoding":"base64","commitment":"finalized"}
+        ])
+    );
+}
+
+#[test]
+fn the_curve_command_rejects_a_correctly_encoded_fee_account_with_the_wrong_owner() {
+    let mut answer = curve_response();
+    answer["result"]["value"][2]["owner"] = json!("11111111111111111111111111111111");
+    let (endpoint, server) = fixture(vec![answer]);
+    let output = Command::new(env!("CARGO_BIN_EXE_radar"))
+        .args([
+            "curve-exit",
+            "--mint",
+            &radar_types::Address::new([0x22; 32]).to_string(),
+            "--raw-tokens",
+            "1000",
+            "--rpc",
+            &endpoint,
+        ])
+        .output()
+        .expect("command");
+    assert!(!output.status.success());
+    assert_eq!(output.stdout.len(), 0);
+    assert!(
+        String::from_utf8(output.stderr)
+            .expect("error")
+            .contains("market program owner differs")
+    );
+    assert_eq!(server.join().expect("RPC fixture").len(), 1);
+}

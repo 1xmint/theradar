@@ -261,6 +261,23 @@ is not accepted as the issuer Snapshot. Protected endpoint/wallet provisioning,
 valuation, measured capacity/fees, deployed exposure and loss reconciliation
 remain required. It grants no authority and loads no key.
 
+## One-context curve exit measurement — 2026-10-07
+
+`radar curve-exit` now reads the mint, derived bonding curve and derived fee
+schedule together under one finalized node-reported context. Owners and existing
+layouts are mandatory; current authority/initialization/supply and unsupported
+extensions cannot be silently defaulted away. Lower mint supply due to holder
+burns is allowed. Pricing refuses active mint/freeze authority and gross exits
+not covered by real SOL reserves.
+
+The venue fee bound is the maximum total over every observed tier and flat row,
+requiring tier coverage from zero. It does not claim the current market-cap tier
+or a fee constant. Fee rounding favours cost conservatism. Output is a requested
+hypothetical exit for that state, not a future fill, searched exit capacity or
+complete trade economics. USD valuation, network fee, wallet ownership and exact
+transaction simulation remain unestablished. This component cannot populate a
+full issuer Snapshot or activate delegation on its own.
+
 ## What would reverse this
 
 Nothing foreseeable reverses holding a policy locally. The specific ceilings are

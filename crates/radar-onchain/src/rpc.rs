@@ -559,7 +559,7 @@ impl RpcClient {
         let result: MultiEnvelope = self.call(
             budget,
             "getMultipleAccounts",
-            &serde_json::json!([asked, { "encoding": "base64" }]),
+            &serde_json::json!([asked, { "encoding": "base64", "commitment": "finalized" }]),
         )?;
         let slot = result.context.map(|c| Slot(c.slot));
         let values = result.value.ok_or_else(|| {

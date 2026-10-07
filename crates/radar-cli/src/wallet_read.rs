@@ -46,7 +46,7 @@ fn read(rpc: &RpcClient, wallet: Address, budget: &mut Budget) -> Result<Value, 
     }))
 }
 
-fn now() -> Result<u64, String> {
+pub(super) fn now() -> Result<u64, String> {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|time| time.as_secs())

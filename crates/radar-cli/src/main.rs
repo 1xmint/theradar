@@ -17,6 +17,7 @@ mod brief;
 mod consider;
 mod control;
 mod cost;
+mod curve_exit;
 mod dossier;
 mod edge;
 mod exits;
@@ -113,6 +114,8 @@ commands:
                                  whether it is fixed or proportional
   wallet-read --wallet <address> --rpc <URL>
     Direct finalized SOL/SPL/Token-2022 reads; JSON, no prices or authority.
+  curve-exit --mint <address> --raw-tokens <N> --rpc <URL>
+    One-context curve/mint/fee read; conservative hypothetical sell, no authority.
 
   dossier <mint> [--rpc URL] [--seconds N]
                                  everything Radar can say about one token, read
@@ -887,6 +890,7 @@ fn main() -> ExitCode {
         "creator-index" => creator_index(&args),
         "dossier" => dossier::run(&args),
         "wallet-read" => wallet_read::run(&args),
+        "curve-exit" => curve_exit::run(&args),
         "audit" => audit::run(&args),
         "model-prices" => model_prices::run(&args),
         "selection" => selection_report(&args),

@@ -833,3 +833,54 @@ GiB with 124 GiB free. Previously rejected ignored mutation-output cleanup was
 not retried. This follow-up records verification and the inspected next-step
 constraints only; the code commit above passed full CI, while follow-up CI may
 be pending.
+
+### One-context curve exit measurements — 2026-10-07
+
+Owner requested continuation from `213b555`. The actual operator caller is
+`radar curve-exit --mint <address> --raw-tokens <N> --rpc <URL>`. The new
+`crates/radar-onchain/src/curve_market.rs` reader derives curve and fee addresses
+and requests them with the mint in one finalized getMultipleAccounts call.
+No new dependency crate or key-bearing process is introduced.
+
+- [x] Require a shared context, exact account count, presence and program owners.
+  Parse existing curve, fee and token layouts; refuse unsupported extensions,
+  noncanonical initialization and nonzero unknown trailing fee data. Require
+  positive current mint supply no greater than the curve's recorded total;
+  holder burns can reduce current supply without changing the original total.
+- [x] Preserve creator, decimals, current mint supply and mint-authority fact
+  from that read. A current authority tag is not a historical revocation latch.
+- [x] Price an explicit hypothetical sell using existing integral curve math.
+  Refuse active mint/freeze authority, graduated/unpriceable curves, requested
+  quantities above supply and gross proceeds above observed real SOL reserves.
+- [x] Require a schedule covering from zero. Bound venue fees by the highest
+  total among every observed tier and flat row, without guessing the applicable
+  market-cap tier. Round fees up and refuse bounds/rounding consuming the exit.
+- [x] Emit raw quantities, gross/fee/net lamports, impact and shared slot as
+  strings, with host read times. USD value, searched exit capacity, network fee
+  and transaction simulation remain null; wallet ownership is unverified.
+- [x] Scoped CLI tests: 219 unit and 4 process tests; onchain: 67 unit and 18 integration tests. Scoped Clippy with warnings denied and workspace fmt passed.
+- [x] Manual mutations of owner OR to AND, maximum fee to minimum, and gross reserve > to >= each failed their targeted test; restored sources passed.
+- [x] Repo-conformance: all 33 checks passed.
+- [ ] Full CI pending.
+
+The read parameters follow
+[getMultipleAccounts](https://solana.com/docs/rpc/http/getmultipleaccounts).
+Existing multi-account callers also now request finalized commitment explicitly.
+No provider response or credential URL is included in a refusal. Fee bounds
+cover only the observed parsed schedule; an admin update or later reserve change
+can invalidate the quote. This does not measure total execution costs or provide
+an executable minimum receipt. It is not the issuer Snapshot, a largest-exit
+search, a portfolio, an authorization or a live transaction simulation.
+
+**Handback in progress:** the market component remains read-only. Next measure
+candidate buy/exit economics and exact transaction fee/simulation evidence,
+trusted SOL/USD valuation, and journal-derived exposure/loss, then activate
+owner mandates outside Serve's write authority and reconcile submissions before
+wiring repeated worker execution. No deployment, real keys, delegation or trade.
+
+A read-only mainnet invocation against the previously captured mint
+6T1BNshzGAKAHvJ3NZ5n62X2eg5rqqsMipUMZJvLpump returned
+`unknown fee trailing data`. The current account carries bytes outside the
+known fee layout; no live quote was emitted and the refusal was preserved.
+The synthetic process fixture verifies the supported layout only. Investigate
+the changed layout with a raw capture before extending parsing.
