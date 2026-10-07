@@ -120,8 +120,10 @@ lane still lack replay checks.
 
 The later October 7 issuer-verification amendment in ADR 0008 additionally
 requires a signed exact intent and host-clock expiry in the Privy binary. It
-authenticates a configured key, but the isolated kernel/reservation issuer is
-still absent. The following original guarantee remains the library/local lane's.
+authenticates a configured key. The later offline issuer amendment in ADR 0008
+adds kernel evaluation and reservations over operator-provisioned evidence;
+live trusted snapshots and reconciliation remain absent. The following original
+guarantee remains the library/local lane's.
 
 > the transaction matches the authorisation **the caller supplied**
 

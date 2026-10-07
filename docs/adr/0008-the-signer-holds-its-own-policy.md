@@ -189,12 +189,61 @@ authenticate the chain head or prevent submission of a signature already returne
 
 This changes the Privy binary's earlier caller-forgery guarantee, not the local
 lane or the checked-signing library by itself. The signature proves provenance
-from the configured issuer key. **There is no isolated issuer yet that evaluates
+from the configured issuer key. **At this increment there was no isolated issuer that evaluates
 the risk kernel against trusted portfolio state and reserves capital atomically.**
 Do not give that key to the caller or describe this verifier as proof that the
 kernel authorized capital. No real issuer trust anchor, live expiry cap,
 delegation or trading is configured by this increment. Durable reservations,
 loss/submission accounting and independent Privy refusal tests remain required.
+
+## Offline issuer over separately provisioned evidence — 2026-10-07
+
+The separate `radar-issuer` binary in the signer package now has an actual
+operator-facing stdin/stdout entry point. It holds an Ed25519 issuer key, no
+Solana wallet key or Privy authorization key, and makes no network calls. It
+emits the exact v1 proof the existing Privy signer verifies. The autonomous
+executor is not wired to it yet.
+
+Its configured files are authority: active wallet-bound policy with an expiry,
+a current independently provisioned snapshot, a pre-existing intact journal,
+and a private key file. On Unix configured files must be regular and mode 0600
+or stricter; deployment still needs a distinct service identity, protected
+directories and Windows ACLs where applicable. The caller supplies only a
+proposal and unsigned transaction. Both must exactly match the proposal and
+bytes in the provisioned evidence; caller-asserted exit capacity, costs or
+creator identity cannot become trusted by passing through the pure kernel.
+
+The snapshot includes wallet identity, counted native SOL, an upper SOL price
+in micro-USD, reviewed fee upper bound, observed Unix time and kernel state
+(including deployed exposure, daily loss and failures). These are trusted
+operator-provisioned inputs, not independently verified live reads by this
+binary. The issuer checks wallet/time/price, evaluates the actual risk kernel,
+narrows its slot expiry, rounds the USD-to-lamport ceiling down with u128
+arithmetic, re-decodes the transaction with existing signer guards, and reserves
+the ceiling plus configured fee cushion. Fees must fit that cushion.
+
+Only then does it persist SubmissionUnknown and sign/output the proof. An
+outstanding claim blocks all further issuance, including after restart. This
+conservative single-flight restriction avoids pretending unimplemented
+settlement accounting can provide current exposure or realised loss. No timer,
+pipe error or refused second request frees it. Claims correlate to the kernel
+nonce and mint. Changed configuration refuses new requests until restart;
+already emitted proofs remain bounded by their own expiry and signer policy.
+
+This is an offline issuer prerequisite, not autonomous trading activation.
+The site's draft limits are not its authority. A live adapter must independently
+read the wallet and market, construct measured evidence, account for fills and
+losses, and activate/revoke mandates outside Serve's write authority. Protected
+stable history and trusted checkpoints are still required against replacement
+and rollback; file mode checks alone do not prove ownership separation. No
+real issuer key, expiry/price/fee policy or delegation is provisioned here.
+
+The actual process regressions in
+`crates/radar-signer/tests/issuer_process.rs` cover valid kernel-derived issuance,
+proof verification, caller evidence substitution, persistent outstanding
+claims, missing state, invalid configuration, snapshot failures, risk refusals,
+insufficient cash, fee coverage and conversion/expiry bounds. Clock boundaries
+are also checked with deterministic arguments in the binary's unit test.
 
 ## What would reverse this
 

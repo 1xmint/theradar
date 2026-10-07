@@ -117,7 +117,8 @@ struct Config {
     ///
     /// The Privy process verifies an issuer-signed intent and consumes its nonce
     /// before key use. This authenticates a configured key, not kernel execution
-    /// or portfolio state: the isolated issuer is not implemented yet.
+    /// or portfolio state: the offline issuer relies on separately provisioned
+    /// evidence and has no live snapshot adapter or reconciliation yet.
     /// Every one of them is clamped against this, unconditionally
     /// ([ADR 0008](https://github.com/hey-vera/radar/blob/main/docs/adr/0008-the-signer-holds-its-own-policy.md)).
     ///

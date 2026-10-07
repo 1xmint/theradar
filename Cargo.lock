@@ -1616,11 +1616,13 @@ version = "0.0.1"
 dependencies = [
  "ed25519-dalek",
  "radar-decode",
+ "radar-journal",
  "radar-risk",
  "radar-types",
  "ring",
  "serde",
  "serde_json",
+ "tempfile",
  "thiserror",
 ]
 

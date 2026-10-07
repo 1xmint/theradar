@@ -3,7 +3,8 @@
 //!
 //! The process trusts only a startup public key, never a key in the request.
 //! This verifies provenance; it does not prove the issuer ran the risk kernel
-//! against trusted portfolio state. That isolated issuer is still required.
+//! against trusted portfolio state. The offline issuer requires separately
+//! provisioned evidence; its live snapshot adapter is still absent.
 
 use ed25519_dalek::{Signature, VerifyingKey};
 use radar_types::Address;

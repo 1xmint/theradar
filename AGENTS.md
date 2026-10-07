@@ -138,8 +138,8 @@ rule *currently reaches* is status, and status is in
    **State the signer's guarantee exactly, because an earlier version said
    "absolute" and was read as more than it is.** The library checks caller-supplied
    bounds. The Privy binary also checks an issuer signature, host-clock expiry
-   and durable nonce reuse. No isolated kernel/reservation issuer exists yet;
-   a signature proves key provenance, not a trusted portfolio decision. The local
+   and durable nonce reuse. The offline issuer uses operator-provisioned evidence;
+   live snapshots/reconciliation are absent. Provenance alone proves no decision. The local
    lane remains unauthenticated. Keep live delegation closed until those gaps close.
    LEARNINGS 23, and [ADR 0007](docs/adr/0007-the-privy-authorization-key-lives-in-the-signer-process.md).
    This is why it refuses address lookup tables

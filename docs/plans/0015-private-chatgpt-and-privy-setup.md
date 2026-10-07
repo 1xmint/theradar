@@ -707,3 +707,40 @@ is inactive. No trade or real signing was performed. Target is 26.8 GiB with
 121.1 GiB free and no local Cargo process remaining. Previously rejected ignored
 mutation-output cleanup was not retried. The verification follow-up edits only
 this handback; the behavior commit's completed full CI is recorded above.
+
+### Offline isolated issuer — 2026-10-07
+
+Owner requested continuation from `bccb92d`. Build a real operator-facing
+`radar-issuer` binary in the existing signer package, called over stdin/stdout;
+no unused framework crate and no claim that the autonomous worker is connected.
+The binary's evidence comes from private operator-provisioned files, not Serve
+drafts or caller-supplied portfolio/price/exit/cost assertions. This is the
+issuance/reservation process before the live trusted snapshot adapter.
+
+- [x] Wallet-bound active policy, expiry and mandatory existing state/key paths.
+  Regular/private Unix files; no network, wallet key or Privy key in the issuer.
+  Reject changed mandates, missing state and stale/future/wrong-wallet evidence.
+- [x] Match proposal and exact transaction against independently provisioned
+  evidence, evaluate the existing kernel, narrow slot expiry and convert USD to
+  lamports conservatively with integer arithmetic. Require fee coverage.
+- [x] Persist the capital claim and SubmissionUnknown before signing a v1
+  intent proof. Retain claims across output errors and restart; refuse all new
+  issuance while an operation is outstanding. Correlate nonce and mint.
+- [x] Eight actual-process regressions plus a deterministic time-boundary test,
+  including broken-output persistence. Scoped signer suite passes 123 Windows
+  tests; no real keys or transactions.
+- [x] Removing the outstanding-operation guard permits a second issuance and
+  fails its process regression. Removing the evidence match permits an invented
+  creator and fails its process regression. Both guards restored.
+- [x] All-target signer Clippy passed with warnings denied; all 33 conformance
+  tests passed. No broad local mutation or release build.
+- [ ] Full CI including all mutation shards at the code commit.
+
+**Handback in progress:** offline issuer only. Do not deploy keys or enable live
+delegation. Next replace operator-provisioned evidence with an independently
+measured wallet/market adapter, activate site mandates outside Serve's write
+authority, and implement confirmation/loss reconciliation before lifting the
+single-flight restriction. Missing operator financial, fee, freshness and
+expiry settings have no live defaults. Protected directories, identity
+separation and checkpoints remain deployment prerequisites. Production stays
+at Serve `3f38ee0`, closed policy, inactive signer.

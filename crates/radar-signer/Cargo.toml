@@ -18,6 +18,7 @@ ed25519-dalek.workspace = true
 # its discriminators are captured from mainnet rather than copied (ADR 0001).
 radar-decode.workspace = true
 radar-risk.workspace = true
+radar-journal.workspace = true
 ring = { version = "0.17", default-features = false }
 radar-types.workspace = true
 serde.workspace = true
@@ -25,6 +26,7 @@ serde_json.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]
+tempfile = "3"
 ed25519-dalek.workspace = true
 radar-decode.workspace = true
 radar-risk.workspace = true
@@ -35,6 +37,10 @@ serde_json.workspace = true
 [[bin]]
 name = "radar-signer"
 path = "src/main.rs"
+
+[[bin]]
+name = "radar-issuer"
+path = "src/bin/radar-issuer.rs"
 
 [lib]
 name = "radar_signer"

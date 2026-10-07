@@ -14,8 +14,9 @@
 //! signer's policy. The Privy process additionally verifies a configured issuer's
 //! signature over the exact intent, checks its own clock and consumes the nonce
 //! persistently. The library signing methods alone do not enforce these guards.
-//! An isolated issuer that actually runs the kernel against trusted portfolio
-//! state is still absent; authenticated provenance does not prove that decision.
+//! The separate offline `radar-issuer` binary evaluates operator-provisioned
+//! evidence and persists reservations. Live trusted snapshots and settlement
+//! reconciliation are absent; authenticated provenance alone proves neither.
 
 pub mod attestation;
 pub mod canonical;
