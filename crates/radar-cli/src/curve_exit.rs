@@ -30,7 +30,10 @@ fn estimate(market: &CurveMarket, raw_tokens: u64) -> Result<Value, String> {
     if upper.total_bps() >= 10_000 {
         return Err("fee bound consumes the exit".into());
     }
-    let fee = upper.charge(gross.lamports);
+    let fee = market
+        .fees
+        .charge_upper(gross.lamports)
+        .ok_or("fee cost bound unavailable")?;
     let net = gross.lamports - fee;
     if net == 0 {
         return Err("fee rounding consumes the exit".into());
@@ -43,7 +46,7 @@ fn estimate(market: &CurveMarket, raw_tokens: u64) -> Result<Value, String> {
         "gross_lamports":gross.lamports.to_string(), "venue_fee_upper_lamports":fee.to_string(),
         "net_lamports_at_observed_state":net.to_string(), "impact_bps":gross.impact_bps.to_string(),
         "venue_fee_upper_bps":upper.total_bps().to_string(),
-        "fee_bound_basis":"maximum_total_across_observed_flat_and_tiers",
+        "fee_bound_basis":"maximum_component_rounded_cost_across_observed_rows",
         "real_sol_reserves":market.curve.real_sol_reserves.to_string(),
         "usd_value":null, "exit_capacity":null, "network_fee":null,
         "transaction_simulation":null, "wallet_ownership":"unverified"

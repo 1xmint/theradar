@@ -993,3 +993,28 @@ accepted socket inheriting listener nonblocking mode: header read failed with
 WouldBlock before request bytes arrived. The fixture now explicitly makes that
 socket blocking before applying its existing five-second read timeout. The
 listener accept loop keeps its deadline. Production HTTP code is unchanged.
+
+### Component rounding correction — 2026-10-07
+
+Before declaring the fee cost conservative, inspected Pump's pinned published
+buy formula: protocol and creator fees round separately. That does not prove
+the sell implementation, but a conservative hypothetical exit must cover this
+rounding. The previous gross-32 live read's fee 1/net 31 can be optimistic by
+one lamport. This is a correction to a quoted bound, not to any signed trade.
+
+- [x] Add `FeeSchedule::charge_upper`: separately ceil LP/protocol/creator costs
+  in each standard/stable/flat/exotic row, then choose largest cost and clamp to
+  gross. Keep maximum total bps as a separate rate ceiling; the largest-rate
+  row need not be the largest-cost row. Existing Fees::charge callers unchanged.
+- [x] CLI uses that cost bound; exhausted exits refuse and output names component
+  rounding. Update exact process quote expectations by one lamport.
+- [x] Regression covers rounding, differing row order, all components, zero,
+  exact divisions, overflow/exhaustion and missing coverage. Restoring combined
+  rounding fails at Some(1) versus Some(2); restored five parser tests, four
+  quote unit tests, five actual-process tests and scoped all-target Clippy pass.
+- [ ] Full CI pending after the already-running repair CI finishes; no checks
+  cancelled. LEARNINGS 49 records the correction and what catches recurrence.
+
+Live trading remains off. No USD valuation, network costs or simulation result
+was invented. This schedule bound covers observed parsed fields and rounded
+component costs; it cannot guarantee a later fill or unobserved program charges.

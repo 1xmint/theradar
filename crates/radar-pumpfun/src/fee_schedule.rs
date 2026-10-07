@@ -72,6 +72,27 @@ impl FeeSchedule {
         {
             return None;
         }
+        self.rows().max_by_key(Fees::total_bps)
+    }
+
+    /// Largest sum of separately rounded component costs across observed rows.
+    /// Total bps alone cannot select this row: equal totals can round differently.
+    /// Clamps costs to the gross amount; callers must refuse an exhausted exit.
+    #[must_use]
+    pub fn charge_upper(&self, lamports: u64) -> Option<u64> {
+        self.upper_bound()?;
+        self.rows()
+            .map(|row| {
+                let cost: u128 = [row.lp_bps, row.protocol_bps, row.creator_bps]
+                    .into_iter()
+                    .map(|bps| (u128::from(lamports) * u128::from(bps)).div_ceil(10_000))
+                    .sum();
+                u64::try_from(cost).unwrap_or(u64::MAX).min(lamports)
+            })
+            .max()
+    }
+
+    fn rows(&self) -> impl Iterator<Item = Fees> + '_ {
         self.standard
             .tiers
             .iter()
@@ -79,7 +100,6 @@ impl FeeSchedule {
             .map(|tier| tier.fees)
             .chain(std::iter::once(self.standard.flat))
             .chain(self.exotic)
-            .max_by_key(Fees::total_bps)
     }
 }
 
@@ -193,5 +213,36 @@ mod tests {
         assert!(schedule.upper_bound().is_none());
         schedule.stable.clear();
         assert!(schedule.upper_bound().is_none());
+    }
+
+    #[test]
+    fn component_rounding_bounds_cost_even_when_the_largest_bps_row_is_different() {
+        let mut schedule = FeeSchedule::parse(&captured()).expect("capture");
+        assert_eq!(schedule.charge_upper(32), Some(2));
+        assert_eq!(schedule.charge_upper(0), Some(0));
+        assert_eq!(schedule.charge_upper(1), Some(1));
+        assert_eq!(schedule.charge_upper(10_000), Some(125));
+        schedule.standard.flat = Fees {
+            lp_bps: 0,
+            protocol_bps: 150,
+            creator_bps: 0,
+        };
+        // The 150-bps row costs only one lamport here; the 125-bps row costs two.
+        assert_eq!(schedule.upper_bound().expect("bps").total_bps(), 150);
+        assert_eq!(schedule.charge_upper(32), Some(2));
+        schedule.exotic = Some(Fees {
+            lp_bps: 1,
+            protocol_bps: 1,
+            creator_bps: 1,
+        });
+        assert_eq!(schedule.charge_upper(32), Some(3));
+        schedule.exotic = Some(Fees {
+            lp_bps: u64::MAX,
+            protocol_bps: u64::MAX,
+            creator_bps: u64::MAX,
+        });
+        assert_eq!(schedule.charge_upper(u64::MAX), Some(u64::MAX));
+        schedule.standard.tiers.clear();
+        assert_eq!(schedule.charge_upper(32), None);
     }
 }

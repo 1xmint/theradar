@@ -13,7 +13,7 @@ benefit of the doubt on everything else.
 
 ## Index
 
-**36 of these 48 name something mechanical that would catch a
+**37 of these 49 name something mechanical that would catch a
 recurrence. 12 name only a habit, and say so** — which is this file's opening
 standard rather than a gap in it. The habit-only rows are the ones worth reading
 twice; nothing will stop those repeating except somebody remembering.
@@ -73,6 +73,7 @@ quietly absent.
 | [46](#46-an-unreadable-wallet-was-reported-as-absent) | An unreadable wallet was reported as absent | nullable-ID and malformed-response wallet regressions; pending-creation UI regression |
 | [47](#47-strict-history-opening-exposed-shared-fixtures-and-clock-dependent-tampering) | Strict history opening exposed shared fixtures and clock-dependent tampering | isolated caller fixtures and deterministic issuer-tampering regression |
 | [48](#48-valid-proofs-left-durable-links-and-input-boundaries-untested) | Valid proofs left durable links and input boundaries untested | issuer process correlation and exact-boundary regressions |
+| [49](#49-a-fee-rate-bound-did-not-bound-rounded-component-costs) | A fee rate bound did not bound rounded component costs | component-rounding and process quote regressions |
 
 ---
 
@@ -2103,3 +2104,29 @@ request arrival and failed with WouldBlock. Explicitly restore blocking mode on
 the accepted socket, retaining the read timeout and accept deadline. The actual
 wallet/curve process regressions exercise this shared fixture; their repeated
 Windows run caught the race. Production RPC behavior was unaffected.
+
+## 49. A fee rate bound did not bound rounded component costs
+
+**Found:** 2026-10-07, review after adding the captured fee extension. The CLI
+selected the largest total bps row and rounded its combined fee up. Pump's
+published buy formula rounds protocol and creator fees separately. That is not
+proof of the sell implementation, but the exit bound must also cover that
+rounding: at gross 32 lamports, 95 and 30 bps can cost two lamports when rounded
+separately, versus one when combined. A row with smaller total bps can therefore
+cost more than the largest-rate row for a small amount. The initial live output
+of fee 1/net 31 was an optimistic bound under component rounding, not a trade.
+
+The complete schedule now computes a ceiling for each observed LP/protocol/
+creator component, sums within each row and selects the largest cost across
+all rows. Cost arithmetic uses u128 and clamps to gross; exhausted exits refuse.
+The maximum bps remains a separate rate bound. This does not establish network
+costs, future fee changes or exact sell fee classification. Historical prefix
+callers using `Fees::charge` retain their combined-fee semantics.
+
+**What catches a recurrence:**
+`component_rounding_bounds_cost_even_when_the_largest_bps_row_is_different`
+checks separate rounding, the rate/cost ordering difference, all three components,
+zero, exact divisibility, overflow and exhaustion. Restoring combined rounding
+fails at Some(1) versus Some(2). Actual-process quotes inspect exact revised
+fees and proceeds for captured and larger exotic schedules. No key or trade
+was involved in discovering or repairing this bound.

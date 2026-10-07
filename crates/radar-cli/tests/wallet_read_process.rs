@@ -176,8 +176,8 @@ fn the_curve_exit_command_reads_only_the_derived_accounts_at_one_finalized_conte
     assert_eq!(quote["slot"], "778");
     assert_eq!(quote["mint"], mint.to_string());
     assert_eq!(quote["gross_lamports"], "29970030");
-    assert_eq!(quote["venue_fee_upper_lamports"], "374626");
-    assert_eq!(quote["net_lamports_at_observed_state"], "29595404");
+    assert_eq!(quote["venue_fee_upper_lamports"], "374627");
+    assert_eq!(quote["net_lamports_at_observed_state"], "29595403");
     assert_eq!(quote["raw_tokens"], "1000");
     assert_eq!(quote["authority"], "read_only");
     let started = quote["read_started_at_unix_secs"].as_u64().expect("start");
@@ -236,8 +236,8 @@ fn the_curve_command_accounts_for_captured_extensions_and_larger_exotic_fees() {
         .map(|at| u8::from_str_radix(&hex[at..at + 2], 16).expect("byte"))
         .collect();
     for (protocol, bound, fee, net) in [
-        (95u64, "125", "374626", "29595404"),
-        (600u64, "630", "1888112", "28081918"),
+        (95u64, "125", "374627", "29595403"),
+        (600u64, "630", "1888113", "28081917"),
     ] {
         let mut bytes = original.clone();
         bytes[161..169].copy_from_slice(&protocol.to_le_bytes());

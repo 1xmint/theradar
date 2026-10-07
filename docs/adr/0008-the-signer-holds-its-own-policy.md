@@ -292,6 +292,19 @@ token classification or current market-cap tier is inferred. Existing prefix-onl
 reader claims the expanded bound. Read-only live verification emitted a quote;
 it is still incomplete execution evidence and grants no signing authority.
 
+## Component rounding in the cost bound — 2026-10-07
+
+The complete schedule's `charge_upper` evaluates each observed row's component
+ceilings separately and chooses the largest cost, rather than charging the row
+with the largest total bps. [Pump's published buy formulas](https://github.com/pump-fun/pump-public-docs/blob/8cda1fa30ea658b20909d8aedf002047119388d2/idl/pump.json)
+show separate protocol/creator rounding. This is not a claim that sell implements
+that exact formula; the hypothetical sell bound covers this rounding as well.
+LP/protocol/creator costs are each rounded up, summed in u128 and clamped to the
+gross amount. The CLI refuses an exhausted exit. Rate and lamport cost bounds
+are separate because different component splits can reverse their ordering.
+Existing combined `Fees::charge` callers retain their historical semantics.
+Neither fee bound supplies transaction simulation, network fees or future fills.
+
 ## What would reverse this
 
 Nothing foreseeable reverses holding a policy locally. The specific ceilings are
