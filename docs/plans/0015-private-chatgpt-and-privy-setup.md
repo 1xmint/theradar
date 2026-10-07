@@ -954,3 +954,42 @@ Next add exact transaction simulation/cost evidence, valuation and journal loss/
 exposure, protected owner mandate activation and settlement reconciliation before
 repeated worker execution. Live signing/delegation remains closed. No keys or
 signatures were used. No production status was reverified.
+
+CI 37697528963 at f3c422f found a test-assertion lint under Linux Rust 1.99;
+local Rust 1.97 had passed. The empty stable vector assertion now compares to
+an empty array without changing the predicate; this repeats LEARNINGS 39.
+All four parser tests pass after correction. Remaining shards are being allowed
+to finish before repair push so no mutation check is cancelled.
+
+Inspected next step: `crates/radar-exec/src/submit.rs` sends and polls but has
+no simulation or network-fee measurement method. The offline issuer's
+`crates/radar-signer/src/bin/radar-issuer.rs` Snapshot still accepts an
+operator-provisioned fee_upper_lamports and exact reviewed transaction.
+[simulateTransaction](https://solana.com/docs/rpc/http/simulatetransaction)
+allows unsigned transactions when sigVerify is false; keep the exact recent
+blockhash rather than enabling replacement, and retain context and explicit
+simulation outcome. [getFeeForMessage](https://solana.com/docs/rpc/http/getfeeformessage)
+prices the exact serialized message and can return null; null cannot be zero.
+Neither proves a later fill. A future read-only command must bind both reads to
+the exact transaction bytes and keep rent/account-creation costs distinct from
+network fees; model input must not supply a claimed simulation success.
+
+Mutation shard 0 reported fee_schedule.rs:45:13 `/` to `*`. Applying that exact
+change left all four focused parser tests passing because later field reads
+already reject truncation. Removed the redundant count-capacity arithmetic and
+stopped reserving memory from the claimed count: the vector now grows only after
+a complete row is read. Oversized counts stop at the first missing row. Parser
+regressions and all-target scoped Clippy pass after repair. No excluded mutant
+or suppressed lint. LEARNINGS 48 records the repeated redundant-guard pattern.
+
+Initial CI 37697528963 completed: 2,431 Rust and 352 web tests passed;
+all build/site/MSRV/fmt/licence/cargo-deny checks passed. Shards 1/2/3 passed;
+shard 0 reported only the removed row-calculation survivor, and lint reported
+only the corrected empty-vector assertion. Both are repaired locally.
+Full repaired-head CI remains required.
+
+A repaired-head Windows process rerun exposed the existing TCP fixture's
+accepted socket inheriting listener nonblocking mode: header read failed with
+WouldBlock before request bytes arrived. The fixture now explicitly makes that
+socket blocking before applying its existing five-second read timeout. The
+listener accept loop keeps its deadline. Production HTTP code is unchanged.

@@ -36,17 +36,10 @@ impl FeeSchedule {
             });
         }
         let count = u32::from_le_bytes(take::<4>(&mut tail)?) as usize;
-        // Bound before allocating or looping: each tier needs 40 bytes and
-        // the exotic fees need another 24. Division avoids count overflow.
-        let rows = tail
-            .len()
-            .checked_sub(24)
-            .ok_or("fee extension truncated")?
-            / 40;
-        if count > rows {
-            return Err("stable fee vector truncated");
-        }
-        let mut stable = Vec::with_capacity(count);
+        // Never reserve memory from the claimed count. A row is pushed only
+        // after all its bytes were read; a forged count stops at the first
+        // incomplete row. Allocation is bounded by successfully read bytes.
+        let mut stable = Vec::new();
         for _ in 0..count {
             stable.push(Tier {
                 threshold_lamports: u128::from_le_bytes(take::<16>(&mut tail)?),
@@ -138,7 +131,7 @@ mod tests {
         let mut legacy = bytes[..109].to_vec();
         legacy.resize(4073, 0);
         let parsed = FeeSchedule::parse(&legacy).expect("historical padding");
-        assert!(parsed.stable.is_empty());
+        assert_eq!(parsed.stable, []);
         assert_eq!(parsed.exotic, None);
         assert_eq!(parsed.upper_bound(), Some(expected));
     }

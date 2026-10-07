@@ -32,6 +32,11 @@ fn fixture(answers: Vec<Value>) -> (String, std::thread::JoinHandle<Vec<Value>>)
                     Err(error) => panic!("accept: {error}"),
                 }
             };
+            // Windows can inherit the listener's nonblocking mode. The accept
+            // loop is bounded separately; request reads use the timeout below.
+            stream
+                .set_nonblocking(false)
+                .expect("blocking request read");
             stream
                 .set_read_timeout(Some(Duration::from_secs(5)))
                 .expect("timeout");

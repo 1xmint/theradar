@@ -1873,6 +1873,12 @@ A local pass under a different tool version is evidence for that version only;
 it cannot stand in for the required CI result. Rust 1.99 workspace clippy passed
 after these test-only corrections.
 
+**Recurrence, 2026-10-07 (CI 37697528963):** a new fee-extension test used
+`assert!(parsed.stable.is_empty())`, passing local Rust 1.97 lint but failing
+Rust 1.99's assert_is_empty. Replaced it with `assert_eq!(parsed.stable, [])`;
+the parser predicate and behavior are unchanged. The required Linux lint gate
+remains the verification of this correction; no suppression was added.
+
 ## 40. A sudo wrapper conflicted with the service's hardening
 
 **2026-10-06.** The CLI isolation runbook used sudo to switch to radar-agent,
@@ -2081,3 +2087,19 @@ both exact line-size boundaries and missing newline; the private-file test
 loads an exact maximum-size valid configuration. Reapplying each of the seven
 reported mutations fails the corresponding test. Required CI checks the code
 against the runner's actual compiler; local lint alone is not that check.
+
+**Recurrence, fee extension (CI 37697528963):** mutation
+`crates/radar-pumpfun/src/fee_schedule.rs:45:13` changed the preliminary row
+bound from division to multiplication. All four focused parser tests still
+passed when that exact mutation was applied: later bounded field reads reject
+truncation independently. Removed the redundant calculation and changed the
+vector to grow only after reading a complete row, avoiding reservation from the
+claimed count altogether. Truncation/oversized-count regressions still refuse;
+full mutation CI checks the remaining parser behavior. No exclusion was added.
+
+**Recurrence, process fixture:** on Windows the accepted TCP socket inherited
+nonblocking mode from the polling listener. A wallet-read header read raced
+request arrival and failed with WouldBlock. Explicitly restore blocking mode on
+the accepted socket, retaining the read timeout and accept deadline. The actual
+wallet/curve process regressions exercise this shared fixture; their repeated
+Windows run caught the race. Production RPC behavior was unaffected.
