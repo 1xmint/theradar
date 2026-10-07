@@ -3,13 +3,13 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import PrivyWallet from "./PrivyWallet";
 
-const sdk = vi.hoisted(() => ({ authenticated: true, id: "alice", token: vi.fn(), create: vi.fn(), login: vi.fn(), config: null as unknown }));
+const sdk = vi.hoisted(() => ({ authenticated: true, walletsReady: true, id: "alice", token: vi.fn(), create: vi.fn(), login: vi.fn(), config: null as unknown }));
 vi.mock("@privy-io/react-auth", () => ({
   PrivyProvider: ({ children, config }: { children: React.ReactNode; config: unknown }) => { sdk.config = config; return children; },
   usePrivy: () => ({ ready: true, authenticated: sdk.authenticated, user: { id: sdk.id }, getAccessToken: sdk.token, login: sdk.login, logout: vi.fn() }),
 }));
-vi.mock("@privy-io/react-auth/solana", () => ({ useCreateWallet: () => ({ createWallet: sdk.create }) }));
-beforeEach(() => { sdk.authenticated = true; sdk.id = "alice"; sdk.token.mockReset().mockResolvedValue("test-token"); sdk.create.mockReset().mockResolvedValue({}); sdk.login.mockReset(); });
+vi.mock("@privy-io/react-auth/solana", () => ({ useCreateWallet: () => ({ createWallet: sdk.create }), useWallets: () => ({ ready: sdk.walletsReady }) }));
+beforeEach(() => { sdk.authenticated = true; sdk.walletsReady = true; sdk.id = "alice"; sdk.token.mockReset().mockResolvedValue("test-token"); sdk.create.mockReset().mockResolvedValue({}); sdk.login.mockReset(); });
 afterEach(() => vi.unstubAllGlobals());
 
 function server(wallet: unknown = { address: "verified-address", id: "wallet", delegated: false }, failedBalance = false) {
@@ -24,6 +24,18 @@ function server(wallet: unknown = { address: "verified-address", id: "wallet", d
 }
 
 describe("private Privy wallet", () => {
+  it("waits for the Solana wallet connection before allowing creation", async () => {
+    sdk.walletsReady = false; vi.stubGlobal("fetch", server(null));
+    const view = render(<PrivyWallet appId="app" />);
+    await screen.findByText("No embedded Solana wallet yet.");
+    await waitFor(() => expect((screen.getByRole("button", { name: "Refresh wallet" }) as HTMLButtonElement).disabled).toBe(false));
+    const create = screen.getByRole("button", { name: "Create Solana wallet" }) as HTMLButtonElement;
+    expect(create.disabled).toBe(true);
+    fireEvent.click(create); expect(sdk.create).not.toHaveBeenCalled();
+    sdk.walletsReady = true; view.rerender(<PrivyWallet appId="app" />);
+    expect(create.disabled).toBe(false);
+    fireEvent.click(create); await waitFor(() => expect(sdk.create).toHaveBeenCalledOnce());
+  });
   it("only signs in or creates a wallet after an explicit owner action", async () => {
     sdk.authenticated = false;
     const fetch = server(null); vi.stubGlobal("fetch", fetch);

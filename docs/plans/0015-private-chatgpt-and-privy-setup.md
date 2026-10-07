@@ -375,3 +375,11 @@ all five wallet unit tests and scoped clippy/formatting pass. Shards 0, 2 and 3
 finished successfully; the run failed only for the lint issue and named survivor.
 The local target directory is 25.4 GiB and no cargo process remains. Push both
 repairs and verify complete CI and a fresh release before deployment.
+
+CI 37566983148 and release 37566979755 both completed successfully at e69f67d,
+including all four mutation shards. The verified artifact was staged but not
+deployed. A final SDK readiness review added the Solana `useWallets().ready`
+gate before owner-triggered creation, matching Privy's current Solana guide.
+The new regression fails when the disabled readiness gate is removed; restored,
+all seven private wallet tests and the frontend production build pass. A fresh
+release containing this guard is required before deployment.

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { useEffect, useRef, useState } from "react";
 import { PrivyProvider, usePrivy } from "@privy-io/react-auth";
-import { useCreateWallet } from "@privy-io/react-auth/solana";
+import { useCreateWallet, useWallets } from "@privy-io/react-auth/solana";
 
 type Preferences = { capital_usd: string; max_trade_usd: string; daily_loss_usd: string; autonomous_requested: boolean };
 type Wallet = { address: string; id: string; delegated: boolean };
@@ -48,6 +48,7 @@ function Connection() {
 export function OwnerWallet() {
   const { getAccessToken } = usePrivy();
   const { createWallet } = useCreateWallet();
+  const { ready: walletsReady } = useWallets();
   const [wallet, setWallet] = useState<Wallet | null>(null);
   const [known, setKnown] = useState(false);
   const [holdings, setHoldings] = useState<Holdings | null>(null);
@@ -105,7 +106,7 @@ export function OwnerWallet() {
 
   async function create() {
     const signal = lifetime.current?.signal;
-    if (!signal || signal.aborted || busy) return;
+    if (!signal || signal.aborted || busy || !walletsReady) return;
     setBusy(true); setError(null);
     try { await createWallet(); if (!signal.aborted) await load(signal); }
     catch { if (!signal.aborted) { setError("Wallet creation did not complete. Refresh to check its status before trying again."); setBusy(false); setKnown(false); } }
@@ -129,7 +130,8 @@ export function OwnerWallet() {
     {!known && !error && <p role="status">Checking wallet ownership…</p>}
     {known && !wallet && <div className="space-y-2">
       <p>No embedded Solana wallet yet.</p>
-      <button className={button} disabled={busy} onClick={() => { void create(); }}>Create Solana wallet</button>
+      {!walletsReady && <p role="status">Preparing Privy wallet connection…</p>}
+      <button className={button} disabled={busy || !walletsReady} onClick={() => { void create(); }}>Create Solana wallet</button>
     </div>}
     {wallet && <>
       <p className="break-all text-sm">Wallet: <span className="font-mono">{wallet.address}</span></p>
