@@ -517,8 +517,13 @@ is installed on the server as part of this increment.
   `privy_only_needs_no_local_key_and_refuses_local_signing` fail with an unwanted
   Authorised result; restored the guard. Startup/environment plumbing was
   exercised by real-process tests rather than redundant line mutations.
-- [ ] Commit, inspect new full CI and release, and deploy the pending wallet
-  recognition guards with the fixed artifact procedure.
+- [x] Code commit `3f38ee0ffaf2d1e349f54b43475f36c010bb335d`: full CI
+  37634849379 passed, including all four mutation shards, 2,381 Rust tests and
+  352 web tests. Release 37634890508 passed at the same commit. Verified manifest
+  SHA-256 `2baf676b184063ffbfa9dc6dfa207879aaa65ed7921ab22a38c3aeae246ab195`,
+  uploaded only radar-serve to `/tmp/radar-serve.new`, and ran the fixed
+  `sudo radar-deploy`. Installed binary hash matches; loopback `/health` reports
+  that exact build, status ok and policyClosed true.
 
 Previous CI 37632513225 completed: all four mutation shards, tests/build/MSRV/web
 and other checks passed; lint failed on an unnecessary raw-string marker in
@@ -531,3 +536,16 @@ and durable reservations/loss accounting, simulation and persistent submission /
 confirmation reconciliation, separate signer deployment, independently verified
 Privy policy refusals and owner delegation. The site preference is a draft;
 ChatGPT may propose, and the deterministic kernel must approve.
+
+**Handback:** wallet-recognition and pending-creation guards are deployed;
+the owner had already reported a working wallet before this deployment, so its
+earlier recovery is not attributed to these guards. Privy-only signer mode and
+trusted wallet request binding are implemented and verified in the repository;
+the released signer binary remains uninstalled. On-host `systemctl is-active
+radar-signer.socket` returned inactive. Service User guardian, ProtectHome
+read-only, NoNewPrivileges yes and MemoryMax 805306368 remain intact. The browser
+tab is still unavailable under the browser URL policy; no new UI capture was
+made. Owner may save limits through the existing site inputs. The next code
+increment is authenticated issuance, replay/expiry control and durable capital /
+submission accounting before delegation or worker activation. No real wallet
+creation, delegated signing, funding or trade was performed by the agent.
