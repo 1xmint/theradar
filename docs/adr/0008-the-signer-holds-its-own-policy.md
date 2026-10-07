@@ -278,6 +278,20 @@ complete trade economics. USD valuation, network fee, wallet ownership and exact
 transaction simulation remain unestablished. This component cannot populate a
 full issuer Snapshot or activate delegation on its own.
 
+## Captured fee extension — 2026-10-07
+
+The one-context reader now uses the complete `FeeSchedule` parser in
+`crates/radar-pumpfun/src/fee_schedule.rs`. It preserves the standard prefix and
+reads the captured stable-tier vector and exotic flat fees. Historical all-zero
+reserved tails remain absent extensions, not an asserted zero exotic schedule.
+Unknown nonzero suffixes and truncated extensions still refuse. Its upper bound
+includes every standard/stable row and both flat schedules, with zero-threshold
+coverage required for the standard and observed stable schedules. No choice of
+token classification or current market-cap tier is inferred. Existing prefix-only
+`FeeConfig::parse` callers retain their previous semantics; only this complete
+reader claims the expanded bound. Read-only live verification emitted a quote;
+it is still incomplete execution evidence and grants no signing authority.
+
 ## What would reverse this
 
 Nothing foreseeable reverses holding a policy locally. The specific ceilings are

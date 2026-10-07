@@ -3,8 +3,9 @@
 //! An actual caller is `radar curve-exit`; this reader never signs or values USD.
 
 use crate::{Budget, MultiAccountRead, OwnedAccount, RpcClient};
+use radar_pumpfun::fee_schedule::FeeSchedule;
 use radar_pumpfun::token::MintAccount;
-use radar_pumpfun::{BondingCurve, FeeConfig, Fees, pda};
+use radar_pumpfun::{BondingCurve, Fees, pda};
 use radar_types::{Address, Slot};
 
 /// Parsed mint, curve and fees attributed to one RPC response context.
@@ -17,7 +18,7 @@ pub struct CurveMarket {
     /// Reserves and creator from the correctly owned derived curve account.
     pub curve: BondingCurve,
     /// Observed schedule, without an assumed market-cap tier.
-    pub fees: FeeConfig,
+    pub fees: FeeSchedule,
     /// Parsed token program, decimals, supply and freeze authority.
     pub token: MintAccount,
     /// Current COption tag; this read does not establish a historical latch.
@@ -30,20 +31,7 @@ impl CurveMarket {
     /// This is not a tier prediction or a guarantee against later updates.
     #[must_use]
     pub fn fee_upper_bound(&self) -> Option<Fees> {
-        if !self
-            .fees
-            .tiers
-            .iter()
-            .any(|tier| tier.threshold_lamports == 0)
-        {
-            return None;
-        }
-        self.fees
-            .tiers
-            .iter()
-            .map(|tier| tier.fees)
-            .chain(std::iter::once(self.fees.flat))
-            .max_by_key(Fees::total_bps)
+        self.fees.upper_bound()
     }
 }
 
@@ -86,18 +74,7 @@ fn at_one_slot(mint: Address, together: &MultiAccountRead) -> Result<CurveMarket
         return Err("mint is not canonically initialized".into());
     }
     let curve = BondingCurve::parse(&accounts[1].data).map_err(|_| "curve layout refused")?;
-    let fees = FeeConfig::parse(&accounts[2].data).map_err(|_| "fee layout refused")?;
-    let known = 69usize
-        .checked_add(
-            fees.tiers
-                .len()
-                .checked_mul(40)
-                .ok_or("fee size overflow")?,
-        )
-        .ok_or("fee size overflow")?;
-    if accounts[2].data[known..].iter().any(|byte| *byte != 0) {
-        return Err("unknown fee trailing data".into());
-    }
+    let fees = FeeSchedule::parse(&accounts[2].data).map_err(str::to_owned)?;
     // Holders may burn tokens after the curve records its original supply.
     // A lower current supply is not evidence that the accounts were mismatched.
     if token.supply == 0 || token.supply > curve.token_total_supply {
@@ -187,7 +164,7 @@ mod tests {
         assert_eq!(value.token.supply, 1_000_000);
         assert_eq!(value.curve.virtual_sol_reserves, 30_000_000_000);
         assert_eq!(value.curve.creator, Address::new([0x33; 32]));
-        assert_eq!(value.fees.tiers[0].fees.total_bps(), 125);
+        assert_eq!(value.fees.standard.tiers[0].fees.total_bps(), 125);
         assert!(!value.mint_authority_active);
         together.accounts[0].as_mut().expect("mint").data[0] = 1;
         assert!(
@@ -259,7 +236,7 @@ mod tests {
     fn fee_upper_bound_covers_all_observed_rows_without_guessing_a_tier() {
         let mut market = at_one_slot(Address::new([0x22; 32]), &fixture()).expect("market");
         assert_eq!(market.fee_upper_bound().expect("coverage").total_bps(), 125);
-        market.fees.tiers.push(radar_pumpfun::fees::Tier {
+        market.fees.standard.tiers.push(radar_pumpfun::fees::Tier {
             threshold_lamports: u128::MAX,
             fees: Fees {
                 lp_bps: 0,
@@ -271,14 +248,14 @@ mod tests {
             market.fee_upper_bound().expect("all tiers").total_bps(),
             500
         );
-        market.fees.flat.creator_bps = 1000;
+        market.fees.standard.flat.creator_bps = 1000;
         assert_eq!(
             market.fee_upper_bound().expect("flat too").total_bps(),
             1095
         );
-        market.fees.tiers[0].threshold_lamports = 1;
+        market.fees.standard.tiers[0].threshold_lamports = 1;
         assert_eq!(market.fee_upper_bound(), None);
-        market.fees.tiers.clear();
+        market.fees.standard.tiers.clear();
         assert_eq!(market.fee_upper_bound(), None);
     }
 }

@@ -218,3 +218,45 @@ fn the_curve_command_rejects_a_correctly_encoded_fee_account_with_the_wrong_owne
     );
     assert_eq!(server.join().expect("RPC fixture").len(), 1);
 }
+
+#[test]
+fn the_curve_command_accounts_for_captured_extensions_and_larger_exotic_fees() {
+    let capture: Value = serde_json::from_str(include_str!(
+        "../../radar-pumpfun/tests/fixtures/pumpfun_fee_extension.json"
+    ))
+    .expect("fee capture");
+    let hex = capture["data_hex"].as_str().expect("hex");
+    let original: Vec<u8> = (0..hex.len())
+        .step_by(2)
+        .map(|at| u8::from_str_radix(&hex[at..at + 2], 16).expect("byte"))
+        .collect();
+    for (protocol, bound, fee, net) in [
+        (95u64, "125", "374626", "29595404"),
+        (600u64, "630", "1888112", "28081918"),
+    ] {
+        let mut bytes = original.clone();
+        bytes[161..169].copy_from_slice(&protocol.to_le_bytes());
+        let mut answer = curve_response();
+        answer["result"]["value"][2]["data"][0] = json!(radar_types::b64::encode(&bytes));
+        let (endpoint, server) = fixture(vec![answer]);
+        let output = Command::new(env!("CARGO_BIN_EXE_radar"))
+            .args([
+                "curve-exit",
+                "--mint",
+                &radar_types::Address::new([0x22; 32]).to_string(),
+                "--raw-tokens",
+                "1000",
+                "--rpc",
+                &endpoint,
+            ])
+            .output()
+            .expect("command");
+        assert!(output.status.success(), "{:?}", output.stderr);
+        let quote: Value = serde_json::from_slice(&output.stdout).expect("quote");
+        assert_eq!(quote["venue_fee_upper_bps"], bound);
+        assert_eq!(quote["venue_fee_upper_lamports"], fee);
+        assert_eq!(quote["net_lamports_at_observed_state"], net);
+        assert_eq!(quote["authority"], "read_only");
+        assert_eq!(server.join().expect("RPC fixture").len(), 1);
+    }
+}

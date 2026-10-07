@@ -112,12 +112,16 @@ mod tests {
                 complete: false,
                 creator: Address::new([0x33; 32]),
             },
-            fees: FeeConfig {
-                flat: fees,
-                tiers: vec![Tier {
-                    threshold_lamports: 0,
-                    fees,
-                }],
+            fees: radar_pumpfun::fee_schedule::FeeSchedule {
+                standard: FeeConfig {
+                    flat: fees,
+                    tiers: vec![Tier {
+                        threshold_lamports: 0,
+                        fees,
+                    }],
+                },
+                stable: Vec::new(),
+                exotic: None,
             },
         }
     }
@@ -125,7 +129,7 @@ mod tests {
     #[test]
     fn an_exit_uses_the_largest_observed_fee_and_exact_integer_proceeds() {
         let mut market = market();
-        market.fees.tiers.push(Tier {
+        market.fees.standard.tiers.push(Tier {
             threshold_lamports: u128::MAX,
             fees: Fees {
                 lp_bps: 0,
@@ -157,7 +161,7 @@ mod tests {
         ] {
             assert!(output[field].is_null());
         }
-        market.fees.flat.protocol_bps = 500;
+        market.fees.standard.flat.protocol_bps = 500;
         assert_eq!(
             estimate(&market, 1000).expect("flat ceiling")["venue_fee_upper_bps"],
             "530"
@@ -176,18 +180,18 @@ mod tests {
         value.curve.complete = true;
         assert!(estimate(&value, 1000).is_err());
         value = market();
-        value.fees.tiers.clear();
+        value.fees.standard.tiers.clear();
         assert!(estimate(&value, 1000).is_err());
         value = market();
-        value.fees.tiers[0].threshold_lamports = 1;
+        value.fees.standard.tiers[0].threshold_lamports = 1;
         assert!(estimate(&value, 1000).is_err());
         value = market();
-        value.fees.flat.protocol_bps = 10_000;
+        value.fees.standard.flat.protocol_bps = 10_000;
         assert!(estimate(&value, 1000).is_err());
         value = market();
-        value.fees.flat.protocol_bps = 9970;
+        value.fees.standard.flat.protocol_bps = 9970;
         assert!(estimate(&value, 1000).is_err());
-        value.fees.flat.protocol_bps = 9969;
+        value.fees.standard.flat.protocol_bps = 9969;
         assert!(estimate(&value, 1000).is_ok());
         value = market();
         value.curve.virtual_token_reserves = 1_000_000;

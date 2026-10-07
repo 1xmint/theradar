@@ -914,3 +914,43 @@ Current site/VPS status was not rechecked or deployed. No real key, signature,
 delegation or trade was used. No local Cargo/rustc/wallet process remains;
 target measured 28.8 GiB with 120.6 GiB free. Previously rejected ignored mutation
 output cleanup was not retried. Follow-up documentation CI may be pending.
+
+### Captured fee extension support — 2026-10-07
+
+Continuation from `31c3bea`; previous documentation CI 37692417065 passed.
+Actual caller remains `radar curve-exit` through the one-context market reader.
+No new dependency or crate, model-to-signer path or production deployment.
+
+- [x] Preserve standard, stable and exotic schedules separately in
+  `crates/radar-pumpfun/src/fee_schedule.rs`. Parse observed extension in full,
+  bound vector allocation by bytes and reject incomplete or unknown suffixes.
+  Historical zero padding remains an absent extension. Existing prefix-only
+  FeeConfig callers retain their earlier behavior.
+- [x] Include every observed row and both flats in the fee bound. Require coverage
+  from zero in standard and observed stable tiers; no guessed classification.
+- [x] Archive the decoded 4097-byte account with slot, owner and SHA-256 in
+  `crates/radar-pumpfun/tests/fixtures/pumpfun_fee_extension.json`.
+- [x] Four parser regressions cover the capture, legacy padding, each truncated
+  extension prefix, unknown suffix, oversized vector, all fee components, a high
+  stable threshold, larger exotic fees and missing schedule coverage.
+  One actual-process test covers captured fees and a larger synthetic exotic fee.
+- [x] Scoped pumpfun/onchain/CLI tests and all-target Clippy passed. Omitting exotic
+  fees and removing unknown-tail refusal each failed their targeted regression;
+  restored parser tests passed. Formatting passed. No mutation exclusions added.
+- [x] Repo-conformance: all 33 checks passed.
+- [ ] Full CI pending.
+
+Read-only mainnet command against
+6T1BNshzGAKAHvJ3NZ5n62X2eg5rqqsMipUMZJvLpump, raw quantity 1000000,
+at host time 1791412653 returned finalized slot 454358569, gross 32 lamports,
+venue upper fee 1 lamport (125 bps bound), net 31 lamports. These are observed
+hypothetical economics for that requested quantity, not owned inventory, an
+executable minimum receipt, a recommendation or a trade. USD value, network
+costs, simulation and searched capacity remain null. The current mint supply
+was below the curve's original total, which the burn-aware supply check allows.
+
+**Handback in progress:** extension support is complete locally; full CI remains.
+Next add exact transaction simulation/cost evidence, valuation and journal loss/
+exposure, protected owner mandate activation and settlement reconciliation before
+repeated worker execution. Live signing/delegation remains closed. No keys or
+signatures were used. No production status was reverified.
