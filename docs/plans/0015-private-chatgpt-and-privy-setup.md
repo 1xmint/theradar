@@ -676,7 +676,8 @@ the entire issuer or trusted mandate/valuation adapter.
   regression. Restored both guards and reran the scoped journal suite: 31 tests
   passed (plus the explicitly invoked child fixture), all-target journal Clippy
   passed with warnings denied, and 33 conformance tests passed.
-- [ ] Full CI including all mutation shards at the code commit.
+- [x] Full CI 37648838566 passed at `0dd8e4dc1f3e02bddd03d6759f5a01da882871d1`:
+  2,400 Rust tests, web/site checks, all four mutation shards and final gate.
 
 CI 37646978006 exposed two missed test assumptions: CLI inventory fixtures used
 the production journal path without its prepared directory, and the issuer
@@ -689,10 +690,20 @@ so every asserted modification is a modification. No production guard is relaxed
 Local repair checks passed 211 CLI tests, 114 signer tests and all-target Clippy
 for both crates with warnings denied. Reapplying an unchanged proof expiry
 reproduces the CI assertion failure; restored timestamp modification passes.
+All 33 conformance tests passed after indexing the recorded learning. The first
+run completed before the repair push: shards 0 and 2 failed their unmutated
+baselines for the two recorded issues, while shards 1 and 3 passed. No shard
+was cancelled, no mutation exclusion was added, and the fresh run passed fully.
 
-**Handback in progress:** production remains unchanged, policy closed, signer
+**Handback:** the reservation-history prerequisite and its caller fixes are
+implemented and verified in PR 334. Production remains unchanged, policy closed, signer
 inactive. No wallet key, issuer key, delegation or financial cap is provisioned.
 This lock coordinates cooperating users of one history path, not hostile writes
 or different journals for the same wallet. Protected stable paths and a trusted
 checkpoint remain needed for rollback detection. The next layer must connect
 an activated mandate and trusted asset valuations to reserved kernel decisions.
+Latest loopback health is ok at Serve `3f38ee0`, policyClosed true; signer socket
+is inactive. No trade or real signing was performed. Target is 26.8 GiB with
+121.1 GiB free and no local Cargo process remaining. Previously rejected ignored
+mutation-output cleanup was not retried. The verification follow-up edits only
+this handback; the behavior commit's completed full CI is recorded above.
