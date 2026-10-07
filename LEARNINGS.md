@@ -1994,3 +1994,10 @@ decode; only selected rows are decoded, and their watermark remains enforced.
 The new mixed-creator regression rejects another creator and future rows;
 bypassing the creator comparison makes its selected count fail. This logical
 check does not impose a performance guarantee; the live repeat is still required.
+
+The final live repeat at 2ddbc25 rendered both actual creator-tool citations in
+roughly 90 seconds. MemoryPeak 736034816 stayed below unchanged MemoryMax
+805306368. The supplied address was a mint with unknown creator identity;
+the answer correctly limited zero rows to the supplied lookup, not a judgment
+about the actual creator. This proves that concrete path, not an arbitrary
+result-size or latency bound. Complete CI, including all mutation shards, passed.

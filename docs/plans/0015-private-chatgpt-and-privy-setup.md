@@ -300,21 +300,32 @@ browser rendered neither answer nor error. The nominal ledger recorded one
 additional call; last_call ok alone is not proof of successful site inference.
 Creator-column selection now avoids decoding unrelated launch envelopes.
 Selected-row decoding still validates matching records and enforces the watermark;
-unrelated event payloads are outside this narrower query. CI, release and the
-live latency/citation repeat remain required. Privy's owner
+unrelated event payloads are outside this narrower query. Code
+`2ddbc25decf931f97075de41ae683629f17cf7bb` passed every CI job in
+37563010238 and release 37563005859. Verified artifact and staged VPS SHA-256
+`78f7e7720a339fef808f4cbb26e55cb3070968de4cd8443fe6b67de9d7b7bff7`,
+then fixed-deployed and verified public health reports that exact build.
+The authenticated same-address question now renders an answer with both actual
+creator_history and creator_track_record citations, at watermark 454092002.
+It states that the supplied address is a mint, not a known creator, and missing
+creator rows do not establish the real creator's history. The result completed
+in roughly 90 seconds; that is still slow, not an indexed-query claim. Saved the
+rendered answer as desktop screenshot evidence. The nominal ledger rose from
+30000 to 50000, with zero daily-cap refusals. Final service MemoryPeak 736034816
+remained below unchanged MemoryMax 805306368; User guardian, ProtectHome
+read-only and NoNewPrivileges yes remain. No wallet action or trade occurred. Privy's owner
 wallet dashboard was inspected read-only and reports No wallets yet; the app ID
 alone does not establish a wallet or delegation.
 
-**Stopped at:** unlimited subscription inference and CLI pipe repair are live
-at `efa6c74`; the first authenticated site answer succeeded without citations.
-Launch and outcome memory filtering are deployed; creator-column selection is local.
-No autonomous trading loop has been enabled. The broader private-autonomy work
-remains in progress.
-**Next action:** release the memory repair from a verified artifact, repeat the
-source-backed site question and record memory use and health. Build Privy owner
-login and dedicated embedded Solana wallet creation, then separate signer
-integration. The dashboard currently has no wallets. Capital, trade, loss and
-session limits still require the owner's mandate before any trading activation.
+**Stopped at:** unlimited subscription inference and the complete source-backed
+site question are verified at `2ddbc25`. CLI pipe, creator retention and scan
+repairs passed complete CI and verified releases. Private server hardening is
+intact. Privy wallet inventory is empty; no autonomous trading loop is enabled.
+**Next action:** settle the pending wallet-control scope, record the decision
+in design 0017, then build the Privy owner login, dedicated embedded Solana
+wallet, live balance and editable risk controls. Follow with the separate signer
+and deterministic kernel integration. Numerical capital, trade, loss and session
+bounds must come from the owner's saved controls before trading activation.
 **Do not:** claim a wallet is delegated from an app ID, treat connected ChatGPT
 as capital authority, expose the private site, copy existing subscription
 credentials between hosts, invent money limits, or turn on automated trading.
