@@ -186,6 +186,16 @@ policy prohibits workarounds, so the owner must finish that sign-in. No browser
 protection was disabled or bypassed. The policy's existing allowed email is
 joshfair2@gmail.com. Authenticated Radar access and ChatGPT linking remain unverified.
 
+The owner clarified that their currently signed-in Cloudflare account uses their
+other email address, confirmed control of both addresses, and approved whichever
+works after being asked about adding that account to Radar's policy. Added the
+current account's email to the existing Josh policy while preserving the original
+email. Reopened the saved policy detail page and verified its Include Emails rule
+lists both, with Action Allow. The reusable policy remains attached to eight
+Radar applications. No public or domain-wide email rule was added. This verifies
+the saved allowlist, not an authenticated Radar session; the browser sign-in
+handoff remains necessary.
+
 1. Complete: PR 334, CI and release runs above, artifact hash, fixed deployment,
    live build, public headers, and challenge format verified at `49415d5`.
 2. Use the supplied public Privy app ID and obtain the dedicated Solana wallet ID. Configure
@@ -208,8 +218,9 @@ Private server setup is installed and applied. ChatGPT is not logged in; the
 Privy app is configured, while wallet delegation remains unverified. No autonomous
 trading loop has been enabled. The broader private-autonomy work remains in progress.
 **Next action:** owner finishes Cloudflare Access sign-in in the existing Brave
-Radar tab and reports success or the resulting error. Both setup/link paths now
-use the correct edge application. Once authenticated, select Connect ChatGPT and
+Radar tab using either approved owner account, and reports success or the
+resulting error. Both setup/link paths now use the correct edge application.
+Once authenticated, select Connect ChatGPT and
 complete the displayed device login. The automated browser sign-in is blocked
 by URL protocol policy and must not be retried through a workaround.
 Verify that linking succeeds through the actual Radar service restrictions.
