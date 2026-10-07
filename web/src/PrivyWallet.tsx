@@ -4,7 +4,7 @@ import { PrivyProvider, usePrivy } from "@privy-io/react-auth";
 import { useCreateWallet, useWallets } from "@privy-io/react-auth/solana";
 
 type Preferences = { capital_usd: string; max_trade_usd: string; daily_loss_usd: string; autonomous_requested: boolean };
-type Wallet = { address: string; id: string; delegated: boolean };
+type Wallet = { address: string; id: string | null; delegated: boolean };
 type Holdings = { wallet: string; slot: number; age_seconds: number; sol: { ui_amount: string }; tokens: { mint: string; ui_amount: string }[] };
 const empty: Preferences = { capital_usd: "", max_trade_usd: "", daily_loss_usd: "", autonomous_requested: false };
 const button = "rounded border border-[var(--color-line)] px-3 py-2 text-sm disabled:opacity-50";
@@ -58,6 +58,7 @@ export function OwnerWallet() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [creationCompleted, setCreationCompleted] = useState(false);
   const lifetime = useRef<AbortController | null>(null);
   const generation = useRef(0);
 
@@ -77,7 +78,7 @@ export function OwnerWallet() {
       if (!active()) return;
       const status = await request<{ wallet: Wallet | null }>("wallet", access, signal);
       if (!active()) return;
-      if (status.wallet !== null && (!status.wallet?.address || !status.wallet.id)) throw new Error("Wallet ownership response could not be read.");
+      if (status.wallet !== null && (!status.wallet?.address || !(status.wallet.id === null || (typeof status.wallet.id === "string" && status.wallet.id.length > 0)))) throw new Error("Wallet ownership response could not be read.");
       setWallet(status.wallet); setKnown(true);
       if (!status.wallet) return;
       const verifiedAddress = status.wallet.address;
@@ -106,9 +107,9 @@ export function OwnerWallet() {
 
   async function create() {
     const signal = lifetime.current?.signal;
-    if (!signal || signal.aborted || busy || !walletsReady) return;
+    if (!signal || signal.aborted || busy || !walletsReady || creationCompleted) return;
     setBusy(true); setError(null);
-    try { await createWallet(); if (!signal.aborted) await load(signal); }
+    try { await createWallet(); if (!signal.aborted) { setCreationCompleted(true); await load(signal); } }
     catch { if (!signal.aborted) { setError("Wallet creation did not complete. Refresh to check its status before trying again."); setBusy(false); setKnown(false); } }
   }
 
@@ -129,9 +130,11 @@ export function OwnerWallet() {
     {error && <p role="alert" className="text-sm text-[var(--color-red)]">{error}</p>}
     {!known && !error && <p role="status">Checking wallet ownership…</p>}
     {known && !wallet && <div className="space-y-2">
-      <p>No embedded Solana wallet yet.</p>
-      {!walletsReady && <p role="status">Preparing Privy wallet connection…</p>}
-      <button className={button} disabled={busy || !walletsReady} onClick={() => { void create(); }}>Create Solana wallet</button>
+      {creationCompleted ? <p role="status">Privy completed wallet creation, but Radar has not verified it yet. Refresh wallet to check again; do not create another wallet.</p> : <>
+        <p>No embedded Solana wallet yet.</p>
+        {!walletsReady && <p role="status">Preparing Privy wallet connection…</p>}
+        <button className={button} disabled={busy || !walletsReady} onClick={() => { void create(); }}>Create Solana wallet</button>
+      </>}
     </div>}
     {wallet && <>
       <p className="break-all text-sm">Wallet: <span className="font-mono">{wallet.address}</span></p>

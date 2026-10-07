@@ -13,7 +13,7 @@ benefit of the doubt on everything else.
 
 ## Index
 
-**33 of these 45 name something mechanical that would catch a
+**34 of these 46 name something mechanical that would catch a
 recurrence. 12 name only a habit, and say so** — which is this file's opening
 standard rather than a gap in it. The habit-only rows are the ones worth reading
 twice; nothing will stop those repeating except somebody remembering.
@@ -70,6 +70,7 @@ quietly absent.
 | [43](#43-terminal-colors-hid-the-device-login-prompt) | Terminal colors hid the device login prompt | `the_installed_cli_colored_device_prompt_is_recognised` |
 | [44](#44-waiting-for-a-cli-before-draining-its-pipes-deadlocked-inference) | Waiting for a CLI before draining its pipes deadlocked inference | `verbose_subprocess_finishes_without_exposing_stderr` |
 | [45](#45-a-creator-query-retained-every-creators-launch-history) | A creator query retained every creator's launch history | habit only: exercise the retained production dataset under its service memory cap |
+| [46](#46-an-unreadable-wallet-was-reported-as-absent) | An unreadable wallet was reported as absent | nullable-ID and malformed-response wallet regressions; pending-creation UI regression |
 
 ---
 
@@ -2001,3 +2002,27 @@ roughly 90 seconds. MemoryPeak 736034816 stayed below unchanged MemoryMax
 the answer correctly limited zero rows to the supplied lookup, not a judgment
 about the actual creator. This proves that concrete path, not an arbitrary
 result-size or latency bound. Complete CI, including all mutation shards, passed.
+
+## 46. An unreadable wallet was reported as absent
+
+**Found:** 2026-10-07, after the owner created a Solana wallet and the site still
+said none existed. The owner confirms its presence in Privy's dashboard. The
+exact production linked-account response has not yet been captured, so the
+following parser defect is independently verified, not a proven diagnosis of
+that live report.
+
+Radar's Privy reader returned Option, converting both an absent embedded wallet
+and missing fields in a matching account into NoWallet. The installed vendor
+SDK explicitly allows a null wallet ID. Address reads do not require a signing
+endpoint ID. The reader now returns errors for malformed responses and preserves
+embedded Solana wallets with optional IDs; the private page can display these
+verified addresses. It also stops offering another creation after the SDK
+creation call completes while backend lookup still reports absent. No signing
+authority is inferred from either event.
+
+**What catches a recurrence:**
+`a_device_wallet_without_a_server_id_is_present_and_not_signing_authority` fails
+when the missing-ID branch again returns NoWallet. The malformed-response
+regression distinguishes unknown data from absent wallets. The UI nullable-ID
+and pending-creation tests fail when the old ID requirement and cleared creation
+state are restored. All mutations were removed and the focused tests pass.

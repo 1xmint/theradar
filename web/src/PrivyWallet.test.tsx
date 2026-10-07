@@ -24,6 +24,24 @@ function server(wallet: unknown = { address: "verified-address", id: "wallet", d
 }
 
 describe("private Privy wallet", () => {
+  it("does not offer another creation when Privy completed it but lookup is still absent", async () => {
+    vi.stubGlobal("fetch", server(null)); render(<PrivyWallet appId="app" />);
+    await screen.findByText("No embedded Solana wallet yet.");
+    fireEvent.click(screen.getByRole("button", { name: "Create Solana wallet" }));
+    await screen.findByText("Privy completed wallet creation, but Radar has not verified it yet. Refresh wallet to check again; do not create another wallet.");
+    expect(screen.queryByRole("button", { name: "Create Solana wallet" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Refresh wallet" }));
+    await waitFor(() => expect((screen.getByRole("button", { name: "Refresh wallet" }) as HTMLButtonElement).disabled).toBe(false));
+    expect(screen.queryByRole("button", { name: "Create Solana wallet" })).toBeNull();
+    expect(sdk.create).toHaveBeenCalledOnce();
+  });
+  it("shows a verified device wallet and balance without a server wallet ID", async () => {
+    vi.stubGlobal("fetch", server({ address: "verified-address", id: null, delegated: false }));
+    render(<PrivyWallet appId="app" />);
+    await screen.findByText("1.5 SOL");
+    expect(screen.queryByRole("button", { name: "Create Solana wallet" })).toBeNull();
+    expect(sdk.create).not.toHaveBeenCalled();
+  });
   it("waits for the Solana wallet connection before allowing creation", async () => {
     sdk.walletsReady = false; vi.stubGlobal("fetch", server(null));
     const view = render(<PrivyWallet appId="app" />);

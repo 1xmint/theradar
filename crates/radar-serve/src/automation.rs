@@ -544,7 +544,7 @@ mod tests {
             did: did.into(),
             wallet: privy::Wallet {
                 address: address.into(),
-                id: id.into(),
+                id: Some(id.into()),
                 delegated: false,
             },
             address: address.parse().unwrap(),

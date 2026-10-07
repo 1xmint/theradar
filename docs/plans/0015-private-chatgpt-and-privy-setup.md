@@ -424,3 +424,43 @@ because it displays the current linking flow, not persisted CLI credential
 status. This does not undo the previously verified subscription link. Avoid
 asking the owner to relink solely because of that label. No local build process
 is left running; target was last measured at 25.4 GiB.
+
+### Created wallet recognition repair — 2026-10-07
+
+Owner pressed Create Solana wallet; Radar still said No embedded Solana wallet
+yet. The owner confirms Privy's dashboard contains Solana wallet
+`o4ppw6fo6qyhc2rhszktx69r`, created October 7. Thus creation succeeded; the
+absence label is not a reliable account-creation result. Exact linked-account
+response remains uncaptured. Browser inspection was denied by URL policy;
+did not retry through another tab or browser. SSH requires a fresh Tailscale
+admin check before remote inspection or deployment.
+
+Found an independently reproducible parser defect: the installed Privy SDK's
+BaseResponseWalletAccount permits `id: string | null`, but Radar required a
+string and collapsed both missing IDs and malformed linked-account responses
+into NoWallet. The reader now retains verified embedded Solana addresses with
+optional server IDs; the private interface accepts null IDs without recreating
+the wallet. Unknown malformed records are errors rather than absent wallets.
+No signing caller was added, and no wallet ID or delegation is invented.
+Draft preferences stay scoped to DID, optional wallet ID and verified address;
+assignment of a previously missing ID changes that key and requires fresh
+owner settings rather than silently migrating a capital mandate.
+
+The interface also remembers completed SDK creation for the current identity
+and offers refresh rather than another creation while the backend is absent.
+Local checks pass: 11 wallet-reader integration tests, five private settings
+unit tests, serve clippy, nine private wallet UI tests and frontend type-check.
+Requiring the server ID again fails the nullable-ID backend regression; restoring
+the old UI ID requirement and cleared creation state fails both new UI tests.
+Restored code passes. Full CI/release/deployment remain pending; production
+still runs 9ecfd70. Tailscale authentication subsequently succeeded. A sanitized
+read-only helper was staged at /tmp/radar-privy-read-check.py; the owner must
+execute it with sudo to inspect the exact supplied wallet's linked-account
+fields without exposing credentials or email. Also requested one ordinary
+Refresh wallet check to distinguish delayed recognition before deployment.
+
+**Repair handback:** parser and duplicate-creation fixes are locally verified.
+Do not claim the nullable-ID defect caused this owner's symptom until its actual
+response is known. Next: inspect the owner's refresh/diagnostic answer, adjust
+only if that evidence requires it, then run full CI and a verified release and
+deploy through the fixed script. Never create another wallet to test recognition.
