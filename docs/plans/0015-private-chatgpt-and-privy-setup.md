@@ -938,7 +938,7 @@ No new dependency or crate, model-to-signer path or production deployment.
   fees and removing unknown-tail refusal each failed their targeted regression;
   restored parser tests passed. Formatting passed. No mutation exclusions added.
 - [x] Repo-conformance: all 33 checks passed.
-- [ ] Full CI pending.
+- [x] Final full CI 37700903314 passed at 9ade385926c35faafe17718571c74131b1582fd2: 2,432 Rust tests, 352 web tests, all mutation shards and gate, build/lint/MSRV/site/fmt/licence/cargo-deny.
 
 Read-only mainnet command against
 6T1BNshzGAKAHvJ3NZ5n62X2eg5rqqsMipUMZJvLpump, raw quantity 1000000,
@@ -949,7 +949,7 @@ executable minimum receipt, a recommendation or a trade. USD value, network
 costs, simulation and searched capacity remain null. The current mint supply
 was below the curve's original total, which the burn-aware supply check allows.
 
-**Handback in progress:** extension support is complete locally; full CI remains.
+**Handback (verified code `9ade385`):** extension and component-rounding support passed full CI.
 Next add exact transaction simulation/cost evidence, valuation and journal loss/
 exposure, protected owner mandate activation and settlement reconciliation before
 repeated worker execution. Live signing/delegation remains closed. No keys or
@@ -1012,9 +1012,36 @@ one lamport. This is a correction to a quoted bound, not to any signed trade.
   exact divisions, overflow/exhaustion and missing coverage. Restoring combined
   rounding fails at Some(1) versus Some(2); restored five parser tests, four
   quote unit tests, five actual-process tests and scoped all-target Clippy pass.
-- [ ] Full CI pending after the already-running repair CI finishes; no checks
-  cancelled. LEARNINGS 49 records the correction and what catches recurrence.
+- [x] Full final-code CI 37700903314 passed at 9ade385. Repair CI 37699338470
+  also passed at 909aa7e before the next push; no checks were cancelled.
+  LEARNINGS 49 records the correction and what catches recurrence.
 
 Live trading remains off. No USD valuation, network costs or simulation result
 was invented. This schedule bound covers observed parsed fields and rounded
 component costs; it cannot guarantee a later fill or unobserved program charges.
+
+**Final handback — verified code 9ade385926c35faafe17718571c74131b1582fd2:**
+full CI 37700903314 passed, including 2,432 Rust and 352 web tests, all four
+mutation shards/final gate and build/lint/MSRV/site/fmt/licence/cargo-deny.
+The complete observed fee layout is now accepted, while unknown suffixes,
+truncation and missing coverage refuse. The lamport ceiling evaluates separately
+rounded components across every observed row; it does not infer tier selection,
+USD valuation, network costs, wallet ownership or future executable proceeds.
+
+After the final conversion change, all 224 CLI tests and five parser regressions
+passed locally, along with scoped all-target Clippy, fmt and 33 conformance checks.
+Rebuilt final-code mainnet read at host 1791414486, finalized slot 454365388,
+returned gross 32, venue fee upper 2, net 30 lamports for explicit raw quantity
+1000000 of the previously captured mint. The prior net 31 output is superseded
+as a conservative component-rounded bound. No signature or trade was involved.
+
+Next build a read-only exact-transaction simulation/network-fee adapter as
+outlined above; retain missing costs as unknown. Then bind independently measured
+valuation, portfolio/loss and owner mandates to the issuer, reconcile submitted
+operations and verify Privy policy refusals before activating repeated execution.
+The site limits remain drafts. No deployment or current VPS health check was made.
+No real issuer/Privy key, delegation, signature or trade was created. No local
+Cargo/rustc/wallet process remains; target measured 29.3 GiB with 120.1 GiB free.
+Previously rejected ignored mutation-output cleanup was not retried. This
+follow-up changes verification documentation only; its CI may be pending while
+the source head above is fully verified.
