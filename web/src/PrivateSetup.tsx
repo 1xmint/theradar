@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 //! Operator-only setup for the owner's subscription and autonomous Privy lane.
 
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { SubscriptionLink } from "./Agent";
 import { ApiError, connections } from "./api";
+
+const PrivyWallet = lazy(() => import("./PrivyWallet"));
 
 export function PrivateSetup() {
   const [privy, setPrivy] = useState<string | null>(null);
@@ -37,13 +39,8 @@ export function PrivateSetup() {
       </div>
       <div className="rounded-md border border-[var(--color-line)] bg-[var(--color-surface)] p-4">
         <h3 className="font-medium">Privy wallet</h3>
-        <p className="mt-2 break-all text-sm" role="status">
-          {privy ? `App configured: ${privy}. Wallet ownership and signing delegation have not been verified here.`
-            : error ?? "Checking Privy configuration…"}
-        </p>
-        <p className="mt-2 text-sm text-[var(--color-dim)]">
-          Use a dedicated Solana wallet with a bounded signing delegation. Radar's signer holds the authorization key.
-        </p>
+        {privy ? <Suspense fallback={<p role="status">Loading wallet connection…</p>}><PrivyWallet appId={privy} /></Suspense>
+          : <p className="mt-2 text-sm" role="status">{error ?? "Checking Privy configuration…"}</p>}
       </div>
       <div className="rounded-md border border-[var(--color-line)] p-4">
         <h3 className="font-medium">Autonomous execution: not enabled</h3>

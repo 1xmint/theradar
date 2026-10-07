@@ -334,5 +334,29 @@ credentials between hosts, invent money limits, or turn on automated trading.
 and loss controls, a live wallet balance, and an option for ChatGPT to decide
 what to do with the wallet. Recommendation given: autonomous trade selection
 and sizing within owner-saved limits, with limit changes under owner control.
-The scope question is pending; this is a proposed boundary, not a numerical
-capital mandate. Wallet-control implementation is paused for that discussion.
+Josh subsequently said to continue. The interface increment is recorded in
+design 0017: explicit owner Privy sign-in and Solana wallet creation, verified
+live balance reads, and durable owner-entered draft limits with an autonomous
+selection preference. Only the owner changes limits; the preference supplies
+no kernel authorization. No numerical capital mandate was supplied.
+
+**Wallet interface work in progress:** private `/automation` child endpoints
+require the existing operator Access check plus a verified Privy access token.
+The embedded wallet is fetched from Privy for that token's DID, never from a
+request parameter. Draft settings are scoped to identity and wallet, stored
+atomically under RADAR_STATE_DIR, and corrupt/unreadable settings are refused.
+Balances reuse the existing all-or-nothing, rate-limited RPC reader. The private
+page lazy-loads the Privy SDK; both EVM and Solana automatic wallet creation are
+off. The owner must press Create Solana wallet. Draft controls are blank until
+the owner enters them and cannot enable execution. No signing API was added.
+Local validation passes: 318 serve unit tests, seven customer guard integration
+tests, 33 conformance tests, scoped serve clippy and formatting, frontend
+type-check/build and 349 web tests. Reversing the trade/capital comparison fails
+its regression; reversing the balance/address comparison fails two UI tests.
+Both fixes were restored. A full local serve integration build was stopped when
+linking many targets delayed the workstation; CI owns the full workspace gate.
+The SDK adds 732 dependencies and a roughly 445 kB gzip lazy private-page chunk.
+The audit reports 26 moderate findings, zero high/critical after ws 8.21.0
+overrides. npm 10 clean installation passed before the final nested ws patch;
+its final lockfile dry-run passes. CI will prove the patched clean installation.
+Numerical bounds remain unset and no signing or trading was tested.

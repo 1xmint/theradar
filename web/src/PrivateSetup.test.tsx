@@ -4,6 +4,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { PrivateSetup } from "./PrivateSetup";
 import { Agent } from "./Agent";
 
+vi.mock("./PrivyWallet", () => ({ default: ({ appId }: { appId: string }) => <p role="status">App configured: {appId}. Wallet ownership and signing delegation have not been verified.</p> }));
+
 afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); });
 
 function server(link: unknown = { error: "not configured" }, status = 404, privy: unknown = { error: "not configured" }, privyStatus = 503) {

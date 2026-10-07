@@ -14,6 +14,7 @@
 pub mod access;
 pub mod admission;
 pub mod api;
+mod automation;
 pub mod cache;
 pub mod challenges;
 pub mod chat;
@@ -304,6 +305,7 @@ impl Drop for VisitorGuard {
 /// deployment returns 404 for them rather than serving intelligence for free.
 pub fn app(state: Arc<AppState>) -> Router {
     let mut router = Router::new()
+        .merge(automation::routes())
         // The interface, embedded in this binary. The server-rendered ops page
         // stays at /ops as the no-JavaScript fallback: it is what answers when
         // somebody is debugging with curl, and it needs no build to exist.
