@@ -471,7 +471,7 @@ impl RpcClient {
         &self.endpoint
     }
 
-    fn call<T: for<'de> Deserialize<'de>>(
+    pub(crate) fn call<T: for<'de> Deserialize<'de>>(
         &self,
         budget: &mut Budget,
         method: &str,

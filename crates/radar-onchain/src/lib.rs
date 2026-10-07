@@ -51,6 +51,7 @@ pub mod budget;
 pub mod curve_market;
 pub mod dossier;
 pub mod launch;
+pub mod preflight;
 pub mod reserves;
 pub mod rpc;
 

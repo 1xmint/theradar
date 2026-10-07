@@ -14,6 +14,160 @@ fn now() -> u64 {
         .as_secs()
 }
 
+#[test]
+fn actual_transaction_read_preserves_bytes_and_reports_separate_fee_and_simulation() {
+    let (endpoint, server) = fixture(vec![
+        json!({"result":{"context":{"slot":50},"value":{"err":null}}}),
+        json!({"result":{"context":{"slot":51},"value":5000}}),
+    ]);
+    let mut bytes = vec![0; 100];
+    bytes[0] = 1;
+    bytes[65] = 1;
+    bytes[99] = 7;
+    let mut file = tempfile::NamedTempFile::new().expect("input");
+    file.write_all(&bytes).expect("write");
+    let before = now();
+    let output = Command::new(env!("CARGO_BIN_EXE_radar"))
+        .args([
+            "transaction-read",
+            "--transaction",
+            file.path().to_str().expect("path"),
+            "--min-slot",
+            "50",
+            "--rpc",
+            &endpoint,
+        ])
+        .output()
+        .expect("command");
+    assert!(output.status.success(), "{:?}", output.stderr);
+    let evidence: Value = serde_json::from_slice(&output.stdout).expect("evidence");
+    assert_eq!(
+        evidence["transaction_base64"],
+        radar_types::b64::encode(&bytes)
+    );
+    assert_eq!(
+        evidence["message_base64"],
+        radar_types::b64::encode(&bytes[65..])
+    );
+    assert_eq!(
+        evidence["network_fee"],
+        json!({"slot":"51","lamports":"5000"})
+    );
+    assert_eq!(evidence["simulation"]["slot"], "50");
+    assert!(evidence["simulation"]["units_consumed"].is_null());
+    assert_eq!(evidence["authority"], "read_only");
+    assert_eq!(evidence["execution_guaranteed"], false);
+    assert!(evidence["rent_and_other_instruction_costs"].is_null());
+    let started = evidence["read_started_at_unix_secs"]
+        .as_u64()
+        .expect("started");
+    let completed = evidence["read_completed_at_unix_secs"]
+        .as_u64()
+        .expect("completed");
+    assert!(before <= started && started <= completed && completed <= now());
+    let calls = server.join().expect("server");
+    assert_eq!(calls.len(), 2);
+    assert_eq!(calls[0]["method"], "simulateTransaction");
+    assert_eq!(
+        calls[0]["params"],
+        json!([evidence["transaction_base64"],{
+        "encoding":"base64","commitment":"finalized","sigVerify":false,
+        "replaceRecentBlockhash":false,"minContextSlot":50}])
+    );
+    assert_eq!(calls[1]["method"], "getFeeForMessage");
+    assert_eq!(
+        calls[1]["params"],
+        json!([evidence["message_base64"],{
+        "commitment":"finalized","minContextSlot":50}])
+    );
+}
+
+#[test]
+fn actual_transaction_read_prints_no_partial_evidence_on_unknown_simulation_or_fee() {
+    let good = json!({"result":{"context":{"slot":50},"value":{"err":null}}});
+    for answers in [
+        vec![json!({"result":{"context":{"slot":50},"value":{}}})],
+        vec![
+            good.clone(),
+            json!({"result":{"context":{"slot":51},"value":null}}),
+        ],
+        vec![good, json!({"error":{"message":"private fee endpoint"}})],
+    ] {
+        let (endpoint, server) = fixture(answers);
+        let mut bytes = vec![0; 100];
+        bytes[0] = 1;
+        bytes[65] = 1;
+        let mut file = tempfile::NamedTempFile::new().expect("input");
+        file.write_all(&bytes).expect("write");
+        let output = Command::new(env!("CARGO_BIN_EXE_radar"))
+            .args([
+                "transaction-read",
+                "--transaction",
+                file.path().to_str().expect("path"),
+                "--min-slot",
+                "50",
+                "--rpc",
+                &endpoint,
+            ])
+            .output()
+            .expect("command");
+        assert!(!output.status.success());
+        assert_eq!(output.stdout, Vec::<u8>::new());
+        assert!(!String::from_utf8_lossy(&output.stderr).contains("private"));
+        server.join().expect("server");
+    }
+}
+
+#[test]
+fn transaction_file_limit_accepts_the_full_packet_and_refuses_one_extra_byte() {
+    let mut bytes = vec![0; radar_onchain::preflight::MAX_TRANSACTION_BYTES];
+    bytes[0] = 1;
+    bytes[65] = 1;
+    let last = bytes.len() - 1;
+    bytes[last] = 7;
+    let mut file = tempfile::NamedTempFile::new().expect("input");
+    file.write_all(&bytes).expect("write");
+    let (endpoint, server) = fixture(vec![
+        json!({"result":{"context":{"slot":0},"value":{"err":null}}}),
+        json!({"result":{"context":{"slot":0},"value":0}}),
+    ]);
+    let output = Command::new(env!("CARGO_BIN_EXE_radar"))
+        .args([
+            "transaction-read",
+            "--transaction",
+            file.path().to_str().expect("path"),
+            "--min-slot",
+            "0",
+            "--rpc",
+            &endpoint,
+        ])
+        .output()
+        .expect("command");
+    assert!(output.status.success(), "{:?}", output.stderr);
+    let evidence: Value = serde_json::from_slice(&output.stdout).expect("evidence");
+    assert_eq!(
+        evidence["transaction_base64"],
+        radar_types::b64::encode(&bytes)
+    );
+    server.join().expect("server");
+    file.write_all(&[0]).expect("extra byte");
+    let output = Command::new(env!("CARGO_BIN_EXE_radar"))
+        .args([
+            "transaction-read",
+            "--transaction",
+            file.path().to_str().expect("path"),
+            "--min-slot",
+            "0",
+            "--rpc",
+            "http://127.0.0.1:1",
+        ])
+        .output()
+        .expect("command");
+    assert!(!output.status.success());
+    assert_eq!(output.stdout, Vec::<u8>::new());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("single unsigned legacy transaction"));
+}
+
 fn fixture(answers: Vec<Value>) -> (String, std::thread::JoinHandle<Vec<Value>>) {
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
     let endpoint = format!("http://{}", listener.local_addr().expect("address"));

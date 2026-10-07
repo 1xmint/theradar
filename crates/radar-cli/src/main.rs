@@ -29,6 +29,7 @@ mod route;
 mod selection;
 mod session;
 mod study;
+mod transaction_read;
 mod wallet_read;
 
 use radar_sim::{JupiterQuoter, RpcClient};
@@ -116,6 +117,8 @@ commands:
     Direct finalized SOL/SPL/Token-2022 reads; JSON, no prices or authority.
   curve-exit --mint <address> --raw-tokens <N> --rpc <URL>
     One-context curve/mint/fee read; conservative hypothetical sell, no authority.
+  transaction-read --transaction <binary-file> --min-slot <N> --rpc <URL>
+    Exact unsigned legacy simulation and message fee; JSON, no signing or sending.
 
   dossier <mint> [--rpc URL] [--seconds N]
                                  everything Radar can say about one token, read
@@ -891,6 +894,7 @@ fn main() -> ExitCode {
         "dossier" => dossier::run(&args),
         "wallet-read" => wallet_read::run(&args),
         "curve-exit" => curve_exit::run(&args),
+        "transaction-read" => transaction_read::run(&args),
         "audit" => audit::run(&args),
         "model-prices" => model_prices::run(&args),
         "selection" => selection_report(&args),

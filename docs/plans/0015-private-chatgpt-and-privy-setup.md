@@ -1045,3 +1045,38 @@ Cargo/rustc/wallet process remains; target measured 29.3 GiB with 120.1 GiB free
 Previously rejected ignored mutation-output cleanup was not retried. This
 follow-up changes verification documentation only; its CI may be pending while
 the source head above is fully verified.
+
+### Exact transaction simulation and network fees — 2026-10-07
+
+- [x] Add the actual operator caller `radar transaction-read --transaction
+  <binary-file> --min-slot <N> --rpc <URL>`. Bounded binary input, canonical
+  single-zero-signature legacy envelope only; no signer dependency or send RPC.
+- [x] Simulate the exact bytes at finalized commitment with explicit minimum
+  slot, no signature verification and no blockhash replacement. Require an
+  explicit null error and reject reported replacement. Price the exact message
+  suffix with getFeeForMessage; null/missing fee cannot become zero.
+- [x] Preserve full transaction/message base64 for equality binding, separate
+  response slots, integer lamports and optional units, host read timestamps.
+  Missing units stay null. Both contexts must meet the caller's minimum slot.
+  Rent/other instruction costs and USD stay unknown; execution is not guaranteed.
+- [x] Five read-unit regressions, one CLI argument regression and three actual
+  process regressions cover byte/option preservation, unsupported framing,
+  stale/missing contexts, missing/error simulation, unexpected replacement,
+  optional/bad units, unknown versus measured-zero fees, budget failure,
+  no partial output/provider details and the 1,232/1,233-byte boundary.
+  Test floor raised by nine. Existing wallet/curve behavior remains covered.
+- [x] Manual unsafe missing-error and null-fee-as-zero changes both failed the
+  intended regressions; source restored. Scoped Clippy passes. Full scoped
+  test/conformance and complete CI validation are recorded in the handback below.
+- [x] Mainnet read-only probe with a zero/unavailable blockhash refused without
+  evidence. This is failure-path verification, not a successful funded trade
+  simulation. No wallet key, signed transaction or submission was involved.
+- [ ] Await full final-source CI, including all mutation shards, before handback.
+
+This adapter only inspects envelope framing locally; the RPC validates message
+structure and the independent signer must still decode and authorize content.
+The output is operator read evidence, not the issuer's complete live snapshot.
+Next bind fresh valuation, exposure/loss, exact-transaction evidence and owner
+mandates to the issuer; close settlement reconciliation and Privy policy refusal
+checks before repeated execution. Site limits are still drafts and live signing
+remains closed. This increment does not require a Serve deployment.

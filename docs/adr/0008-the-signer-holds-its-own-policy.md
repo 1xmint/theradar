@@ -305,6 +305,39 @@ are separate because different component splits can reverse their ordering.
 Existing combined `Fees::charge` callers retain their historical semantics.
 Neither fee bound supplies transaction simulation, network fees or future fills.
 
+### Exact transaction reads
+
+`radar transaction-read --transaction <binary-file> --min-slot <N> --rpc <URL>`
+now obtains read-only simulation and network-fee evidence. Its caller is the
+operator CLI, not Serve or the issuer. Input is bounded to a legacy packet of
+1,232 bytes, with canonical one-signature framing and one zero placeholder.
+Versioned, multi-signer and already signed envelopes refuse. Local inspection
+establishes framing only; the RPC validates the message and the independent
+signer still must decode and authorize its instructions.
+
+`simulateTransaction` receives the exact base64 bytes, finalized commitment,
+explicit minimum context slot, signature verification disabled and blockhash
+replacement disabled. Explicit `err:null` is required; a missing field cannot
+be success. A reported replacement blockhash refuses. `getFeeForMessage` then
+receives the exact message suffix, with the same commitment and minimum slot.
+Both response contexts must independently meet that slot; they are not an
+atomic snapshot. Missing/null fees refuse, whereas measured zero remains zero.
+Absent compute units remain unknown. Output retains both full base64 strings
+for exact equality binding, individual slots and host start/completion times.
+
+No provider errors or program logs are copied into operator output. No partial
+JSON is emitted when either read fails. These measurements grant no authority,
+do not verify signatures or guarantee later execution, and leave rent, other
+instruction costs and USD valuation unknown. An expired original blockhash
+refuses rather than simulating a different transaction. The issuer has not yet
+been connected to these reads; its live snapshot and reconciliation gaps, and
+Privy delegation/policy refusal verification, still keep live execution closed.
+
+The RPC contracts and packet bound were checked against Solana's
+[simulation](https://solana.com/docs/rpc/http/simulatetransaction),
+[message fee](https://solana.com/docs/rpc/http/getfeeformessage) and
+[transaction](https://solana.com/docs/core/transactions) documentation.
+
 ## What would reverse this
 
 Nothing foreseeable reverses holding a policy locally. The specific ceilings are
