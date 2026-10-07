@@ -2,7 +2,7 @@
 # Plan 0015 — Private ChatGPT and Privy setup
 
 **Status:** in progress; connection UI, sign-in fixes and security headers deployed;
-private server setup installed; ChatGPT login and wallet delegation remain.
+private server setup installed and ChatGPT linked; inference allowance and wallet delegation remain.
 **Date:** 2026-10-06.
 **Branch:** fix/wallet-signin-diagnostics.
 **Base:** b55a47651c81ed8a1134f00deaeabc9b6cc4d792.
@@ -225,18 +225,21 @@ matching manifest names that commit and radar-serve SHA-256
 After verifying the download, shipped it through `/tmp/radar-serve.new` and
 `sudo radar-deploy`; `/health` reports the full code commit and status ok.
 The service retains User guardian, NoNewPrivileges yes and ProtectHome read-only.
-The CLI still reports Not logged in: owner device sign-in remains pending.
+The owner subsequently completed the device flow and reported Linked in the
+Radar page. `/usr/local/bin/radar-codex login status` independently reports
+Logged in using ChatGPT. Public health still reports `agent.configured=false`,
+as expected before an inference allowance is selected. Documentation commit
+`91ea610` also passed all jobs in CI 37557612148.
 
 **Stopped at:** deployed colored device prompt repair at `d73f8cf`.
-Private server setup is installed and applied. ChatGPT is not logged in; the
+Private server setup is installed and applied. ChatGPT login is verified; the
 Privy app is configured, while wallet delegation remains unverified. No autonomous
 trading loop has been enabled. The broader private-autonomy work remains in progress.
-**Next action:** owner refreshes the authenticated Radar page, selects Connect ChatGPT and
-complete the displayed device login. The automated browser sign-in is blocked
+**Next action:** choose the daily inference allowance (the owner has been asked
+to choose a model-call cap), configure the persistent meter, and verify a
+read-only evidence-backed model call through Radar. No call allowance is
+assumed from subscription login. The automated browser sign-in remains blocked
 by URL protocol policy and must not be retried through a workaround.
-Verify that linking succeeds through the actual Radar service restrictions.
-The installed client was verified with NoNewPrivileges, not all service namespaces.
-Choose an inference allowance separately before testing a model call.
 Obtain the owner's Privy DID and dedicated wallet ID to configure private admission.
 **Do not:** claim a wallet is delegated from an app ID, treat connected ChatGPT
 as capital authority, expose the private site, copy existing subscription
