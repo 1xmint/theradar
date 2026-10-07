@@ -139,10 +139,21 @@ fn one_change_recorded_twice_is_one_claim_and_not_two() {
     drop(log);
 
     // A write that landed, timed out on the way back, and was retried. The
-    // same change is now in the file twice.
-    let text = std::fs::read_to_string(&path).expect("read");
-    let again = text.lines().last().expect("a line").to_owned();
-    std::fs::write(&path, format!("{text}{again}\n")).expect("append");
+    // same operation change is now recorded twice, each with a valid event
+    // sequence/hash. Repeating raw JSONL bytes would corrupt the chain rather
+    // than represent a second recorded change, and now refuses before replay.
+    let mut journal = radar_journal::Journal::open(&path).expect("journal");
+    let last = journal.events().expect("events").pop().expect("last");
+    journal
+        .record_operation(
+            last.outcome,
+            last.at,
+            last.correlation,
+            last.operation.expect("operation"),
+            last.build,
+            last.redacted,
+        )
+        .expect("duplicate change");
 
     // Re-apply the bug: drop the `live.entry.state == entry.state` guard in
     // `replay` and the second copy is a move from `Reserved` to `Reserved`,

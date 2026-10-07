@@ -94,6 +94,7 @@ use radar_types::{
 };
 use serde::{Deserialize, Serialize};
 
+use crate::Verified;
 use crate::event::{Correlation, Event, Outcome};
 use crate::file::{Journal, JournalError};
 
@@ -246,6 +247,9 @@ pub enum OperationError {
     /// The durable record could not be written, so nothing was done.
     #[error("the operation could not be recorded, so it did not happen: {0}")]
     Journal(#[from] JournalError),
+    /// Replaying damaged or incomplete history could lose a capital claim.
+    #[error("operation history is not intact: {0:?}; reconcile it before proceeding")]
+    HistoryNotIntact(Verified),
     /// The account refused the claim.
     #[error("the account refused the claim: {0}")]
     Portfolio(#[from] PortfolioError),
@@ -357,7 +361,14 @@ struct Live {
 /// The caller is `radar consider`, which reopens the log before the risk kernel
 /// sizes anything so that capital claimed by an operation still in flight is not
 /// offered to a second one.
+/// Ownership is held by a nonblocking OS lock on `<journal>.lock` until this
+/// log is dropped. Keep the pathname and sidecar protected and stable: deleting
+/// or replacing them can bypass cooperative ownership. Generic `Journal`
+/// readers do not take this lock and must not write operation history.
 pub struct OperationLog {
+    // Holding the OS handle holds ownership, including through replay and
+    // external submission. Never delete the lock file to release ownership.
+    _owner: std::fs::File,
     journal: Journal,
     operations: BTreeMap<OperationId, Live>,
     build: Option<String>,
@@ -365,6 +376,7 @@ pub struct OperationLog {
 
 impl OperationLog {
     /// Opens the log at `path` and rebuilds every operation the file records.
+    /// Acquires ownership before reading, then refuses non-intact history.
     ///
     /// The portfolio is untouched here. Rebuilding *state* and re-taking
     /// *claims* are separate steps because the terminal ones must not be
@@ -375,14 +387,59 @@ impl OperationLog {
     ///
     /// # Errors
     ///
-    /// [`OperationError::Journal`] if the file cannot be read, and
+    /// [`OperationError::Journal`] if ownership cannot be acquired or the file
+    /// cannot be read; [`OperationError::HistoryNotIntact`] for broken or torn
+    /// history; and
     /// [`OperationError::Orphan`] or [`OperationError::IllegalTransition`] if
     /// what it records is not a history an operation could have had.
     pub fn open(path: impl Into<std::path::PathBuf>) -> Result<Self, OperationError> {
-        let journal = Journal::open(path)?;
+        let path = path.into();
+        let parent = path
+            .parent()
+            .filter(|p| !p.as_os_str().is_empty())
+            .unwrap_or(std::path::Path::new("."));
+        let directory = parent.canonicalize().map_err(|source| JournalError::Io {
+            path: parent.display().to_string(),
+            source,
+        })?;
+        let name = path.file_name().ok_or_else(|| JournalError::Io {
+            path: path.display().to_string(),
+            source: std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "an operation journal needs a filename",
+            ),
+        })?;
+        let path = directory.join(name);
+        let mut lock_path = path.as_os_str().to_os_string();
+        lock_path.push(".lock");
+        let lock_path = std::path::PathBuf::from(lock_path);
+        let mut options = std::fs::OpenOptions::new();
+        options.read(true).write(true).create(true).truncate(false);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt as _;
+            options.mode(0o600);
+        }
+        let owner = options
+            .open(&lock_path)
+            .map_err(|source| JournalError::Io {
+                path: lock_path.display().to_string(),
+                source,
+            })?;
+        // Nonblocking: another owner is a refusal, never a queued stale reader.
+        owner.try_lock().map_err(|source| JournalError::Io {
+            path: lock_path.display().to_string(),
+            source: source.into(),
+        })?;
+        let journal = Journal::open(&path)?;
+        let integrity = journal.verify()?;
+        if !matches!(integrity, Verified::Intact { .. }) {
+            return Err(OperationError::HistoryNotIntact(integrity));
+        }
         let events = journal.events()?;
         let operations = replay(&events)?;
         Ok(Self {
+            _owner: owner,
             journal,
             operations,
             build: radar_types::build_sha().map(str::to_owned),

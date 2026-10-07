@@ -652,3 +652,35 @@ An isolated authority needs exclusive ownership of that state, trusted wallet
 asset snapshots and conservative USD valuation, mandate version/revocation,
 and confirmed settlement reconciliation. The site's `automation::Preferences`
 remains a Serve-owned draft; do not load it as autonomous authority unchanged.
+
+### Exclusive intact reservation history — 2026-10-07
+
+Owner requested continuation from `8c60a42`. Before an isolated approval process
+can use existing reservations, close two inspected gaps in its actual
+`OperationLog::open` path (existing runtime caller: CLI `consider`): concurrent
+processes can replay the same balance/claims, and replay accepted history
+without verifying its hash chain. This increment owns that prerequisite, not
+the entire issuer or trusted mandate/valuation adapter.
+
+- [x] Hold a nonblocking OS lock on the persistent journal sidecar before
+  opening/verification/replay, until the log is dropped or process exits.
+- [x] Refuse broken or torn operation history without repair. Keep read-only
+  generic journal audit available and preserve duplicate-transition idempotence
+  in a valid chain; raw repeated lines are corruption.
+- [x] Four regressions cover competing instances and directory aliases,
+  actual child-process death/reheld capital, corrupted/torn/repeated history,
+  and failed lock provisioning. The ignored child fixture is run explicitly by
+  the real-process regression, not counted as an independently passing test.
+- [x] Removing the OS lock allows a second owner and fails its regression.
+  Skipping integrity verification accepts damaged history and fails its
+  regression. Restored both guards and reran the scoped journal suite: 31 tests
+  passed (plus the explicitly invoked child fixture), all-target journal Clippy
+  passed with warnings denied, and 33 conformance tests passed.
+- [ ] Full CI including all mutation shards at the code commit.
+
+**Handback in progress:** production remains unchanged, policy closed, signer
+inactive. No wallet key, issuer key, delegation or financial cap is provisioned.
+This lock coordinates cooperating users of one history path, not hostile writes
+or different journals for the same wallet. Protected stable paths and a trusted
+checkpoint remain needed for rollback detection. The next layer must connect
+an activated mandate and trusted asset valuations to reserved kernel decisions.

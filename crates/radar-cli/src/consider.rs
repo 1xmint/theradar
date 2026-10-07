@@ -51,9 +51,8 @@ const PAID_TIER_CAP: usize = 25;
 ///
 /// Alongside the analyst's journal rather than inside it: the two are read by
 /// different commands and one of them is on the money path. Nothing writes this
-/// file yet — execution is shut — and an absent one opens as a log with nothing
-/// outstanding, which is the honest reading for an instance that has never
-/// operated.
+/// file yet — execution is shut. An absent file opens empty only within an
+/// already prepared state directory; ownership/history failures refuse the pass.
 const OPERATIONS_JOURNAL: &str = "data/execution/operations.jsonl";
 
 /// Runs the lane, and keeps a record of having run it.
@@ -814,11 +813,11 @@ fn inventory(
     // about to spend.
     //
     // The file does not exist on any instance today, and an operations journal
-    // that was never written to opens empty — nothing outstanding, nothing
-    // re-taken. That is a measurement rather than a silence: the log
-    // distinguishes it from a file it could not read, which is an error here.
+    // that was never written to opens empty only inside an existing writable
+    // state directory. Ownership and intact history are checked before replay;
+    // missing directories are not silently recreated after possible state loss.
     let mut operations = radar_journal::OperationLog::open(OPERATIONS_JOURNAL).map_err(|e| {
-        format!("the operations journal at {OPERATIONS_JOURNAL} cannot be read, so what is already claimed is unknown: {e}")
+        format!("the operations journal at {OPERATIONS_JOURNAL} cannot be exclusively opened and verified, so what is already claimed is unknown: {e}")
     })?;
     operations.rehold(&mut portfolio).map_err(|e| {
         format!(
