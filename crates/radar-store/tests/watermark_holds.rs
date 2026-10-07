@@ -111,6 +111,44 @@ fn matching_reads_filter_during_decode_without_exposing_future_rows() {
 }
 
 #[test]
+fn creator_column_selection_keeps_other_creators_and_future_rows_out() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let slots = slots_in_one_partition();
+    let mut writer = Writer::open(dir.path(), 10_000).expect("open");
+    for slot in slots {
+        let mut event = launch_at(slot);
+        if slot == slots[1] {
+            let Event::Launch(launch) = &mut event else {
+                unreachable!()
+            };
+            launch.creator = Address::new([8; 32]);
+        }
+        writer.append(event).expect("append");
+    }
+    writer.flush().expect("flush");
+    let reader = Reader::open(dir.path());
+    let selected = reader
+        .read_creator_launches(&Address::new([7; 32]).to_string(), AsOf::at(Slot(slots[1])))
+        .expect("creator launches");
+    assert_eq!(selected.len(), 1);
+    assert_eq!(selected[0].slot(), Slot(slots[0]));
+    assert_eq!(
+        reader
+            .read_creator_launches(&Address::new([8; 32]).to_string(), AsOf::at(Slot(slots[3])))
+            .expect("other creator")
+            .len(),
+        1
+    );
+    assert_eq!(
+        reader
+            .read_creator_launches(&Address::new([6; 32]).to_string(), AsOf::at(Slot(slots[3])))
+            .expect("unknown creator")
+            .len(),
+        0
+    );
+}
+
+#[test]
 fn a_file_that_straddles_the_watermark_yields_only_the_admissible_half() {
     let dir = tempfile::tempdir().expect("tempdir");
     let slots = slots_in_one_partition();

@@ -1983,3 +1983,14 @@ while reintroducing excess retention, so logical tests alone cannot prove this
 resource fix.
 The outcome predicate regression also checks that callbacks never see future
 measurements. Removing its retention filter fails the selected-row assertion.
+
+The complete memory-filtered live query stayed below the cap (MemoryPeak
+674140160, process RSS about 289000 KiB at completion), but the browser showed no
+answer after a multi-minute scan. The nominal ledger increased by one model
+call, so health's completed-investigation status alone was not the useful
+proof. The remaining launch scan decoded every unrelated signature and address
+before rejecting it. A creator-column query now selects rows before event
+decode; only selected rows are decoded, and their watermark remains enforced.
+The new mixed-creator regression rejects another creator and future rows;
+bypassing the creator comparison makes its selected count fail. This logical
+check does not impose a performance guarantee; the live repeat is still required.

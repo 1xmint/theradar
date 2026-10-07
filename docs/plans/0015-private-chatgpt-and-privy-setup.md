@@ -2,7 +2,7 @@
 # Plan 0015 — Private ChatGPT and Privy setup
 
 **Status:** in progress; connection UI, sign-in fixes and security headers deployed;
-private server setup installed and ChatGPT linked; inference allowance and wallet delegation remain.
+private server setup installed and ChatGPT linked; unlimited subscription allowance applied; wallet flow and delegation remain.
 **Date:** 2026-10-06.
 **Branch:** fix/wallet-signin-diagnostics.
 **Base:** b55a47651c81ed8a1134f00deaeabc9b6cc4d792.
@@ -291,14 +291,23 @@ then fixed-deployed and verified public health. The live repeat kept launch
 scans below 458285056 bytes, then full outcome retention reached the 805306368
 cap before inference. Restored service through fixed deployment. Matching outcome
 reads now retain only measurements for the selected creator's recorded mints;
-watermark gating and malformed-row errors remain. This second repair still needs
-CI, release and a completed live repeat under the same cap. Privy's owner
+watermark gating and malformed-row errors remain. Outcome repair `efa6c74dce486f9d07e1cedbbf209a159a1de497` passed all jobs
+in CI 37562058437 and release 37562054563. Verified artifact and staged VPS
+SHA-256 `93bd4c5769138655913ebc8bd6c4c3ffc8984f03d0549bc7e5b95cbd9355b618`,
+then fixed-deployed and verified health. The complete query stayed below the cap,
+MemoryPeak 674140160 and process RSS about 289000 KiB, but took minutes and the
+browser rendered neither answer nor error. The nominal ledger recorded one
+additional call; last_call ok alone is not proof of successful site inference.
+Creator-column selection now avoids decoding unrelated launch envelopes.
+Selected-row decoding still validates matching records and enforces the watermark;
+unrelated event payloads are outside this narrower query. CI, release and the
+live latency/citation repeat remain required. Privy's owner
 wallet dashboard was inspected read-only and reports No wallets yet; the app ID
 alone does not establish a wallet or delegation.
 
 **Stopped at:** unlimited subscription inference and CLI pipe repair are live
-at `8d3a91d`; the first authenticated site answer succeeded without citations.
-Launch filtering is deployed; matching outcome filtering awaits verification and release.
+at `efa6c74`; the first authenticated site answer succeeded without citations.
+Launch and outcome memory filtering are deployed; creator-column selection is local.
 No autonomous trading loop has been enabled. The broader private-autonomy work
 remains in progress.
 **Next action:** release the memory repair from a verified artifact, repeat the

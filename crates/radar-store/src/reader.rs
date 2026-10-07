@@ -138,7 +138,7 @@ impl Reader {
         from: Option<Slot>,
         to: Option<Slot>,
     ) -> Result<Vec<Event>, StoreError> {
-        self.read_range_matching(table, as_of, from, to, &|_| true)
+        self.read_range_matching(table, as_of, from, to, &|_| true, None)
     }
 
     /// Reads only matching events, retaining them while decoding each batch.
@@ -154,7 +154,21 @@ impl Reader {
         as_of: AsOf,
         keep: &impl Fn(&Event) -> bool,
     ) -> Result<Vec<Event>, StoreError> {
-        self.read_range_matching(table, as_of, None, None, keep)
+        self.read_range_matching(table, as_of, None, None, keep, None)
+    }
+
+    /// Reads a creator's launches, checking the stored creator column before
+    /// decoding unrelated envelopes. Only selected rows are decoded as events.
+    /// The normal watermark gate still applies to every returned launch.
+    ///
+    /// # Errors
+    /// Returns [`StoreError`] if a file cannot be read or a selected row is malformed.
+    pub fn read_creator_launches(
+        &self,
+        creator: &str,
+        as_of: AsOf,
+    ) -> Result<Vec<Event>, StoreError> {
+        self.read_range_matching(Table::Launches, as_of, None, None, &|_| true, Some(creator))
     }
 
     fn read_range_matching(
@@ -164,6 +178,7 @@ impl Reader {
         from: Option<Slot>,
         to: Option<Slot>,
         keep: &impl Fn(&Event) -> bool,
+        creator: Option<&str>,
     ) -> Result<Vec<Event>, StoreError> {
         // Fail with the reason rather than with "no `slot` column", which is
         // what the caller actually sees otherwise and which says nothing about
@@ -183,7 +198,7 @@ impl Reader {
             {
                 continue;
             }
-            out.extend(read_file(&path, table, &|event| {
+            out.extend(read_file(&path, table, creator, &|event| {
                 as_of.admits(event.slot())
                     && from.is_none_or(|f| event.slot() >= f)
                     && to.is_none_or(|t| event.slot() <= t)
@@ -839,6 +854,7 @@ fn slots_in(path: &Path, column: &'static str) -> Result<Vec<Slot>, StoreError> 
 fn read_file(
     path: &Path,
     table: Table,
+    creator: Option<&str>,
     keep: &impl Fn(&Event) -> bool,
 ) -> Result<Vec<Event>, StoreError> {
     let file = fs::File::open(path)?;
@@ -857,8 +873,14 @@ fn read_file(
         let instruction = str_col(&batch, "instruction")?;
         let known = bool_col(&batch, "known")?;
         let mint = str_col(&batch, "mint")?;
+        let creators = creator.map(|_| str_col(&batch, "creator")).transpose()?;
 
         for i in 0..batch.num_rows() {
+            if let (Some(wanted), Some(stored)) = (creator, creators)
+                && stored.value(i) != wanted
+            {
+                continue;
+            }
             // The pre-2026-09-07 sentinels are coupled: a row with no resolved
             // position also has no resolved success, and translating one
             // without the other keeps reporting an unresolved row as a
