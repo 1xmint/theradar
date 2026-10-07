@@ -3,7 +3,8 @@
 
 **Status:** in progress; private ChatGPT linking and unlimited subscription allowance
 are installed; Privy login, wallet creation, balances and draft limits deployed.
-Owner wallet setup, signer delegation and autonomous execution remain.
+Owner reports a verified Solana wallet and live balance. Signer delegation and
+autonomous execution remain.
 **Date:** 2026-10-06.
 **Branch:** fix/wallet-signin-diagnostics.
 **Base:** b55a47651c81ed8a1134f00deaeabc9b6cc4d792.
@@ -16,7 +17,9 @@ This resumes the direction in [design 0017](../design/0017-a-private-autonomous-
 and [plan 0011](0011-private-autonomous-trader.md). It supplies no
 wallet, delegation, capital mandate or inference allowance. Josh supplied the
 public app ID `cmthhkznr0a3u0cl86prxlb7x` during this session. Its server setup is
-now installed; wallet identifiers and limits remain unset. No real trade is authorized.
+now installed; the owner later supplied a wallet identifier/address and confirmed
+the balance read (see the dated notes below). Limits remain unset. No real trade
+is authorized.
 
 ## This increment
 
@@ -488,3 +491,43 @@ ChatGPT autonomy preference. These remain drafts and execution stays inactive.
 Next code step is to inspect complete CI/release results and deploy the verified
 recognition guard artifact. The separate signer and execution worker still need
 integration. No wallet creation, signing or funding action was taken by the agent.
+
+
+### Privy-only signer preparation — 2026-10-07
+
+Owner requested continued movement toward autonomous trading. Starting from
+`f230fa3`, this increment removes the otherwise mandatory local Solana key from
+an explicit Privy-only mode, and binds Privy signing requests to startup-configured
+app ID, wallet ID and Solana address. The existing executor composition caller
+migrates to the bound library API. No key, delegation, policy allowance or worker
+is installed on the server as part of this increment.
+
+- [x] Add the trusted wallet scope and reject destination, app, HTTP method,
+  RPC operation, encoding and chain substitution before using the key.
+- [x] Add `RADAR_SIGNER_MODE=privy`: no local key load and no local signing.
+- [x] Preserve the shipped closed policy, mandatory policy file and allowlist.
+- [x] Update signer deployment example and repair its incomplete closed-policy
+  JSON (all required fields, lowercase `observe`).
+- [x] Scoped tests: `cargo test -p radar-signer` passed 101 tests; executor
+  `the_customer_lane_composes` passed seven; all-target signer/executor Clippy
+  passed with warnings denied on the Windows GNU LLVM toolchain.
+- [x] `cargo mutants -f crates/radar-signer/src/privy.rs -p radar-signer
+  --test-package radar-signer --in-place`: 22 mutants, 20 caught, two unviable,
+  no survivors. Removing the process wallet-address comparison makes
+  `privy_only_needs_no_local_key_and_refuses_local_signing` fail with an unwanted
+  Authorised result; restored the guard. Startup/environment plumbing was
+  exercised by real-process tests rather than redundant line mutations.
+- [ ] Commit, inspect new full CI and release, and deploy the pending wallet
+  recognition guards with the fixed artifact procedure.
+
+Previous CI 37632513225 completed: all four mutation shards, tests/build/MSRV/web
+and other checks passed; lint failed on an unnecessary raw-string marker in
+`the_wallet_read_is_never_permission.rs`. That literal is corrected in this
+increment. Release 37632504923 passed but is not deployed from a failed-CI commit.
+
+Remaining before live autonomous trading: owner-saved capital/per-trade/daily-loss
+mandate, authenticated kernel issuance and replay/expiry control, trusted state
+and durable reservations/loss accounting, simulation and persistent submission /
+confirmation reconciliation, separate signer deployment, independently verified
+Privy policy refusals and owner delegation. The site preference is a draft;
+ChatGPT may propose, and the deterministic kernel must approve.

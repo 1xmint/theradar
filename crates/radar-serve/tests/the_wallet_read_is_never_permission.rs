@@ -137,7 +137,7 @@ fn a_device_wallet_without_a_server_id_is_present_and_not_signing_authority() {
 #[test]
 fn malformed_wallet_responses_are_unknown_not_absent() {
     for body in [
-        r#"{}"#,
+        "{}",
         r#"{"linked_accounts":null}"#,
         r#"{"linked_accounts":[{"type":"wallet","chain_type":"solana","connector_type":"embedded","id":123,"address":"sol"}]}"#,
         r#"{"linked_accounts":[{"type":"wallet","chain_type":"solana","connector_type":"embedded","id":"sol-1"}]}"#,

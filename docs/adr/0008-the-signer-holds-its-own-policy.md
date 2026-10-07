@@ -119,6 +119,22 @@ precondition 1 still requires be verified by making it refuse.
   authorisation is *wider* than the policy, since that is the only case the
   change is about.
 
+## Private Privy wallet binding — 2026-10-07
+
+The private trader now has an explicit `RADAR_SIGNER_MODE=privy` startup mode.
+It loads no local Solana private key and refuses local signing requests. A Privy
+authorization key in either mode requires trusted startup configuration for the
+app ID, wallet ID and Solana address. `privy::authorise` accepts this `WalletScope`
+instead of a caller-selected address, and binds the signed request to HTTP POST,
+the exact wallet RPC URL, matching app header, `signTransaction` and base64
+encoding. An optional chain type must be Solana. It cannot authorize server-side
+sign-and-send, arbitrary message signing or wallet administration.
+
+This closes request destination/operation substitution, not the remaining issuer,
+nonce, portfolio accounting or trusted-clock gaps above. The existing executor
+composition test uses this bound scope. No production signer or delegation is
+enabled by this source change; `Policy::SHIPPED` remains closed.
+
 ## What would reverse this
 
 Nothing foreseeable reverses holding a policy locally. The specific ceilings are

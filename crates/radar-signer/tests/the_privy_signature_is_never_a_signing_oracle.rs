@@ -14,7 +14,7 @@
 //! inside the request that will be sent, not against a copy passed alongside it.
 
 use radar_risk::{Action, Address, Authorization, Autonomy, MicroUsd, Policy, Slot};
-use radar_signer::privy::{AuthorizationKey, NotAuthorised, PrivyRequest, authorise};
+use radar_signer::privy::{AuthorizationKey, NotAuthorised, PrivyRequest, WalletScope, authorise};
 use radar_signer::verify::{Allowlist, CallerBounds};
 use serde_json::{Value, json};
 
@@ -97,6 +97,10 @@ fn key() -> AuthorizationKey {
     AuthorizationKey::parse(&radar_types::b64::encode(pkcs8.as_ref())).expect("parses")
 }
 
+fn scope() -> WalletScope {
+    WalletScope::new("cmthhkznr0a3u0cl86prxlb7x", "abc", Address::new(WALLET)).expect("scope")
+}
+
 fn request_carrying(transaction: &[u8]) -> PrivyRequest {
     let mut headers = serde_json::Map::new();
     headers.insert(
@@ -118,6 +122,105 @@ fn request_carrying(transaction: &[u8]) -> PrivyRequest {
 }
 
 #[test]
+fn a_valid_transaction_cannot_authorise_another_destination_or_operation() {
+    let key = key();
+    let scope = scope();
+    let mut requests = Vec::new();
+    for url in [
+        "https://api.privy.io/v1/wallets/other/rpc",
+        "https://example.com/v1/wallets/abc/rpc",
+        "https://api.privy.io/v1/wallets/abc/rpc?method=signMessage",
+        "https://api.privy.io/v1/wallets/%61bc/rpc",
+    ] {
+        let mut request = request_carrying(&honest());
+        request.url = url.to_owned();
+        requests.push(request);
+    }
+    for method in ["GET", "PUT", "post"] {
+        let mut request = request_carrying(&honest());
+        request.method = method.to_owned();
+        requests.push(request);
+    }
+    for method in ["signMessage", "signAndSendTransaction", "exportPrivateKey"] {
+        let mut request = request_carrying(&honest());
+        request.body["method"] = json!(method);
+        requests.push(request);
+    }
+    for app in [Value::Null, json!("other-app")] {
+        let mut request = request_carrying(&honest());
+        request.headers.insert("privy-app-id".to_owned(), app);
+        requests.push(request);
+    }
+    for encoding in [Value::Null, json!("base58")] {
+        let mut request = request_carrying(&honest());
+        request.body["params"]["encoding"] = encoding;
+        requests.push(request);
+    }
+    for chain in [Value::Null, json!("ethereum")] {
+        let mut request = request_carrying(&honest());
+        request.body["chain_type"] = chain;
+        requests.push(request);
+    }
+    for request in requests {
+        assert_eq!(
+            authorise(
+                &key,
+                &request,
+                &authorization(),
+                &scope,
+                &allowlist(),
+                &policy(),
+                unbounded(NOW)
+            ),
+            Err(NotAuthorised::OutsideScope),
+            "{request:?}"
+        );
+    }
+    let mut solana = request_carrying(&honest());
+    solana.body["chain_type"] = json!("solana");
+    assert!(
+        authorise(
+            &key,
+            &solana,
+            &authorization(),
+            &scope,
+            &allowlist(),
+            &policy(),
+            unbounded(NOW)
+        )
+        .is_ok()
+    );
+}
+
+#[test]
+fn configured_ids_cannot_inject_a_url_or_header() {
+    for invalid in ["", "a/b", "a?b", "a#b", "a%2Fb", "a\nb", "é"] {
+        assert!(WalletScope::new(invalid, "abc", Address::new(WALLET)).is_err());
+        assert!(WalletScope::new("app", invalid, Address::new(WALLET)).is_err());
+    }
+    assert!(WalletScope::new("app-1", "wallet_1", Address::new(WALLET)).is_ok());
+}
+
+#[test]
+fn the_transaction_must_use_the_configured_wallet_address() {
+    let wrong_wallet =
+        WalletScope::new("cmthhkznr0a3u0cl86prxlb7x", "abc", Address::new([0x44; 32]))
+            .expect("scope");
+    assert!(matches!(
+        authorise(
+            &key(),
+            &request_carrying(&honest()),
+            &authorization(),
+            &wrong_wallet,
+            &allowlist(),
+            &policy(),
+            unbounded(NOW)
+        ),
+        Err(NotAuthorised::Refused(_))
+    ));
+}
+
+#[test]
 fn a_request_the_kernel_authorised_is_signed() {
     // The permitting half, and it has to hold. A gate that refuses everything is
     // not a gate, and a suite that only ever asserts refusals would pass against
@@ -126,7 +229,7 @@ fn a_request_the_kernel_authorised_is_signed() {
         &key(),
         &request_carrying(&honest()),
         &authorization(),
-        &Address::new(WALLET),
+        &scope(),
         &allowlist(),
         &policy(),
         unbounded(NOW),
@@ -151,7 +254,7 @@ fn a_transaction_for_another_token_is_refused_rather_than_signed() {
         &key(),
         &request_carrying(&substituted_mint()),
         &authorization(),
-        &Address::new(WALLET),
+        &scope(),
         &allowlist(),
         &policy(),
         unbounded(NOW),
@@ -186,7 +289,7 @@ fn the_bytes_checked_are_the_bytes_the_request_carries() {
         &key(),
         &honest_request,
         &authorization(),
-        &Address::new(WALLET),
+        &scope(),
         &allowlist(),
         &policy(),
         unbounded(NOW),
@@ -195,7 +298,7 @@ fn the_bytes_checked_are_the_bytes_the_request_carries() {
         &key(),
         &substituted,
         &authorization(),
-        &Address::new(WALLET),
+        &scope(),
         &allowlist(),
         &policy(),
         unbounded(NOW),
@@ -212,7 +315,7 @@ fn an_expired_authorisation_signs_nothing() {
         &key(),
         &request_carrying(&honest()),
         &authorization(),
-        &Address::new(WALLET),
+        &scope(),
         &allowlist(),
         &policy(),
         unbounded(Slot(9_999)),
@@ -240,7 +343,7 @@ fn a_request_with_no_transaction_in_it_is_refused_rather_than_passed() {
                     &key(),
                     &request,
                     &authorization(),
-                    &Address::new(WALLET),
+                    &scope(),
                     &allowlist(),
                     &policy(),
                     unbounded(NOW),

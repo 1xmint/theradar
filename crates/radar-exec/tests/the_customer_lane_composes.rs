@@ -21,7 +21,7 @@ use radar_customer::{Allowance, Meter, Subject};
 use radar_exec::customer_signing::{Authorising, CustomerSigner, PrivyTransport};
 use radar_exec::pipeline::Signing;
 use radar_risk::{Action, Address, Authorization, Autonomy, MicroUsd, Policy, Slot};
-use radar_signer::privy::{AuthorizationKey, PrivyRequest, authorise};
+use radar_signer::privy::{AuthorizationKey, PrivyRequest, WalletScope, authorise};
 use radar_signer::verify::Allowlist;
 
 const SYSTEM: [u8; 32] = [0u8; 32];
@@ -121,11 +121,15 @@ impl Authorising for RealSigner {
         let request: PrivyRequest =
             serde_json::from_value(request.clone()).map_err(|e| vec![e.to_string()])?;
         let wallet: Address = wallet.parse().map_err(|_| vec!["bad wallet".to_owned()])?;
+        if wallet != Address::new(WALLET) {
+            return Err(vec!["wrong configured wallet".to_owned()]);
+        }
+        let scope = WalletScope::new(APP, "sol-1", Address::new(WALLET)).expect("scope");
         authorise(
             &self.key,
             &request,
             authorization,
-            &wallet,
+            &scope,
             &Allowlist {
                 programs: vec![DEX, SYSTEM],
             },

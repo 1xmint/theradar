@@ -70,6 +70,7 @@ impl Signer {
     ) -> Self {
         let mut command = Command::new(env!("CARGO_BIN_EXE_radar-signer"));
         command
+            .env("RADAR_SIGNER_MODE", "local")
             .env("RADAR_SIGNER_KEY", key_file)
             .env("RADAR_SIGNER_PROGRAMS", programs);
         match policy_file {
@@ -82,6 +83,14 @@ impl Signer {
             Some(material) => command.env("RADAR_PRIVY_AUTHORIZATION_KEY", material),
             None => command.env_remove("RADAR_PRIVY_AUTHORIZATION_KEY"),
         };
+        command
+            .env("RADAR_SIGNER_PRIVY_APP_ID", "cmthhkznr0a3u0cl86prxlb7x")
+            .env("RADAR_SIGNER_PRIVY_WALLET_ID", "abc")
+            .env("RADAR_SIGNER_PRIVY_WALLET_ADDRESS", b58(&wallet()));
+        Self::from_command(command)
+    }
+
+    fn from_command(mut command: Command) -> Self {
         let mut child = command
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -621,4 +630,89 @@ fn a_privy_request_whose_body_carries_no_transaction_is_refused() {
 
     let answer = signer.ask(&request);
     assert_eq!(answer["outcome"], "refused", "{answer}");
+}
+
+fn privy_only_command(policy: &std::path::Path) -> Command {
+    let mut command = Command::new(env!("CARGO_BIN_EXE_radar-signer"));
+    command
+        .env("RADAR_SIGNER_MODE", "privy")
+        .env_remove("RADAR_SIGNER_KEY")
+        .env(
+            "RADAR_SIGNER_PROGRAMS",
+            format!("{},{}", b58(&DEX), b58(&SYSTEM)),
+        )
+        .env("RADAR_SIGNER_POLICY", policy)
+        .env("RADAR_PRIVY_AUTHORIZATION_KEY", privy_key())
+        .env("RADAR_SIGNER_PRIVY_APP_ID", "cmthhkznr0a3u0cl86prxlb7x")
+        .env("RADAR_SIGNER_PRIVY_WALLET_ID", "abc")
+        .env("RADAR_SIGNER_PRIVY_WALLET_ADDRESS", b58(&wallet()));
+    command
+}
+
+#[test]
+fn privy_only_needs_no_local_key_and_refuses_local_signing() {
+    let scratch = Scratch::new("privy-only");
+    let policy = policy_file(&scratch.0, &open_policy());
+    let mut signer = Signer::from_command(privy_only_command(&policy));
+    assert_eq!(
+        signer.ask(&privy_request(&honest()))["outcome"],
+        "authorised"
+    );
+    assert_eq!(
+        signer.ask(&request(&honest(), &MINT, 1_000))["outcome"],
+        "refused"
+    );
+    let mut wrong = privy_request(&honest());
+    wrong["wallet"] = serde_json::json!(b58(&[0x44; 32]));
+    assert_eq!(signer.ask(&wrong)["outcome"], "refused");
+    wrong = privy_request(&honest());
+    wrong["request"]["url"] = serde_json::json!("https://api.privy.io/v1/wallets/other/rpc");
+    assert_eq!(signer.ask(&wrong)["outcome"], "refused");
+}
+
+#[test]
+fn privy_only_remains_closed_under_the_shipped_policy() {
+    let scratch = Scratch::new("privy-closed");
+    let policy = policy_file(&scratch.0, &radar_risk::Policy::SHIPPED);
+    let mut signer = Signer::from_command(privy_only_command(&policy));
+    assert_eq!(signer.ask(&privy_request(&honest()))["outcome"], "refused");
+}
+
+#[test]
+fn missing_or_invalid_privy_configuration_never_falls_back() {
+    let scratch = Scratch::new("privy-config");
+    let policy = policy_file(&scratch.0, &open_policy());
+    for name in [
+        "RADAR_PRIVY_AUTHORIZATION_KEY",
+        "RADAR_SIGNER_PRIVY_APP_ID",
+        "RADAR_SIGNER_PRIVY_WALLET_ID",
+        "RADAR_SIGNER_PRIVY_WALLET_ADDRESS",
+        "RADAR_SIGNER_POLICY",
+        "RADAR_SIGNER_PROGRAMS",
+    ] {
+        let mut command = privy_only_command(&policy);
+        command.env_remove(name);
+        let mut signer = Signer::from_command(command);
+        assert_eq!(
+            signer.ask(&privy_request(&honest()))["outcome"],
+            "refused",
+            "{name}"
+        );
+    }
+    for (name, value) in [
+        ("RADAR_SIGNER_MODE", "typo"),
+        ("RADAR_SIGNER_PRIVY_WALLET_ID", "abc/other"),
+        ("RADAR_SIGNER_PRIVY_APP_ID", ""),
+        ("RADAR_SIGNER_PRIVY_WALLET_ADDRESS", "invalid"),
+        ("RADAR_PRIVY_AUTHORIZATION_KEY", " "),
+    ] {
+        let mut command = privy_only_command(&policy);
+        command.env(name, value);
+        let mut signer = Signer::from_command(command);
+        assert_eq!(
+            signer.ask(&privy_request(&honest()))["outcome"],
+            "refused",
+            "{name}"
+        );
+    }
 }
