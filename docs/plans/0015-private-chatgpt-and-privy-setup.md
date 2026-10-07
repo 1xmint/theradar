@@ -448,7 +448,7 @@ owner settings rather than silently migrating a capital mandate.
 
 The interface also remembers completed SDK creation for the current identity
 and offers refresh rather than another creation while the backend is absent.
-Local checks pass: 11 wallet-reader integration tests, five private settings
+Local checks pass: 12 wallet-reader integration tests, five private settings
 unit tests, serve clippy, nine private wallet UI tests and frontend type-check.
 Requiring the server ID again fails the nullable-ID backend regression; restoring
 the old UI ID requirement and cleared creation state fails both new UI tests.

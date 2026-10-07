@@ -141,11 +141,27 @@ fn malformed_wallet_responses_are_unknown_not_absent() {
         r#"{"linked_accounts":null}"#,
         r#"{"linked_accounts":[{"type":"wallet","chain_type":"solana","connector_type":"embedded","id":123,"address":"sol"}]}"#,
         r#"{"linked_accounts":[{"type":"wallet","chain_type":"solana","connector_type":"embedded","id":"sol-1"}]}"#,
+        r#"{"linked_accounts":[{"type":"wallet","chain_type":"solana","connector_type":"embedded","id":"sol-1","address":""}]}"#,
+        r#"{"linked_accounts":[{"type":"wallet","chain_type":"solana","connector_type":"embedded","id":"","address":"sol"}]}"#,
     ] {
         assert!(matches!(
             client(body).wallet_for(DID),
             Err(Unavailable::Unreachable(_))
         ));
+    }
+}
+
+#[test]
+fn nullable_ids_do_not_relax_embedded_solana_account_selection() {
+    for (kind, chain, connector) in [
+        ("email", "solana", "embedded"),
+        ("wallet", "ethereum", "embedded"),
+        ("wallet", "solana", "phantom"),
+    ] {
+        let body = format!(
+            r#"{{"linked_accounts":[{{"type":"{kind}","chain_type":"{chain}","connector_type":"{connector}","id":null,"address":"unrelated"}}]}}"#
+        );
+        assert_eq!(client(&body).wallet_for(DID), Err(Unavailable::NoWallet));
     }
 }
 
