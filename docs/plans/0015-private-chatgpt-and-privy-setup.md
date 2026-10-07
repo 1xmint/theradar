@@ -168,12 +168,23 @@ Its AUD matches the installed Radar configuration. Cloudflare reported success;
 an unauthenticated request now redirects to login with that exact audience.
 The separate Radar link app `6194bf19-ac25-4a2d-8f57-6ca2cb554595` issues a different
 audience, so `/v1/link` must move into the main application too. The main-app
-form is prepared, but Cloudflare refuses the duplicate destination. Deleting
-the obsolete single-route app requires explicit action-time confirmation under
-browser-control policy; that question is pending. No deletion has occurred.
+form was prepared, but Cloudflare refused the duplicate destination. Deleting
+the obsolete single-route app required explicit action-time confirmation under
+browser-control policy. The owner replied "you have full permission".
+Deleted that app and saved the main Radar app with `/ops`,
+`/automation`, and `/v1/link`, retaining its existing Josh-only policy. Cloudflare
+reported application deletion and the main app listed three destinations.
+Unauthenticated HEAD requests to both setup and link now return 302 with AUD
+`9ef62960f26e3c848e254acae4ec81b2d5a3127e8fdd907329f9c5f525b4c0d2` in the
+login redirect, matching the installed server. Public health still reports
+build `49415d5` and `policyClosed=true`. No server config or binary changed.
 Brave blocked the login redirect with ERR_BLOCKED_BY_CLIENT after the page was
-reloaded. No browser protection was disabled or bypassed. Owner sign-in remains
-unverified.
+reloaded initially; a later reload reached the Cloudflare Access login page.
+Following its existing Cloudflare identity-provider link then reached a browser
+security rejection: the page's URL protocol was outside HTTP/HTTPS. Browser
+policy prohibits workarounds, so the owner must finish that sign-in. No browser
+protection was disabled or bypassed. The policy's existing allowed email is
+joshfair2@gmail.com. Authenticated Radar access and ChatGPT linking remain unverified.
 
 1. Complete: PR 334, CI and release runs above, artifact hash, fixed deployment,
    live build, public headers, and challenge format verified at `49415d5`.
@@ -196,11 +207,11 @@ unverified.
 Private server setup is installed and applied. ChatGPT is not logged in; the
 Privy app is configured, while wallet delegation remains unverified. No autonomous
 trading loop has been enabled. The broader private-autonomy work remains in progress.
-**Next action:** obtain pending confirmation to delete the obsolete Radar link
-Access application, then save `/v1/link` into the prepared main Radar application.
-Verify both paths redirect with the installed AUD. Owner resolves the Brave login
-block in their browser, opens `/automation`, selects Connect ChatGPT, and completes
-the displayed device login.
+**Next action:** owner finishes Cloudflare Access sign-in in the existing Brave
+Radar tab and reports success or the resulting error. Both setup/link paths now
+use the correct edge application. Once authenticated, select Connect ChatGPT and
+complete the displayed device login. The automated browser sign-in is blocked
+by URL protocol policy and must not be retried through a workaround.
 Verify that linking succeeds through the actual Radar service restrictions.
 The installed client was verified with NoNewPrivileges, not all service namespaces.
 Choose an inference allowance separately before testing a model call.
