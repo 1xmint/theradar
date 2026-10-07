@@ -678,6 +678,18 @@ the entire issuer or trusted mandate/valuation adapter.
   passed with warnings denied, and 33 conformance tests passed.
 - [ ] Full CI including all mutation shards at the code commit.
 
+CI 37646978006 exposed two missed test assumptions: CLI inventory fixtures used
+the production journal path without its prepared directory, and the issuer
+tampering test's second clock read could reproduce the original expiry across
+a second boundary. Inventory now takes an explicit history path (the runtime
+still supplies the fixed production path); each fixture owns a temporary
+directory. A caller regression refuses both an owned history and a missing
+state directory. Tampering derives changed timestamps from the signed original,
+so every asserted modification is a modification. No production guard is relaxed.
+Local repair checks passed 211 CLI tests, 114 signer tests and all-target Clippy
+for both crates with warnings denied. Reapplying an unchanged proof expiry
+reproduces the CI assertion failure; restored timestamp modification passes.
+
 **Handback in progress:** production remains unchanged, policy closed, signer
 inactive. No wallet key, issuer key, delegation or financial cap is provisioned.
 This lock coordinates cooperating users of one history path, not hostile writes

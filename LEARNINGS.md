@@ -13,7 +13,7 @@ benefit of the doubt on everything else.
 
 ## Index
 
-**34 of these 46 name something mechanical that would catch a
+**35 of these 47 name something mechanical that would catch a
 recurrence. 12 name only a habit, and say so** — which is this file's opening
 standard rather than a gap in it. The habit-only rows are the ones worth reading
 twice; nothing will stop those repeating except somebody remembering.
@@ -71,6 +71,7 @@ quietly absent.
 | [44](#44-waiting-for-a-cli-before-draining-its-pipes-deadlocked-inference) | Waiting for a CLI before draining its pipes deadlocked inference | `verbose_subprocess_finishes_without_exposing_stderr` |
 | [45](#45-a-creator-query-retained-every-creators-launch-history) | A creator query retained every creator's launch history | habit only: exercise the retained production dataset under its service memory cap |
 | [46](#46-an-unreadable-wallet-was-reported-as-absent) | An unreadable wallet was reported as absent | nullable-ID and malformed-response wallet regressions; pending-creation UI regression |
+| [47](#47-strict-history-opening-exposed-shared-fixtures-and-clock-dependent-tampering) | Strict history opening exposed shared fixtures and clock-dependent tampering | isolated caller fixtures and deterministic issuer-tampering regression |
 
 ---
 
@@ -2026,3 +2027,27 @@ when the missing-ID branch again returns NoWallet. The malformed-response
 regression distinguishes unknown data from absent wallets. The UI nullable-ID
 and pending-creation tests fail when the old ID requirement and cleared creation
 state are restored. All mutations were removed and the focused tests pass.
+
+## 47. Strict history opening exposed shared fixtures and clock-dependent tampering
+
+**Found:** 2026-10-07, CI 37646978006. Operation history now requires an existing
+state directory and exclusive ownership. Two CLI tests still used the fixed
+production path, so the Linux tests and one mutation baseline failed. Scoped
+journal checks did not cover that actual caller. Inventory now receives its
+history path explicitly, with the fixed path supplied at runtime and isolated
+temporary directories in tests. A caller regression checks refusal for an
+already owned history and a missing parent directory.
+
+A separate mutation baseline exposed a signer test flake: an expiry constructed
+from a later clock read could equal the original signed expiry across a second
+boundary. The test then expected an authentic unchanged proof to be refused.
+Tampered timestamps now derive from the original signed values, ensuring they
+change regardless of clock timing. Production clock and signature guards are
+unchanged. Caller tests belong in validation when changing a shared boundary;
+tampering tests must prove a value was changed, not infer it from time passing.
+
+**What catches a recurrence:** `unavailable_reservation_history_refuses_inventory`
+checks the caller's refusal; the CLI suite exercises isolated valid histories.
+`the_process_refuses_a_forged_or_modified_issuer_intent` changes original signed
+timestamps directly. Reapplying an unchanged expiry reproduces CI's assertion
+failure; restoring the subtraction passes.

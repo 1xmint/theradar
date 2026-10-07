@@ -944,6 +944,14 @@ fn the_process_refuses_a_forged_or_modified_issuer_intent() {
     let policy = policy_file(&scratch.0, &open_policy());
     let mut signer = Signer::from_command(privy_only_command(&policy));
     let original = privy_request(&honest());
+    // Change the signed values themselves: a fresh clock read can coincide
+    // with the original expiry when this loop crosses a second boundary.
+    let issued = original["proof"]["issued_at_unix_secs"]
+        .as_u64()
+        .expect("issued");
+    let expires = original["proof"]["expires_at_unix_secs"]
+        .as_u64()
+        .expect("expires");
     for (path, value) in [
         ("/authorization/nonce", serde_json::json!("forged-fresh")),
         ("/authorization/mint", serde_json::json!(b58(&[0x99; 32]))),
@@ -967,10 +975,10 @@ fn the_process_refuses_a_forged_or_modified_issuer_intent() {
             "/request/body/params/transaction",
             serde_json::json!("different"),
         ),
-        ("/proof/issued_at_unix_secs", serde_json::json!(unix_now())),
+        ("/proof/issued_at_unix_secs", serde_json::json!(issued + 1)),
         (
             "/proof/expires_at_unix_secs",
-            serde_json::json!(unix_now() + 58),
+            serde_json::json!(expires - 1),
         ),
         ("/proof/signature", serde_json::json!("AAAA")),
     ] {
