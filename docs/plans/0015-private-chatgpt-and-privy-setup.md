@@ -789,7 +789,9 @@ no new framework crate, Serve cache or signer dependency is introduced.
 - [x] Replacing the common-slot conjunction with an OR fails the mixed-slot
   regression. Rounding token quantities through f64 fails the exact-quantity
   regression (u64::MAX becomes 18446744073709551616). Both changes restored.
-- [ ] Full CI including all four mutation shards at the code commit.
+- [x] Full CI 37671411086 passed at `744d949246a05ff1924c2355e6f6e3690b0ed4aa`:
+  2,416 Rust tests, 352 web tests, site/build/lint/MSRV checks, all four mutation
+  shards and the final gate.
 
 The RPC parameters follow [getBalance](https://solana.com/docs/rpc/http/getbalance)
 and [getTokenAccountsByOwner](https://solana.com/docs/rpc/http/gettokenaccountsbyowner).
@@ -802,7 +804,8 @@ there is no path that substitutes these reads for market capacity, fees, price,
 portfolio exposure or loss accounting. No issuer key or delegated signing is
 activated. The command's read deadline is not a financial policy default.
 
-**Handback in progress:** direct wallet measurement only. Remaining work includes
+**Handback:** direct wallet measurement is implemented and verified in PR 334.
+Remaining work includes
 trusted endpoint/wallet provisioning, measured market and transaction evidence,
 active mandates, settlement/loss reconciliation and independently tested Privy
 refusals. Trading remains inactive; no deployment or real signing in this change.
@@ -813,3 +816,20 @@ node reported 0 native lamports at slot 454310379, no SPL token accounts at
 454310380, and no Token-2022 accounts at 454310381. The command correctly emitted
 null for common_reported_slot, USD value and realised P&L. These are those three
 node responses, not a current valuation or proof of no other asset types.
+
+Inspection for the next adapter: `crates/radar-onchain/src/dossier.rs` reads the
+bonding curve and fee schedule separately and reports buy-within-impact capacity.
+That reporting path cannot be relabelled as atomic market evidence or simulated
+exit capacity. `crates/radar-sim/src/curve.rs` has a pure fee-adjusted sell quoter;
+it still needs correctly owned, slot-bound reserves and fees, and its curve
+arithmetic is a price for those reserves, not a real fill. A live issuer must
+also bind the exact transaction, fees, wallet inventory, valuation and journal
+exposure rather than accepting this wallet-read JSON as complete kernel state.
+
+No production deployment or current VPS health claim was made in this increment.
+The prior SSH health check timed out. No real signing, issuer/Privy key setup or
+trade occurred. No local Cargo or wallet process remains; target measured 28.7
+GiB with 124 GiB free. Previously rejected ignored mutation-output cleanup was
+not retried. This follow-up records verification and the inspected next-step
+constraints only; the code commit above passed full CI, while follow-up CI may
+be pending.
