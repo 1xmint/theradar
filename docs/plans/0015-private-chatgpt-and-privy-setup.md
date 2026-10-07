@@ -360,3 +360,18 @@ The audit reports 26 moderate findings, zero high/critical after ws 8.21.0
 overrides. npm 10 clean installation passed before the final nested ws patch;
 its final lockfile dry-run passes. CI will prove the patched clean installation.
 Numerical bounds remain unset and no signing or trading was tested.
+
+CI 37566015723 at feddf7d passes web (including the final patched clean install),
+workspace build/tests and MSRV. Linux lint reports a large Result error variant
+not diagnosed by the Windows compiler: use a small status/message refusal type
+and construct the HTTP response at the handler boundary. Release 37566017065
+passed, but is held and will not be deployed because the lint repair needs a
+fresh verified release. Await the remaining mutation shards before pushing.
+Shard 1 reports a survivor at automation.rs:23:23, deleting the nonblank storage
+check. Re-applied that exact predicate mutation and extracted configuration
+opening behind an explicit-value seam. Its new writable/blank/missing/blocked
+directory test fails with the reported mutation. The predicate is restored;
+all five wallet unit tests and scoped clippy/formatting pass. Shards 0, 2 and 3
+finished successfully; the run failed only for the lint issue and named survivor.
+The local target directory is 25.4 GiB and no cargo process remains. Push both
+repairs and verify complete CI and a fresh release before deployment.

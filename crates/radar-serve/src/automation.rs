@@ -18,12 +18,15 @@ use std::{
 };
 
 pub(crate) fn routes() -> Router<Arc<AppState>> {
-    let store = std::env::var(crate::ledger::STATE_DIR)
-        .ok()
-        .filter(|dir| !dir.trim().is_empty())
+    routes_with_store(configured_store(
+        std::env::var(crate::ledger::STATE_DIR).ok(),
+    ))
+}
+
+fn configured_store(dir: Option<String>) -> Option<Arc<Store>> {
+    dir.filter(|dir| !dir.trim().is_empty())
         .and_then(|dir| Store::at(PathBuf::from(dir)).ok())
-        .map(Arc::new);
-    routes_with_store(store)
+        .map(Arc::new)
 }
 
 fn routes_with_store(store: Option<Arc<Store>>) -> Router<Arc<AppState>> {
@@ -45,6 +48,18 @@ async fn private_response(mut response: Response) -> Response {
 
 fn refuse(status: StatusCode, message: &str) -> Response {
     (status, Json(json!({"error": message}))).into_response()
+}
+
+struct OwnerRefusal(StatusCode, &'static str);
+
+impl IntoResponse for OwnerRefusal {
+    fn into_response(self) -> Response {
+        refuse(self.0, self.1)
+    }
+}
+
+fn owner_refuse(status: StatusCode, message: &'static str) -> OwnerRefusal {
+    OwnerRefusal(status, message)
 }
 
 /// Constructible only after a genuine JWT and authoritative wallet lookup.
@@ -72,25 +87,25 @@ impl OwnerWallet {
 async fn owner(
     state: &Arc<AppState>,
     headers: &HeaderMap,
-) -> Result<Option<OwnerWallet>, Response> {
+) -> Result<Option<OwnerWallet>, OwnerRefusal> {
     let token = customer::token_from(headers)
-        .ok_or_else(|| refuse(StatusCode::UNAUTHORIZED, "Sign in to Privy first."))?;
+        .ok_or_else(|| owner_refuse(StatusCode::UNAUTHORIZED, "Sign in to Privy first."))?;
     let config = state
         .customer
         .config()
-        .ok_or_else(|| refuse(StatusCode::SERVICE_UNAVAILABLE, "Privy is not configured."))?
+        .ok_or_else(|| owner_refuse(StatusCode::SERVICE_UNAVAILABLE, "Privy is not configured."))?
         .clone();
     let state_for_keys = Arc::clone(state);
     let keys = tokio::task::spawn_blocking(move || state_for_keys.customer_keys.get(&config))
         .await
         .map_err(|_| {
-            refuse(
+            owner_refuse(
                 StatusCode::SERVICE_UNAVAILABLE,
                 "Could not verify Privy identity.",
             )
         })?
         .map_err(|_| {
-            refuse(
+            owner_refuse(
                 StatusCode::SERVICE_UNAVAILABLE,
                 "Could not verify Privy identity.",
             )
@@ -102,7 +117,7 @@ async fn owner(
         crate::now_unix(),
     )
     .map_err(|_| {
-        refuse(
+        owner_refuse(
             StatusCode::UNAUTHORIZED,
             "Privy session is invalid or expired. Sign in again.",
         )
@@ -119,7 +134,7 @@ async fn owner(
     })
     .await
     .map_err(|_| {
-        refuse(
+        owner_refuse(
             StatusCode::BAD_GATEWAY,
             "Could not verify wallet ownership.",
         )
@@ -127,7 +142,7 @@ async fn owner(
     match looked_up {
         Ok(wallet) => {
             let address = wallet.address.parse().map_err(|_| {
-                refuse(
+                owner_refuse(
                     StatusCode::BAD_GATEWAY,
                     "Privy returned an unreadable wallet address.",
                 )
@@ -139,7 +154,7 @@ async fn owner(
             }))
         }
         Err(privy::Unavailable::NoWallet) => Ok(None),
-        Err(_) => Err(refuse(
+        Err(_) => Err(owner_refuse(
             StatusCode::BAD_GATEWAY,
             "Could not verify wallet ownership. Balance is unknown.",
         )),
@@ -152,7 +167,7 @@ async fn wallet(State(state): State<Arc<AppState>>, headers: HeaderMap) -> Respo
             Json(json!({"wallet": found.map(|owner| owner.wallet), "execution_enabled": false}))
                 .into_response()
         }
-        Err(response) => response,
+        Err(response) => response.into_response(),
     }
 }
 
@@ -163,7 +178,7 @@ async fn balance(State(state): State<Arc<AppState>>, headers: HeaderMap) -> Resp
             StatusCode::CONFLICT,
             "Create your embedded Solana wallet first.",
         ),
-        Err(response) => response,
+        Err(response) => response.into_response(),
     }
 }
 
@@ -255,7 +270,7 @@ async fn limits(
                 "Create your embedded Solana wallet first.",
             );
         }
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     let Some(store) = store else {
         return refuse(
@@ -288,7 +303,7 @@ async fn save(
                 "Create your embedded Solana wallet first.",
             );
         }
-        Err(response) => return response,
+        Err(response) => return response.into_response(),
     };
     if !preferences.validate() {
         return refuse(
@@ -320,6 +335,18 @@ mod tests {
         signature::{ECDSA_P256_SHA256_FIXED_SIGNING, EcdsaKeyPair, KeyPair},
     };
     use tower::ServiceExt;
+
+    #[test]
+    fn wallet_settings_require_an_explicit_writable_directory() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(configured_store(Some(dir.path().display().to_string())).is_some());
+        assert!(configured_store(None).is_none());
+        assert!(configured_store(Some(String::new())).is_none());
+        assert!(configured_store(Some("   ".into())).is_none());
+        let file = dir.path().join("file");
+        std::fs::write(&file, b"not a directory").unwrap();
+        assert!(configured_store(Some(file.join("inside").display().to_string())).is_none());
+    }
 
     fn b64(raw: &[u8]) -> String {
         radar_types::b64::encode(raw)
