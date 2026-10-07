@@ -464,3 +464,27 @@ Do not claim the nullable-ID defect caused this owner's symptom until its actual
 response is known. Next: inspect the owner's refresh/diagnostic answer, adjust
 only if that evidence requires it, then run full CI and a verified release and
 deploy through the fixed script. Never create another wallet to test recognition.
+
+### Owner refresh result — 2026-10-07
+
+Owner now reports the private page displays wallet
+`JAnZAdjZjmgpr9YZ6i9eViQbbKA4VgQKPfYAQTSeFAcS`, native balance
+0.000000000 SOL, slot 454242629, snapshot age at retrieval 0 seconds, no token
+holdings, and the three USD limit inputs. The recognition issue resolved before
+deployment of the nullable-ID/creation-state repair. Thus that repair cannot be
+credited with fixing this owner's report; delayed recognition is plausible but
+the exact propagation cause is unmeasured. The root diagnostic is no longer
+required for this working wallet setup.
+
+CI 37632513225 and release 37632504923 remain in progress at
+`3f10f62aaaa43b5fa70e1e2f2850adaf9f2354ba`. Keep them intact; do not push this
+documentation update while waiting on those runs. Production is still 9ecfd70.
+
+**Handback:** owner reports a live verified address and fresh empty holdings;
+production settings persistence remains untested until the owner enters limits
+and saves them. No capital values or trade mandate were supplied. Owner next
+enters capital, maximum per trade and daily loss values, and may select the
+ChatGPT autonomy preference. These remain drafts and execution stays inactive.
+Next code step is to inspect complete CI/release results and deploy the verified
+recognition guard artifact. The separate signer and execution worker still need
+integration. No wallet creation, signing or funding action was taken by the agent.
