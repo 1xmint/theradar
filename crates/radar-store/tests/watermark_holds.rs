@@ -70,6 +70,46 @@ fn slots_in_one_partition() -> [u64; 4] {
 }
 
 #[test]
+fn matching_reads_filter_during_decode_without_exposing_future_rows() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let slots = slots_in_one_partition();
+    let mut writer = Writer::open(dir.path(), 10_000).expect("open");
+    for slot in slots {
+        writer.append(launch_at(slot)).expect("append");
+    }
+    writer.flush().expect("flush");
+    let reader = Reader::open(dir.path());
+    let visited = std::cell::RefCell::new(Vec::new());
+    let matching = reader
+        .read_matching(Table::Launches, AsOf::at(Slot(slots[1])), &|event| {
+            visited.borrow_mut().push(event.slot());
+            event.slot() == Slot(slots[1])
+        })
+        .expect("matching read");
+    assert_eq!(*visited.borrow(), vec![Slot(slots[0]), Slot(slots[1])]);
+    assert_eq!(matching.len(), 1);
+    assert_eq!(matching[0].slot(), Slot(slots[1]));
+    assert!(
+        reader
+            .read_matching(Table::Launches, AsOf::at(Slot(slots[3])), &|_| false)
+            .expect("reject every row")
+            .is_empty()
+    );
+    assert_eq!(
+        reader
+            .read_matching(Table::Launches, AsOf::at(Slot(slots[3])), &|_| true)
+            .expect("accept every admitted row")
+            .len(),
+        4
+    );
+    assert!(
+        reader
+            .read_matching(Table::Positions, AsOf::at(Slot(slots[3])), &|_| true)
+            .is_err()
+    );
+}
+
+#[test]
 fn a_file_that_straddles_the_watermark_yields_only_the_admissible_half() {
     let dir = tempfile::tempdir().expect("tempdir");
     let slots = slots_in_one_partition();

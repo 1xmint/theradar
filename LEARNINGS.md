@@ -13,8 +13,8 @@ benefit of the doubt on everything else.
 
 ## Index
 
-**33 of these 44 name something mechanical that would catch a
-recurrence. 11 name only a habit, and say so** — which is this file's opening
+**33 of these 45 name something mechanical that would catch a
+recurrence. 12 name only a habit, and say so** — which is this file's opening
 standard rather than a gap in it. The habit-only rows are the ones worth reading
 twice; nothing will stop those repeating except somebody remembering.
 
@@ -69,6 +69,7 @@ quietly absent.
 | [42](#42-a-new-operator-page-was-not-added-to-the-edge-login-gate) | A new operator page was not added to the edge login gate | habit only: verify each new page's login redirect and audience |
 | [43](#43-terminal-colors-hid-the-device-login-prompt) | Terminal colors hid the device login prompt | `the_installed_cli_colored_device_prompt_is_recognised` |
 | [44](#44-waiting-for-a-cli-before-draining-its-pipes-deadlocked-inference) | Waiting for a CLI before draining its pipes deadlocked inference | `verbose_subprocess_finishes_without_exposing_stderr` |
+| [45](#45-a-creator-query-retained-every-creators-launch-history) | A creator query retained every creator's launch history | habit only: exercise the retained production dataset under its service memory cap |
 
 ---
 
@@ -1954,3 +1955,26 @@ Discard credential-adjacent stderr; keep the child deadline and cleanup.
 runs a portable subprocess fixture that fills both pipes beyond their usual
 capacity before emitting READY. The fixed caller completes and exposes no
 stderr. Restoring the old wait-before-read function times out at five seconds.
+
+## 45. A creator query retained every creator's launch history
+
+**2026-10-06.** The first ChatGPT site answer completed after the pipe repair.
+A specific-address question then stalled while gathering creator evidence,
+before the CLI started. The service retained all launch events before filtering
+for the supplied creator. Its launch partitions occupied 668M on disk;
+MemoryCurrent reached 805044224 bytes against MemoryMax 805306368. Restarted
+through the fixed deploy procedure to restore service, without raising the cap.
+
+Reader::read_matching applies the watermark and caller predicate during row
+decode. Both creator tools use it, retaining only matching launch events.
+Matching rows and track-record outcomes still occupy memory; this is not a
+constant-memory guarantee for arbitrarily large results.
+
+**What catches a recurrence:** habit only for the resource regression. Repeat
+a real creator query against the retained production dataset under the existing
+memory cap and record its peak. The new matching-read test checks admitted rows,
+empty results and event-table rejection, not instrument peak memory. Bypassing
+the decoder predicate fails that test with four rows instead of one; restoring
+it passes. Reverting the instruments to full reads could preserve their outputs
+while reintroducing excess retention, so logical tests alone cannot prove this
+resource fix.

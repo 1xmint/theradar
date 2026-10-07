@@ -104,7 +104,9 @@ impl Instrument for CreatorTrackRecord {
     }
 
     fn run(&self, input: Input, ctx: &Context<'_>) -> Result<Output, InstrumentError> {
-        let launches = ctx.store.read(Table::Launches, ctx.as_of).map_err(|e| {
+        let launches = ctx.store.read_matching(Table::Launches, ctx.as_of, &|event| {
+            matches!(event, Event::Launch(launch) if launch.creator.to_string() == input.creator)
+        }).map_err(|e| {
             InstrumentError::OutOfRange {
                 as_of: ctx.as_of.to_string(),
                 detail: e.to_string(),

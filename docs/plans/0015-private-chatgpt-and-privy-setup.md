@@ -270,22 +270,34 @@ streams, while Rust waited for exit before reading them. A pipe-filling child
 therefore blocked. The caller now drains stdout and discards stderr concurrently
 while retaining the deadline. Seventy model tests and scoped clippy pass;
 restoring the old function fails the subprocess regression at five seconds.
-CI, release, deployment and repeating the authenticated site test remain.
+CI 37559378293 and release 37559374718 passed at
+`3e786a26e16bce2107af54ed696fa435b42cf538`. Verified artifact and staged VPS
+SHA-256 `32a08fae7309ce93335a18cfd729c6fe194fe7d7e94bb764488920b3b795d439`,
+deployed through the fixed script, and verified public health reports that build.
+Repeating the authenticated question produced a site answer in about 30 seconds.
+The UI reported no consulted sources; this proves the inference path only.
+The nominal usage ledger recorded two calls, with no daily-cap refusals.
 
-**Stopped at:** unlimited subscription inference is configured at `d1213e6`;
-the first site call exposed a subprocess output deadlock, now repaired locally.
-Private server setup is installed and applied. ChatGPT login is verified; the
-Privy app is configured, while wallet delegation remains unverified. No autonomous
-trading loop has been enabled. The broader private-autonomy work remains in progress.
-**Next action:** finish CI and deploy the concurrent-drain repair from a verified
-release, then repeat the read-only site question and retain the result and health
-status. The owner's authenticated HTTP/HTTPS tab is now accessible for this
-test; the earlier suspended login tab remains blocked and is not retried.
-Obtain the owner's Privy DID and dedicated wallet ID to configure private admission.
-The owner has been asked whether a dedicated embedded Solana wallet already
-exists. The web package currently has no Privy SDK/login or embedded-wallet
-flow; it has external wallet connection. Build the embedded flow and separate
-signer integration next, before claiming unattended trading works.
+**Creator evidence resource repair:** a specific-address follow-up stalled
+before inference while retaining all creators' launch rows. MemoryCurrent reached
+805044224 bytes under the unchanged 805306368-byte cap. Restored service with
+the fixed deploy script. A new decoder predicate retains only admitted matching
+launch rows, used by both creator instruments. Scoped store/instrument tests and
+clippy pass; bypassing the predicate fails its new watermark regression.
+CI, release and a live repeat under the same cap remain required. Privy's owner
+wallet dashboard was inspected read-only and reports No wallets yet; the app ID
+alone does not establish a wallet or delegation.
+
+**Stopped at:** unlimited subscription inference and CLI pipe repair are live
+at `3e786a2`; the first authenticated site answer succeeded without citations.
+A creator-evidence memory repair is locally verified and awaits CI and deployment.
+No autonomous trading loop has been enabled. The broader private-autonomy work
+remains in progress.
+**Next action:** release the memory repair from a verified artifact, repeat the
+source-backed site question and record memory use and health. Build Privy owner
+login and dedicated embedded Solana wallet creation, then separate signer
+integration. The dashboard currently has no wallets. Capital, trade, loss and
+session limits still require the owner's mandate before any trading activation.
 **Do not:** claim a wallet is delegated from an app ID, treat connected ChatGPT
 as capital authority, expose the private site, copy existing subscription
 credentials between hosts, invent money limits, or turn on automated trading.
