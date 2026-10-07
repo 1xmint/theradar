@@ -240,7 +240,17 @@ cannot impose a daily refusal. Startup identifies the mode as subscription
 usage rather than printing a fictitious dollar ceiling. Missing configuration
 still disables inference. The existing administrator script has an explicit
 mode to save this choice without re-entering or exposing Privy secrets.
-CI, matching release, deployment and administrator application remain pending.
+Code `d1213e65853c23f85f344659c084eb2f8068dd65` passed all jobs in CI
+37558536953. Release 37558534038 passed with that exact manifest commit;
+radar-serve SHA-256 is
+`93d8349868b3ffb5b718bac3964f187834e3684a98acc83561b4f2097b3f1f1c`.
+Verified downloaded and staged VPS hashes, then deployed through the fixed
+script. Public health reports that build and status ok, with policyClosed true.
+The isolated CLI remains logged in and Radar retains its service hardening.
+The current administrator script is uploaded at `/tmp/radar-private-setup.py`,
+matching local SHA-256
+`2b964e5e0c36143a1ae39fc515c75ae4c99a269e6c1a55587918401b203da76b`.
+Administrator application remains pending; health still reports the agent off.
 Local validation: 68 radar-model tests, the allowance reporting binary test,
 33 conformance tests, scoped model/serve clippy and formatting pass. Disabling
 the new unlimited literal makes its allowance regression fail. Eight Linux
@@ -251,16 +261,22 @@ can be drawn because no instrument evidence was provided." This verifies
 subscription inference through the bridge, not the still-disabled Radar chat
 route or the complete service namespaces. No credential output was exposed.
 
-**Stopped at:** deployed colored device prompt repair at `d73f8cf`.
+**Stopped at:** deployed explicit unlimited subscription support at `d1213e6`;
+the selected root-only allowance has not yet been applied.
 Private server setup is installed and applied. ChatGPT login is verified; the
 Privy app is configured, while wallet delegation remains unverified. No autonomous
 trading loop has been enabled. The broader private-autonomy work remains in progress.
-**Next action:** verify and deploy explicit unlimited subscription support, then
-the owner runs the prepared administrator command to apply that choice. Apply
-settings through the fixed deployment and verify a read-only evidence-backed
-model call through Radar. The automated browser sign-in remains blocked
+**Next action:** the owner runs the prepared command in their administrator SSH
+terminal: `sudo python3 /tmp/radar-private-setup.py --unlimited-subscription`,
+followed by `sudo radar-deploy` using the verified staged artifact. Then verify
+the agent reports configured and make a read-only evidence-backed model call
+through Radar. The automated browser sign-in remains blocked
 by URL protocol policy and must not be retried through a workaround.
 Obtain the owner's Privy DID and dedicated wallet ID to configure private admission.
+The owner has been asked whether a dedicated embedded Solana wallet already
+exists. The web package currently has no Privy SDK/login or embedded-wallet
+flow; it has external wallet connection. Build the embedded flow and separate
+signer integration next, before claiming unattended trading works.
 **Do not:** claim a wallet is delegated from an app ID, treat connected ChatGPT
 as capital authority, expose the private site, copy existing subscription
 credentials between hosts, invent money limits, or turn on automated trading.
