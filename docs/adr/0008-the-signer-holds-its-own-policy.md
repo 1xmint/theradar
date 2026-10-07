@@ -10,8 +10,9 @@ therefore what it protects against.
 
 [LEARNINGS](../../LEARNINGS.md) 23 records the finding this ADR answers. The
 signer does not verify that the `Authorization` it receives came from the kernel:
-there is no MAC on it, and its `nonce` — a content hash of the proposal and the
-state it was judged against — is never checked against anything.
+there is no MAC on it. At the original decision, its `nonce` — a content hash of
+the proposal and the state it was judged against — was never checked. The dated
+October update below adds Privy process reuse checks, not issuer authentication.
 
 So its guarantee is *the transaction matches the authorisation the caller
 supplied.* Against an executor **bug**, that is complete, and it is what the

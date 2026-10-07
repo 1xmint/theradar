@@ -572,10 +572,28 @@ limits or complete transaction accounting.
 - [x] Scoped signer tests passed (107 on Windows), all-target signer Clippy
   passed with warnings denied, and all 33 repository conformance tests passed.
   Fixed the context-file line budget by keeping the updated guarantee concise.
-- [ ] Finish full CI; record the final commit.
+- [x] Code commit `225308a5a8c0e6d918992b7d42a10a835e3d79fd`: full CI
+  37639125067 passed, including 2,388 Rust tests, 352 web tests and all four
+  mutation shards. Unix private-directory refusal passed in that run. A manual
+  wallet-guard removal also fails its regression with fresh test nonces, proving
+  the new replay guard does not mask the older wallet-binding check; restored
+  and verified the correct behavior.
 
 No production signer configuration or delegation is changed. The site stays
 at `3f38ee0` and the shipped policy stays closed. No new site artifact is needed
 for this signer-only increment. Next: authenticate issuance and expiry and connect
 the owner mandate to durable reservation/submission accounting before enabling
 any signer or worker.
+
+**Handback:** replay state is implemented and verified in the repository. No
+new release/deploy was needed for this signer-only increment. On-host health
+still reports build `3f38ee0`, status ok and policyClosed true; signer socket is
+inactive. Saved numeric limits and wallet delegation remain unverified; do not
+invent them. Remaining live controls include authenticated issuance, independent
+expiry, durable portfolio/reservation/loss state, simulation and submission /
+confirmation reconciliation, independent Privy policy refusal tests, and owner
+delegation. No real wallet signing, funding or trade was performed. Local target
+was measured at 25.9 GiB with about 122 GiB free. Automatic approval review
+rejected cleanup of the generated `mutants.out` directory as "blocked by policy"
+without a more specific reason; it remains ignored, and no deletion workaround
+was attempted.

@@ -248,6 +248,11 @@ mutants. This is request binding only, not authenticated issuance, durable
 accounting or live delegation. See [plan 0015](0015-private-chatgpt-and-privy-setup.md)
 for deployment and verification status. P6 remains incomplete.
 
+Replay preparation at `225308a` adds persistent, exclusive nonce consumption in
+the Privy binary before key use. Process tests cover concurrency, restart, failed
+attempts and missing state. A fresh forged nonce or a resent Privy request is
+still possible; this is not authenticated issuance or submission accounting.
+
 - [ ] Specify the trusted authorization issuer, authenticated intent, replay
   prevention, independent expiry state and atomic reservation/consumption. Keep
   secret authority outside model, serve and untrusted executor surfaces. Document
