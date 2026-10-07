@@ -141,8 +141,10 @@ impl Issuer {
     ) -> Result<(PrivyAuthorization, String, u64), String> {
         let mut authorization =
             match radar_risk::evaluate(&candidate.proposal, &snapshot.state, &self.config.policy) {
-                Verdict::Authorised(value) if !value.needs_operator_signature => *value,
-                _ => return Err("risk kernel refused".into()),
+                // Startup permits only self-authorising policies; the kernel
+                // cannot produce an operator-required decision under them.
+                Verdict::Authorised(value) => *value,
+                Verdict::Refused { .. } => return Err("risk kernel refused".into()),
             };
         // Narrow the kernel window to the signer's policy window.
         authorization.expires_after = radar_types::Slot(

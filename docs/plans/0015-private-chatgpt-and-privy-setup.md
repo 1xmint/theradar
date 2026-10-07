@@ -726,8 +726,8 @@ issuance/reservation process before the live trusted snapshot adapter.
 - [x] Persist the capital claim and SubmissionUnknown before signing a v1
   intent proof. Retain claims across output errors and restart; refuse all new
   issuance while an operation is outstanding. Correlate nonce and mint.
-- [x] Eight actual-process regressions plus a deterministic time-boundary test,
-  including broken-output persistence. Scoped signer suite passes 123 Windows
+- [x] Nine actual-process regressions plus a deterministic time-boundary test,
+  including broken-output persistence. Scoped signer suite passes 124 Windows
   tests; no real keys or transactions.
 - [x] Removing the outstanding-operation guard permits a second issuance and
   fails its process regression. Removing the evidence match permits an invented
@@ -735,6 +735,15 @@ issuance/reservation process before the live trusted snapshot adapter.
 - [x] All-target signer Clippy passed with warnings denied; all 33 conformance
   tests passed. No broad local mutation or release build.
 - [ ] Full CI including all mutation shards at the code commit.
+
+First issuer CI 37652941215 exposed six missing observations (exact input-size
+and current-slot boundaries and nonce/mint correlation) plus an equivalent
+operator-signature guard. Added the observations; reapplying all six exact
+reported mutations fails their tests. The duplicate guard is removed: startup
+already permits only self-authorising policies. Linux's Rust 1.99.0 also caught
+three assertion-style lints absent under local 1.97.1; fixed without suppression.
+Restored source passes 124 signer tests and all-target scoped Clippy. No mutation
+exclusion or local broad mutation run was used.
 
 **Handback in progress:** offline issuer only. Do not deploy keys or enable live
 delegation. Next replace operator-provisioned evidence with an independently

@@ -52,7 +52,7 @@ impl Fixture {
             "mint":mint, "market":radar_types::Market::PUMP_FUN_BONDING_CURVE,
             "quote":radar_types::Asset::Sol, "creator":address(0x33), "action":"buy",
             "notional":50_000_000, "estimated_round_trip_cost":100_000,
-            "oldest_input_slot":999, "simulated_exit_capacity":100_000_000
+            "oldest_input_slot":1000, "simulated_exit_capacity":100_000_000
         });
         let candidate =
             json!({"proposal":proposal, "transaction":radar_types::b64::encode(&transaction)});
@@ -148,6 +148,16 @@ impl Drop for Process {
     }
 }
 
+fn raw_response(fixture: &Fixture, raw: &[u8]) -> (String, bool) {
+    let mut process = fixture.start();
+    let mut stdin = process.child.stdin.take().expect("stdin");
+    let _ = stdin.write_all(raw);
+    drop(stdin);
+    let mut answer = String::new();
+    process.reader.read_line(&mut answer).expect("response");
+    (answer, process.child.wait().expect("exit").success())
+}
+
 #[test]
 fn issuance_runs_the_kernel_and_reserves_before_a_verifiable_proof_leaves() {
     let fixture = Fixture::new();
@@ -195,6 +205,25 @@ fn issuance_runs_the_kernel_and_reserves_before_a_verifiable_proof_leaves() {
         radar_journal::OperationState::SubmissionUnknown
     );
     assert_eq!(entries[0].1.intent.amount.raw(), 250_005_000);
+    let events = radar_journal::Journal::open(fixture.dir.path().join("operations.jsonl"))
+        .expect("audit")
+        .events()
+        .expect("events");
+    assert_eq!(events.len(), 3);
+    assert_eq!(
+        events[0].correlation.mint,
+        Some(intent.authorization.mint.to_string())
+    );
+    assert_eq!(
+        events[0].correlation.receipt.as_deref(),
+        Some(intent.authorization.nonce.as_str())
+    );
+    for event in &events[1..] {
+        assert_eq!(
+            event.correlation.operation.as_deref(),
+            Some(entries[0].0.as_str())
+        );
+    }
     drop(operations);
     assert_eq!(
         fixture.start().ask(&fixture.candidate)["reason"],
@@ -345,7 +374,7 @@ fn startup_refuses_missing_history_and_unbounded_config_and_runtime_revocation()
             .output()
             .expect("startup");
         assert!(!output.status.success(), "{pointer}");
-        assert!(output.stdout.is_empty());
+        assert_eq!(output.stdout.len(), 0);
     }
     let mut fixture = Fixture::new();
     let mut issuer = fixture.start();
@@ -434,7 +463,7 @@ fn unusable_private_files_and_overlong_input_stop_without_issuing() {
         .output()
         .expect("startup");
     assert!(!output.status.success());
-    assert!(output.stdout.is_empty());
+    assert_eq!(output.stdout.len(), 0);
     fixture.save();
     #[cfg(unix)]
     {
@@ -447,7 +476,7 @@ fn unusable_private_files_and_overlong_input_stop_without_issuing() {
             .output()
             .expect("startup");
         assert!(!output.status.success());
-        assert!(output.stdout.is_empty());
+        assert_eq!(output.stdout.len(), 0);
         fixture.save();
     }
     let mut issuer = fixture.start();
@@ -464,6 +493,35 @@ fn unusable_private_files_and_overlong_input_stop_without_issuing() {
         "no proof from a truncated input: {answer}"
     );
     assert!(!issuer.child.wait().expect("exit").success());
+}
+
+#[test]
+fn the_input_size_boundary_accepts_a_complete_line_and_refuses_truncation() {
+    for (length, newline, accepted) in [
+        (65_536, true, true),
+        (65_537, true, false),
+        (1000, false, false),
+    ] {
+        let fixture = Fixture::new();
+        let mut raw = fixture.candidate.to_string();
+        raw.extend(std::iter::repeat_n(
+            ' ',
+            length - usize::from(newline) - raw.len(),
+        ));
+        if newline {
+            raw.push('\n');
+        }
+        let (answer, success) = raw_response(&fixture, raw.as_bytes());
+        assert_eq!(success, accepted, "{length}/{newline}: {answer}");
+        if accepted {
+            assert_eq!(
+                serde_json::from_str::<Value>(&answer).expect("proof JSON")["outcome"],
+                "issued"
+            );
+        } else {
+            assert!(answer.is_empty(), "{answer}");
+        }
+    }
 }
 
 #[test]

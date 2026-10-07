@@ -13,7 +13,7 @@ benefit of the doubt on everything else.
 
 ## Index
 
-**35 of these 47 name something mechanical that would catch a
+**36 of these 48 name something mechanical that would catch a
 recurrence. 12 name only a habit, and say so** — which is this file's opening
 standard rather than a gap in it. The habit-only rows are the ones worth reading
 twice; nothing will stop those repeating except somebody remembering.
@@ -72,6 +72,7 @@ quietly absent.
 | [45](#45-a-creator-query-retained-every-creators-launch-history) | A creator query retained every creator's launch history | habit only: exercise the retained production dataset under its service memory cap |
 | [46](#46-an-unreadable-wallet-was-reported-as-absent) | An unreadable wallet was reported as absent | nullable-ID and malformed-response wallet regressions; pending-creation UI regression |
 | [47](#47-strict-history-opening-exposed-shared-fixtures-and-clock-dependent-tampering) | Strict history opening exposed shared fixtures and clock-dependent tampering | isolated caller fixtures and deterministic issuer-tampering regression |
+| [48](#48-valid-proofs-left-durable-links-and-input-boundaries-untested) | Valid proofs left durable links and input boundaries untested | issuer process correlation and exact-boundary regressions |
 
 ---
 
@@ -2051,3 +2052,29 @@ checks the caller's refusal; the CLI suite exercises isolated valid histories.
 `the_process_refuses_a_forged_or_modified_issuer_intent` changes original signed
 timestamps directly. Reapplying an unchanged expiry reproduces CI's assertion
 failure; restoring the subtraction passes.
+
+## 48. Valid proofs left durable links and input boundaries untested
+
+**Found:** 2026-10-07, CI 37652941215. The offline issuer's valid-proof tests
+did not inspect the proposal's journal nonce/mint links, exercise a proposal
+observed exactly at the current slot, or distinguish complete maximum-size
+input from a truncated or unterminated line. Six mutations of those behaviors
+survived even though proof verification and outstanding-capital checks passed.
+The proof is one output; its durable correlation and the framing boundary are
+other outputs, and each must be observed where it matters.
+
+A seventh survivor was redundant: startup rejects every policy requiring
+operator approval, so the kernel cannot return an operator-required decision.
+The duplicate match guard was removed rather than adding an exclusion or a
+test for an unreachable condition. Linux CI also ran Rust 1.99.0 while the
+local GNU Windows toolchain was 1.97.1 and flagged three assertion-style lints;
+that repeats learning 39, and the assertions now show lengths on failure.
+
+**What catches a recurrence:**
+`issuance_runs_the_kernel_and_reserves_before_a_verifiable_proof_leaves` checks
+the current-slot decision and journal correlation; subsequent operation events
+link to the proposing event instead of repeating its nonce and mint.
+`the_input_size_boundary_accepts_a_complete_line_and_refuses_truncation` checks
+both exact line-size boundaries and missing newline. Reapplying each of the six
+reported mutations fails the corresponding test. Required CI checks the code
+against the runner's actual compiler; local lint alone is not that check.
