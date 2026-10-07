@@ -47,15 +47,18 @@ pub enum Envelope {
 /// different copy sent.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct PrivyAuthorization {
-    /// The authorization the kernel issued.
+    /// The authorization asserted by the issuer. Its proof does not itself
+    /// establish that the kernel ran against trusted portfolio state.
     pub authorization: Authorization,
+    /// Required issuer proof. Old callers without one fail closed.
+    pub proof: IntentProof,
     /// The Privy request, exactly as it will be sent.
     pub request: crate::privy::PrivyRequest,
     /// The customer's wallet, base58.
     ///
     /// Must match the process's configured wallet scope as well as the bytes.
-    /// The process consumes the authorization nonce before using the Privy key;
-    /// the authorization's issuer is not yet authenticated.
+    /// The process consumes the authorization nonce before using the Privy key,
+    /// after verifying the configured issuer's proof and time window.
     pub wallet: String,
     /// The caller's view of the chain head.
     pub now_slot: u64,
@@ -64,6 +67,18 @@ pub struct PrivyAuthorization {
     /// Required, like `now_slot` and for the same reason: an optional bound with
     /// a default is a missing value that passes.
     pub max_lamports: u64,
+}
+
+/// An issuer-signed validity window, checked against the process's own clock.
+/// There is no default expiry or request-selected public key.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct IntentProof {
+    /// Unix seconds; a future issue time refuses without clock-skew allowance.
+    pub issued_at_unix_secs: u64,
+    /// Unix seconds; expiry is exclusive.
+    pub expires_at_unix_secs: u64,
+    /// Base64 Ed25519 signature over [`crate::attestation::payload`].
+    pub signature: String,
 }
 
 /// A request to sign locally.

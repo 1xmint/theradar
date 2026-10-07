@@ -91,6 +91,7 @@ impl Signer {
             "RADAR_SIGNER_NONCE_DIR",
             nonce_directory(key_file.parent().expect("parent")),
         );
+        configure_issuer(&mut command);
         Self::from_command(command)
     }
 
@@ -418,7 +419,8 @@ fn privy_key() -> String {
 
 /// A request for a Privy authorization signature.
 fn privy_request(transaction: &str) -> serde_json::Value {
-    serde_json::json!({
+    let now = unix_now();
+    let mut request = serde_json::json!({
         "sign": "privy",
         "authorization": {
             "nonce": "test-nonce",
@@ -440,7 +442,46 @@ fn privy_request(transaction: &str) -> serde_json::Value {
         "wallet": b58(&wallet()),
         "now_slot": 1_000u64,
         "max_lamports": u64::MAX,
-    })
+        "proof": {
+            "issued_at_unix_secs": now - 1,
+            "expires_at_unix_secs": now + 59,
+            "signature": "",
+        },
+    });
+    attest(&mut request);
+    request
+}
+
+// A separate, non-wallet test key. Production must keep the issuer's private
+// key outside the model, Serve, executor and signer; only its public key is here.
+fn issuer_key() -> ed25519_dalek::SigningKey {
+    ed25519_dalek::SigningKey::from_bytes(&[0x6B; 32])
+}
+
+fn configure_issuer(command: &mut Command) {
+    command
+        .env(
+            "RADAR_SIGNER_ISSUER_PUBLIC_KEY",
+            b58(&issuer_key().verifying_key().to_bytes()),
+        )
+        .env("RADAR_SIGNER_MAX_INTENT_LIFETIME_SECS", "60");
+}
+
+fn unix_now() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("clock")
+        .as_secs()
+}
+
+fn attest(request: &mut serde_json::Value) {
+    use ed25519_dalek::Signer as _;
+    let intent: radar_signer::protocol::PrivyAuthorization =
+        serde_json::from_value(request.clone()).expect("intent");
+    let payload = radar_signer::attestation::payload(&intent).expect("payload");
+    request["proof"]["signature"] = serde_json::json!(radar_types::b64::encode(
+        &issuer_key().sign(payload.as_bytes()).to_bytes()
+    ));
 }
 
 #[test]
@@ -612,6 +653,7 @@ fn the_running_process_checks_a_privy_request_before_it_authorises_one() {
 
     let mut substituted = privy_request(&substituted_mint());
     substituted["authorization"]["nonce"] = serde_json::json!("substituted-mint");
+    attest(&mut substituted);
     let substituted = signer.ask(&substituted);
     assert_eq!(
         substituted["outcome"], "refused",
@@ -633,6 +675,7 @@ fn a_privy_request_whose_body_carries_no_transaction_is_refused() {
 
     let mut request = privy_request(&honest());
     request["request"]["body"]["params"] = serde_json::json!({});
+    attest(&mut request);
 
     let answer = signer.ask(&request);
     assert_eq!(answer["outcome"], "refused", "{answer}");
@@ -656,6 +699,7 @@ fn privy_only_command(policy: &std::path::Path) -> Command {
         "RADAR_SIGNER_NONCE_DIR",
         nonce_directory(policy.parent().expect("parent")),
     );
+    configure_issuer(&mut command);
     command
 }
 
@@ -687,10 +731,12 @@ fn privy_only_needs_no_local_key_and_refuses_local_signing() {
     let mut wrong = privy_request(&honest());
     wrong["wallet"] = serde_json::json!(b58(&[0x44; 32]));
     wrong["authorization"]["nonce"] = serde_json::json!("wrong-wallet");
+    attest(&mut wrong);
     assert_eq!(signer.ask(&wrong)["outcome"], "refused");
     wrong = privy_request(&honest());
     wrong["request"]["url"] = serde_json::json!("https://api.privy.io/v1/wallets/other/rpc");
     wrong["authorization"]["nonce"] = serde_json::json!("wrong-url");
+    attest(&mut wrong);
     assert_eq!(signer.ask(&wrong)["outcome"], "refused");
 }
 
@@ -714,6 +760,8 @@ fn missing_or_invalid_privy_configuration_never_falls_back() {
         "RADAR_SIGNER_POLICY",
         "RADAR_SIGNER_PROGRAMS",
         "RADAR_SIGNER_NONCE_DIR",
+        "RADAR_SIGNER_ISSUER_PUBLIC_KEY",
+        "RADAR_SIGNER_MAX_INTENT_LIFETIME_SECS",
     ] {
         let mut command = privy_only_command(&policy);
         command.env_remove(name);
@@ -730,6 +778,13 @@ fn missing_or_invalid_privy_configuration_never_falls_back() {
         ("RADAR_SIGNER_PRIVY_APP_ID", ""),
         ("RADAR_SIGNER_PRIVY_WALLET_ADDRESS", "invalid"),
         ("RADAR_PRIVY_AUTHORIZATION_KEY", " "),
+        ("RADAR_SIGNER_ISSUER_PUBLIC_KEY", "invalid"),
+        (
+            "RADAR_SIGNER_ISSUER_PUBLIC_KEY",
+            "11111111111111111111111111111111",
+        ),
+        ("RADAR_SIGNER_MAX_INTENT_LIFETIME_SECS", "0"),
+        ("RADAR_SIGNER_MAX_INTENT_LIFETIME_SECS", "-1"),
     ] {
         let mut command = privy_only_command(&policy);
         command.env(name, value);
@@ -759,8 +814,10 @@ fn a_privy_nonce_cannot_be_reused_after_restart_or_for_changed_bytes() {
     *changed_bytes.last_mut().expect("instruction data") = 0xCE;
     changed["request"]["body"]["params"]["transaction"] =
         serde_json::json!(radar_types::b64::encode(&changed_bytes));
+    attest(&mut changed);
     assert_eq!(restarted.ask(&changed)["outcome"], "refused");
     changed["authorization"]["nonce"] = serde_json::json!("fresh-intent");
+    attest(&mut changed);
     assert_eq!(restarted.ask(&changed)["outcome"], "authorised");
 }
 
@@ -818,9 +875,11 @@ fn failed_or_interrupted_privy_attempts_remain_consumed() {
     assert_eq!(signer.ask(&privy_request(&honest()))["outcome"], "refused");
     let mut invalid = privy_request(&substituted_mint());
     invalid["authorization"]["nonce"] = serde_json::json!("rejected-attempt");
+    attest(&mut invalid);
     assert_eq!(signer.ask(&invalid)["outcome"], "refused");
     let mut corrected = privy_request(&honest());
     corrected["authorization"]["nonce"] = serde_json::json!("rejected-attempt");
+    attest(&mut corrected);
     assert_eq!(signer.ask(&corrected)["outcome"], "refused");
 }
 
@@ -849,6 +908,7 @@ fn loss_of_nonce_state_while_running_refuses_fresh_intents() {
         .expect("retain state");
     let mut fresh = privy_request(&honest());
     fresh["authorization"]["nonce"] = serde_json::json!("fresh-after-loss");
+    attest(&mut fresh);
     assert_eq!(signer.ask(&fresh)["outcome"], "refused");
     assert!(!scratch.0.join("nonces").exists());
 }
@@ -861,6 +921,7 @@ fn blank_nonces_refuse_and_nonce_text_never_becomes_a_path() {
     for nonce in ["", " \t\n "] {
         let mut request = privy_request(&honest());
         request["authorization"]["nonce"] = serde_json::json!(nonce);
+        attest(&mut request);
         assert_eq!(signer.ask(&request)["outcome"], "refused");
     }
     assert_eq!(
@@ -871,9 +932,182 @@ fn blank_nonces_refuse_and_nonce_text_never_becomes_a_path() {
     );
     let mut escaped = privy_request(&honest());
     escaped["authorization"]["nonce"] = serde_json::json!("../outside");
+    attest(&mut escaped);
     assert_eq!(signer.ask(&escaped)["outcome"], "authorised");
     assert!(!scratch.0.join("outside").exists());
     assert_eq!(signer.ask(&escaped)["outcome"], "refused");
+}
+
+#[test]
+fn the_process_refuses_a_forged_or_modified_issuer_intent() {
+    let scratch = Scratch::new("issuer-tampering");
+    let policy = policy_file(&scratch.0, &open_policy());
+    let mut signer = Signer::from_command(privy_only_command(&policy));
+    let original = privy_request(&honest());
+    for (path, value) in [
+        ("/authorization/nonce", serde_json::json!("forged-fresh")),
+        ("/authorization/mint", serde_json::json!(b58(&[0x99; 32]))),
+        ("/authorization/action", serde_json::json!("sell")),
+        ("/authorization/max_notional", serde_json::json!(1)),
+        ("/authorization/expires_after", serde_json::json!(1_151)),
+        (
+            "/authorization/needs_operator_signature",
+            serde_json::json!(true),
+        ),
+        ("/wallet", serde_json::json!(b58(&[0x44; 32]))),
+        ("/now_slot", serde_json::json!(1_001)),
+        ("/max_lamports", serde_json::json!(1)),
+        ("/request/method", serde_json::json!("GET")),
+        (
+            "/request/url",
+            serde_json::json!("https://api.privy.io/v1/wallets/other/rpc"),
+        ),
+        ("/request/headers/privy-app-id", serde_json::json!("other")),
+        (
+            "/request/body/params/transaction",
+            serde_json::json!("different"),
+        ),
+        ("/proof/issued_at_unix_secs", serde_json::json!(unix_now())),
+        (
+            "/proof/expires_at_unix_secs",
+            serde_json::json!(unix_now() + 58),
+        ),
+        ("/proof/signature", serde_json::json!("AAAA")),
+    ] {
+        let mut forged = original.clone();
+        *forged.pointer_mut(path).expect("field") = value;
+        let answer = signer.ask(&forged);
+        assert_eq!(answer["outcome"], "refused", "{path}: {answer}");
+    }
+    // Invalid proofs must not consume an authentic intent's nonce.
+    assert_eq!(signer.ask(&original)["outcome"], "authorised");
+}
+
+#[test]
+fn only_the_configured_issuer_and_protocol_domain_are_accepted() {
+    use ed25519_dalek::Signer as _;
+    let scratch = Scratch::new("issuer-key-domain");
+    let policy = policy_file(&scratch.0, &open_policy());
+    let mut signer = Signer::from_command(privy_only_command(&policy));
+    let original = privy_request(&honest());
+    let intent = serde_json::from_value(original.clone()).expect("intent");
+    let payload = radar_signer::attestation::payload(&intent).expect("payload");
+    let other_key = ed25519_dalek::SigningKey::from_bytes(&[0x7C; 32]);
+    for signature in [
+        other_key.sign(payload.as_bytes()),
+        issuer_key().sign(
+            payload
+                .replace("radar/privy-intent/v1", "other/protocol/v1")
+                .as_bytes(),
+        ),
+    ] {
+        let mut forged = original.clone();
+        forged["proof"]["signature"] =
+            serde_json::json!(radar_types::b64::encode(&signature.to_bytes()));
+        let answer = signer.ask(&forged);
+        assert_eq!(answer["outcome"], "refused", "{answer}");
+    }
+    assert_eq!(signer.ask(&original)["outcome"], "authorised");
+}
+
+#[test]
+fn legacy_or_incomplete_privy_proofs_fail_closed() {
+    let scratch = Scratch::new("issuer-missing-proof");
+    let policy = policy_file(&scratch.0, &open_policy());
+    let mut signer = Signer::from_command(privy_only_command(&policy));
+    for name in ["issued_at_unix_secs", "expires_at_unix_secs", "signature"] {
+        let mut request = privy_request(&honest());
+        request["proof"]
+            .as_object_mut()
+            .expect("proof")
+            .remove(name);
+        assert_eq!(signer.ask(&request)["outcome"], "refused", "{name}");
+    }
+    let mut legacy = privy_request(&honest());
+    legacy.as_object_mut().expect("request").remove("proof");
+    assert_eq!(signer.ask(&legacy)["outcome"], "refused");
+    assert_eq!(
+        signer.ask(&privy_request(&honest()))["outcome"],
+        "authorised"
+    );
+}
+
+#[test]
+fn expiry_uses_the_signer_clock_and_its_configured_lifetime() {
+    let scratch = Scratch::new("issuer-expiry");
+    let policy = policy_file(&scratch.0, &open_policy());
+    let mut signer = Signer::from_command(privy_only_command(&policy));
+    let now = unix_now();
+    for (issued, expires) in [
+        (now - 60, now - 1),    // expired, even with a caller slot in the past
+        (now + 100, now + 160), // future issue time
+        (now - 1, now + 60),    // 61 seconds exceeds the operator's 60-second test cap
+        (now, now),
+        (now, now - 1),
+        (0, u64::MAX),
+    ] {
+        let mut request = privy_request(&honest());
+        request["now_slot"] = serde_json::json!(0);
+        request["proof"]["issued_at_unix_secs"] = serde_json::json!(issued);
+        request["proof"]["expires_at_unix_secs"] = serde_json::json!(expires);
+        attest(&mut request);
+        let answer = signer.ask(&request);
+        assert_eq!(answer["outcome"], "refused", "{issued}/{expires}: {answer}");
+    }
+    assert_eq!(
+        signer.ask(&privy_request(&honest()))["outcome"],
+        "authorised"
+    );
+}
+
+#[test]
+fn issuer_time_boundaries_are_exact_and_unsigned_values_never_wrap() {
+    let public = radar_types::Address::new(issuer_key().verifying_key().to_bytes());
+    let issuer = radar_signer::attestation::Issuer::new(&public, 60).expect("issuer");
+    let mut request = privy_request(&honest());
+    request["proof"]["issued_at_unix_secs"] = serde_json::json!(100);
+    request["proof"]["expires_at_unix_secs"] = serde_json::json!(160);
+    attest(&mut request);
+    let intent = serde_json::from_value(request.clone()).expect("intent");
+    assert!(issuer.check(&intent, 99).is_err());
+    assert!(issuer.check(&intent, 100).is_ok());
+    assert!(issuer.check(&intent, 159).is_ok());
+    assert!(issuer.check(&intent, 160).is_err());
+    assert!(issuer.check(&intent, u64::MAX).is_err());
+    request["proof"]["issued_at_unix_secs"] = serde_json::json!(u64::MAX - 60);
+    request["proof"]["expires_at_unix_secs"] = serde_json::json!(u64::MAX);
+    attest(&mut request);
+    let intent = serde_json::from_value(request).expect("intent");
+    assert!(issuer.check(&intent, u64::MAX - 60).is_ok());
+    assert!(issuer.check(&intent, u64::MAX - 1).is_ok());
+    assert!(issuer.check(&intent, u64::MAX).is_err());
+}
+
+#[test]
+fn invalid_issuer_curve_points_refuse_at_startup() {
+    let invalid = radar_types::Address::new([0x02; 32]);
+    assert!(ed25519_dalek::VerifyingKey::from_bytes(invalid.as_bytes()).is_err());
+    assert!(radar_signer::attestation::Issuer::new(&invalid, 60).is_err());
+    let scratch = Scratch::new("issuer-invalid-point");
+    let policy = policy_file(&scratch.0, &open_policy());
+    let mut command = privy_only_command(&policy);
+    command.env("RADAR_SIGNER_ISSUER_PUBLIC_KEY", invalid.to_string());
+    let mut signer = Signer::from_command(command);
+    assert_eq!(signer.ask(&privy_request(&honest()))["outcome"], "refused");
+}
+
+#[test]
+fn a_non_exact_issuer_payload_is_refused_without_consuming_the_nonce() {
+    let scratch = Scratch::new("issuer-payload-float");
+    let policy = policy_file(&scratch.0, &open_policy());
+    let mut signer = Signer::from_command(privy_only_command(&policy));
+    let mut request = privy_request(&honest());
+    request["request"]["body"]["extra"] = serde_json::json!(1.25);
+    assert_eq!(signer.ask(&request)["outcome"], "refused");
+    assert_eq!(
+        signer.ask(&privy_request(&honest()))["outcome"],
+        "authorised"
+    );
 }
 
 #[cfg(unix)]

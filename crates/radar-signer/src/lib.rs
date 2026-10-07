@@ -11,12 +11,13 @@
 //! # What this defends against
 //!
 //! The transaction must match the caller-supplied authorization and this
-//! signer's policy. Issuer authenticity is not verified: a replaced executor
-//! can forge an authorization within those bounds. The Privy process also
-//! consumes each nonce persistently before using its key; this library alone
-//! does not enforce single use. Independent portfolio accounting and issuance
-//! authentication remain prerequisites for live autonomy.
+//! signer's policy. The Privy process additionally verifies a configured issuer's
+//! signature over the exact intent, checks its own clock and consumes the nonce
+//! persistently. The library signing methods alone do not enforce these guards.
+//! An isolated issuer that actually runs the kernel against trusted portfolio
+//! state is still absent; authenticated provenance does not prove that decision.
 
+pub mod attestation;
 pub mod canonical;
 pub mod key;
 pub mod privy;

@@ -136,11 +136,11 @@ rule *currently reaches* is status, and status is in
    **authentication, not authority**, and may never soften a refusal.
 
    **State the signer's guarantee exactly, because an earlier version said
-   "absolute" and was read as more than it is.** The signer does not verify that
-   an `Authorization` came from the kernel: no MAC. Only the Privy binary checks
-   nonce reuse durably. The property is *the transaction matches the authorisation the
-   caller supplied* — a complete defence against an executor **bug**, and not one
-   against a **compromised caller**, which writes its own authorisation.
+   "absolute" and was read as more than it is.** The library checks caller-supplied
+   bounds. The Privy binary also checks an issuer signature, host-clock expiry
+   and durable nonce reuse. No isolated kernel/reservation issuer exists yet;
+   a signature proves key provenance, not a trusted portfolio decision. The local
+   lane remains unauthenticated. Keep live delegation closed until those gaps close.
    LEARNINGS 23, and [ADR 0007](docs/adr/0007-the-privy-authorization-key-lives-in-the-signer-process.md).
    This is why it refuses address lookup tables
    ([ADR 0003](docs/adr/0003-legacy-transactions-because-the-signer-must-be-able-to-read-them.md))

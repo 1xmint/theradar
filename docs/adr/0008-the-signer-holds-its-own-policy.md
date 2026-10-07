@@ -162,6 +162,40 @@ checked-signing library method without this process state. The local lane is
 unchanged. Authenticated issuance, trusted expiry and durable portfolio/submission
 accounting remain incomplete. Live delegation and execution stay inactive.
 
+## Privy issuer verification and independent expiry — 2026-10-07
+
+The Privy process now requires a base58 Ed25519 public key from startup
+configuration (`RADAR_SIGNER_ISSUER_PUBLIC_KEY`) and a positive maximum intent
+lifetime (`RADAR_SIGNER_MAX_INTENT_LIFETIME_SECS`). Neither defaults. Requests
+must carry a proof with Unix issue/expiry seconds and a base64 Ed25519 signature.
+Older callers without that proof refuse. No issuer private key is loaded into
+this signer, Serve or the executor.
+
+The exact v1 transcript is `attestation::payload`: the domain
+`radar/privy-intent/v1`, authorization, complete typed Privy request, wallet,
+caller slot and lamport bound, and issue/expiry times. The existing canonical
+JSON subset encodes integers exactly; external clients must preserve u64 values,
+not round them through JavaScript numbers. Strict Ed25519 verification rejects
+another issuer or changes to the transcript. Wallet scope, transaction decoding,
+own policy and allowlist remain separate mandatory checks.
+
+The process reads its own host clock, requires issue <= now < expiry and an
+interval no larger than the configured maximum. It checks before nonce
+reservation and again after persistence, before invoking checked key use.
+Unauthenticated or already expired requests do not consume a nonce; once claimed,
+an attempt stays consumed even if the second check or transaction check refuses.
+Host time is a trust dependency: rollback can extend acceptance. This does not
+authenticate the chain head or prevent submission of a signature already returned.
+
+This changes the Privy binary's earlier caller-forgery guarantee, not the local
+lane or the checked-signing library by itself. The signature proves provenance
+from the configured issuer key. **There is no isolated issuer yet that evaluates
+the risk kernel against trusted portfolio state and reserves capital atomically.**
+Do not give that key to the caller or describe this verifier as proof that the
+kernel authorized capital. No real issuer trust anchor, live expiry cap,
+delegation or trading is configured by this increment. Durable reservations,
+loss/submission accounting and independent Privy refusal tests remain required.
+
 ## What would reverse this
 
 Nothing foreseeable reverses holding a policy locally. The specific ceilings are

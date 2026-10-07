@@ -597,3 +597,40 @@ was measured at 25.9 GiB with about 122 GiB free. Automatic approval review
 rejected cleanup of the generated `mutants.out` directory as "blocked by policy"
 without a more specific reason; it remains ignored, and no deletion workaround
 was attempted.
+
+### Privy issuer proof and independent expiry — 2026-10-07
+
+Owner requested continuation from `2286891`. The concrete caller is the existing
+Privy stdin process handler. Add mandatory issuer proof verification and a
+signed time window checked against the process's host clock. A startup public
+key and positive maximum lifetime are required without defaults. The proof
+binds the entire authorization, request, wallet and caller bounds under a v1
+domain. No new crate, issuer private key or production financial values are added.
+
+This is the receiving boundary, **not an implemented kernel/reservation issuer**.
+That issuer must remain isolated from Serve/model/executor and derive decisions
+from trusted state; otherwise a proof only relocates caller authority. Existing
+library signing and local lane do not acquire these process guards. Host clock
+rollback and HTTP resubmission of returned signatures remain separate concerns.
+
+- [x] Required wire proof and startup issuer/lifetime config, exact transcript,
+  strict signature check and host-clock expiry before nonce claim and key use.
+- [x] Existing wallet/nonce/transaction regressions explicitly issue valid test
+  proofs after mutations, so the new guard cannot mask their refusal behavior.
+- [x] Seven new regressions: modified intent, wrong issuer/domain, incomplete proof,
+  process clock/lifetime limits, exact/u64 boundaries, invalid curve key, non-exact payload.
+- [x] Scoped signer tests passed 114 tests on Windows; all-target signer Clippy
+  passed with warnings denied. Production policy remains closed, signer inactive.
+- [x] Removing signature verification permits a forged fresh nonce and fails the
+  real-process tampering regression. Removing expiry permits an old intent even
+  with a caller slot of zero and fails the real-process clock regression.
+  Restored both guards: scoped tests and all 33 conformance tests passed.
+- [ ] Full CI including all four mutation shards at the code commit.
+
+**Handback in progress:** do not deploy or enable a signer. Production stays at
+Serve `3f38ee0`; no issuer or live time cap has been provisioned. Next integrate
+trusted mandate/portfolio reservations with isolated issuance and reconciliation.
+Latest loopback health confirms status ok, policyClosed true and build `3f38ee0`;
+signer socket is inactive. Prior documentation CI 37641528789 is still running
+its final mutation shard; do not push over it. No signing, delegation or trade
+has been performed. The earlier rejected cleanup is not retried.
