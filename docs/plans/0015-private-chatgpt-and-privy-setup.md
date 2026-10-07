@@ -861,7 +861,7 @@ No new dependency crate or key-bearing process is introduced.
 - [x] Scoped CLI tests: 219 unit and 4 process tests; onchain: 67 unit and 18 integration tests. Scoped Clippy with warnings denied and workspace fmt passed.
 - [x] Manual mutations of owner OR to AND, maximum fee to minimum, and gross reserve > to >= each failed their targeted test; restored sources passed.
 - [x] Repo-conformance: all 33 checks passed.
-- [ ] Full CI pending.
+- [x] Full CI 37689898799 passed at d4b84f2df698f838ba05661e0c3a3c3de4fd70f1: 2,426 Rust tests, 352 web tests, all four mutation shards and final gate, build/lint/MSRV/site/fmt/licence/cargo-deny.
 
 The read parameters follow
 [getMultipleAccounts](https://solana.com/docs/rpc/http/getmultipleaccounts).
@@ -872,7 +872,7 @@ can invalidate the quote. This does not measure total execution costs or provide
 an executable minimum receipt. It is not the issuer Snapshot, a largest-exit
 search, a portfolio, an authorization or a live transaction simulation.
 
-**Handback in progress:** the market component remains read-only. Next measure
+**Handback (verified code `d4b84f2`):** the market component remains read-only. Next measure
 candidate buy/exit economics and exact transaction fee/simulation evidence,
 trusted SOL/USD valuation, and journal-derived exposure/loss, then activate
 owner mandates outside Serve's write authority and reconcile submissions before
@@ -884,3 +884,33 @@ A read-only mainnet invocation against the previously captured mint
 known fee layout; no live quote was emitted and the refusal was preserved.
 The synthetic process fixture verifies the supported layout only. Investigate
 the changed layout with a raw capture before extending parsing.
+
+**Observed fee-layout extension (not yet supported):** getAccountInfo finalized
+returned the fee-program-owned account
+8Wf5TiAheLUqBrKXeYg2JtAFFMWtKdG2BSFgqUcPVwTt at slot 454343743,
+length 4097 bytes. SHA-256 of decoded bytes:
+3504fae20640e15bd441257ab118aa96fb4e99190defc06a01aae26b307bf204.
+The first 177 bytes are below; all remaining bytes were zero.
+
+```text
+8f3492bbdb7b4c9bfdd3bb8cab341ce0528457f2c3817d3278441963dcd55fed58ba24c999ddac02aa00000000000000005f000000000000001e00000000000000010000000000000000000000000000000000000000000000000000005f000000000000001e00000000000000010000000000000000000000000000000000000000000000000000005f000000000000001e0000000000000000000000000000005f000000000000001e00000000000000
+```
+
+The published [fee-program IDL](https://github.com/pump-fun/pump-public-docs/blob/8cda1fa30ea658b20909d8aedf002047119388d2/idl/pump_fees.json)
+at pinned commit 8cda1fa lists stable_fee_tiers then exotic_flat_fees after
+fee_tiers. Interpreting the capture by that layout gives one stable tier at
+threshold zero with LP/protocol/creator 0/95/30 bps, followed by exotic flat
+0/95/30 bps. These are measurements of this account, not trading defaults.
+The current reader deliberately refuses this extension. Next extend parsing
+with this capture and truncation/fee-bound regressions; do not simply drop the
+trailing-data refusal or claim a fee bound over ignored rows.
+
+Verification follow-up: full CI is complete and successful at the code hash
+above. This follow-up changes only the plan, including the captured fee-layout
+finding. `cargo +stable-x86_64-pc-windows-gnullvm test -p repo-conformance
+--locked` passed all 33 checks after that finding was added. No source guard was
+relaxed for the live refusal; the strict unsupported-layout boundary remains.
+Current site/VPS status was not rechecked or deployed. No real key, signature,
+delegation or trade was used. No local Cargo/rustc/wallet process remains;
+target measured 28.8 GiB with 120.6 GiB free. Previously rejected ignored mutation
+output cleanup was not retried. Follow-up documentation CI may be pending.
