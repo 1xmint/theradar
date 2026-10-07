@@ -231,14 +231,34 @@ Logged in using ChatGPT. Public health still reports `agent.configured=false`,
 as expected before an inference allowance is selected. Documentation commit
 `91ea610` also passed all jobs in CI 37557612148.
 
+**Owner inference choice:** after being offered daily call caps, Josh explicitly
+selected unlimited. This is no Radar-imposed daily subscription call cap; it
+does not change provider limits, per-investigation bounds or capital authority.
+The explicit `unlimited` literal is supported only for a valid Codex provider;
+the saturating meter continues recording usage and its maximum counter sentinel
+cannot impose a daily refusal. Startup identifies the mode as subscription
+usage rather than printing a fictitious dollar ceiling. Missing configuration
+still disables inference. The existing administrator script has an explicit
+mode to save this choice without re-entering or exposing Privy secrets.
+CI, matching release, deployment and administrator application remain pending.
+Local validation: 68 radar-model tests, the allowance reporting binary test,
+33 conformance tests, scoped model/serve clippy and formatting pass. Disabling
+the new unlimited literal makes its allowance regression fail. Eight Linux
+bridge/setup tests pass under NoNewPrivileges, including identity preservation
+and rejecting paid API/missing isolated-client settings. A real call through
+the installed isolated client exits successfully with: "No trade conclusion
+can be drawn because no instrument evidence was provided." This verifies
+subscription inference through the bridge, not the still-disabled Radar chat
+route or the complete service namespaces. No credential output was exposed.
+
 **Stopped at:** deployed colored device prompt repair at `d73f8cf`.
 Private server setup is installed and applied. ChatGPT login is verified; the
 Privy app is configured, while wallet delegation remains unverified. No autonomous
 trading loop has been enabled. The broader private-autonomy work remains in progress.
-**Next action:** choose the daily inference allowance (the owner has been asked
-to choose a model-call cap), configure the persistent meter, and verify a
-read-only evidence-backed model call through Radar. No call allowance is
-assumed from subscription login. The automated browser sign-in remains blocked
+**Next action:** verify and deploy explicit unlimited subscription support, then
+the owner runs the prepared administrator command to apply that choice. Apply
+settings through the fixed deployment and verify a read-only evidence-backed
+model call through Radar. The automated browser sign-in remains blocked
 by URL protocol policy and must not be retried through a workaround.
 Obtain the owner's Privy DID and dedicated wallet ID to configure private admission.
 **Do not:** claim a wallet is delegated from an app ID, treat connected ChatGPT

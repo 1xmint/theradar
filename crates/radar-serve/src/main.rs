@@ -85,15 +85,27 @@ fn configure_agent() -> (Option<Chat>, String) {
                 // ceiling as `$2.00` when it is `$2.004` is a line an operator
                 // would reasonably quote back later.
                 format!(
-                    "on via {name}, {tools} read-only tool(s), ${}.{:06}/day",
-                    budget.daily_max.get() / 1_000_000,
-                    budget.daily_max.get() % 1_000_000
+                    "on via {name}, {tools} read-only tool(s), {}",
+                    model_allowance_label(budget.daily_max)
                 ),
             )
         }
         // Printed rather than swallowed. A misconfiguration that produces
         // silence is one an operator debugs by reading source.
         Err(why) => (None, format!("off — {why}")),
+    }
+}
+
+/// Report an unlimited subscription as a usage policy, never a dollar ceiling.
+fn model_allowance_label(daily: radar_types::MicroUsd) -> String {
+    if daily == radar_model::UNLIMITED_SUBSCRIPTION_DAILY {
+        "unlimited subscription calls (provider limits still apply)".to_owned()
+    } else {
+        format!(
+            "${}.{:06}/day",
+            daily.get() / 1_000_000,
+            daily.get() % 1_000_000
+        )
     }
 }
 
@@ -642,6 +654,18 @@ mod tests {
     use super::*;
     use radar_store::Writer;
     use radar_types::{Address, Signature, Slot};
+
+    #[test]
+    fn allowance_reporting_distinguishes_subscription_usage_from_dollars() {
+        assert_eq!(
+            model_allowance_label(radar_model::UNLIMITED_SUBSCRIPTION_DAILY),
+            "unlimited subscription calls (provider limits still apply)"
+        );
+        assert_eq!(
+            model_allowance_label(radar_types::MicroUsd(2_004_000)),
+            "$2.004000/day"
+        );
+    }
 
     /// A real, on-disk store with one row in it, wired into a fresh
     /// [`AppState`] the same way `build_state` does -- built by hand rather

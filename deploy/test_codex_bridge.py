@@ -107,6 +107,27 @@ class SetupTests(unittest.TestCase):
         original = '# comment\nRADAR_CUSTOMER_SALT=old-fixture\nRADAR_CUSTOMER_SALT="current-fixture"\n'
         self.assertEqual(self.setup.settings_from(original)["RADAR_CUSTOMER_SALT"], "current-fixture")
 
+    def test_unlimited_subscription_preserves_identity_and_existing_state(self):
+        original = ('RADAR_MODEL_CODEX=/usr/local/bin/radar-codex\n'
+                    'RADAR_MODEL_DAILY_USD=1.00\nRADAR_STATE_DIR=/existing/state\n'
+                    'RADAR_CUSTOMER_SALT=fixture\nRADAR_CUSTOMER_ACCESS=closed\n')
+        updates = self.setup.unlimited_subscription_updates(original)
+        updated = self.setup.settings_from(self.setup.updated_settings(original, updates))
+        self.assertEqual(updated['RADAR_MODEL_DAILY_USD'], 'unlimited')
+        self.assertEqual(updated['RADAR_STATE_DIR'], '/existing/state')
+        self.assertEqual(updated['RADAR_CUSTOMER_SALT'], 'fixture')
+        self.assertEqual(updated['RADAR_CUSTOMER_ACCESS'], 'closed')
+        self.assertEqual(self.setup.unlimited_subscription_updates(
+            'RADAR_MODEL_CODEX=/usr/local/bin/radar-codex\n')['RADAR_STATE_DIR'],
+            '/home/guardian/radar/data/state')
+
+    def test_unlimited_subscription_refuses_api_and_missing_isolated_client(self):
+        for original in ['', 'RADAR_MODEL_CODEX=codex\n',
+                         'RADAR_MODEL_CODEX=/usr/local/bin/radar-codex\nRADAR_MODEL_API_KEY=fixture\n',
+                         'RADAR_MODEL_CODEX=/usr/local/bin/radar-codex\nRADAR_MODEL_OPENAI_KEY=fixture\n']:
+            with self.assertRaises(SystemExit):
+                self.setup.unlimited_subscription_updates(original)
+
     def test_updating_connections_preserves_both_salt_assignments(self):
         original = ('# keep this\nRADAR_CUSTOMER_SALT=old-fixture\n'
                     'RADAR_CUSTOMER_SALT="current-fixture"\nRADAR_MODEL_CODEX=old\n'

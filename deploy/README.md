@@ -428,6 +428,29 @@ RADAR_STATE_DIR=/home/guardian/radar/data/state
 RADAR_MODEL_CODEX=/usr/local/bin/radar-codex
 ```
 
+For an explicitly selected ChatGPT subscription with no Radar daily call cap,
+set `RADAR_MODEL_DAILY_USD=unlimited`. This literal is accepted only with the
+Codex provider; missing or conflicting provider settings and paid API providers
+cannot use it. The saturating meter uses its maximum counter value to represent
+unlimited usage, continues recording calls, and startup reports unlimited
+subscription calls instead of a dollar ceiling. OpenAI's plan limits still apply.
+Per-investigation turn limits, deadlines and read-only tools still apply.
+An explicitly configured `RADAR_MODEL_PER_CALL_USD` retains its separate limit.
+
+After the matching server release is installed, the existing administrator
+setup script can apply this choice without re-entering Privy secrets:
+
+```powershell
+ssh -t guardian-vps-tail "sudo python3 /tmp/radar-private-setup.py --unlimited-subscription"
+```
+
+Upload the current `deploy/setup-private-connections.py` to that temporary path
+first and verify its hash. This mode requires the isolated Codex client, refuses
+paid API settings, preserves unrelated identity settings and uses the existing
+ledger directory (or the already-existing default state directory). Apply the
+saved settings through the verified artifact and fixed `sudo radar-deploy`
+procedure. It grants no wallet or trading authority.
+
 The startup log says which mode it is in. `radar-serve` prints `access` and
 `agent` lines on every start, and an instance serving without a check says so
 about itself in its own logs:

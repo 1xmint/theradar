@@ -2,7 +2,8 @@
 # SPDX-License-Identifier: Apache-2.0
 """One-time administrator setup; secrets are entered only on the VPS terminal.
 
-Does not restart Radar, log in to ChatGPT, select budgets, or configure a signer.
+Does not restart Radar, log in to ChatGPT, or configure a signer. The explicit
+--unlimited-subscription mode applies an operator-selected usage allowance.
 The fixed radar-deploy procedure applies the settings after this command exits.
 """
 
@@ -71,9 +72,34 @@ def updated_settings(original, updates):
     ) + "\n"
 
 
+def unlimited_subscription_updates(original):
+    settings = settings_from(original)
+    if settings.get("RADAR_MODEL_CODEX") != "/usr/local/bin/radar-codex":
+        refuse("The isolated Codex client must already be configured.")
+    if any(settings.get(name) for name in ("RADAR_MODEL_API_KEY", "RADAR_MODEL_OPENAI_KEY")):
+        refuse("Unlimited subscription mode cannot include a paid API provider.")
+    return {
+        "RADAR_MODEL_DAILY_USD": "unlimited",
+        "RADAR_STATE_DIR": settings.get("RADAR_STATE_DIR") or "/home/guardian/radar/data/state",
+    }
+
+
 def main():
     if os.geteuid() != 0:
         refuse("Run with sudo in your own SSH terminal.")
+    if sys.argv[1:] == ["--unlimited-subscription"]:
+        env_path = Path("/etc/radar/radar.env")
+        if env_path.is_symlink() or not env_path.is_file():
+            refuse("Expected an existing regular /etc/radar/radar.env")
+        original = env_path.read_text()
+        updates = unlimited_subscription_updates(original)
+        state = Path(updates["RADAR_STATE_DIR"])
+        if not state.is_dir() or state.is_symlink():
+            refuse("The configured ledger directory must already exist and not be a symlink.")
+        install(env_path, updated_settings(original, updates), 0o600)
+        print("Saved unlimited subscription calls. Provider limits still apply.")
+        print("Apply with the verified artifact and fixed radar-deploy procedure.")
+        return
     if len(sys.argv) != 2 or not re.fullmatch(r"[a-zA-Z0-9]{20,40}", sys.argv[1]):
         refuse("Usage: sudo python3 setup-private-connections.py <public Privy app ID>")
     app_id = sys.argv[1]
