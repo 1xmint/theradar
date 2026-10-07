@@ -169,6 +169,18 @@ pub const LINK_PROMPT_TIMEOUT: Duration = Duration::from_secs(30);
 /// ordinary word in the surrounding prose.
 #[must_use]
 pub fn parse_link(output: &str) -> Option<Linking> {
+    // The non-interactive CLI still emits ANSI SGR colors. Strip those before
+    // looking for token shapes, including resets attached to the URL and code.
+    let mut parts = output.split("\u{1b}[");
+    let mut plain = parts.next().unwrap_or_default().to_owned();
+    for part in parts {
+        let text = part
+            .split_once('m')
+            .filter(|(parameters, _)| parameters.chars().all(|c| c.is_ascii_digit() || c == ';'))
+            .map_or(part, |(_, text)| text);
+        plain.push_str(text);
+    }
+    let output = plain;
     let url = output.split_whitespace().find_map(|word| {
         let trimmed = word.trim_matches(|c: char| !c.is_ascii_graphic() || "\"'.,)".contains(c));
         trimmed.starts_with("https://").then(|| trimmed.to_owned())
@@ -631,6 +643,34 @@ mod tests {
                 "from {output:?}"
             );
             assert_eq!(linking.user_code, "WDJB-MJHT", "from {output:?}");
+        }
+    }
+
+    #[test]
+    fn the_installed_cli_colored_device_prompt_is_recognised() {
+        // Captured from Codex 0.131.0 through the installed isolated bridge.
+        // Use a fictitious code: the regression is the color around both fields.
+        let output = "Welcome to Codex [v\u{1b}[90m0.131.0\u{1b}[0m]\n\
+            1. Open this link in your browser and sign in to your account\n\
+               \u{1b}[94mhttps://auth.openai.com/codex/device\u{1b}[0m\n\
+            2. Enter this one-time code \u{1b}[90m(expires in 15 minutes)\u{1b}[0m\n\
+               \u{1b}[94mABCD-EFGH6\u{1b}[0m\n";
+        assert_eq!(
+            parse_link(output),
+            Some(Linking {
+                verification_url: "https://auth.openai.com/codex/device".to_owned(),
+                user_code: "ABCD-EFGH6".to_owned(),
+            })
+        );
+        assert_eq!(
+            parse_link(&output.replace("[94m", "[1;94m").replace("[0m", "[m")),
+            parse_link(output),
+            "combined SGR parameters and an empty reset are also colors"
+        );
+        // Unfinished and other escape sequences must not consume a valid prompt.
+        for prefix in ["\u{1b}[94", "\u{1b}]title", "\u{1b}[0m"] {
+            let prompt = format!("{prefix}\nhttps://auth.openai.com/codex/device ABCD-EFGH6");
+            assert!(parse_link(&prompt).is_some(), "{prefix:?}");
         }
     }
 

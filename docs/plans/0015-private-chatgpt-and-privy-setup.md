@@ -213,14 +213,19 @@ handoff remains necessary.
 
 ## Handback
 
+**Device prompt repair:** the owner confirms Access sign-in succeeds. The
+installed Codex 0.131.0 prints its device prompt immediately through the bridge,
+but ANSI colors prevented `parse_link` from recognizing it. Numeric SGR
+formatting is now removed before parsing. The 66 radar-model tests and scoped
+clippy pass; restoring the old parser fails the new captured-format regression.
+Linux CI, release and deployed verification remain pending for this increment.
+
 **Stopped at:** deployed connection and diagnostics increment at `49415d5`.
 Private server setup is installed and applied. ChatGPT is not logged in; the
 Privy app is configured, while wallet delegation remains unverified. No autonomous
 trading loop has been enabled. The broader private-autonomy work remains in progress.
-**Next action:** owner finishes Cloudflare Access sign-in in the existing Brave
-Radar tab using either approved owner account, and reports success or the
-resulting error. Both setup/link paths now use the correct edge application.
-Once authenticated, select Connect ChatGPT and
+**Next action:** finish CI and deploy the colored-prompt repair, then have the
+owner refresh the authenticated Radar page, select Connect ChatGPT and
 complete the displayed device login. The automated browser sign-in is blocked
 by URL protocol policy and must not be retried through a workaround.
 Verify that linking succeeds through the actual Radar service restrictions.

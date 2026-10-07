@@ -13,7 +13,7 @@ benefit of the doubt on everything else.
 
 ## Index
 
-**31 of these 42 name something mechanical that would catch a
+**32 of these 43 name something mechanical that would catch a
 recurrence. 11 name only a habit, and say so** — which is this file's opening
 standard rather than a gap in it. The habit-only rows are the ones worth reading
 twice; nothing will stop those repeating except somebody remembering.
@@ -67,6 +67,7 @@ quietly absent.
 | [40](#40-a-sudo-wrapper-conflicted-with-the-services-hardening) | A sudo wrapper conflicted with the service's hardening | the fixed-command bridge tests under NoNewPrivileges |
 | [41](#41-an-installer-refused-valid-repeated-environment-settings) | An installer refused valid repeated environment settings | setup fixtures for last-value selection and salt preservation |
 | [42](#42-a-new-operator-page-was-not-added-to-the-edge-login-gate) | A new operator page was not added to the edge login gate | habit only: verify each new page's login redirect and audience |
+| [43](#43-terminal-colors-hid-the-device-login-prompt) | Terminal colors hid the device login prompt | `the_installed_cli_colored_device_prompt_is_recognised` |
 
 ---
 
@@ -1920,3 +1921,18 @@ or removing that destination first.
 through the edge without a session: a login redirect must carry the configured
 audience. Then exercise the authenticated page and its API together. Unit tests
 cannot establish the current dashboard's external route configuration.
+
+## 43. Terminal colors hid the device login prompt
+
+**2026-10-06.** After Access login worked, Connect ChatGPT stayed at Starting
+while Radar waited for a recognizable device prompt. Capturing the installed
+Codex 0.131.0 through the isolated socket client proved it printed a prompt
+immediately on stdout, with ANSI SGR sequences attached to the URL and code.
+The parser expected a token starting with `https://` and missed that output.
+Remove numeric SGR formatting before looking for the two fields. Preserve the
+vendor-owned credential flow and the existing prompt deadline.
+
+**What catches a recurrence:** `the_installed_cli_colored_device_prompt_is_recognised`
+uses the captured format with a fictitious code, including combined SGR
+parameters, resets and unfinished escapes. Manually restoring the old parser
+makes that test fail with None instead of the expected URL and code.
