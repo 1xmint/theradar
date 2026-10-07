@@ -4,14 +4,14 @@
 //! The caller sends an [`Authorization`] and some transaction bytes and says
 //! they correspond. This module assumes that claim is false and looks.
 //!
-//! The threat model is not "a bug in the executor". It is a fully compromised
-//! executor — prompt-injected, or replaced outright — that can construct any
-//! transaction it likes and describe it any way it likes. The only things it
-//! cannot do are forge an [`Authorization`] the kernel did not issue, and change
-//! the bytes after this module has read them.
+//! A caller can construct any transaction and authorization it likes. This
+//! module enforces decoded transaction bounds and the signer's own policy;
+//! it does not authenticate the authorization's origin. The Privy process adds
+//! issuer-proof, clock and durable nonce checks before invoking this module.
+//! Even that proof establishes key provenance, not trusted kernel execution.
 //!
-//! So every check here is against the *decoded bytes*, never against anything
-//! the caller said about them.
+//! Transaction claims are checked against decoded bytes. Caller-supplied
+//! authorization bounds are also checked against this signer's own policy.
 
 use radar_risk::{Authorization, Autonomy, Policy};
 use radar_types::{Address, Slot};
@@ -1063,10 +1063,10 @@ mod tests {
     fn an_authorisation_wider_than_the_signers_policy_is_refused() {
         // The only case this change is about.
         //
-        // The signer does not verify that an `Authorization` came from the
-        // kernel -- no MAC, and the nonce is checked against nothing -- so its
-        // bounds are the caller's claim about what was approved. Before ADR
-        // 0008 that claim was the only ceiling there was.
+        // This library check does not authenticate an Authorization or consume
+        // its nonce. The Privy process has additional guards; this policy clamp
+        // still applies independently. Before ADR 0008 the caller's claim was
+        // the only ceiling here.
         //
         // Refused rather than quietly clamped to the smaller number: a caller
         // asking for more than the operator allowed is either a bug or an

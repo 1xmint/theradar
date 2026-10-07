@@ -625,12 +625,30 @@ rollback and HTTP resubmission of returned signatures remain separate concerns.
   real-process tampering regression. Removing expiry permits an old intent even
   with a caller slot of zero and fails the real-process clock regression.
   Restored both guards: scoped tests and all 33 conformance tests passed.
-- [ ] Full CI including all four mutation shards at the code commit.
+- [x] Code commit `7899833fa5787a86692398fe9b0730ac764b84a1`: full CI
+  37642745249 passed, including 2,395 Rust tests, 352 web tests, all four
+  mutation shards and their final gate. Linux signer tests passed as well.
 
-**Handback in progress:** do not deploy or enable a signer. Production stays at
+**Handback:** the receiving boundary is implemented and verified in the repo;
+do not deploy or enable a signer. Production stays at
 Serve `3f38ee0`; no issuer or live time cap has been provisioned. Next integrate
 trusted mandate/portfolio reservations with isolated issuance and reconciliation.
 Latest loopback health confirms status ok, policyClosed true and build `3f38ee0`;
-signer socket is inactive. Prior documentation CI 37641528789 is still running
-its final mutation shard; do not push over it. No signing, delegation or trade
-has been performed. The earlier rejected cleanup is not retried.
+signer socket is inactive. Prior documentation CI 37641528789 completed with
+overall conclusion failure, although all 13 listed jobs (including all four
+mutation shards) report success and `gh run view --log-failed` returned no log.
+The aggregate inconsistency is unresolved, not described as a clean CI pass.
+The subsequent code commit's full CI passed, as recorded above. PR 334 describes
+the actual guarantees and remaining gates. No real signing, delegation or trade
+has been performed. The earlier rejected cleanup is not retried. Target remains
+25.9 GiB with 122 GiB free; no local Cargo process remains.
+
+Next-step inspection: reuse `radar-types::Portfolio` and
+`radar-journal::OperationLog` rather than inventing another reservation ledger.
+The latter already has reserve/submit/rehold and refuses to free unknown
+submissions as failures; its existing runtime caller is CLI `consider`, not the
+private trader. `Journal::open` does not acquire a cross-process writer lock.
+An isolated authority needs exclusive ownership of that state, trusted wallet
+asset snapshots and conservative USD valuation, mandate version/revocation,
+and confirmed settlement reconciliation. The site's `automation::Preferences`
+remains a Serve-owned draft; do not load it as autonomous authority unchanged.

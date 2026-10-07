@@ -6,8 +6,10 @@ complete; P2, P4, P5, remaining P7 and P8 unstarted.** No live operation is
 authorised by this document. Work resumed at the owner's request in October;
 [plan 0015](0015-private-chatgpt-and-privy-setup.md) records the private ChatGPT
 subscription link, Privy wallet/balance and draft settings. Signer request binding
-at `3f38ee0` is preparation for P6; authenticated issuance and durable accounting
-remain incomplete. The earlier 2026-09-26 inspection found no progress beyond
+at `3f38ee0` is preparation for P6; the Privy process now verifies exact issuer
+proofs, host-clock expiry and durable nonce reuse (`7899833`). The isolated
+kernel/reservation issuer and durable accounting remain incomplete. The earlier
+2026-09-26 inspection found no progress beyond
 #237 (`7ef027d`) while plans 0013/0014 ran; that is historical, not current status.
 **Date:** 2026-09-09, implementation begun 2026-09-09.
 **Branch:** merged to `main`; implementation lands there as ordinary pull requests.
