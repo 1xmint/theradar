@@ -10,17 +10,18 @@
 //!
 //! # What this defends against
 //!
-//! Not a bug in the executor — a *replaced* executor. Assume it can build any
-//! transaction and describe it any way it likes. The two things it cannot do
-//! are forge an [`radar_risk::Authorization`] the kernel never issued, and
-//! change the bytes between this module reading them and the signature covering
-//! them. Every check is against the decoded bytes; nothing the caller says
-//! about a transaction is an input.
+//! The transaction must match the caller-supplied authorization and this
+//! signer's policy. Issuer authenticity is not verified: a replaced executor
+//! can forge an authorization within those bounds. The Privy process also
+//! consumes each nonce persistently before using its key; this library alone
+//! does not enforce single use. Independent portfolio accounting and issuance
+//! authentication remain prerequisites for live autonomy.
 
 pub mod canonical;
 pub mod key;
 pub mod privy;
 pub mod protocol;
+pub mod replay;
 pub mod turnkey;
 pub mod tx;
 pub mod verify;

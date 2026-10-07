@@ -87,6 +87,10 @@ impl Signer {
             .env("RADAR_SIGNER_PRIVY_APP_ID", "cmthhkznr0a3u0cl86prxlb7x")
             .env("RADAR_SIGNER_PRIVY_WALLET_ID", "abc")
             .env("RADAR_SIGNER_PRIVY_WALLET_ADDRESS", b58(&wallet()));
+        command.env(
+            "RADAR_SIGNER_NONCE_DIR",
+            nonce_directory(key_file.parent().expect("parent")),
+        );
         Self::from_command(command)
     }
 
@@ -606,7 +610,9 @@ fn the_running_process_checks_a_privy_request_before_it_authorises_one() {
         "an authorised answer carries a header value: {honest}"
     );
 
-    let substituted = signer.ask(&privy_request(&substituted_mint()));
+    let mut substituted = privy_request(&substituted_mint());
+    substituted["authorization"]["nonce"] = serde_json::json!("substituted-mint");
+    let substituted = signer.ask(&substituted);
     assert_eq!(
         substituted["outcome"], "refused",
         "a request for a token the authorisation does not cover must be refused: {substituted}"
@@ -646,7 +652,23 @@ fn privy_only_command(policy: &std::path::Path) -> Command {
         .env("RADAR_SIGNER_PRIVY_APP_ID", "cmthhkznr0a3u0cl86prxlb7x")
         .env("RADAR_SIGNER_PRIVY_WALLET_ID", "abc")
         .env("RADAR_SIGNER_PRIVY_WALLET_ADDRESS", b58(&wallet()));
+    command.env(
+        "RADAR_SIGNER_NONCE_DIR",
+        nonce_directory(policy.parent().expect("parent")),
+    );
     command
+}
+
+fn nonce_directory(parent: &std::path::Path) -> std::path::PathBuf {
+    let dir = parent.join("nonces");
+    std::fs::create_dir_all(&dir).expect("nonce directory");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700))
+            .expect("permissions");
+    }
+    dir
 }
 
 #[test]
@@ -664,9 +686,11 @@ fn privy_only_needs_no_local_key_and_refuses_local_signing() {
     );
     let mut wrong = privy_request(&honest());
     wrong["wallet"] = serde_json::json!(b58(&[0x44; 32]));
+    wrong["authorization"]["nonce"] = serde_json::json!("wrong-wallet");
     assert_eq!(signer.ask(&wrong)["outcome"], "refused");
     wrong = privy_request(&honest());
     wrong["request"]["url"] = serde_json::json!("https://api.privy.io/v1/wallets/other/rpc");
+    wrong["authorization"]["nonce"] = serde_json::json!("wrong-url");
     assert_eq!(signer.ask(&wrong)["outcome"], "refused");
 }
 
@@ -689,6 +713,7 @@ fn missing_or_invalid_privy_configuration_never_falls_back() {
         "RADAR_SIGNER_PRIVY_WALLET_ADDRESS",
         "RADAR_SIGNER_POLICY",
         "RADAR_SIGNER_PROGRAMS",
+        "RADAR_SIGNER_NONCE_DIR",
     ] {
         let mut command = privy_only_command(&policy);
         command.env_remove(name);
@@ -715,4 +740,154 @@ fn missing_or_invalid_privy_configuration_never_falls_back() {
             "{name}"
         );
     }
+}
+
+#[test]
+fn a_privy_nonce_cannot_be_reused_after_restart_or_for_changed_bytes() {
+    let scratch = Scratch::new("privy-restart");
+    let policy = policy_file(&scratch.0, &open_policy());
+    let original = privy_request(&honest());
+    {
+        let mut signer = Signer::from_command(privy_only_command(&policy));
+        assert_eq!(signer.ask(&original)["outcome"], "authorised");
+    }
+    let mut restarted = Signer::from_command(privy_only_command(&policy));
+    assert_eq!(restarted.ask(&original)["outcome"], "refused");
+    let mut changed = original.clone();
+    changed["now_slot"] = serde_json::json!(1_001);
+    let mut changed_bytes = radar_types::b64::decode(&honest()).expect("transaction");
+    *changed_bytes.last_mut().expect("instruction data") = 0xCE;
+    changed["request"]["body"]["params"]["transaction"] =
+        serde_json::json!(radar_types::b64::encode(&changed_bytes));
+    assert_eq!(restarted.ask(&changed)["outcome"], "refused");
+    changed["authorization"]["nonce"] = serde_json::json!("fresh-intent");
+    assert_eq!(restarted.ask(&changed)["outcome"], "authorised");
+}
+
+#[test]
+fn concurrent_privy_processes_cannot_consume_one_nonce_twice() {
+    let scratch = Scratch::new("privy-concurrent");
+    let policy = policy_file(&scratch.0, &open_policy());
+    let first = Signer::from_command(privy_only_command(&policy));
+    let second = Signer::from_command(privy_only_command(&policy));
+    let barrier = std::sync::Arc::new(std::sync::Barrier::new(3));
+    let threads: Vec<_> = [first, second]
+        .into_iter()
+        .map(|mut signer| {
+            let barrier = barrier.clone();
+            std::thread::spawn(move || {
+                barrier.wait();
+                signer.ask(&privy_request(&honest()))
+            })
+        })
+        .collect();
+    barrier.wait();
+    let answers: Vec<_> = threads
+        .into_iter()
+        .map(|thread| thread.join().expect("joined"))
+        .collect();
+    assert_eq!(
+        answers
+            .iter()
+            .filter(|answer| answer["outcome"] == "authorised")
+            .count(),
+        1,
+        "{answers:?}"
+    );
+    assert_eq!(
+        answers
+            .iter()
+            .filter(|answer| answer["outcome"] == "refused")
+            .count(),
+        1,
+        "{answers:?}"
+    );
+}
+
+#[test]
+fn failed_or_interrupted_privy_attempts_remain_consumed() {
+    let scratch = Scratch::new("privy-interrupted");
+    let policy = policy_file(&scratch.0, &open_policy());
+    let directory = nonce_directory(&scratch.0);
+    // A crash after reserving, before signing/output, cannot silently release it.
+    radar_signer::replay::ReplayStore::at(&directory)
+        .expect("store")
+        .claim("test-nonce")
+        .expect("reserve");
+    let mut signer = Signer::from_command(privy_only_command(&policy));
+    assert_eq!(signer.ask(&privy_request(&honest()))["outcome"], "refused");
+    let mut invalid = privy_request(&substituted_mint());
+    invalid["authorization"]["nonce"] = serde_json::json!("rejected-attempt");
+    assert_eq!(signer.ask(&invalid)["outcome"], "refused");
+    let mut corrected = privy_request(&honest());
+    corrected["authorization"]["nonce"] = serde_json::json!("rejected-attempt");
+    assert_eq!(signer.ask(&corrected)["outcome"], "refused");
+}
+
+#[test]
+fn a_missing_nonce_directory_is_never_recreated_by_the_signer() {
+    let scratch = Scratch::new("privy-missing-state");
+    let policy = policy_file(&scratch.0, &open_policy());
+    let missing = scratch.0.join("missing-state");
+    let mut command = privy_only_command(&policy);
+    command.env("RADAR_SIGNER_NONCE_DIR", &missing);
+    let mut signer = Signer::from_command(command);
+    assert_eq!(signer.ask(&privy_request(&honest()))["outcome"], "refused");
+    assert!(!missing.exists());
+}
+
+#[test]
+fn loss_of_nonce_state_while_running_refuses_fresh_intents() {
+    let scratch = Scratch::new("privy-lost-state");
+    let policy = policy_file(&scratch.0, &open_policy());
+    let mut signer = Signer::from_command(privy_only_command(&policy));
+    assert_eq!(
+        signer.ask(&privy_request(&honest()))["outcome"],
+        "authorised"
+    );
+    std::fs::rename(scratch.0.join("nonces"), scratch.0.join("retained-nonces"))
+        .expect("retain state");
+    let mut fresh = privy_request(&honest());
+    fresh["authorization"]["nonce"] = serde_json::json!("fresh-after-loss");
+    assert_eq!(signer.ask(&fresh)["outcome"], "refused");
+    assert!(!scratch.0.join("nonces").exists());
+}
+
+#[test]
+fn blank_nonces_refuse_and_nonce_text_never_becomes_a_path() {
+    let scratch = Scratch::new("privy-nonce-text");
+    let policy = policy_file(&scratch.0, &open_policy());
+    let mut signer = Signer::from_command(privy_only_command(&policy));
+    for nonce in ["", " \t\n "] {
+        let mut request = privy_request(&honest());
+        request["authorization"]["nonce"] = serde_json::json!(nonce);
+        assert_eq!(signer.ask(&request)["outcome"], "refused");
+    }
+    assert_eq!(
+        std::fs::read_dir(scratch.0.join("nonces"))
+            .expect("read")
+            .count(),
+        0
+    );
+    let mut escaped = privy_request(&honest());
+    escaped["authorization"]["nonce"] = serde_json::json!("../outside");
+    assert_eq!(signer.ask(&escaped)["outcome"], "authorised");
+    assert!(!scratch.0.join("outside").exists());
+    assert_eq!(signer.ask(&escaped)["outcome"], "refused");
+}
+
+#[cfg(unix)]
+#[test]
+fn nonce_state_with_shared_permissions_is_refused() {
+    use std::os::unix::fs::PermissionsExt as _;
+    let scratch = Scratch::new("privy-permissions");
+    let policy = policy_file(&scratch.0, &open_policy());
+    let command = privy_only_command(&policy);
+    std::fs::set_permissions(
+        scratch.0.join("nonces"),
+        std::fs::Permissions::from_mode(0o750),
+    )
+    .expect("permissions");
+    let mut signer = Signer::from_command(command);
+    assert_eq!(signer.ask(&privy_request(&honest()))["outcome"], "refused");
 }

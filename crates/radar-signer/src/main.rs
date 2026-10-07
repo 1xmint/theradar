@@ -18,6 +18,9 @@
 //!   mode. A configured key also requires `RADAR_SIGNER_PRIVY_APP_ID`,
 //!   `RADAR_SIGNER_PRIVY_WALLET_ID` and `RADAR_SIGNER_PRIVY_WALLET_ADDRESS`.
 //!   These bind signing requests to trusted startup configuration.
+//! - `RADAR_SIGNER_NONCE_DIR` — existing private persistent directory, required
+//!   with any Privy key. Each nonce is consumed before the key is used, even if
+//!   the attempt then fails. Missing state refuses rather than being recreated.
 //! - `RADAR_SIGNER_PROGRAMS` — comma-separated base58 program ids that may
 //!   appear in a signed transaction. Absent means every request is refused; an
 //!   empty allowlist is a signer that will sign anything, and that is the one
@@ -29,6 +32,7 @@ use std::path::PathBuf;
 use radar_risk::Policy;
 use radar_signer::privy::{AuthorizationKey, WalletScope, authorise};
 use radar_signer::protocol::{Envelope, PrivyAuthorization, Response, bounds_of, place_signature};
+use radar_signer::replay::ReplayStore;
 use radar_signer::{Allowlist, Key, check};
 use radar_types::{Address, Slot};
 
@@ -108,7 +112,7 @@ struct Config {
     /// from the caller.
     ///
     /// The signer does not verify that an `Authorization` came from the kernel
-    /// -- there is no MAC on it, and its nonce is checked against nothing. So an
+    /// -- there is no MAC on it. Privy nonces are consumed before key use, but an
     /// authorisation's bounds are the caller's claim about what was approved.
     /// Every one of them is clamped against this, unconditionally
     /// ([ADR 0008](https://github.com/hey-vera/radar/blob/main/docs/adr/0008-the-signer-holds-its-own-policy.md)).
@@ -122,7 +126,7 @@ struct Config {
     /// `None` is a refusal for the customer lane and leaves the local lane
     /// untouched. An instance with no customers needs no customer key, and
     /// refusing to start without one would take down the lane that works.
-    privy: Option<(AuthorizationKey, WalletScope)>,
+    privy: Option<(AuthorizationKey, WalletScope, ReplayStore)>,
 }
 
 impl Config {
@@ -176,9 +180,12 @@ impl Config {
                     .map_err(|_| "RADAR_SIGNER_PRIVY_WALLET_ADDRESS is not set".to_owned())?
                     .parse::<Address>()
                     .map_err(|_| "configured wallet is not a base58 address".to_owned())?;
+                let nonce_dir = std::env::var("RADAR_SIGNER_NONCE_DIR")
+                    .map_err(|_| "RADAR_SIGNER_NONCE_DIR is not set".to_owned())?;
                 Some((
                     AuthorizationKey::parse(&material).map_err(|e| e.to_string())?,
                     WalletScope::new(&app, &wallet_id, wallet).map_err(|e| e.to_string())?,
+                    ReplayStore::at(&PathBuf::from(nonce_dir)).map_err(|e| e.to_string())?,
                 ))
             }
             _ => None,
@@ -203,7 +210,7 @@ impl Config {
 /// `privy::authorise`, which reads the transaction out of the request body
 /// rather than being handed one.
 fn handle_privy(privy: &PrivyAuthorization, config: &Config) -> Response {
-    let Some((key, scope)) = config.privy.as_ref() else {
+    let Some((key, scope, replay)) = config.privy.as_ref() else {
         // Rule 8. No key means no customer signing, not an unsigned request --
         // an unsigned request would simply be rejected by Privy, but reporting
         // it as anything other than "not configured" would send an operator to
@@ -215,6 +222,11 @@ fn handle_privy(privy: &PrivyAuthorization, config: &Config) -> Response {
     };
     if &wallet != scope.wallet() {
         return Response::refused("the wallet does not match the configured Privy wallet");
+    }
+    // Reserve before using the key. Even a rejected or interrupted attempt is
+    // consumed: retry requires a newly issued authorization, not erasing state.
+    if replay.claim(&privy.authorization.nonce).is_err() {
+        return Response::refused("authorization nonce is reused, empty or cannot be persisted");
     }
 
     match authorise(

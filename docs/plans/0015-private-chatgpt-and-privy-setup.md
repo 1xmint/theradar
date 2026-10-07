@@ -549,3 +549,33 @@ made. Owner may save limits through the existing site inputs. The next code
 increment is authenticated issuance, replay/expiry control and durable capital /
 submission accounting before delegation or worker activation. No real wallet
 creation, delegated signing, funding or trade was performed by the agent.
+
+### Privy single-attempt authorization state — 2026-10-07
+
+Owner requested continuation. Starting from `4e99859`, implement the next P6
+control at its existing caller, the signer's Privy stdin handler. Require an
+existing persistent private nonce directory; consume a SHA-256-named marker
+atomically and sync it before key use. This prevents reuse across processes and
+restarts. Failed attempts stay consumed. Scope this increment to replay state;
+do not describe it as issuer authentication, trusted expiry, enforceable site
+limits or complete transaction accounting.
+
+- [x] Add the replay store and mandatory Privy process configuration.
+- [x] Preserve local-only startup without Privy state; permit only the protected
+  nonce directory in the unit's filesystem write allowance.
+- [x] Real-process tests cover restart, modified requests, concurrent processes,
+  interrupted/rejected attempts, blank/path-shaped nonces and lost state.
+  Unix CI also checks private directory permissions.
+- [x] Replacing exclusive marker creation with overwrite/truncate makes the
+  real-process restart regression fail with a second Authorised response.
+  Restored exclusive creation and the regression passed.
+- [x] Scoped signer tests passed (107 on Windows), all-target signer Clippy
+  passed with warnings denied, and all 33 repository conformance tests passed.
+  Fixed the context-file line budget by keeping the updated guarantee concise.
+- [ ] Finish full CI; record the final commit.
+
+No production signer configuration or delegation is changed. The site stays
+at `3f38ee0` and the shipped policy stays closed. No new site artifact is needed
+for this signer-only increment. Next: authenticate issuance and expiry and connect
+the owner mandate to durable reservation/submission accounting before enabling
+any signer or worker.

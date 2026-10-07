@@ -135,6 +135,32 @@ nonce, portfolio accounting or trusted-clock gaps above. The existing executor
 composition test uses this bound scope. No production signer or delegation is
 enabled by this source change; `Policy::SHIPPED` remains closed.
 
+## Privy single-attempt guard — 2026-10-07
+
+The Privy binary now requires `RADAR_SIGNER_NONCE_DIR`, an existing signer-owned
+private directory on a persistent local filesystem. It exclusively creates a
+SHA-256-named tombstone for the nonce, syncs that file and (on Unix) its directory,
+then invokes the checked signing method. Concurrent processes cannot create the
+same tombstone; existing markers refuse across process restarts and key rotation.
+Empty nonces, missing state and persistence failures refuse. Nonce text is never
+used as a path. The zero-byte marker is sufficient: existence means consumed,
+regardless of its contents, and no signature is stored there.
+
+The decision deliberately trades transparent retry for refusal: an interrupted,
+rejected or ambiguously completed attempt stays consumed. Reconcile before
+requesting a new authorization. Never clear state to retry. The systemd unit
+permits writes only to this state directory; it does not automatically recreate
+missing nonce state. Protect and preserve that directory, including backups;
+deletion or rollback by an administrator can reset replay protection.
+
+This is at-most-one signing attempt per caller-supplied nonce in the Privy
+**process**, not an authenticated issuer or a network replay guarantee. It does
+not prevent the executor from resending an already obtained signature to Privy,
+forging fresh nonces or lying about time/state. `privy::authorise` remains a
+checked-signing library method without this process state. The local lane is
+unchanged. Authenticated issuance, trusted expiry and durable portfolio/submission
+accounting remain incomplete. Live delegation and execution stay inactive.
+
 ## What would reverse this
 
 Nothing foreseeable reverses holding a policy locally. The specific ceilings are

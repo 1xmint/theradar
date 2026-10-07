@@ -53,9 +53,9 @@ pub struct PrivyAuthorization {
     pub request: crate::privy::PrivyRequest,
     /// The customer's wallet, base58.
     ///
-    /// The account the transaction must be signed by. Supplied by the caller and
-    /// then checked against the bytes, like everything else here — a caller that
-    /// names the wrong wallet gets a refusal, not somebody else's signature.
+    /// Must match the process's configured wallet scope as well as the bytes.
+    /// The process consumes the authorization nonce before using the Privy key;
+    /// the authorization's issuer is not yet authenticated.
     pub wallet: String,
     /// The caller's view of the chain head.
     pub now_slot: u64,

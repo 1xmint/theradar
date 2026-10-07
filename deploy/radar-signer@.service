@@ -48,4 +48,7 @@ LockPersonality=yes
 SystemCallFilter=@system-service
 SystemCallArchitectures=native
 CapabilityBoundingSet=
-ReadWritePaths=
+# Provision once; deliberately no StateDirectory= automatic recreation. Missing
+# replay state must refuse Privy signing rather than reset consumed nonces.
+# The '-' permits a local-only instance without Privy state to keep running.
+ReadWritePaths=-/var/lib/radar-signer/nonces

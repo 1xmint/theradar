@@ -137,8 +137,8 @@ rule *currently reaches* is status, and status is in
 
    **State the signer's guarantee exactly, because an earlier version said
    "absolute" and was read as more than it is.** The signer does not verify that
-   an `Authorization` came from the kernel: there is no MAC and the `nonce` is
-   never checked. The property is *the transaction matches the authorisation the
+   an `Authorization` came from the kernel: no MAC. Only the Privy binary checks
+   nonce reuse durably. The property is *the transaction matches the authorisation the
    caller supplied* — a complete defence against an executor **bug**, and not one
    against a **compromised caller**, which writes its own authorisation.
    LEARNINGS 23, and [ADR 0007](docs/adr/0007-the-privy-authorization-key-lives-in-the-signer-process.md).
