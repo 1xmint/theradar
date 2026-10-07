@@ -425,22 +425,31 @@ fn wait_with_deadline(
     deadline: Duration,
     seconds: u64,
 ) -> Result<std::process::Output, Unreachable> {
+    // Drain while the child runs: waiting first deadlocks once either pipe
+    // fills. Only stdout is the answer; credential-adjacent stderr is discarded.
+    let stdout = child.stdout.take().map(|mut pipe| {
+        std::thread::spawn(move || {
+            let mut bytes = Vec::new();
+            let _ = pipe.read_to_end(&mut bytes);
+            bytes
+        })
+    });
+    if let Some(mut pipe) = child.stderr.take() {
+        std::thread::spawn(move || {
+            let _ = std::io::copy(&mut pipe, &mut std::io::sink());
+        });
+    }
     let started = std::time::Instant::now();
     loop {
         match child.try_wait() {
             Ok(Some(status)) => {
-                let mut stdout = Vec::new();
-                let mut stderr = Vec::new();
-                if let Some(mut pipe) = child.stdout.take() {
-                    let _ = pipe.read_to_end(&mut stdout);
-                }
-                if let Some(mut pipe) = child.stderr.take() {
-                    let _ = pipe.read_to_end(&mut stderr);
-                }
+                let stdout = stdout
+                    .and_then(|reader| reader.join().ok())
+                    .unwrap_or_default();
                 return Ok(std::process::Output {
                     status,
                     stdout,
-                    stderr,
+                    stderr: Vec::new(),
                 });
             }
             Ok(None) => {
@@ -611,6 +620,44 @@ mod tests {
         .expect("a successful call with output");
         assert_eq!(answer.text, "the creator has 41 launches");
         assert_eq!(answer.cost, None, "a subscription does not bill per call");
+    }
+
+    #[test]
+    fn verbose_subprocess_finishes_without_exposing_stderr() {
+        let child = Command::new(std::env::current_exe().expect("test executable"))
+            .args([
+                "--exact",
+                "codex::tests::pipe_filling_cli_fixture",
+                "--nocapture",
+            ])
+            .env("RADAR_TEST_PIPE_FIXTURE", "1")
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("spawn fixture");
+        let output = wait_with_deadline(child, Duration::from_secs(5), 5)
+            .expect("draining both pipes lets the child exit before the deadline");
+        assert!(output.status.success());
+        assert!(output.stdout.windows(5).any(|bytes| bytes == b"READY"));
+        assert!(output.stdout.len() > 128 * 1024);
+        assert!(
+            output.stderr.is_empty(),
+            "vendor diagnostics must not escape"
+        );
+    }
+
+    #[test]
+    fn pipe_filling_cli_fixture() {
+        if std::env::var_os("RADAR_TEST_PIPE_FIXTURE").is_none() {
+            return;
+        }
+        std::io::stdout()
+            .write_all(&vec![b'x'; 128 * 1024])
+            .expect("stdout");
+        std::io::stderr()
+            .write_all(&vec![b'y'; 128 * 1024])
+            .expect("stderr");
+        std::io::stdout().write_all(b"READY\n").expect("answer");
     }
 
     #[test]

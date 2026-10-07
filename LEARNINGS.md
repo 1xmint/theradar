@@ -13,7 +13,7 @@ benefit of the doubt on everything else.
 
 ## Index
 
-**32 of these 43 name something mechanical that would catch a
+**33 of these 44 name something mechanical that would catch a
 recurrence. 11 name only a habit, and say so** — which is this file's opening
 standard rather than a gap in it. The habit-only rows are the ones worth reading
 twice; nothing will stop those repeating except somebody remembering.
@@ -68,6 +68,7 @@ quietly absent.
 | [41](#41-an-installer-refused-valid-repeated-environment-settings) | An installer refused valid repeated environment settings | setup fixtures for last-value selection and salt preservation |
 | [42](#42-a-new-operator-page-was-not-added-to-the-edge-login-gate) | A new operator page was not added to the edge login gate | habit only: verify each new page's login redirect and audience |
 | [43](#43-terminal-colors-hid-the-device-login-prompt) | Terminal colors hid the device login prompt | `the_installed_cli_colored_device_prompt_is_recognised` |
+| [44](#44-waiting-for-a-cli-before-draining-its-pipes-deadlocked-inference) | Waiting for a CLI before draining its pipes deadlocked inference | `verbose_subprocess_finishes_without_exposing_stderr` |
 
 ---
 
@@ -1936,3 +1937,20 @@ vendor-owned credential flow and the existing prompt deadline.
 uses the captured format with a fictitious code, including combined SGR
 parameters, resets and unfinished escapes. Manually restoring the old parser
 makes that test fail with None instead of the expected URL and code.
+
+## 44. Waiting for a CLI before draining its pipes deadlocked inference
+
+**2026-10-06.** Login and a direct isolated-client call succeeded, but the
+authenticated Radar question timed out after 90 seconds. The model caller
+polled for child exit before reading stdout and stderr. A verbose CLI filled
+its pipe and blocked writing; Radar waited for a process that could not exit.
+The direct diagnostic used communicate, which drains both streams and hid this
+caller difference. Health also waited behind the investigation's meter lock.
+
+Drain both streams concurrently while retaining only stdout as the answer.
+Discard credential-adjacent stderr; keep the child deadline and cleanup.
+
+**What catches a recurrence:** `verbose_subprocess_finishes_without_exposing_stderr`
+runs a portable subprocess fixture that fills both pipes beyond their usual
+capacity before emitting READY. The fixed caller completes and exposes no
+stderr. Restoring the old wait-before-read function times out at five seconds.

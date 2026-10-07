@@ -250,7 +250,9 @@ The isolated CLI remains logged in and Radar retains its service hardening.
 The current administrator script is uploaded at `/tmp/radar-private-setup.py`,
 matching local SHA-256
 `2b964e5e0c36143a1ae39fc515c75ae4c99a269e6c1a55587918401b203da76b`.
-Administrator application remains pending; health still reports the agent off.
+The owner ran the administrator command and fixed deployment. Local and public
+health now report agent configured true, provider codex and build `d1213e6`;
+login status remains Logged in using ChatGPT and hardening remains intact.
 Local validation: 68 radar-model tests, the allowance reporting binary test,
 33 conformance tests, scoped model/serve clippy and formatting pass. Disabling
 the new unlimited literal makes its allowance regression fail. Eight Linux
@@ -261,17 +263,24 @@ can be drawn because no instrument evidence was provided." This verifies
 subscription inference through the bridge, not the still-disabled Radar chat
 route or the complete service namespaces. No credential output was exposed.
 
-**Stopped at:** deployed explicit unlimited subscription support at `d1213e6`;
-the selected root-only allowance has not yet been applied.
+**First site inference:** used the owner's authenticated Radar tab to ask a
+read-only creator-history/refusal question through `/ask`. It reached the CLI,
+then timed out at 90 seconds. The direct successful diagnostic drained both
+streams, while Rust waited for exit before reading them. A pipe-filling child
+therefore blocked. The caller now drains stdout and discards stderr concurrently
+while retaining the deadline. Seventy model tests and scoped clippy pass;
+restoring the old function fails the subprocess regression at five seconds.
+CI, release, deployment and repeating the authenticated site test remain.
+
+**Stopped at:** unlimited subscription inference is configured at `d1213e6`;
+the first site call exposed a subprocess output deadlock, now repaired locally.
 Private server setup is installed and applied. ChatGPT login is verified; the
 Privy app is configured, while wallet delegation remains unverified. No autonomous
 trading loop has been enabled. The broader private-autonomy work remains in progress.
-**Next action:** the owner runs the prepared command in their administrator SSH
-terminal: `sudo python3 /tmp/radar-private-setup.py --unlimited-subscription`,
-followed by `sudo radar-deploy` using the verified staged artifact. Then verify
-the agent reports configured and make a read-only evidence-backed model call
-through Radar. The automated browser sign-in remains blocked
-by URL protocol policy and must not be retried through a workaround.
+**Next action:** finish CI and deploy the concurrent-drain repair from a verified
+release, then repeat the read-only site question and retain the result and health
+status. The owner's authenticated HTTP/HTTPS tab is now accessible for this
+test; the earlier suspended login tab remains blocked and is not retried.
 Obtain the owner's Privy DID and dedicated wallet ID to configure private admission.
 The owner has been asked whether a dedicated embedded Solana wallet already
 exists. The web package currently has no Privy SDK/login or embedded-wallet
