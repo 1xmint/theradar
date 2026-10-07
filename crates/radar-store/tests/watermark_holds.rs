@@ -89,11 +89,12 @@ fn matching_reads_filter_during_decode_without_exposing_future_rows() {
     assert_eq!(*visited.borrow(), vec![Slot(slots[0]), Slot(slots[1])]);
     assert_eq!(matching.len(), 1);
     assert_eq!(matching[0].slot(), Slot(slots[1]));
-    assert!(
+    assert_eq!(
         reader
             .read_matching(Table::Launches, AsOf::at(Slot(slots[3])), &|_| false)
             .expect("reject every row")
-            .is_empty()
+            .len(),
+        0
     );
     assert_eq!(
         reader
