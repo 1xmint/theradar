@@ -324,6 +324,19 @@ impl Reader {
     ///
     /// Returns [`StoreError`] if a file cannot be read or a row is malformed.
     pub fn read_outcomes(&self, as_of: AsOf) -> Result<Vec<Outcome>, StoreError> {
+        self.read_outcomes_matching(as_of, &|_| true)
+    }
+
+    /// Reads matching outcome measurements without retaining unrelated rows.
+    /// The measurement watermark is applied before the caller predicate.
+    ///
+    /// # Errors
+    /// Returns [`StoreError`] if a file cannot be read or a row is malformed.
+    pub fn read_outcomes_matching(
+        &self,
+        as_of: AsOf,
+        keep: &impl Fn(&Outcome) -> bool,
+    ) -> Result<Vec<Outcome>, StoreError> {
         let mut out = Vec::new();
         for path in self.files(Table::Outcomes)? {
             if start_slot_of(&path).is_some_and(|start| start > as_of.slot().get()) {
@@ -365,7 +378,7 @@ impl Reader {
                     if !as_of.admits(measured_at) {
                         continue;
                     }
-                    out.push(Outcome {
+                    let outcome = Outcome {
                         mint: parse(mint.value(i), "mint")?,
                         measured_at,
                         launch_slot: Slot(launch.value(i)),
@@ -385,7 +398,10 @@ impl Reader {
                         window_trough_price: cell(window_trough, i),
                         vwap: cell(vwap, i),
                         fills: cell(fills, i).unwrap_or(0),
-                    });
+                    };
+                    if keep(&outcome) {
+                        out.push(outcome);
+                    }
                 }
             }
         }

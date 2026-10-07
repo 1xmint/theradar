@@ -112,14 +112,6 @@ impl Instrument for CreatorTrackRecord {
                 detail: e.to_string(),
             }
         })?;
-        let outcomes =
-            ctx.store
-                .read_outcomes(ctx.as_of)
-                .map_err(|e| InstrumentError::OutOfRange {
-                    as_of: ctx.as_of.to_string(),
-                    detail: e.to_string(),
-                })?;
-
         let mints: Vec<radar_types::Address> = launches
             .iter()
             .filter_map(|e| match e {
@@ -127,6 +119,13 @@ impl Instrument for CreatorTrackRecord {
                 _ => None,
             })
             .collect();
+        let outcomes = ctx
+            .store
+            .read_outcomes_matching(ctx.as_of, &|outcome| mints.contains(&outcome.mint))
+            .map_err(|e| InstrumentError::OutOfRange {
+                as_of: ctx.as_of.to_string(),
+                detail: e.to_string(),
+            })?;
 
         // A mint can be measured more than once. Keep the latest measurement at
         // or before the watermark, because that is what was known then.

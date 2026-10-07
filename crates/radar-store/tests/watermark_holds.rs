@@ -220,6 +220,35 @@ fn outcomes_are_gated_on_when_they_were_measured() {
 }
 
 #[test]
+fn matching_outcomes_retain_only_selected_admitted_measurements() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let slots = slots_in_one_partition();
+    let mut writer = Writer::open(dir.path(), 10_000).expect("open");
+    for slot in slots {
+        writer.append_outcome(outcome_at(slot)).expect("append");
+    }
+    writer.flush().expect("flush");
+    let reader = Reader::open(dir.path());
+    let visited = std::cell::RefCell::new(Vec::new());
+    let matching = reader
+        .read_outcomes_matching(AsOf::at(Slot(slots[1])), &|outcome| {
+            visited.borrow_mut().push(outcome.measured_at);
+            outcome.measured_at == Slot(slots[1])
+        })
+        .expect("matching outcomes");
+    assert_eq!(*visited.borrow(), vec![Slot(slots[0]), Slot(slots[1])]);
+    assert_eq!(matching.len(), 1);
+    assert_eq!(matching[0].measured_at, Slot(slots[1]));
+    assert_eq!(
+        reader
+            .read_outcomes_matching(AsOf::at(Slot(slots[3])), &|_| false)
+            .expect("reject all")
+            .len(),
+        0
+    );
+}
+
+#[test]
 fn a_watermark_before_everything_returns_nothing_rather_than_everything() {
     // The failure direction that matters: an inverted comparison returns the
     // whole store, and every count downstream still looks plausible.

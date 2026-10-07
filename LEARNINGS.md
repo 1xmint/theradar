@@ -1967,7 +1967,10 @@ through the fixed deploy procedure to restore service, without raising the cap.
 
 Reader::read_matching applies the watermark and caller predicate during row
 decode. Both creator tools use it, retaining only matching launch events.
-Matching rows and track-record outcomes still occupy memory; this is not a
+The live repeat then exposed the same retention in the 282M outcomes table:
+MemoryPeak reached the 805306368-byte cap before inference. Restored service
+again through fixed deployment. Track-record now applies a matching outcome
+predicate during decode as well. Matching rows still occupy memory; this is not a
 constant-memory guarantee for arbitrarily large results.
 
 **What catches a recurrence:** habit only for the resource regression. Repeat
@@ -1978,3 +1981,5 @@ the decoder predicate fails that test with four rows instead of one; restoring
 it passes. Reverting the instruments to full reads could preserve their outputs
 while reintroducing excess retention, so logical tests alone cannot prove this
 resource fix.
+The outcome predicate regression also checks that callbacks never see future
+measurements. Removing its retention filter fails the selected-row assertion.

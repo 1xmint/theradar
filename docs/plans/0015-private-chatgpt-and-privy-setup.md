@@ -284,13 +284,21 @@ before inference while retaining all creators' launch rows. MemoryCurrent reache
 the fixed deploy script. A new decoder predicate retains only admitted matching
 launch rows, used by both creator instruments. Scoped store/instrument tests and
 clippy pass; bypassing the predicate fails its new watermark regression.
-CI, release and a live repeat under the same cap remain required. Privy's owner
+Launch repair `8d3a91d4303f800036c15d4d695fbf3099f248b8` passed all jobs
+in CI 37561215606 and release 37561211248. Verified artifact and staged VPS
+SHA-256 `c68a18e0af297f4f70f5c8ad314fff12573dbd31196ee86a3072d602ce3d13c4`,
+then fixed-deployed and verified public health. The live repeat kept launch
+scans below 458285056 bytes, then full outcome retention reached the 805306368
+cap before inference. Restored service through fixed deployment. Matching outcome
+reads now retain only measurements for the selected creator's recorded mints;
+watermark gating and malformed-row errors remain. This second repair still needs
+CI, release and a completed live repeat under the same cap. Privy's owner
 wallet dashboard was inspected read-only and reports No wallets yet; the app ID
 alone does not establish a wallet or delegation.
 
 **Stopped at:** unlimited subscription inference and CLI pipe repair are live
-at `3e786a2`; the first authenticated site answer succeeded without citations.
-A creator-evidence memory repair is locally verified and awaits CI and deployment.
+at `8d3a91d`; the first authenticated site answer succeeded without citations.
+Launch filtering is deployed; matching outcome filtering awaits verification and release.
 No autonomous trading loop has been enabled. The broader private-autonomy work
 remains in progress.
 **Next action:** release the memory repair from a verified artifact, repeat the
@@ -301,3 +309,10 @@ session limits still require the owner's mandate before any trading activation.
 **Do not:** claim a wallet is delegated from an app ID, treat connected ChatGPT
 as capital authority, expose the private site, copy existing subscription
 credentials between hosts, invent money limits, or turn on automated trading.
+
+**Owner interface request:** Josh asked for on-site editable capital, per-trade
+and loss controls, a live wallet balance, and an option for ChatGPT to decide
+what to do with the wallet. Recommendation given: autonomous trade selection
+and sizing within owner-saved limits, with limit changes under owner control.
+The scope question is pending; this is a proposed boundary, not a numerical
+capital mandate. Wallet-control implementation is paused for that discussion.
