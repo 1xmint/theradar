@@ -762,3 +762,54 @@ this increment. No local Cargo or issuer process remains; target is 27.2 GiB
 with 120.5 GiB free. The previously rejected ignored mutation-output cleanup
 was not retried. This follow-up changes only the verification handback; its
 own CI may be pending, while the code commit above passed fully.
+
+### Direct operator wallet reads — 2026-10-07
+
+Owner requested continuation from `7761fd0`. The first live-input piece is the
+actual `radar wallet-read --wallet <address> --rpc <URL>` operator command in
+`crates/radar-cli/src/wallet_read.rs`. It reuses the existing read-only RPC client;
+no new framework crate, Serve cache or signer dependency is introduced.
+
+- [x] Require a valid explicit wallet and nonblank explicit RPC endpoint. Spend
+  at most three RPC calls under the existing bounded-read budget shape.
+- [x] Read native SOL, SPL and Token-2022 with explicit finalized commitment.
+  Both RPC methods also serve the existing positions display; they now request
+  finality explicitly. Their balance/owner/quantity parsing guards remain.
+- [x] Refuse the entire command for failed/malformed reads or missing token
+  context. No partial JSON and no raw provider error or credential-bearing URL.
+- [x] Emit integer quantities as decimal strings, preserving token accounts and
+  node-reported decimals separately. Never aggregate incompatible accounts or
+  invent dollar value, realised P&L, deployed exposure or empty risk state.
+- [x] Preserve every leg's context slot. `common_reported_slot` is populated
+  only when all three reported slots match; it proves no common bank hash or
+  atomic cross-request snapshot. Preserve host read start/completion times.
+- [x] Scoped CLI suite passed 217 tests; scoped onchain suite passed. All-target
+  Clippy for both packages passed with warnings denied. The CLI fixture's lint
+  findings were corrected without suppressions; its process tests were rerun.
+- [x] Replacing the common-slot conjunction with an OR fails the mixed-slot
+  regression. Rounding token quantities through f64 fails the exact-quantity
+  regression (u64::MAX becomes 18446744073709551616). Both changes restored.
+- [ ] Full CI including all four mutation shards at the code commit.
+
+The RPC parameters follow [getBalance](https://solana.com/docs/rpc/http/getbalance)
+and [getTokenAccountsByOwner](https://solana.com/docs/rpc/http/gettokenaccountsbyowner).
+This is node-reported evidence, not independent cryptographic verification of
+RPC truth, recent chain head, network identity or the absence of unsupported
+holdings. An explicit endpoint can still be untrustworthy. Operator setup must
+bind it and the wallet outside the untrusted caller's control before this feeds
+a live issuer. Output is deliberately not the offline issuer's full Snapshot;
+there is no path that substitutes these reads for market capacity, fees, price,
+portfolio exposure or loss accounting. No issuer key or delegated signing is
+activated. The command's read deadline is not a financial policy default.
+
+**Handback in progress:** direct wallet measurement only. Remaining work includes
+trusted endpoint/wallet provisioning, measured market and transaction evidence,
+active mandates, settlement/loss reconciliation and independently tested Privy
+refusals. Trading remains inactive; no deployment or real signing in this change.
+
+Live command verification used the owner's previously supplied wallet and
+`https://api.mainnet-beta.solana.com`, read-only, at Unix time 1791399631. The
+node reported 0 native lamports at slot 454310379, no SPL token accounts at
+454310380, and no Token-2022 accounts at 454310381. The command correctly emitted
+null for common_reported_slot, USD value and realised P&L. These are those three
+node responses, not a current valuation or proof of no other asset types.

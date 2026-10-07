@@ -245,6 +245,22 @@ claims, missing state, invalid configuration, snapshot failures, risk refusals,
 insufficient cash, fee coverage and conversion/expiry bounds. Clock boundaries
 are also checked with deterministic arguments in the binary's unit test.
 
+## Direct wallet evidence is not yet issuer state — 2026-10-07
+
+`radar wallet-read --wallet <address> --rpc <URL>` now calls the read-only RPC
+client directly for native SOL and both token programs, with finalized
+commitment, exact quantity strings and individual context slots. Failed reads
+or missing context refuse the whole output. Read start/completion times are
+host observations; matching slot numbers do not prove an atomic common-bank
+snapshot. USD valuation and realised P&L remain null. Node-reported decimals
+and RPC truth still depend on the selected provider.
+
+This operator command is the first live wallet measurement piece, not an
+activated mandate, complete kernel state or trusted market adapter. Its output
+is not accepted as the issuer Snapshot. Protected endpoint/wallet provisioning,
+valuation, measured capacity/fees, deployed exposure and loss reconciliation
+remain required. It grants no authority and loads no key.
+
 ## What would reverse this
 
 Nothing foreseeable reverses holding a policy locally. The specific ceilings are

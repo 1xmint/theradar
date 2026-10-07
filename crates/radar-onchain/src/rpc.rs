@@ -642,7 +642,7 @@ impl RpcClient {
         let result: BalanceEnvelope = self.call(
             budget,
             "getBalance",
-            &serde_json::json!([address.to_string()]),
+            &serde_json::json!([address.to_string(), { "commitment": "finalized" }]),
         )?;
         let context = result
             .context
@@ -688,7 +688,7 @@ impl RpcClient {
             &serde_json::json!([
                 owner.to_string(),
                 { "programId": program_id },
-                { "encoding": "jsonParsed" }
+                { "encoding": "jsonParsed", "commitment": "finalized" }
             ]),
         )?;
         let slot = result.context.map(|c| Slot(c.slot));

@@ -28,6 +28,7 @@ mod route;
 mod selection;
 mod session;
 mod study;
+mod wallet_read;
 
 use radar_sim::{JupiterQuoter, RpcClient};
 use radar_store::{Event, Reader, Table};
@@ -110,6 +111,9 @@ commands:
   cost --from <ts> --to <ts>     what a round trip costs, bucketed by notional;
                                  re-derives the 850 bps constant and says
                                  whether it is fixed or proportional
+  wallet-read --wallet <address> --rpc <URL>
+    Direct finalized SOL/SPL/Token-2022 reads; JSON, no prices or authority.
+
   dossier <mint> [--rpc URL] [--seconds N]
                                  everything Radar can say about one token, read
                                  from the chain on demand rather than from the
@@ -882,6 +886,7 @@ fn main() -> ExitCode {
         "study" => event_study(&args),
         "creator-index" => creator_index(&args),
         "dossier" => dossier::run(&args),
+        "wallet-read" => wallet_read::run(&args),
         "audit" => audit::run(&args),
         "model-prices" => model_prices::run(&args),
         "selection" => selection_report(&args),
