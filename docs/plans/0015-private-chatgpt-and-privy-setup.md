@@ -218,14 +218,20 @@ installed Codex 0.131.0 prints its device prompt immediately through the bridge,
 but ANSI colors prevented `parse_link` from recognizing it. Numeric SGR
 formatting is now removed before parsing. The 66 radar-model tests and scoped
 clippy pass; restoring the old parser fails the new captured-format regression.
-Linux CI, release and deployed verification remain pending for this increment.
+Code commit `d73f8cfe4176d6e8e8dba2df1e732c77f671095d` passed every job in CI
+37557211086, including all mutation shards. Release 37557206803 passed; its
+matching manifest names that commit and radar-serve SHA-256
+`c3af21a2a6fdad2a99aab64dfc604dcdab798d54895bca81611e1d42376911ce`.
+After verifying the download, shipped it through `/tmp/radar-serve.new` and
+`sudo radar-deploy`; `/health` reports the full code commit and status ok.
+The service retains User guardian, NoNewPrivileges yes and ProtectHome read-only.
+The CLI still reports Not logged in: owner device sign-in remains pending.
 
-**Stopped at:** deployed connection and diagnostics increment at `49415d5`.
+**Stopped at:** deployed colored device prompt repair at `d73f8cf`.
 Private server setup is installed and applied. ChatGPT is not logged in; the
 Privy app is configured, while wallet delegation remains unverified. No autonomous
 trading loop has been enabled. The broader private-autonomy work remains in progress.
-**Next action:** finish CI and deploy the colored-prompt repair, then have the
-owner refresh the authenticated Radar page, select Connect ChatGPT and
+**Next action:** owner refreshes the authenticated Radar page, selects Connect ChatGPT and
 complete the displayed device login. The automated browser sign-in is blocked
 by URL protocol policy and must not be retried through a workaround.
 Verify that linking succeeds through the actual Radar service restrictions.
