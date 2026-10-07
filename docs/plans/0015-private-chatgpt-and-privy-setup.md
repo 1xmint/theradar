@@ -1,8 +1,9 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # Plan 0015 — Private ChatGPT and Privy setup
 
-**Status:** in progress; connection UI, sign-in fixes and security headers deployed;
-private server setup installed and ChatGPT linked; unlimited subscription allowance applied; wallet flow and delegation remain.
+**Status:** in progress; private ChatGPT linking and unlimited subscription allowance
+are installed; Privy login, wallet creation, balances and draft limits deployed.
+Owner wallet setup, signer delegation and autonomous execution remain.
 **Date:** 2026-10-06.
 **Branch:** fix/wallet-signin-diagnostics.
 **Base:** b55a47651c81ed8a1134f00deaeabc9b6cc4d792.
@@ -383,3 +384,43 @@ gate before owner-triggered creation, matching Privy's current Solana guide.
 The new regression fails when the disabled readiness gate is removed; restored,
 all seven private wallet tests and the frontend production build pass. A fresh
 release containing this guard is required before deployment.
+
+### Wallet interface handback — 2026-10-07 UTC
+
+**Verified deployment:** `9ecfd70991e116ea03b0b292dd5fd207966c7585`.
+CI 37568238443 completed successfully, including all four mutation shards;
+release 37568234147 completed successfully and includes 350 passing web tests.
+Downloaded BUILD-INFO.txt names the exact commit. radar-serve SHA256
+`fa86d907459e1bc56d86d0f0e38d6529943b6e5375db41a215b17a439973ab1c`
+matches the manifest, local file and staged VPS file. Ran the fixed
+`ssh guardian-vps-tail 'sudo radar-deploy'` procedure; public `/health` reports
+that exact build and status ok. `systemctl show` confirms active, User guardian,
+MemoryMax 805306368, ProtectHome read-only and NoNewPrivileges yes.
+Anonymous wallet, balance and limits URLs each return Cloudflare 302.
+
+**Live interface proof:** reloaded the owner's authenticated private setup tab,
+waited for real SDK initialization and clicked Sign in with Privy. Its email
+login dialog renders correctly under the deployed CSP. Left it open for the
+owner and saved screenshot radar-privy-setup.png in this task's visualization
+directory. No email was submitted, wallet created, funds moved or delegation
+granted. A direct browser navigation to the wallet JSON endpoint was blocked by
+the browser client; did not bypass or retry it. The extra Privy JWT requirement
+is proven by integration tests, not by an authenticated live API probe.
+
+**Stopped at:** this interface increment is deployed. Balance and settings
+handlers pass their tests; an actual owner wallet balance and saved production
+settings remain unverified because there is no verified owner wallet yet.
+Preferences remain drafts and Policy stays closed. No autonomous trade ran.
+
+**Next action:** owner completes Privy sign-in and presses Create Solana wallet,
+then enters capital, maximum per trade and daily loss values and saves the
+autonomous-selection preference. Verify these reads and persistence against
+that wallet. Follow with the separate signer, bounded delegation, deterministic
+policy loading and execution worker; asset/session constraints must be resolved
+before activation. Do not treat the saved checkbox as capital authority.
+
+**Separate follow-up:** after restart, the ChatGPT widget still says Connect
+because it displays the current linking flow, not persisted CLI credential
+status. This does not undo the previously verified subscription link. Avoid
+asking the owner to relink solely because of that label. No local build process
+is left running; target was last measured at 25.4 GiB.
