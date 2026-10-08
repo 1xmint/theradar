@@ -1108,3 +1108,36 @@ was clean after the source push; no local Cargo/rustc/wallet process remains.
 Target measured 29.4 GiB with 119.2 GiB free. Previously rejected ignored output
 cleanup was not retried. This final follow-up records verification only; its CI
 may be pending while the source head above is fully verified.
+
+### Bind exact-transaction evidence to offline issuer — 2026-10-07
+
+- [x] Require `transaction_evidence` in the private snapshot, accepting the JSON
+  emitted by transaction-read. Candidate stdin cannot provide it. Older snapshots
+  refuse. No network or new dependency added to the issuer/signer.
+- [x] Consume the existing Checked transaction to compare exact transaction and
+  signable-message base64, avoiding a second decoder. Require read-only/finalized
+  version-1 metadata, explicit null simulation error and no blockhash replacement.
+- [x] Both RPC slots must meet the requested minimum, that minimum cannot predate
+  the proposal's oldest input, and neither slot may exceed the decision slot.
+  Measured network fee must fit the operator-reviewed full fee upper bound and
+  mandate reserve. Optional units and unknown rent/USD fields grant no authority.
+- [x] Require an ordered non-future read window, fresh from its start under the
+  existing mandate age bound. Proof expiry also follows that start, with checked
+  addition; recent completion cannot renew an old read. Refuse before reservation.
+- [x] Four new actual-process regressions cover every required field, mismatches,
+  slot/fee boundaries, missing versus measured-zero fees, different read slots,
+  stale/future/reversed windows, proof expiry and overflow. Existing issuer tests
+  use the required evidence and retain their kernel/reservation/replay checks.
+  Raise the Rust test floor by four. Scoped signer tests and Clippy pass locally.
+- [x] Manual removal of message binding fails the missing-message regression.
+  Manual removal of evidence expiry cap fails the proof-lifetime regression;
+  both restored before final validation.
+- [x] Final local validation: 128 signer tests, 33 conformance checks, scoped
+  all-target Clippy and formatting passed on restored source.
+- [ ] Complete full CI before recording source handback.
+
+This is protected operator-file integration, not independently authenticated RPC
+provenance. A live collector must still populate wallet/valuation/exposure/loss
+and complete costs, and the owner mandate must remain outside Serve's authority.
+Settlement reconciliation and verified Privy policy/delegation still precede
+repeated live execution. Site limits remain drafts; no live key or trade enabled.

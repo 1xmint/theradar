@@ -329,14 +329,41 @@ No provider errors or program logs are copied into operator output. No partial
 JSON is emitted when either read fails. These measurements grant no authority,
 do not verify signatures or guarantee later execution, and leave rent, other
 instruction costs and USD valuation unknown. An expired original blockhash
-refuses rather than simulating a different transaction. The issuer has not yet
-been connected to these reads; its live snapshot and reconciliation gaps, and
-Privy delegation/policy refusal verification, still keep live execution closed.
+refuses rather than simulating a different transaction. Live snapshot and
+reconciliation gaps, and Privy delegation/policy refusal verification, still
+keep live execution closed.
 
 The RPC contracts and packet bound were checked against Solana's
 [simulation](https://solana.com/docs/rpc/http/simulatetransaction),
 [message fee](https://solana.com/docs/rpc/http/getfeeformessage) and
 [transaction](https://solana.com/docs/core/transactions) documentation.
+
+### Binding operator read evidence to offline issuance
+
+The private snapshot now requires `transaction_evidence`, containing the JSON
+emitted by `radar transaction-read`. The offline issuer is its actual consumer;
+candidate stdin cannot supply it. Older snapshots without this field refuse.
+No RPC, network-bearing dependency or real credential was added to the issuer.
+This remains operator-provisioned evidence: file protection establishes trust,
+not cryptographic proof of RPC origin. A live adapter must still own collection.
+
+Before capital reservation, the issuer requires version 1, read-only/finalized
+metadata, explicit successful simulation with no blockhash replacement, and
+equality with both the exact transaction bytes and the decoded signable message.
+Signature verification remains explicitly disabled in this unsigned read.
+The requested minimum slot cannot precede the proposal's oldest input; both
+reported contexts must meet that minimum and cannot exceed the snapshot's
+decision slot. Separate contexts remain separate. The measured network fee must
+fit the snapshot's reviewed full fee ceiling, which already must fit the mandate
+reserve. An unknown fee refuses; measured zero is distinct from unknown.
+
+Host read start/completion must be present, ordered and no later than issuance;
+the start must be fresh under the mandate's existing snapshot age bound. Proof
+expiry is additionally capped by start plus that bound, with checked arithmetic.
+A recent completion cannot refresh an old read. All failures happen before
+reservation/proof output. Optional units and unknown rent/USD fields grant no
+authority; this does not establish complete costs, portfolio valuation, losses,
+settlement or Privy delegation. Live execution remains closed.
 
 ## What would reverse this
 

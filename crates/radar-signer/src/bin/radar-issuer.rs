@@ -48,6 +48,9 @@ struct Snapshot {
     // exit capacity, creator identity, costs or a different transaction.
     proposal: Proposal,
     transaction: String,
+    // The operator copies transaction-read output into the private snapshot.
+    // Stdin cannot supply or replace this read evidence.
+    transaction_evidence: serde_json::Value,
 }
 
 #[derive(Deserialize)]
@@ -102,6 +105,62 @@ fn expired(now: u64, deadline: u64) -> bool {
 
 fn snapshot_current(now: u64, observed: u64, max_age: u64) -> bool {
     now.checked_sub(observed).is_some_and(|age| age <= max_age)
+}
+
+fn evidence_integer(value: &serde_json::Value, field: &str) -> Result<u64, String> {
+    value[field]
+        .as_str()
+        .and_then(|value| value.parse().ok())
+        .ok_or_else(|| "invalid transaction evidence integer".into())
+}
+
+fn transaction_evidence_expiry(
+    snapshot: &Snapshot,
+    config: &Config,
+    checked: &radar_signer::verify::Checked,
+    now: u64,
+) -> Result<u64, String> {
+    let value = &snapshot.transaction_evidence;
+    if value["version"] != 1
+        || value["authority"] != "read_only"
+        || value["commitment"] != "finalized"
+        || value["transaction_base64"] != radar_types::b64::encode(checked.bytes())
+        || value["message_base64"] != radar_types::b64::encode(checked.signable())
+        || value["execution_guaranteed"] != false
+        || value["simulation"].get("err") != Some(&serde_json::Value::Null)
+        || value["simulation"]["signature_verified"] != false
+        || value["simulation"]["blockhash_replaced"] != false
+    {
+        return Err("transaction evidence does not bind successful exact-byte simulation".into());
+    }
+    let minimum = evidence_integer(value, "minimum_context_slot")?;
+    let simulation = evidence_integer(&value["simulation"], "slot")?;
+    let fee = evidence_integer(&value["network_fee"], "slot")?;
+    let lamports = evidence_integer(&value["network_fee"], "lamports")?;
+    if minimum < snapshot.proposal.oldest_input_slot.get()
+        || simulation < minimum
+        || fee < minimum
+        || simulation > snapshot.state.now.get()
+        || fee > snapshot.state.now.get()
+        || lamports > snapshot.fee_upper_lamports
+    {
+        return Err("transaction evidence slots or network fee exceed reviewed bounds".into());
+    }
+    let started = value["read_started_at_unix_secs"]
+        .as_u64()
+        .ok_or("missing evidence start time")?;
+    let completed = value["read_completed_at_unix_secs"]
+        .as_u64()
+        .ok_or("missing evidence completion time")?;
+    if completed < started
+        || completed > now
+        || !snapshot_current(now, started, config.max_snapshot_age_secs)
+    {
+        return Err("transaction evidence read window is not current".into());
+    }
+    started
+        .checked_add(config.max_snapshot_age_secs)
+        .ok_or_else(|| "evidence expiry overflow".into())
 }
 
 impl Issuer {
@@ -173,7 +232,7 @@ impl Issuer {
         let allowlist = radar_signer::Allowlist {
             programs: self.config.programs.iter().map(|a| *a.as_bytes()).collect(),
         };
-        radar_signer::check(
+        let checked = radar_signer::check(
             &authorization,
             &bytes,
             &self.config.wallet,
@@ -185,10 +244,12 @@ impl Issuer {
             },
         )
         .map_err(|_| "transaction refused")?;
+        let evidence_expiry = transaction_evidence_expiry(snapshot, &self.config, &checked, now)?;
         let expires = now
             .checked_add(self.config.intent_lifetime_secs)
             .ok_or("intent expiry overflow")?
             .min(self.config.valid_until_unix_secs)
+            .min(evidence_expiry)
             .min(
                 snapshot
                     .observed_at_unix_secs

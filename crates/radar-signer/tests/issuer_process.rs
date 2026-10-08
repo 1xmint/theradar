@@ -59,7 +59,17 @@ impl Fixture {
         let snapshot = json!({
             "wallet":wallet, "observed_at_unix_secs":unix_now(), "sol_lamports":300_000_000,
             "sol_upper_micro_usd":200_000_000, "fee_upper_lamports":5000, "state":radar_risk::PortfolioState::flat(radar_types::Slot(1000)),
-            "proposal":candidate["proposal"], "transaction":candidate["transaction"]
+            "proposal":candidate["proposal"], "transaction":candidate["transaction"],
+            "transaction_evidence":{
+                "version":1,"authority":"read_only","commitment":"finalized",
+                "minimum_context_slot":"1000","transaction_base64":candidate["transaction"],
+                "message_base64":radar_types::b64::encode(&transaction[65..]),
+                "simulation":{"slot":"1000","err":null,"signature_verified":false,
+                    "blockhash_replaced":false,"units_consumed":null},
+                "network_fee":{"slot":"1000","lamports":"5000"},
+                "execution_guaranteed":false,"rent_and_other_instruction_costs":null,"usd_value":null,
+                "read_started_at_unix_secs":unix_now(),"read_completed_at_unix_secs":unix_now()
+            }
         });
         let config = json!({
             "active":true, "wallet":wallet, "app_id":"test-app", "wallet_id":"test-wallet",
@@ -159,6 +169,176 @@ fn raw_response(fixture: &Fixture, raw: &[u8]) -> (String, bool) {
 }
 
 #[test]
+fn exact_simulation_evidence_is_required_and_cannot_be_replaced_by_stdin() {
+    let mut fixture = Fixture::new();
+    let original = fixture.snapshot.clone();
+    let mut issuer = fixture.start();
+    for pointer in [
+        "/version",
+        "/authority",
+        "/commitment",
+        "/transaction_base64",
+        "/message_base64",
+        "/execution_guaranteed",
+        "/simulation/err",
+        "/simulation/signature_verified",
+        "/simulation/blockhash_replaced",
+        "/minimum_context_slot",
+        "/simulation/slot",
+        "/network_fee/slot",
+        "/network_fee/lamports",
+        "/read_started_at_unix_secs",
+        "/read_completed_at_unix_secs",
+    ] {
+        fixture.snapshot = original.clone();
+        let evidence = &mut fixture.snapshot["transaction_evidence"];
+        let (parent, key) = pointer.rsplit_once('/').expect("pointer");
+        evidence
+            .pointer_mut(parent)
+            .expect("parent")
+            .as_object_mut()
+            .expect("object")
+            .remove(key);
+        fixture.save();
+        assert_eq!(
+            issuer.ask(&fixture.candidate)["outcome"],
+            "refused",
+            "missing {pointer}"
+        );
+    }
+    for (pointer, value) in [
+        ("/version", json!(2)),
+        ("/authority", json!("issued")),
+        ("/commitment", json!("processed")),
+        ("/transaction_base64", json!("different bytes")),
+        ("/message_base64", json!("different message")),
+        ("/execution_guaranteed", json!(true)),
+        ("/simulation/err", json!({"InstructionError":[0,1]})),
+        ("/simulation/signature_verified", json!(true)),
+        ("/simulation/blockhash_replaced", json!(true)),
+    ] {
+        fixture.snapshot = original.clone();
+        *fixture.snapshot["transaction_evidence"]
+            .pointer_mut(pointer)
+            .expect("field") = value;
+        fixture.save();
+        assert_eq!(
+            issuer.ask(&fixture.candidate)["outcome"],
+            "refused",
+            "bad {pointer}"
+        );
+    }
+    fixture.snapshot = original.clone();
+    fixture
+        .snapshot
+        .as_object_mut()
+        .expect("snapshot")
+        .remove("transaction_evidence");
+    fixture.save();
+    assert_eq!(issuer.ask(&fixture.candidate)["outcome"], "refused");
+    assert_eq!(
+        std::fs::read(fixture.dir.path().join("operations.jsonl")).expect("history"),
+        Vec::<u8>::new()
+    );
+    fixture.snapshot = original;
+    fixture.save();
+    assert_eq!(issuer.ask(&fixture.candidate)["outcome"], "issued");
+}
+
+#[test]
+fn evidence_contexts_and_network_cost_must_fit_the_reviewed_snapshot() {
+    let mut fixture = Fixture::new();
+    let original = fixture.snapshot.clone();
+    let mut issuer = fixture.start();
+    for (pointer, value) in [
+        ("/minimum_context_slot", json!("999")),
+        ("/minimum_context_slot", json!("1001")),
+        ("/simulation/slot", json!("999")),
+        ("/simulation/slot", json!("1001")),
+        ("/network_fee/slot", json!("999")),
+        ("/network_fee/slot", json!("1001")),
+        ("/network_fee/lamports", json!("5001")),
+        ("/network_fee/lamports", Value::Null),
+        ("/network_fee/lamports", json!("-1")),
+        ("/network_fee/lamports", json!(5000)),
+    ] {
+        fixture.snapshot = original.clone();
+        *fixture.snapshot["transaction_evidence"]
+            .pointer_mut(pointer)
+            .expect("field") = value;
+        fixture.save();
+        assert_eq!(
+            issuer.ask(&fixture.candidate)["outcome"],
+            "refused",
+            "{pointer}"
+        );
+    }
+    fixture.snapshot = original.clone();
+    fixture.snapshot["fee_upper_lamports"] = json!(4999);
+    fixture.save();
+    assert_eq!(issuer.ask(&fixture.candidate)["outcome"], "refused");
+    assert_eq!(
+        std::fs::read(fixture.dir.path().join("operations.jsonl")).expect("history"),
+        Vec::<u8>::new()
+    );
+    fixture.snapshot = original;
+    // Separate slots are accepted independently, not declared one atomic bank.
+    fixture.snapshot["state"]["now"] = json!(1001);
+    fixture.snapshot["transaction_evidence"]["network_fee"]["slot"] = json!("1001");
+    fixture.snapshot["transaction_evidence"]["network_fee"]["lamports"] = json!("0");
+    fixture.save();
+    assert_eq!(issuer.ask(&fixture.candidate)["outcome"], "issued");
+}
+
+#[test]
+fn the_oldest_transaction_read_bounds_proof_lifetime_and_future_or_stale_reads_refuse() {
+    let mut fixture = Fixture::new();
+    fixture.config["intent_lifetime_secs"] = json!(300);
+    fixture.save();
+    let original = fixture.snapshot.clone();
+    let mut issuer = fixture.start();
+    let now = unix_now();
+    for (started, completed) in [
+        (now - 121, now),
+        (now + 600, now + 600),
+        (now, now + 600),
+        (now, now - 1),
+    ] {
+        fixture.snapshot = original.clone();
+        fixture.snapshot["transaction_evidence"]["read_started_at_unix_secs"] = json!(started);
+        fixture.snapshot["transaction_evidence"]["read_completed_at_unix_secs"] = json!(completed);
+        fixture.save();
+        assert_eq!(issuer.ask(&fixture.candidate)["outcome"], "refused");
+    }
+    fixture.snapshot = original;
+    fixture.snapshot["transaction_evidence"]["read_started_at_unix_secs"] = json!(now - 90);
+    fixture.snapshot["transaction_evidence"]["read_completed_at_unix_secs"] = json!(now - 80);
+    fixture.save();
+    let answer = issuer.ask(&fixture.candidate);
+    assert_eq!(answer["outcome"], "issued", "{answer}");
+    assert_eq!(
+        answer["intent"]["proof"]["expires_at_unix_secs"],
+        now - 90 + 120
+    );
+}
+
+#[test]
+fn an_overflowing_evidence_expiry_refuses_without_reserving_capital() {
+    let mut fixture = Fixture::new();
+    fixture.config["max_snapshot_age_secs"] = json!(u64::MAX);
+    fixture.save();
+    let mut issuer = fixture.start();
+    assert_eq!(
+        issuer.ask(&fixture.candidate)["reason"],
+        "evidence expiry overflow"
+    );
+    assert_eq!(
+        std::fs::read(fixture.dir.path().join("operations.jsonl")).expect("history"),
+        Vec::<u8>::new()
+    );
+}
+
+#[test]
 fn issuance_runs_the_kernel_and_reserves_before_a_verifiable_proof_leaves() {
     let fixture = Fixture::new();
     let mut issuer = fixture.start();
@@ -242,6 +422,7 @@ fn stdin_cannot_choose_authority_or_invent_the_market_evidence() {
         "max_lamports",
         "wallet",
         "policy",
+        "transaction_evidence",
     ] {
         let mut candidate = fixture.candidate.clone();
         candidate[field] = json!("caller chooses");
