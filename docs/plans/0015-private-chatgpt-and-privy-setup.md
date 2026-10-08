@@ -1424,3 +1424,39 @@ No Cargo/rustc/radar/issuer/signer process remains. Target measured 32.9 GiB,
 with 114.9 GiB free. Previously rejected ignored-output cleanup was not retried.
 This handback follow-up changes documentation only; its CI may be pending while
 the source above is fully verified.
+
+### Protected finalized settlement review (2026-10-08)
+
+The caller is the operator issuer's explicit --review-settlement mode, consuming
+private settlement-read JSON and the durable authorized/signed binding. Current
+settlement semantics cannot close a measured spend below the reservation without
+leaving its remainder open. Build the evidence review while retaining claims;
+do not bypass that accounting gap or assume USD exposure/loss disappeared.
+
+- [x] Re-verify the recorded artifact's wallet signature/authorized message.
+  Bind evidence to outstanding native-SOL operation, wallet, signature, exact
+  canonical transaction, finalized slot/context and ordered fresh read times.
+- [x] Require native arrays matching the signed account table, complete token
+  identities/quantities and distinct in-range indices. Review integer native
+  changes, known fees and separate token arrays without guessing USD/PnL.
+- [x] Require native-unit reservation and measured fee/net debit within its
+  ceiling. Accept exact equality and measured zero fees; preserve native credits
+  as historical changes, without labelling them profit.
+- [x] Four regressions cover positive/negative integer extremes, required/bad
+  fields, slots/times, equality/bounds, token metadata and actual issuer process
+  output/refusals. Journal bytes and outstanding claims remain unchanged. Raise
+  the Rust floor from 2068 to 2072.
+- [x] Removing exact packet-byte binding fails the missing/mismatched evidence
+  regression. Removing caller signature verification (with the otherwise-unused
+  decoded buffer renamed) fails the actual-process signature refusal regression.
+  Restore source after each manual bug demonstration.
+- [ ] Finish scoped tests/Clippy/fmt/conformance, staged review and full source
+  CI including all four mutation shards; record verified handback.
+
+No live chain/provider call, wallet/key/credential/delegation change, trade or
+Serve deployment occurs here. Review is read-only under journal ownership. The
+next accounting change must close known completed measured spends correctly,
+retain reconciliation evidence and update exposure/loss before allowing another
+issuance. Independent live valuation/cost/searched exit evidence, activated
+owner limits and verified Privy policy/delegation remain necessary. Site limits
+remain drafts and autonomous execution remains off.

@@ -8,6 +8,134 @@ use std::process::{Child, Command, Stdio};
 const SEED: [u8; 32] = [0x6B; 32];
 
 #[test]
+fn settlement_review_reverifies_the_protected_artifact_signature() {
+    let key = ed25519_dalek::SigningKey::from_bytes(&[0x42; 32]);
+    let (fixture, unsigned) = fixture_for_wallet(&key);
+    let mut issuer = fixture.start();
+    assert_eq!(issuer.ask(&fixture.candidate)["outcome"], "issued");
+    drop(issuer);
+    let history = fixture.dir.path().join("operations.jsonl");
+    let mut log = radar_journal::OperationLog::open(&history).expect("history");
+    let id = log.outstanding().next().expect("operation").0.clone();
+    // Generic journal callers do not authenticate signatures. Deliberately
+    // provision an invalid artifact to prove review enforces that boundary.
+    log.record_signed(&id, radar_types::b64::encode(&unsigned), unix_now())
+        .expect("unverified fixture");
+    drop(log);
+    let path = fixture.dir.path().join("evidence.json");
+    write(&path, &json!({}));
+    let result = fixture
+        .command()
+        .args(["--review-settlement", id.as_str()])
+        .arg(&path)
+        .output()
+        .expect("review");
+    assert!(!result.status.success());
+    assert_eq!(result.stdout, Vec::<u8>::new());
+    assert!(
+        String::from_utf8_lossy(&result.stderr).contains("wallet signature verification failed")
+    );
+    assert_eq!(
+        radar_journal::OperationLog::open(&history)
+            .expect("history")
+            .outstanding()
+            .count(),
+        1
+    );
+}
+
+#[test]
+fn settlement_review_binds_exact_evidence_and_keeps_the_journal_outstanding() {
+    use ed25519_dalek::Signer as _;
+    let key = ed25519_dalek::SigningKey::from_bytes(&[0x42; 32]);
+    let (fixture, mut signed) = fixture_for_wallet(&key);
+    let mut issuer = fixture.start();
+    assert_eq!(issuer.ask(&fixture.candidate)["outcome"], "issued");
+    drop(issuer);
+    let signature = key.sign(&signed[65..]).to_bytes();
+    signed[1..65].copy_from_slice(&signature);
+    let history = fixture.dir.path().join("operations.jsonl");
+    let mut log = radar_journal::OperationLog::open(&history).expect("history");
+    let id = log.outstanding().next().expect("operation").0.clone();
+    log.record_signed(&id, radar_types::b64::encode(&signed), unix_now())
+        .expect("fixture signed binding");
+    drop(log);
+    let saved = std::fs::read(&history).expect("history bytes");
+    let path = fixture.dir.path().join("settlement.json");
+    let evidence = json!({"version":1,"authority":"read_only","commitment":"finalized","wallet":fixture.config["wallet"],
+        "transaction_base64":radar_types::b64::encode(&signed),"signature":radar_types::Signature::new(signature).to_string(),
+        "signature_verified_locally":false,"operation_reconciled":false,"usd_value":null,"realised_pnl":null,
+        "outcome":"failed","slot":"1001","minimum_slot":"1000","read_started_at_unix_secs":unix_now(),"read_completed_at_unix_secs":unix_now(),
+        "account_keys":[fixture.config["wallet"],address(0x22),address(0x11)],"pre_balances_lamports":["300000000","0","0"],
+        "post_balances_lamports":["299995000","0","0"],"network_fee_lamports":"5000","pre_token_balances":[],"post_token_balances":[]});
+    write(&path, &evidence);
+    let result = fixture
+        .command()
+        .args(["--review-settlement", id.as_str()])
+        .arg(&path)
+        .output()
+        .expect("review");
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    let report: Value = serde_json::from_slice(&result.stdout).expect("report");
+    assert_eq!(report["operation"], id.as_str());
+    assert_eq!(report["wallet_net_change_lamports"], "-5000");
+    assert_eq!(report["network_fee_lamports"], "5000");
+    assert_eq!(report["reservation_released"], false);
+    assert_eq!(report["signature_verified_locally"], true);
+    assert_eq!(std::fs::read(&history).expect("unchanged"), saved);
+    for (field, bad) in [
+        ("transaction_base64", json!("different")),
+        ("read_completed_at_unix_secs", json!(unix_now() + 600)),
+    ] {
+        let mut value = evidence.clone();
+        value[field] = bad;
+        write(&path, &value);
+        let result = fixture
+            .command()
+            .args(["--review-settlement", id.as_str()])
+            .arg(&path)
+            .output()
+            .expect("refused review");
+        assert!(!result.status.success());
+        assert_eq!(result.stdout, Vec::<u8>::new());
+        assert_eq!(std::fs::read(&history).expect("unchanged"), saved);
+    }
+    let mut log = radar_journal::OperationLog::open(&history).expect("restart");
+    assert_eq!(log.outstanding().count(), 1);
+    let invalid_id = log
+        .propose(
+            radar_journal::Intent {
+                asset: radar_types::Asset::Sol,
+                amount: radar_types::TokenQuantity::lamports(1),
+                at: radar_types::Slot(1000),
+            },
+            unix_now(),
+            radar_journal::Correlation {
+                execution: Some(radar_journal::ExecutionBinding {
+                    wallet: radar_types::Address::new(key.verifying_key().to_bytes()),
+                    transaction: radar_types::b64::encode(&signed),
+                    signed_transaction: None,
+                }),
+                ..radar_journal::Correlation::default()
+            },
+        )
+        .expect("another protected test operation");
+    drop(log);
+    let result = fixture
+        .command()
+        .args(["--review-settlement", invalid_id.as_str()])
+        .arg(&path)
+        .output()
+        .expect("unknown refusal");
+    assert!(!result.status.success());
+    assert_eq!(result.stdout, Vec::<u8>::new());
+}
+
+#[test]
 fn signed_binding_mode_requires_the_exact_flag_and_argument_count() {
     let fixture = Fixture::new();
     for args in [

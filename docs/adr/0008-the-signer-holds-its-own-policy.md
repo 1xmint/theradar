@@ -464,6 +464,32 @@ reconciler must match finalized evidence to this recorded artifact and establish
 fees/economic effects and USD accounting before releasing capital. Limits remain
 drafts and live delegation remains closed. Tests use fixture keys only.
 
+## Protected settlement review
+
+`radar-issuer --review-settlement <operation-id> <private-settlement-json-file>`
+uses the configured protected journal and a copied `radar settlement-read`
+packet. It requires an outstanding native-SOL operation with a recorded signed
+artifact, re-verifies that artifact's wallet signature and exact authorized
+message, then checks the packet's wallet, signature, canonical transaction,
+finalized commitment, slot floor and ordered fresh host read window. Native
+arrays must match the signed account table; token metadata must have complete
+identities/quantities and distinct in-range account indices. The measured fee
+and wallet's net debit must fit the native reservation, including exact equality.
+
+The report preserves signed integer native changes, fee-paying failed execution
+and separate pre/post token metadata. It does not infer trade notional, USD
+exposure, realised PnL, a zero pre-balance for a new token account or profit from
+a native credit. Token program identities are retained as metadata; this step
+does not classify token effects economically. Protected files are the trust
+boundary, not authenticated RPC or host provenance.
+
+Review leaves the journal and reservation unchanged, including across restart.
+This is an operator evidence check before reconciliation, not a reconciler that
+closes an operation. A completed transaction can spend less than its reservation;
+the existing PartiallyFilled settlement leaves the remainder open. Terminal
+measured-spend accounting and independent USD exposure/loss updates are still
+needed before safely enabling repeated issuance. Live delegation stays closed.
+
 ## What would reverse this
 
 Nothing foreseeable reverses holding a policy locally. The specific ceilings are

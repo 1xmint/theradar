@@ -15,6 +15,9 @@ use radar_types::{
 };
 use serde::Deserialize;
 
+#[path = "radar-issuer/settlement.rs"]
+mod settlement;
+
 #[derive(Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 struct Config {
@@ -480,6 +483,37 @@ impl Issuer {
             .map_err(|_| "signed transaction could not be persisted")?;
         Ok(())
     }
+
+    fn review_settlement(&self, operation: &str, path: &Path) -> Result<serde_json::Value, String> {
+        let (id, entry) = self
+            .operations
+            .outstanding()
+            .find(|(id, _)| id.as_str() == operation)
+            .ok_or("unknown outstanding operation")?;
+        let binding = self
+            .operations
+            .execution(id)
+            .ok_or("operation has no transaction binding")?;
+        let signed = radar_types::b64::decode(
+            binding
+                .signed_transaction
+                .as_deref()
+                .ok_or("operation has no signed transaction")?,
+        )
+        .ok_or("invalid signed binding")?;
+        verified_signed(binding, self.config.wallet, &signed)?;
+        let evidence =
+            serde_json::from_slice(&private_read(path)?).map_err(|_| "invalid settlement JSON")?;
+        let mut review = settlement::review(
+            binding,
+            entry,
+            &evidence,
+            unix_now()?,
+            self.config.max_snapshot_age_secs,
+        )?;
+        review["operation"] = serde_json::json!(operation);
+        Ok(review)
+    }
 }
 
 fn run() -> Result<(), String> {
@@ -487,11 +521,21 @@ fn run() -> Result<(), String> {
     let mut issuer = Issuer::load(Path::new(&path))?;
     let args: Vec<_> = std::env::args().skip(1).collect();
     if !args.is_empty() {
-        if args.len() != 3 || args[0] != "--bind-signed" {
+        if args.len() != 3 {
             return Err(
                 "usage: radar-issuer --bind-signed <operation-id> <private-signed-binary-file>"
                     .into(),
             );
+        }
+        if args[0] == "--review-settlement" {
+            println!(
+                "{}",
+                issuer.review_settlement(&args[1], Path::new(&args[2]))?
+            );
+            return Ok(());
+        }
+        if args[0] != "--bind-signed" {
+            return Err("usage: radar-issuer --bind-signed or --review-settlement <operation-id> <private-file>".into());
         }
         issuer.bind_signed(&args[1], Path::new(&args[2]))?;
         println!(
