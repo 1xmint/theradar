@@ -13,7 +13,7 @@ benefit of the doubt on everything else.
 
 ## Index
 
-**37 of these 49 name something mechanical that would catch a
+**38 of these 50 name something mechanical that would catch a
 recurrence. 12 name only a habit, and say so** — which is this file's opening
 standard rather than a gap in it. The habit-only rows are the ones worth reading
 twice; nothing will stop those repeating except somebody remembering.
@@ -74,6 +74,7 @@ quietly absent.
 | [47](#47-strict-history-opening-exposed-shared-fixtures-and-clock-dependent-tampering) | Strict history opening exposed shared fixtures and clock-dependent tampering | isolated caller fixtures and deterministic issuer-tampering regression |
 | [48](#48-valid-proofs-left-durable-links-and-input-boundaries-untested) | Valid proofs left durable links and input boundaries untested | issuer process correlation and exact-boundary regressions |
 | [49](#49-a-fee-rate-bound-did-not-bound-rounded-component-costs) | A fee rate bound did not bound rounded component costs | component-rounding and process quote regressions |
+| [50](#50-a-byte-check-left-the-encoded-request-unchanged) | A byte check left the encoded request unchanged | canonical Privy request process regression |
 
 ---
 
@@ -2130,3 +2131,23 @@ zero, exact divisibility, overflow and exhaustion. Restoring combined rounding
 fails at Some(1) versus Some(2). Actual-process quotes inspect exact revised
 fees and proceeds for captured and larger exotic schedules. No key or trade
 was involved in discovering or repairing this bound.
+
+## 50. A byte check left the encoded request unchanged
+
+**Found:** 2026-10-07, review after integrating transaction-read evidence into
+the issuer. Evidence matched the Checked bytes, but the Privy request still
+copied the original provisioned base64 string. The existing shared decoder
+deliberately ignores whitespace and input after padding. A fixture with an
+ignored suffix therefore passed byte checks while forwarding that suffix to
+the provider. This could cause a later provider refusal after capital was
+reserved; that consequence was not tested against Privy and no live trade ran.
+
+Encode the request from Checked bytes, without changing shared decoder
+compatibility. The proof now binds the same canonical payload as the read
+evidence. The correction required another full source CI run.
+
+**What catches a recurrence:**
+`the_privy_request_encodes_checked_bytes_even_when_the_provisioned_spelling_is_lenient`
+supplies an equivalent lenient spelling, asserts canonical request output and
+verifies the resulting attestation. Restoring original-string forwarding fails
+that assertion. The test uses temporary fixture credentials only.

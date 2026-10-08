@@ -1134,7 +1134,8 @@ may be pending while the source head above is fully verified.
   both restored before final validation.
 - [x] Final local validation: 128 signer tests, 33 conformance checks, scoped
   all-target Clippy and formatting passed on restored source.
-- [ ] Complete full CI before recording source handback.
+- [x] Full initial CI 37708213731 passed at 3bfac0f, including all mutation
+  shards; final request-correction CI 37710263172 passed at 90cc0a9.
 
 This is protected operator-file integration, not independently authenticated RPC
 provenance. A live collector must still populate wallet/valuation/exposure/loss
@@ -1153,3 +1154,35 @@ original forwarded spelling fails that regression; source restored. Final local
 count is 129 signer tests, with 33 conformance checks, scoped Clippy and fmt.
 The test floor gains one more. Await the initial source CI before pushing this
 request correction, then verify its final source head without cancelled checks.
+
+**Final handback — verified source 90cc0a945400a0ca16f7ed9ee9e78160fe07a30e:**
+CI 37710263172 passed all build/tests/lint/fmt/MSRV/web/site/licence/cargo-deny
+checks, all four mutation shards and the final gate. Totals: 2,446 Rust and 352
+web tests. Initial issuer CI 37708213731 also passed before the correction push;
+the previous documentation CI completed before initial source was pushed.
+No check was cancelled. Local final validation: 129 signer tests, 33 conformance
+checks, scoped all-target Clippy and formatting. Three manual wrong behaviors
+(missing message binding, missing expiry cap, original-string forwarding) each
+failed their intended regression and were restored. LEARNINGS 50 records the
+encoded-request correction. No new lint suppression or mutation exclusion.
+
+The offline issuer now consumes protected transaction-read evidence before any
+reservation/proof. The evidence and canonical signing request bind the same
+Checked bytes. This is operator-file trust, not independently authenticated live
+RPC provenance. A live collector for wallet/valuation/exposure/loss and complete
+costs, protected activated owner mandates, settlement reconciliation and verified
+Privy policy/delegation still precede repeated trading. Site settings remain
+drafts; funding and active numeric limits were not established this increment.
+No real credential or delegation was provisioned, no wallet signature or trade
+was produced, and no Serve deployment or current VPS health check was made.
+
+Read-only browser inspection was attempted with the computer-use skill's browser
+alternative. Browser URL policy rejected selection of the suspended Privy tab
+(chrome-extension protocol); no alternate surface or workaround was used. The
+owner was asked to reopen the dashboard normally; no reply had arrived at
+handback, and live delegation status remains unverified.
+
+No local Cargo/rustc/radar/issuer/signer process remains. Target measured 29.4 GiB
+with 119.1 GiB free. Previously rejected ignored-output cleanup was not retried.
+This follow-up changes documentation only; its CI may be pending while the
+source head above is fully verified.
