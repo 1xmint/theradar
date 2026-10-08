@@ -1259,3 +1259,51 @@ No local Cargo/rustc/radar/issuer/signer process remains. Target measured 31.9
 GiB with 116.7 GiB free. Previously rejected ignored-output cleanup was not
 retried. This handback follow-up changes documentation only; its CI may be
 pending while the source above is fully verified.
+
+### Finalized exact-transaction settlement evidence (2026-10-07)
+
+The next caller is the operator `radar settlement-read` command, using a direct
+key-free RPC reader in radar-onchain. It supplies historical effects for later
+protected accounting; it does not release any outstanding issuer operation.
+
+- [x] Add an explicit wallet/signed-file/minimum-slot/RPC command. Reuse bounded
+  file input and host clock, under one RPC-call/twenty-second read budget.
+- [x] Require canonical single nonzero-signature legacy framing and writable
+  wallet fee payer. Read its account table; no duplicate signer wire decoder or
+  network dependency in the signer. Full validity/inclusion remains RPC trust.
+- [x] Query getTransaction at finalized commitment in base64; bind exact signed
+  bytes, legacy version and transaction slot. Missing/null transactions remain
+  unknown. No partial packet or provider detail on read failure.
+- [x] Require explicit execution metadata and known fee. Record landed failures
+  with their fee; require native balance arrays matching the account count and
+  complete token metadata arrays. Reject duplicate/out-of-range token indices,
+  missing identities/programs, invalid integer amounts or decimals. Retain raw
+  per-account history, optional chain time and host read times; no USD/PnL guess.
+- [x] Five reader unit tests, two actual CLI process tests and one command-scope
+  test cover success/failure, exact bytes/options, required fields, quantities,
+  slot/size/framing boundaries, every truncated prefix, malformed metadata,
+  duplicate token entries, unknown transactions and no partial output. Raise
+  the test floor by eight. Initial scoped tests passed: 95 onchain and 234 CLI.
+- [x] Local scoped all-target Clippy passed after keeping validated signature
+  extraction inside the private input parser. No lint suppression added.
+- [x] Removing exact-byte equality fails the mismatched-result test. Replacing
+  explicit err lookup with missing-as-null lookup fails the required-field test.
+  Source restored; all five reader tests and twelve CLI process tests pass.
+  Rust 1.99 scoped Clippy/format and all 33 conformance checks passed.
+- [ ] Inspect the staged diff, push after the prior completed CI and verify
+  full source CI including all four mutation shards before handback.
+
+A read-only public mainnet probe found signature
+ptNycYpFJ2R571QUNbPK2fXcBXqNL8aC7ojgP6rAm4mDeYsSGy6PPEn5cCitRndvTp2jdRPXMFH2dhi8o282ZB8
+at finalized slot 454421787. Its 1,142-byte version-zero envelope was refused by
+this command before its own RPC read, as intended for the current legacy lane.
+This is live refusal evidence; successful settlement reads are controlled
+fixtures. The Solana reference's devnet example signature was unavailable on
+public mainnet. No signature/trade was created, no user wallet read or VPS
+health/deployment was performed, and no real credential or delegation changed.
+
+The outstanding-operation guard is unchanged. Operation-to-signed-transaction
+binding, protected reconciliation and USD exposure/loss accounting are still
+needed to permit another issuance. Live price/cost/searched-exit evidence,
+activated owner limits and verified Privy policy/delegation remain prerequisites
+for autonomous execution. Site limits are still drafts.

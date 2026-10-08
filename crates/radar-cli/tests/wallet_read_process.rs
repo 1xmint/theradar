@@ -14,6 +14,107 @@ fn now() -> u64 {
         .as_secs()
 }
 
+fn settlement_bytes() -> Vec<u8> {
+    let mut bytes = vec![1];
+    bytes.extend_from_slice(&[0xAB; 64]);
+    bytes.extend_from_slice(&[1, 0, 0, 1]);
+    bytes.extend_from_slice(&[0x55; 32]);
+    bytes.extend_from_slice(&[0xAA; 32]);
+    bytes.push(0);
+    bytes
+}
+
+fn settlement_result() -> Value {
+    json!({"slot":50,"version":"legacy","transaction":[radar_types::b64::encode(&settlement_bytes()),"base64"],
+        "blockTime":null,"meta":{"err":null,"fee":5000,"preBalances":[10000],"postBalances":[5000],
+            "preTokenBalances":[],"postTokenBalances":[]}})
+}
+
+fn settlement_command(endpoint: &str) -> std::process::Output {
+    let mut file = tempfile::NamedTempFile::new().expect("signed input");
+    file.write_all(&settlement_bytes()).expect("file");
+    Command::new(env!("CARGO_BIN_EXE_radar"))
+        .args([
+            "settlement-read",
+            "--wallet",
+            &radar_types::Address::new([0x55; 32]).to_string(),
+            "--transaction",
+            file.path().to_str().expect("path"),
+            "--min-slot",
+            "50",
+            "--rpc",
+            endpoint,
+        ])
+        .output()
+        .expect("command")
+}
+
+#[test]
+fn settlement_command_preserves_effects_fees_and_read_window_without_reconciling() {
+    for err in [Value::Null, json!({"InstructionError":[0,1]})] {
+        let mut result = settlement_result();
+        result["meta"]["err"] = err.clone();
+        let (endpoint, server) = fixture(vec![json!({"result":result})]);
+        let before = now();
+        let output = settlement_command(&endpoint);
+        assert!(output.status.success(), "{:?}", output.stderr);
+        let evidence: Value = serde_json::from_slice(&output.stdout).expect("evidence");
+        assert_eq!(
+            evidence["transaction_base64"],
+            radar_types::b64::encode(&settlement_bytes())
+        );
+        assert_eq!(
+            evidence["outcome"],
+            if err.is_null() { "succeeded" } else { "failed" }
+        );
+        assert_eq!(evidence["network_fee_lamports"], "5000");
+        assert_eq!(evidence["pre_balances_lamports"], json!(["10000"]));
+        assert_eq!(evidence["post_balances_lamports"], json!(["5000"]));
+        assert_eq!(evidence["pre_token_balances"], json!([]));
+        assert_eq!(evidence["post_token_balances"], json!([]));
+        assert_eq!(evidence["operation_reconciled"], false);
+        assert_eq!(evidence["authority"], "read_only");
+        let start = evidence["read_started_at_unix_secs"]
+            .as_u64()
+            .expect("start");
+        let end = evidence["read_completed_at_unix_secs"]
+            .as_u64()
+            .expect("end");
+        assert!(before <= start && start <= end && end <= now());
+        let calls = server.join().expect("server");
+        assert_eq!(
+            calls,
+            vec![json!({"jsonrpc":"2.0","id":1,"method":"getTransaction",
+            "params":[radar_types::Signature::new([0xAB;64]).to_string(),
+                {"encoding":"base64","commitment":"finalized","maxSupportedTransactionVersion":0}]})]
+        );
+    }
+}
+
+#[test]
+fn unknown_mismatched_or_incomplete_settlement_emits_no_partial_packet() {
+    let mut mismatch = settlement_result();
+    mismatch["transaction"][0] = json!("different bytes");
+    let mut incomplete = settlement_result();
+    incomplete["meta"]
+        .as_object_mut()
+        .expect("meta")
+        .remove("err");
+    for answer in [
+        json!({"result":null}),
+        json!({"result":mismatch}),
+        json!({"result":incomplete}),
+        json!({"error":{"message":"private provider detail"}}),
+    ] {
+        let (endpoint, server) = fixture(vec![answer]);
+        let output = settlement_command(&endpoint);
+        assert!(!output.status.success());
+        assert_eq!(output.stdout, Vec::<u8>::new());
+        assert!(!String::from_utf8_lossy(&output.stderr).contains("private provider detail"));
+        assert_eq!(server.join().expect("server").len(), 1);
+    }
+}
+
 fn collected_reads() -> Vec<Value> {
     vec![
         json!({"result":{"context":{"slot":50},"value":u64::MAX}}),

@@ -396,6 +396,47 @@ existing Jupiter SOL-to-USDC quote is a point quote, not the conservative upper
 USD price required for a live spending ceiling. This increment does not activate
 delegation or change the site's draft limits.
 
+### Finalized settlement reads
+
+`radar settlement-read --wallet <address> --transaction <signed-binary-file>
+--min-slot <N> --rpc <URL>` now reads historical finalized evidence for exactly
+one signed legacy transaction. The operator CLI is the caller. The read holds
+no key, sends nothing and cannot transition a journal operation.
+
+Input is bounded to 1,232 bytes, one canonical nonzero signature and a legacy
+header with the configured wallet as writable fee payer. Account keys are read
+locally; the RPC remains responsible for full message validity, signature and
+execution assertions. The request uses the first signature, base64 encoding,
+finalized commitment and maximum supported transaction version zero. The
+response must explicitly say legacy, bind the exact canonical transaction
+bytes and report a transaction slot at or above the supplied minimum. This is
+RPC trust, not a cryptographically authenticated inclusion proof.
+
+Explicit execution metadata is required. A landed failure remains a failure
+with a measured fee; a missing/null transaction or absent execution field is
+unknown and emits no packet. Native pre/post balance arrays must match the
+local account table. Token arrays must be present; their entries require unique
+in-range account indices, valid mint/owner identities, SPL or Token-2022 program,
+integer-string amounts and byte-sized decimals. Quantities and fees are emitted
+as strings. UI floats, provider errors and program logs are not copied.
+
+The packet preserves historical balances, transaction slot, optional chain
+block time and the host read window. It does not make those balances current,
+infer an economic trade from native movement or turn a missing token entry into
+an assumed zero. USD valuation and realised PnL remain unknown; the packet does
+not reconcile an operation. A future protected reconciler must bind evidence
+to the authorized operation, establish effects and fees, and update exposure
+and loss accounting before another issuance. The issuer's outstanding-operation
+guard and live delegation gate remain closed.
+
+The method/encoding/metadata contract was checked against Solana's
+[getTransaction reference](https://solana.com/docs/rpc/http/gettransaction).
+Controlled process tests cover successful and fee-paying failed reads. A live
+public mainnet transaction at slot 454421787 used version zero and was refused
+by the legacy input guard; this is a verified refusal, not a successful live
+settlement read. The reference's example signature was unavailable on the public
+mainnet endpoint. No user wallet transaction was signed or broadcast.
+
 ## What would reverse this
 
 Nothing foreseeable reverses holding a policy locally. The specific ceilings are

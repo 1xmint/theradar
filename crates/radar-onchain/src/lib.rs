@@ -54,6 +54,7 @@ pub mod launch;
 pub mod preflight;
 pub mod reserves;
 pub mod rpc;
+pub mod settlement;
 
 pub use budget::{Budget, Count, Exhausted};
 pub use dossier::{CurveFacts, Dossier, Unavailable, build};

@@ -29,6 +29,7 @@ mod replay;
 mod route;
 mod selection;
 mod session;
+mod settlement_read;
 mod study;
 mod transaction_read;
 mod wallet_read;
@@ -122,6 +123,8 @@ commands:
     Exact unsigned legacy simulation and message fee; JSON, no signing or sending.
   evidence-read --wallet <address> --transaction <binary-file> --min-slot <N> --rpc <URL>
     Collect wallet and exact transaction evidence together; no valuation or authority.
+  settlement-read --wallet <address> --transaction <signed-binary-file> --min-slot <N> --rpc <URL>
+    Exact finalized transaction and balance metadata; no claim release or USD accounting.
 
   dossier <mint> [--rpc URL] [--seconds N]
                                  everything Radar can say about one token, read
@@ -899,6 +902,7 @@ fn main() -> ExitCode {
         "curve-exit" => curve_exit::run(&args),
         "transaction-read" => transaction_read::run(&args),
         "evidence-read" => evidence_read::run(&args),
+        "settlement-read" => settlement_read::run(&args),
         "audit" => audit::run(&args),
         "model-prices" => model_prices::run(&args),
         "selection" => selection_report(&args),
