@@ -19,12 +19,12 @@ fn signed_transaction(
         || bytes[1..65].iter().all(|byte| *byte == 0)
         || bytes[65] != 1
         || bytes[66] != 0
-        || bytes[68] == 0
-        || bytes[68] >= 128
         || bytes[67] >= bytes[68]
     {
         return Err("settlement-read needs a single signed legacy transaction");
     }
+    // The readonly count rejects zero accounts. Packet size plus the complete
+    // table check also excludes account counts needing a second shortvec byte.
     let end = 69 + usize::from(bytes[68]) * 32;
     if bytes.len() < end + 33 {
         return Err("settlement transaction accounts are truncated");
@@ -413,6 +413,20 @@ mod tests {
         let mut maximum = original;
         maximum.resize(MAX_TRANSACTION_BYTES, 0);
         assert!(read(&result(&maximum), &maximum).is_ok());
+        let mut minimum = bytes();
+        minimum[68] = 1;
+        minimum.drain(101..133);
+        assert_eq!(minimum.len(), 134);
+        let mut raw = result(&minimum);
+        raw["meta"]["preBalances"] = json!([u64::MAX]);
+        raw["meta"]["postBalances"] = json!([u64::MAX - 5000]);
+        raw["meta"]["postTokenBalances"] = json!([]);
+        let evidence = read(&raw, &minimum).expect("minimum signed legacy packet");
+        assert_eq!(
+            evidence["account_keys"],
+            json!([Address::new([0x55; 32]).to_string()])
+        );
+        assert_eq!(evidence["transaction_base64"], b64::encode(&minimum));
     }
 
     #[test]

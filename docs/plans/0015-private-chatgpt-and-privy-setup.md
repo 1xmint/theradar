@@ -1293,6 +1293,20 @@ protected accounting; it does not release any outstanding issuer operation.
 - [ ] Inspect the staged diff, push after the prior completed CI and verify
   full source CI including all four mutation shards before handback.
 
+Source CI 37723194570 at 67a6c44 completed every shard: 2,460 Rust tests,
+352 web tests and all non-mutation checks passed; shard zero reported two
+survivors. The 134-byte accepted boundary was covered only in another crate's
+process test, outside the onchain mutation sandbox. Add it to the existing
+onchain framing regression; manually applying the exact `<` to `<=` change at
+settlement.rs:17:24 now fails that regression. Source restored.
+
+The settlement.rs:23:9 `||` to `&&` change passed all five reader tests when
+applied by hand. The zero/high account-count guards are redundant: readonly
+unsigned count is always at least zero, and a complete 128-account table cannot
+fit the 1,232-byte packet limit. Remove those guards rather than exclude their
+mutants. The remaining bounds still reject zero/noncanonical/truncated tables.
+No new test, mutation exclusion or lint suppression is added in this repair.
+
 A read-only public mainnet probe found signature
 ptNycYpFJ2R571QUNbPK2fXcBXqNL8aC7ojgP6rAm4mDeYsSGy6PPEn5cCitRndvTp2jdRPXMFH2dhi8o282ZB8
 at finalized slot 454421787. Its 1,142-byte version-zero envelope was refused by
