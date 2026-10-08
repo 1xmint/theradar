@@ -1493,6 +1493,7 @@ No Cargo/rustc/radar/issuer/signer process remains. Target measured 33.0 GiB,
 with 114.8 GiB free. Previously rejected ignored-output cleanup was not retried.
 This follow-up changes documentation only; its CI may be pending while the
 source above is fully verified.
+
 ### Completed measured native spend (2026-10-08)
 
 Add terminal measured-spend vocabulary for the existing journal confirm/reconcile
@@ -1677,10 +1678,60 @@ figures; USD exposure/loss reconciliation remains open. No live authority change
   their targeted regression; both restored. Raise test floor to 2086.
 - [x] All 184 scoped tests and 33 conformance tests pass, with Rust 1.99 scoped
   Clippy and format.
-- [ ] Read staged diff, commit, wait prior CI, push and verify all CI shards/gate.
+- [x] Read staged diff; source 740ec39 passed full CI 37824117332: 2,483 Rust
+  and 352 web tests, all four mutation shards and final gate. Prior handback CI
+  37821367844 passed before this push; no awaited check was cancelled.
 
 Next: derive economic exposure/loss from retained facts with explicit valuation
 and execution-day evidence, then build protected live snapshots. This checkpoint
 only rejects stale history association, not incorrect USD figures carrying a
 current marker. Autonomous execution remains off, with all four activation
 gates still open. No production deployment, real trade or delegation is made.
+
+### Handback: protected accounting history checkpoint (2026-10-08)
+
+Source 740ec394b81abd7f3ee39b738984ada8f9804ce0 passed full CI
+37824117332 (https://github.com/1xmint/theradar/actions/runs/37824117332):
+2,483 Rust and 352 web tests, all four mutation shards and final gate. Local
+verification passed 41 journal, 143 signer and 33 conformance tests, scoped Rust
+1.99 Clippy and formatting. Bypassing the issuer comparison and returning an
+empty journal checkpoint each failed its targeted regression; source restored.
+No new mutation exclusion or lint suppression was added. Prior handback CI
+37821367844 completed successfully before the push. No awaited run was cancelled.
+
+Issuer::issue requires a private accounting_checkpoint string equal to the
+owned journal's last complete event digest. Empty string is genesis only; missing
+or malformed input refuses. Every event counts, including completed operations,
+aborts, proposals whose reservation was refused and non-operation records.
+Failed appends do not advance the head; repeats and replay preserve it. Tests
+exercise stale history refusal in restarted and running issuers, unchanged
+history on refusal, candidate exclusion and a current checkpoint still refusing
+the supplied daily-loss stop. Outstanding submissions continue to block issuance.
+
+This asserts operator-provisioned history coverage only. It does not verify that
+USD exposure or loss figures are correct, authenticate RPC origin, prevent
+operator rollback or establish current prices/holdings. Copying the current
+digest onto incorrect economic figures remains possible inside the trusted
+operator boundary. No protected claim-closing command was added.
+
+Next: economic reconciliation and independent live snapshot construction.
+Inspection shows current ExecutionBinding retains wallet/transaction, while
+proposal correlation retains mint/receipt rather than a complete reviewed
+proposal. Durable creator/action attribution is needed for economic accounting;
+an opaque proposal nonce cannot reconstruct it. Retained normalized settlement
+review omits optional chain block time, so execution-day evidence is also needed
+before daily-loss attribution. Native net delta and authorization ceilings must
+not substitute for measured trade notional, valuation or PnL. These are next-step
+requirements, not implementations or settled accounting choices.
+
+All four activation gates remain open: economic reconciliation; protected live
+risk inputs; execution/recovery/exits/scheduling; and activated owner limits,
+isolated keys, verified Privy policy/delegation, funding, deployment and bounded
+validation. This closes one coverage safeguard within the first gate. Autonomous
+execution remains off and site settings remain drafts. No live provider/chain
+read, real wallet signature/key/credential/delegation change, trade, VPS health
+read or Serve deployment occurred. Current funding and Privy setup are unverified.
+
+No Cargo/rustc/Radar process remains locally. Target measured 33.1 GiB with
+114.5 GiB free. Previously rejected ignored-output cleanup was not retried. This
+follow-up records verified source only; its documentation CI may still be pending.
