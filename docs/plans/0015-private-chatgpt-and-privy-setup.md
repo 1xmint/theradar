@@ -1372,8 +1372,9 @@ needed by the future settlement reconciler without releasing any claim.
 - [x] Manually bypassing strict signature verification makes the actual-process
   regression fail. Removing exact-message equality also fails on a validly
   re-signed changed message. Restore source after each demonstration.
-- [ ] Finish scoped tests/lint/fmt/conformance, staged review and full source
-  CI including every mutation shard before final handback.
+- [x] Scoped tests/lint/fmt/conformance and complete staged review passed.
+  Full source CI 37800981316 passed at 1e2797f, including every mutation shard
+  and final gate: 2,465 Rust tests and 352 web tests.
 
 Older operations lacking binding refuse this command; their claims are retained.
 The operator's private config/history/files remain the trust boundary, not
@@ -1391,3 +1392,35 @@ including misspelled flags and too few/many arguments; raise the floor to 2068.
 Applying that exact mutation fails the usage-error regression. Source restored;
 all 19 issuer process tests and scoped Rust 1.99 Clippy passed after the repair.
 No check was cancelled, and no mutation exclusion or lint suppression is added.
+
+**Final handback — verified source 1e2797f786c7fc86d636185a81d67c108089468f:**
+CI 37800981316 passed build/tests/lint/fmt/MSRV/web/site/licence/cargo-deny,
+all four mutation shards and final gate. Totals: 2,465 Rust and 352 web tests.
+Previous documentation CI 37726270806 and initial source CI 37797820882 completed
+before subsequent pushes; no check was cancelled. Local verification: 33 journal
+tests, 134 signer tests and 33 conformance checks passed before the scope repair;
+all 19 issuer process tests and scoped Rust 1.99 Clippy/format passed after it.
+Three manual wrong behaviors (signature bypass, exact-message bypass and exact
+command-guard mutation) fail regressions; source restored. No suppression or
+mutation exclusion was added.
+
+The offline issuer retains protected wallet/authorized bytes before proof output.
+Its explicit signed-file command verifies the exact legacy message and wallet
+signature, then persists the signed artifact under existing operation ownership.
+Replay preserves that binding, while absent/conflicting metadata refuses. Older
+operations remain unbound and outstanding. No generic journal method claims to
+verify the wallet signature or authenticate its host. No executor broadcasts yet.
+Recording signed bytes never releases a reservation or resets portfolio state.
+
+Next: match protected finalized settlement evidence to the recorded artifact,
+establish economic effects/fees and reconcile USD valuation, exposure and losses
+before allowing another issuance. Live price bounds, complete cost/searched-exit
+evidence, activated owner limits and verified Privy policy/delegation remain
+necessary for autonomous execution. The new keys/signatures used only temporary
+test wallets. No real wallet/key/credential/delegation/trade, live wallet/VPS
+health read or Serve deployment occurred. Site limits remain drafts.
+
+No Cargo/rustc/radar/issuer/signer process remains. Target measured 32.9 GiB,
+with 114.9 GiB free. Previously rejected ignored-output cleanup was not retried.
+This handback follow-up changes documentation only; its CI may be pending while
+the source above is fully verified.
