@@ -1515,8 +1515,9 @@ not inferred from native balance changes.
   Removing completed remainder release, moving journal writes before preflight,
   rejecting exact fee equality and bypassing replay checks each fail the
   corresponding regression. Restore source after every manual demonstration.
-- [ ] Finish format/staged review and full source CI including every mutation
-  shard; record the verified handback.
+- [x] Format and complete staged review passed. Source 6bcb1f3 passed full
+  CI 37813011455: 2,475 Rust and 352 web tests, all four mutation shards
+  and final gate. Verified handback follows.
 
 No protected reconcile command is enabled by this increment. Generic journal
 callers establish completion; they do not authenticate chain evidence. Next:
@@ -1524,3 +1525,44 @@ retain finalized reconciliation evidence durably and account for exposure/loss
 before another issuance. Full protected snapshot construction, live valuation,
 cost/searched exit evidence, activated limits and verified Privy policy/delegation
 remain necessary. Autonomous execution is off and site settings remain drafts.
+
+### Handback: completed measured spend (2026-10-08)
+
+Source 6bcb1f336832151c2b84c463af96d18bdaa046ec passed full CI
+37813011455 (https://github.com/1xmint/theradar/actions/runs/37813011455):
+2,475 Rust and 352 web tests, all four mutation shards and final gate. The prior
+documentation CI 37810416491 passed before pushing this source; no awaited check
+was cancelled. Formatting's job status field remained in_progress despite its
+successful conclusion, completion timestamp and completed steps; the overall
+workflow completed successfully. Local verification passed 86 types, 36 journal,
+140 signer and 33 conformance tests, scoped Rust 1.99 Clippy and format. All four
+manually reapplied bugs failed regressions; source restored. No new mutation
+exclusion or lint suppression was added.
+
+Completed records a final measured spend, debits only that amount and releases
+the unused reservation. PartiallyFilled still retains its remainder. Journal
+terminal callers preflight on a portfolio copy before persistence and apply it
+only after the write succeeds. Refusals leave history and balances untouched.
+Replayed reservations must be reheld before closure. Completed replay checks
+unchanged intent/reservation and spend units/ceiling; completed operations do
+not rehold or debit fresh balances again. Duplicate completion is idempotent.
+
+The protected review now emits a typed native settlement candidate when a
+measured debit covers known fees, including equality and measured zero. Credits
+and debits below fees leave it absent. This candidate does not mutate history,
+release claims or infer gross spend, USD exposure/loss or realised PnL. Generic
+journal callers must establish the outcome themselves. No protected reconcile
+command is enabled yet.
+
+Next: retain finalized reconciliation evidence durably, update economic
+exposure/loss and prevent issuance from stale accounting. Complete protected
+snapshots, live valuation/cost/searched exit evidence, activated owner limits
+and verified Privy policy/delegation remain necessary. Autonomous execution
+remains off; site settings are drafts. No live chain/provider call, real wallet
+signature/key/credential/delegation change, trade, VPS health read or Serve
+deployment occurred here.
+
+No Cargo/rustc/radar/issuer/signer process remains. Target measured 33.1 GiB,
+with 114.7 GiB free. Previously rejected ignored-output cleanup was not retried.
+This follow-up changes documentation only; its CI may be pending while the
+source above is fully verified.
