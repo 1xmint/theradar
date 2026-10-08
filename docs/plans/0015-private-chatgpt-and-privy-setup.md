@@ -1735,3 +1735,33 @@ read or Serve deployment occurred. Current funding and Privy setup are unverifie
 No Cargo/rustc/Radar process remains locally. Target measured 33.1 GiB with
 114.5 GiB free. Previously rejected ignored-output cleanup was not retried. This
 follow-up records verified source only; its documentation CI may still be pending.
+
+### Reviewed trade attribution and execution-time evidence (2026-10-08)
+
+Actual callers: Issuer::issue stores the typed protected proposal with its
+checked transaction before issuance; existing protected settlement review/record
+retain normalized optional execution time. These are economic reconciliation
+prerequisites, not a live ledger or a source of model signing authority.
+
+- [x] Optional reviewed_proposal in ExecutionBinding preserves absent-field old
+  event hashes. Signing updates and terminal replay retain it; replay rejects
+  changed, removed or newly invented attribution. No migration guesses fields.
+- [x] Store serialized typed Proposal rather than arbitrary input JSON. Actual
+  issuer regression verifies all reviewed fields and exclusion of extra bodies.
+- [x] Preserve known unsigned block_time_unix_secs as a decimal string, leave
+  missing/null time unknown, refuse malformed/negative/future-to-read times.
+  Zero/equality and canonical decimal spelling are covered; record persists time
+  and refuses a conflicting repeat.
+- [x] Three new regressions raise the test floor to 2089. Existing actual signed
+  binding and durable terminal tests verify retained proposal/time through replay.
+- [x] Reapplied omission of stored proposal, changed-proposal replay acceptance,
+  and using read completion as absent execution time each fail; restore source.
+- [x] All 187 scoped tests and 33 conformance checks pass; Rust 1.99 scoped
+  Clippy and formatting pass. No mutation exclusion or lint suppression added.
+- [ ] Read staged diff, commit, wait prior CI, push and verify all shards/gate.
+
+Next: economic reconciliation using measured fills, cost basis and dated valuation
+inputs; authorizing proposal notional is not measured fill value. Protected live
+snapshots, execution/recovery/exits and activation verification also remain.
+Autonomous trading stays off. No real credential, wallet signature, delegation,
+trade, live chain/provider read or production deployment occurs in this increment.

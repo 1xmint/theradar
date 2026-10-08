@@ -1004,6 +1004,7 @@ fn replay(events: &[Event]) -> Result<BTreeMap<OperationId, Live>, OperationErro
                 || entry != live.entry
                 || binding.wallet != previous.wallet
                 || binding.transaction != previous.transaction
+                || binding.reviewed_proposal != previous.reviewed_proposal
                 || binding.signed_transaction.is_none()
                 || previous
                     .signed_transaction

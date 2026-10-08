@@ -50,6 +50,18 @@ fn native_settlement(delta: i128, fee: u64) -> Option<radar_types::Settlement> {
         })
 }
 
+fn block_time(value: &Value, completed: u64) -> Result<Option<u64>, String> {
+    match value.get("block_time_unix_secs") {
+        None | Some(Value::Null) => Ok(None),
+        Some(value) => value
+            .as_str()
+            .and_then(|s| s.parse::<u64>().ok())
+            .filter(|time| *time <= completed)
+            .map(Some)
+            .ok_or_else(|| "invalid or future settlement block time".into()),
+    }
+}
+
 pub(super) fn review(
     binding: &ExecutionBinding,
     entry: &OperationEntry,
@@ -144,11 +156,13 @@ pub(super) fn review(
         json!({"account":account.to_string(),"pre_lamports":pre.to_string(),"post_lamports":post.to_string(),
             "net_change_lamports":(i128::from(*post)-i128::from(*pre)).to_string()})).collect();
     let native_settlement = native_settlement(delta, fee);
+    let block_time = block_time(value, completed)?;
     Ok(
         json!({"version":1,"authority":"protected_file_review","outcome":outcome,
         "wallet":binding.wallet.to_string(),"signature":Signature::new(signature).to_string(),
         "slot":slot.to_string(),"native_account_effects":effects,"wallet_net_change_lamports":delta.to_string(),
         "minimum_slot":minimum.to_string(),"read_started_at_unix_secs":started,"read_completed_at_unix_secs":completed,
+        "block_time_unix_secs":block_time.map(|time|time.to_string()),
         "network_fee_lamports":fee.to_string(),"reserved_lamports":reserved.raw().to_string(),
         "pre_token_balances":before,"post_token_balances":after,"usd_value":null,"realised_pnl":null,
         "native_settlement_candidate":native_settlement,
@@ -174,6 +188,7 @@ mod tests {
             wallet,
             transaction: b64::encode(&signed),
             signed_transaction: Some(b64::encode(&signed)),
+            reviewed_proposal: None,
         };
         let entry = OperationEntry {
             intent: Intent {
@@ -191,6 +206,52 @@ mod tests {
             "account_keys":[wallet.to_string()],"pre_balances_lamports":[u64::MAX.to_string()],"post_balances_lamports":["0"],
             "network_fee_lamports":"5000","pre_token_balances":[],"post_token_balances":[]});
         (binding, entry, value)
+    }
+
+    #[test]
+    fn execution_time_is_retained_or_unknown_and_never_replaced_by_read_time() {
+        let (binding, entry, mut value) = fixture();
+        for time in [
+            None,
+            Some(Value::Null),
+            Some(json!("0")),
+            Some(json!("100")),
+        ] {
+            value
+                .as_object_mut()
+                .expect("object")
+                .remove("block_time_unix_secs");
+            if let Some(time) = time {
+                value["block_time_unix_secs"] = time;
+            }
+            let report = review(&binding, &entry, &value, 100, 20).expect("review");
+            assert_eq!(
+                report["block_time_unix_secs"],
+                value
+                    .get("block_time_unix_secs")
+                    .cloned()
+                    .unwrap_or(Value::Null)
+            );
+            assert_eq!(report["usd_value"], Value::Null);
+            assert_eq!(report["realised_pnl"], Value::Null);
+        }
+        for bad in [
+            json!(100),
+            json!(true),
+            json!({}),
+            json!("-1"),
+            json!("101"),
+            json!("unknown"),
+            json!("18446744073709551616"),
+        ] {
+            value["block_time_unix_secs"] = bad;
+            assert!(review(&binding, &entry, &value, 100, 20).is_err());
+        }
+        value["block_time_unix_secs"] = json!("00090");
+        assert_eq!(
+            review(&binding, &entry, &value, 100, 20).expect("canonical time")["block_time_unix_secs"],
+            "90"
+        );
     }
 
     #[test]

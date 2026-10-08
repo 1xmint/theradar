@@ -8,6 +8,34 @@ use std::process::{Child, Command, Stdio};
 const SEED: [u8; 32] = [0x6B; 32];
 
 #[test]
+fn issued_history_retains_the_typed_reviewed_proposal_without_unreviewed_fields() {
+    let mut fixture = Fixture::new();
+    let expected = fixture.snapshot["proposal"].clone();
+    fixture.snapshot["proposal"]["provider_body"] = json!("UNREVIEWED_PROPOSAL_MUST_NOT_PERSIST");
+    fixture.save();
+    let mut issuer = fixture.start();
+    assert_eq!(issuer.ask(&fixture.candidate)["outcome"], "issued");
+    drop(issuer);
+    let history = fixture.dir.path().join("operations.jsonl");
+    let log = radar_journal::OperationLog::open(&history).expect("replay");
+    let id = log.outstanding().next().expect("operation").0;
+    assert_eq!(
+        log.execution(id).expect("binding").reviewed_proposal,
+        Some(expected)
+    );
+    assert!(
+        !std::fs::read_to_string(&history)
+            .expect("history")
+            .contains("UNREVIEWED_PROPOSAL_MUST_NOT_PERSIST")
+    );
+    drop(log);
+    assert_eq!(
+        fixture.start().ask(&fixture.candidate)["reason"],
+        "outstanding operation requires reconciliation"
+    );
+}
+
+#[test]
 fn accounting_checkpoint_is_required_and_cannot_be_supplied_by_the_candidate() {
     let mut fixture = Fixture::new();
     let mut issuer = fixture.start();
@@ -264,6 +292,7 @@ fn settlement_review_binds_exact_evidence_and_keeps_the_journal_outstanding() {
                         .expect("wallet"),
                     transaction: radar_types::b64::encode(&signed),
                     signed_transaction: None,
+                    reviewed_proposal: None,
                 }),
                 ..radar_journal::Correlation::default()
             },
@@ -282,7 +311,14 @@ fn settlement_review_binds_exact_evidence_and_keeps_the_journal_outstanding() {
 
 #[test]
 fn finalized_record_persists_only_normalized_facts_and_keeps_issuance_blocked() {
-    let (fixture, signed, id, evidence) = finalized_fixture();
+    let (fixture, signed, id, mut evidence) = finalized_fixture();
+    evidence["block_time_unix_secs"] = json!(
+        (evidence["read_completed_at_unix_secs"]
+            .as_u64()
+            .expect("read completion")
+            - 1)
+        .to_string()
+    );
     let history = fixture.dir.path().join("operations.jsonl");
     let path = fixture.dir.path().join("settlement.json");
     let mut saved = std::fs::read(&history).expect("history bytes");
@@ -316,6 +352,10 @@ fn finalized_record_persists_only_normalized_facts_and_keeps_issuance_blocked() 
             assert_eq!(retained.review["signature_verified_locally"], true);
             assert_eq!(retained.review["minimum_slot"], "1000");
             assert_eq!(
+                retained.review["block_time_unix_secs"],
+                evidence["block_time_unix_secs"]
+            );
+            assert_eq!(
                 retained.review["read_started_at_unix_secs"],
                 evidence["read_started_at_unix_secs"]
             );
@@ -339,6 +379,7 @@ fn finalized_record_persists_only_normalized_facts_and_keeps_issuance_blocked() 
         ("transaction_base64", json!("different")),
         ("read_completed_at_unix_secs", json!(unix_now() + 600)),
         ("slot", json!("1002")),
+        ("block_time_unix_secs", json!("0")),
     ] {
         let mut value = evidence.clone();
         value[field] = bad;
@@ -478,6 +519,10 @@ fn signed_bytes_are_verified_and_persisted_without_releasing_the_operation() {
     assert_eq!(
         log.execution(&id).expect("binding").signed_transaction,
         Some(radar_types::b64::encode(&signed))
+    );
+    assert_eq!(
+        log.execution(&id).expect("binding").reviewed_proposal,
+        Some(fixture.snapshot["proposal"].clone())
     );
     assert_eq!(log.outstanding().count(), 1);
     drop(log);

@@ -136,6 +136,7 @@ fn signed_binding_survives_restart_without_releasing_or_replacing_a_claim() {
         wallet: WALLET,
         transaction: "approved bytes".into(),
         signed_transaction: None,
+        reviewed_proposal: Some(serde_json::json!({"creator":"reviewed creator","action":"buy"})),
     };
     let correlation = Correlation {
         execution: Some(binding.clone()),
@@ -191,6 +192,73 @@ fn signed_binding_survives_restart_without_releasing_or_replacing_a_claim() {
 }
 
 #[test]
+fn replay_refuses_replacing_removing_or_inventing_the_reviewed_proposal() {
+    for change in 0..4 {
+        let dir = tempfile::tempdir().expect("dir");
+        let path = somewhere(&dir);
+        let mut log = OperationLog::open(&path).expect("log");
+        let mut binding = radar_journal::ExecutionBinding {
+            wallet: WALLET,
+            transaction: "approved".into(),
+            signed_transaction: None,
+            reviewed_proposal: (change != 3)
+                .then(|| serde_json::json!({"creator":"original","action":"buy"})),
+        };
+        let id = log
+            .propose(
+                intent(),
+                1,
+                Correlation {
+                    execution: Some(binding.clone()),
+                    ..about()
+                },
+            )
+            .expect("proposal");
+        log.reserve(&id, &mut account(), 2).expect("reserve");
+        log.submit(&id, 3, |_| Ok::<_, ()>(()))
+            .expect("submit")
+            .expect("effect");
+        let entry = *log.entry(&id).expect("entry");
+        binding.signed_transaction = Some("signed".into());
+        match change {
+            0 => {
+                binding.reviewed_proposal.as_mut().expect("proposal")["creator"] =
+                    serde_json::json!("changed");
+            }
+            1 => {
+                binding.reviewed_proposal.as_mut().expect("proposal")["action"] =
+                    serde_json::json!("exit");
+            }
+            2 => binding.reviewed_proposal = None,
+            _ => {
+                binding.reviewed_proposal =
+                    Some(serde_json::json!({"creator":"invented","action":"buy"}));
+            }
+        }
+        drop(log);
+        radar_journal::Journal::open(&path)
+            .expect("journal")
+            .record_operation(
+                radar_journal::Outcome::Uncertain,
+                4,
+                Correlation {
+                    operation: Some(id.as_str().into()),
+                    execution: Some(binding),
+                    ..Correlation::default()
+                },
+                entry,
+                None,
+                None,
+            )
+            .expect("valid hashes but changed attribution");
+        assert!(matches!(
+            OperationLog::open(&path),
+            Err(OperationError::ExecutionBinding)
+        ));
+    }
+}
+
+#[test]
 fn replay_refuses_changed_execution_identity_missing_bindings_and_changed_claims() {
     for change in 0..7 {
         let dir = tempfile::tempdir().expect("dir");
@@ -200,6 +268,7 @@ fn replay_refuses_changed_execution_identity_missing_bindings_and_changed_claims
             wallet: WALLET,
             transaction: "approved".into(),
             signed_transaction: None,
+            reviewed_proposal: None,
         };
         let id = log
             .propose(
@@ -227,6 +296,7 @@ fn replay_refuses_changed_execution_identity_missing_bindings_and_changed_claims
             wallet: WALLET,
             transaction: "approved".into(),
             signed_transaction: Some("signed".into()),
+            reviewed_proposal: None,
         };
         match change {
             0 => binding.wallet = radar_types::Address::SYSTEM_PROGRAM,
@@ -572,6 +642,7 @@ fn finalized_facts_survive_restart_and_terminal_completion_without_releasing_ear
     let path = somewhere(&dir);
     let mut portfolio = account();
     let mut log = OperationLog::open(&path).expect("open");
+    let reviewed = serde_json::json!({"creator":"reviewed","action":"buy"});
     let id = log
         .propose(
             intent(),
@@ -581,6 +652,7 @@ fn finalized_facts_survive_restart_and_terminal_completion_without_releasing_ear
                     wallet: WALLET,
                     transaction: "approved".into(),
                     signed_transaction: None,
+                    reviewed_proposal: Some(reviewed.clone()),
                 }),
                 ..about()
             },
@@ -649,6 +721,10 @@ fn finalized_facts_survive_restart_and_terminal_completion_without_releasing_ear
     drop(log);
     let log = OperationLog::open(&path).expect("terminal replay");
     assert_eq!(log.settlement(&id), Some(&evidence));
+    assert_eq!(
+        log.execution(&id).expect("binding").reviewed_proposal,
+        Some(reviewed)
+    );
     assert_eq!(log.outstanding().count(), 0);
 }
 
@@ -671,6 +747,7 @@ fn finalized_record_requires_an_unknown_operation_with_the_recorded_signed_artif
                             wallet: WALLET,
                             transaction: "approved".into(),
                             signed_transaction: None,
+                            reviewed_proposal: None,
                         }),
                         ..about()
                     }
@@ -738,6 +815,7 @@ fn replay_refuses_unbound_changed_or_misstaged_finalized_facts() {
                         wallet: WALLET,
                         transaction: "approved".into(),
                         signed_transaction: None,
+                        reviewed_proposal: None,
                     }),
                     ..about()
                 },

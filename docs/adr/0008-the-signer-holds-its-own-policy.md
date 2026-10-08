@@ -560,6 +560,34 @@ fresh economic reads. The risk kernel still checks the supplied portfolio state.
 Economic reconciliation and independently constructed live snapshots remain
 required; live delegation stays closed.
 
+## Durable reviewed trade attribution and execution time
+
+New issuer proposals retain the typed, independently reviewed `Proposal` as
+normalized JSON inside ExecutionBinding, together with the canonical checked
+transaction. It includes creator, action, market, quote, sizing and risk-input
+fields. Serialization of the typed proposal excludes arbitrary input fields.
+The proposal is recorded before reservation/proof output; signing metadata
+updates and terminal replay preserve it. Replay refuses replacing, dropping or
+inventing this field in a later execution binding. Generic journal callers
+establish the proposal's correctness; it is inert data, not signing authority.
+Older bindings deserialize with no reviewed proposal, and an absent optional
+field preserves their event hashes. No attribution is inferred or backfilled.
+
+Protected settlement review now retains `block_time_unix_secs` as a canonical
+unsigned decimal string when present. Missing or null time remains null, never
+the host read time. Malformed, negative or future-to-read-completion timestamps
+refuse. Measured zero and equality with read completion are accepted. The
+existing record mode stores this normalized field durably; changing it in a
+repeat conflicts with the earlier record. Older recorded reviews remain as they
+were; a repeat with a different normalized shape also conflicts rather than
+rewriting old evidence. This is protected operator evidence, not authenticated chain time or proof
+of an execution day independent of that trust boundary.
+
+Attribution and time are prerequisites for later economic reconciliation. The
+reviewed notional is an authorization input, not measured fill value. No prices,
+cost basis, USD exposure or realised loss are inferred here, and no claim-closing
+command or live delegation is enabled.
+
 ## What would reverse this
 
 Nothing foreseeable reverses holding a policy locally. The specific ceilings are

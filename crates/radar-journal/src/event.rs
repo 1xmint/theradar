@@ -159,6 +159,10 @@ pub struct ExecutionBinding {
     pub transaction: String,
     /// Canonical signed bytes, recorded after caller verification and before broadcast.
     pub signed_transaction: Option<String>,
+    /// Protected issuer's normalized reviewed proposal, not model authority.
+    /// Absent in older histories; no creator/action is inferred from a nonce.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reviewed_proposal: Option<serde_json::Value>,
 }
 
 /// Caller-verified normalized review, durably tied to the recorded artifact.

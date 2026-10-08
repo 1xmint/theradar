@@ -68,6 +68,23 @@ struct Candidate {
     transaction: String,
 }
 
+impl Snapshot {
+    fn execution_binding(
+        &self,
+        transaction: &str,
+    ) -> Result<radar_journal::ExecutionBinding, String> {
+        Ok(radar_journal::ExecutionBinding {
+            wallet: self.wallet,
+            transaction: transaction.to_owned(),
+            signed_transaction: None,
+            reviewed_proposal: Some(
+                serde_json::to_value(&self.proposal)
+                    .map_err(|_| "reviewed proposal could not be normalized")?,
+            ),
+        })
+    }
+}
+
 struct Issuer {
     config_path: PathBuf,
     config: Config,
@@ -437,15 +454,14 @@ impl Issuer {
                 },
                 now,
                 Correlation {
-                    execution: Some(radar_journal::ExecutionBinding {
-                        wallet: self.config.wallet,
-                        transaction: intent
-                            .request
-                            .transaction()
-                            .ok_or("request transaction missing")?
-                            .to_owned(),
-                        signed_transaction: None,
-                    }),
+                    execution: Some(
+                        snapshot.execution_binding(
+                            intent
+                                .request
+                                .transaction()
+                                .ok_or("request transaction missing")?,
+                        )?,
+                    ),
                     mint: Some(intent.authorization.mint.to_string()),
                     receipt: Some(intent.authorization.nonce.clone()),
                     ..Correlation::default()
@@ -653,6 +669,7 @@ mod tests {
                 wallet,
                 transaction: radar_types::b64::encode(&unsigned),
                 signed_transaction: None,
+                reviewed_proposal: None,
             };
             let mut signed = unsigned.clone();
             let signature = key.sign(&signed[65..]).to_bytes();
