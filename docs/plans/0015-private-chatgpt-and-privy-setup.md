@@ -1450,8 +1450,9 @@ do not bypass that accounting gap or assume USD exposure/loss disappeared.
   regression. Removing caller signature verification (with the otherwise-unused
   decoded buffer renamed) fails the actual-process signature refusal regression.
   Restore source after each manual bug demonstration.
-- [ ] Finish scoped tests/Clippy/fmt/conformance, staged review and full source
-  CI including all four mutation shards; record verified handback.
+- [x] Scoped tests/Clippy/fmt/conformance and complete staged review passed.
+  Source 92bde94 passed CI 37807037187, including all four mutation shards
+  and final gate: 2,469 Rust and 352 web tests. Verified handback follows.
 
 No live chain/provider call, wallet/key/credential/delegation change, trade or
 Serve deployment occurs here. Review is read-only under journal ownership. The
@@ -1460,3 +1461,35 @@ retain reconciliation evidence and update exposure/loss before allowing another
 issuance. Independent live valuation/cost/searched exit evidence, activated
 owner limits and verified Privy policy/delegation remain necessary. Site limits
 remain drafts and autonomous execution remains off.
+
+### Handback: protected finalized settlement review (2026-10-08)
+
+Source 92bde94cb5b4bb4d8f34d9f3d2cde83d65bb8c2f passed full CI
+37807037187 (https://github.com/1xmint/theradar/actions/runs/37807037187):
+2,469 Rust and 352 web tests, all four mutation shards and final gate. The
+previous documentation run 37803826507 completed successfully before this
+source push; no awaited check was cancelled. Local verification passed all
+139 signer tests, 33 conformance checks, scoped Rust 1.99 Clippy and format.
+The two manually reapplied bugs failed their regressions and were restored.
+No new mutation exclusion or lint suppression was added.
+
+The explicit offline issuer review re-verifies the recorded wallet signature
+and authorized message, checks protected finalized evidence against the exact
+outstanding operation and reports measured historical integer effects/fees.
+The actual-process regressions prove successful review and refusals leave the
+journal bytes and outstanding claim unchanged. Protected files do not establish
+RPC provenance. Token arrays are retained separately; review does not infer
+trade notional, missing balances, current holdings, USD value or realised PnL.
+
+Next: add terminal accounting for completed measured spends below a reservation
+ceiling, retain reconciliation evidence and account for exposure/loss before
+another issuance. Full protected snapshot construction, live valuation/cost and
+searched exit evidence, activated owner limits and verified Privy policy and
+delegation remain necessary. Autonomous execution is off; site limits are drafts.
+No live chain/provider call, real wallet/key/credential/delegation change, trade,
+VPS health read or Serve deployment occurred in this increment.
+
+No Cargo/rustc/radar/issuer/signer process remains. Target measured 33.0 GiB,
+with 114.8 GiB free. Previously rejected ignored-output cleanup was not retried.
+This follow-up changes documentation only; its CI may be pending while the
+source above is fully verified.
