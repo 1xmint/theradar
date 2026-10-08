@@ -1929,10 +1929,52 @@ older reviews are not rewritten. The claim stays outstanding.
   saturating post totals: each acquisition regression fails; restore source.
 - [x] Scoped verification passes: 153 signer and 33 conformance tests, Rust
   1.99 Clippy and formatting. Complete staged diff read. Prior CI completed.
-- [ ] Push and verify full CI, all mutation shards and final gate.
+- [x] Source c3f903d passed CI 37852448900: 2,494 Rust and 352 web tests,
+  all four mutation shards and final gate. Prior CI passed before pushing;
+  no awaited run was cancelled.
 
 Next: establish acquisition costs and gross fill attribution, then durable
 idempotent USD exposure/loss reconciliation. Protected live risk inputs,
 execution/recovery/exits/scheduling and activation/funding verification remain.
 All four activation gates remain open. Autonomous trading remains off. No live
 provider/chain read, real key/signature/delegation/trade or deployment occurs.
+
+### Handback: retained measured net token acquisition (2026-10-08)
+
+Source c3f903d05d3b26cdf3c465e48faacc4eda207a8c passed full CI
+37852448900 (https://github.com/1xmint/theradar/actions/runs/37852448900):
+2,494 Rust and 352 web tests, all four mutation shards and final gate. Local
+verification passed 153 signer and 33 conformance tests, Rust 1.99 scoped Clippy
+and formatting. Accepting failed execution, skipping pre-owner checks and
+saturating post totals each failed when deliberately reapplied; source restored.
+No mutation exclusion, lint suppression or dependency added. Staged diff read;
+prior CI 37847565387 completed successfully before this source push.
+
+The existing protected review/record commands now derive and durably retain
+positive net token acquisition for successful reviewed native-SOL buys only
+when both metadata sides match wallet/mint/index/program/usable decimals across
+all included accounts. Internal transfers cancel; foreign wallets are excluded.
+Empty/unpaired/changed metadata, failed or unknown context, unusable units,
+overflow and nonpositive totals stay null. Missing pre metadata for a new ATA
+is not zero. Record repeats remain idempotent, replay retains the report and
+the outstanding claim still blocks issuance. Older reports are not backfilled;
+changed normalized repeat shapes conflict. Provenance remains operator evidence,
+not independent authenticated chain origin or gross venue-fill attribution.
+
+Next establish acquisition costs, separate swap consideration from rent/tips/
+fees and handle newly created accounts with explicit evidence, then implement
+durable idempotent economic reconciliation for exposure and daily loss. Current
+USD/PnL/cost-basis fields remain unknown. Protected live risk inputs, execution/
+recovery/exits/scheduling and activation of owner limits, isolated keys, verified
+Privy policy/delegation, funding, deployment and bounded validation remain.
+All four activation gates remain open; several substantial integrations remain.
+
+Autonomous trading remains off; site limits remain drafts. No live provider or
+chain read, real wallet key/signature/credential/delegation change, trade, VPS
+health read or Serve deployment occurred. Current funding/Privy setup remains
+unverified. Fixture signatures only. No local watcher remains. This verified
+handback is committed locally for inclusion with the next source push; no
+redundant documentation-only CI run. Verified source is pushed in PR 334.
+
+No Cargo/rustc/Radar process remains locally. Target measured 33.1 GiB with
+61.1 GiB free. Previously rejected ignored-output cleanup was not retried.
