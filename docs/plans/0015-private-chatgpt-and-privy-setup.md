@@ -1577,7 +1577,7 @@ remain, rather than a final UI switch.
 
 | Activation gate | Current foundation | Still required |
 | --- | --- | --- |
-| Durable settlement and economic accounting | Exact signed binding, finalized review, terminal measured native spend | Retain normalized facts; reconcile USD exposure/loss and prevent stale accounting from authorizing another operation |
+| Durable settlement and economic accounting | Exact signed binding, retained normalized finalized facts, terminal measured native spend | Reconcile USD exposure/loss and prevent stale accounting from authorizing another operation |
 | Independent live risk inputs | Wallet, transaction, mint/curve/fee and combined read commands | Build protected live snapshots with conservative prices, current valued inventory, full costs and searched sellable capacity |
 | Autonomous execution loop | ChatGPT link, inert proposals, risk kernel, isolated issuer and Privy signer | Connect checked signing, durable broadcast ownership, uncertain-result recovery, settlement, exits and scheduling |
 | Activation and live validation | Private wallet UI and draft limits | Activate owner limits, provision isolated keys, verify Privy policy/delegation, confirm funding, deploy and validate a tightly bounded live trade |
@@ -1603,11 +1603,57 @@ close a trade, update USD loss, refresh a live snapshot or enable delegation.
   unreviewed input response fields each fails its regression; restore source.
 - [x] All 181 scoped journal/signer tests and 33 conformance checks pass;
   scoped Rust 1.99 Clippy and format pass. Read the complete staged diff.
-- [ ] Await full source CI including all four mutation shards and record the
-  verified handback.
+- [x] Source 7b51c51 passed full CI 37818503009: 2,480 Rust and 352 web
+  tests, all four mutation shards and final gate. Verified handback follows.
 
 Next: economic reconciliation of retained evidence and a durable accounting
 watermark before another issuance. Unknown USD value/PnL remains unknown. No
 live chain/provider call, real signature/key/credential/delegation change, trade,
 VPS health read or Serve deployment is performed here. Current funding and live
 Privy setup are unverified; site settings remain drafts in the current code path.
+
+### Handback: durable settlement facts and activation map (2026-10-08)
+
+Source 7b51c51f1146d6fa6a574cb51848fad35aa536a8 passed full CI
+37818503009 (https://github.com/1xmint/theradar/actions/runs/37818503009):
+2,480 Rust and 352 web tests, all four mutation shards and final gate. Prior
+handback CI 37815702919 passed before this source push; no awaited check was
+cancelled. Local verification passed 40 journal, 141 signer and 33 conformance
+tests, scoped Rust 1.99 Clippy and format. The additional terminal-replay case
+also passed its scoped regression. Three manually reapplied bugs failed their
+regressions and source was restored. No new mutation exclusion or lint
+suppression was added.
+
+The operator's --record-settlement mode reviews one protected packet read and
+persists only normalized facts with the exact signed artifact. It re-verifies
+wallet signature/message and preserves minimum slot/read times. Arbitrary
+input response fields are excluded. The journal appends before memory/output,
+refuses unbound or non-unknown operations and changed facts, and makes identical
+repeats idempotent. Replay checks record stage/identity/immutability and retains
+facts through later terminal records. Older absent-field hashes stay unchanged.
+Generic journal callers provide verified normalized data themselves; the
+journal does not authenticate cryptography, chain origin or economic effects.
+
+Recording leaves claims outstanding and still blocks issuance, including after
+restart. Native candidates do not establish gross spend or USD exposure/loss.
+Optional chain block time is not retained by this review; no execution-day or
+daily-loss inference is made from host read times. Retained historical evidence
+does not make a future portfolio snapshot current.
+
+Four activation gates remain, with the durable-facts portion of gate one now
+implemented: economic reconciliation/accounting checkpoint; protected live
+risk-input construction; execution/recovery/exit loop; and activated owner
+limits, isolated keys, verified Privy policy/delegation, funding, deployment and
+bounded live validation. Several substantial integrations remain; no percentage
+or launch date is claimed. The next implementation is economic accounting of
+retained facts with a durable checkpoint before another issuance.
+
+Autonomous execution remains off and site settings remain drafts in the current
+code path. No live chain/provider call, real wallet signature/key/credential or
+delegation change, trade, VPS health read or Serve deployment occurred. Live
+wallet funding and Privy setup remain unverified.
+
+No Cargo/rustc/radar/issuer/signer process remains. Target measured 33.1 GiB,
+with 114.5 GiB free. Previously rejected ignored-output cleanup was not retried.
+This follow-up changes documentation only; its CI may be pending while the
+source above is fully verified.
