@@ -7,6 +7,121 @@ use std::process::{Child, Command, Stdio};
 
 const SEED: [u8; 32] = [0x6B; 32];
 
+fn fixture_for_wallet(wallet_key: &ed25519_dalek::SigningKey) -> (Fixture, Vec<u8>) {
+    let mut fixture = Fixture::new();
+    let wallet = radar_types::Address::new(wallet_key.verifying_key().to_bytes());
+    let mut unsigned =
+        radar_types::b64::decode(fixture.candidate["transaction"].as_str().expect("bytes"))
+            .expect("decode");
+    unsigned[69..101].copy_from_slice(wallet.as_bytes());
+    fixture.candidate["transaction"] = json!(radar_types::b64::encode(&unsigned));
+    fixture.config["wallet"] = json!(wallet.to_string());
+    fixture.snapshot["wallet"] = json!(wallet.to_string());
+    fixture.snapshot["wallet_evidence"]["wallet"] = json!(wallet.to_string());
+    fixture.snapshot["transaction"] = fixture.candidate["transaction"].clone();
+    fixture.snapshot["transaction_evidence"]["transaction_base64"] =
+        fixture.candidate["transaction"].clone();
+    fixture.snapshot["transaction_evidence"]["message_base64"] =
+        json!(radar_types::b64::encode(&unsigned[65..]));
+    fixture.save();
+    (fixture, unsigned)
+}
+
+#[test]
+fn signed_bytes_are_verified_and_persisted_without_releasing_the_operation() {
+    use ed25519_dalek::Signer as _;
+    let wallet_key = ed25519_dalek::SigningKey::from_bytes(&[0x42; 32]);
+    let (fixture, unsigned) = fixture_for_wallet(&wallet_key);
+    let mut issuer = fixture.start();
+    assert_eq!(issuer.ask(&fixture.candidate)["outcome"], "issued");
+    drop(issuer);
+    let history = fixture.dir.path().join("operations.jsonl");
+    let log = radar_journal::OperationLog::open(&history).expect("log");
+    let id = log.outstanding().next().expect("operation").0.clone();
+    assert_eq!(
+        log.execution(&id).expect("binding").transaction,
+        radar_types::b64::encode(&unsigned)
+    );
+    drop(log);
+    let original_history = std::fs::read(&history).expect("history bytes");
+    let mut signed = unsigned.clone();
+    let signature = wallet_key.sign(&signed[65..]).to_bytes();
+    signed[1..65].copy_from_slice(&signature);
+    let path = fixture.dir.path().join("signed.bin");
+    for bytes in [
+        unsigned.clone(),
+        {
+            let mut wrong = signed.clone();
+            wrong[1] ^= 1;
+            wrong
+        },
+        {
+            let mut wrong = signed.clone();
+            wrong[133] ^= 1;
+            wrong
+        },
+        {
+            let mut wrong = signed.clone();
+            wrong[165] ^= 1;
+            let signature = wallet_key.sign(&wrong[65..]).to_bytes();
+            wrong[1..65].copy_from_slice(&signature);
+            wrong
+        },
+        vec![0; 1233],
+    ] {
+        std::fs::write(&path, bytes).expect("signed fixture");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))
+                .expect("private");
+        }
+        let result = fixture
+            .command()
+            .args(["--bind-signed", id.as_str()])
+            .arg(&path)
+            .output()
+            .expect("bind");
+        assert!(!result.status.success());
+        assert_eq!(result.stdout, Vec::<u8>::new());
+        assert_eq!(
+            std::fs::read(&history).expect("history unchanged"),
+            original_history
+        );
+    }
+    std::fs::write(&path, &signed).expect("signed");
+    for _ in 0..2 {
+        let result = fixture
+            .command()
+            .args(["--bind-signed", id.as_str()])
+            .arg(&path)
+            .output()
+            .expect("bind");
+        assert!(
+            result.status.success(),
+            "{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+        let packet: Value = serde_json::from_slice(&result.stdout).expect("packet");
+        assert_eq!(
+            packet,
+            json!({"outcome":"recorded","operation":id.as_str(),"broadcast":false,"reconciled":false})
+        );
+    }
+    let log = radar_journal::OperationLog::open(&history).expect("replay signed");
+    assert_eq!(
+        log.execution(&id).expect("binding").signed_transaction,
+        Some(radar_types::b64::encode(&signed))
+    );
+    assert_eq!(log.outstanding().count(), 1);
+    drop(log);
+    let mut restarted = fixture.start();
+    assert_eq!(
+        restarted.ask(&fixture.candidate)["reason"],
+        "outstanding operation requires reconciliation"
+    );
+}
+
 fn unix_now() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)

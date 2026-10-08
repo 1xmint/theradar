@@ -1350,3 +1350,35 @@ No local Cargo/rustc/radar/issuer/signer process remains. Target measured 32.6
 GiB with 116.6 GiB free. Previously rejected ignored-output cleanup was not
 retried. This final handback follow-up changes documentation only; its CI may
 be pending while the source above is fully verified.
+
+### Protected signed-transaction binding (2026-10-08)
+
+The actual caller is the offline operator issuer. Persist its checked canonical
+transaction and wallet in the operation's proposal, then accept a signed artifact
+only after local signature/message verification. This closes the identity gap
+needed by the future settlement reconciler without releasing any claim.
+
+- [x] Add optional execution correlation metadata without changing the digest
+  of older events where it is absent. Retain metadata across replay.
+- [x] Record signed bytes only in SubmissionUnknown, after a durable append.
+  Repeat identical bytes idempotently; reject a conflicting second binding.
+  Replay refuses changed identity, authorized bytes or claim metadata.
+- [x] Add explicit offline --bind-signed operation/private-file mode. Verify
+  configured wallet, exact legacy message, packet bounds, canonical single
+  signature framing and strict wallet Ed25519 signature before recording.
+- [x] Four new tests cover real issuer processes, restart/idempotence, changed
+  signatures and validly signed foreign messages, interrupted writes, malformed
+  bindings/replay and packet boundaries. Raise Rust floor from 2063 to 2067.
+- [x] Manually bypassing strict signature verification makes the actual-process
+  regression fail. Removing exact-message equality also fails on a validly
+  re-signed changed message. Restore source after each demonstration.
+- [ ] Finish scoped tests/lint/fmt/conformance, staged review and full source
+  CI including every mutation shard before final handback.
+
+Older operations lacking binding refuse this command; their claims are retained.
+The operator's private config/history/files remain the trust boundary, not
+authenticated host/RPC provenance. No executor broadcasts, no settlement closes
+and no USD exposure/loss is inferred here. Protected settlement accounting,
+live price/cost/searched-exit evidence, activated owner limits and verified Privy
+policy/delegation remain before autonomous execution. No real wallet/key/Privy
+credential, delegation, trade, current wallet read or Serve deployment changed.

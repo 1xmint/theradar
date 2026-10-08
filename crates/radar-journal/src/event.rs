@@ -92,6 +92,9 @@ pub enum Outcome {
 /// find that run from a mint, a week, or a transaction they are holding.
 #[derive(Clone, Default, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub struct Correlation {
+    /// Protected caller's exact transaction binding. Not signing authority.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub execution: Option<ExecutionBinding>,
     /// The mention that started it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mention: Option<String>,
@@ -131,7 +134,8 @@ impl Correlation {
     /// [`Journal::record`](crate::Journal::record) can say so.
     #[must_use]
     pub const fn is_empty(&self) -> bool {
-        self.mention.is_none()
+        self.execution.is_none()
+            && self.mention.is_none()
             && self.receipt.is_none()
             && self.nomination.is_none()
             && self.week.is_none()
@@ -140,6 +144,17 @@ impl Correlation {
             && self.mint.is_none()
             && self.operation.is_none()
     }
+}
+
+/// Exact bytes retained by the protected issuer before an effect is released.
+#[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
+pub struct ExecutionBinding {
+    /// The wallet whose signature the protected caller must verify.
+    pub wallet: radar_types::Address,
+    /// Canonical base64 of the kernel-approved transaction.
+    pub transaction: String,
+    /// Canonical signed bytes, recorded after caller verification and before broadcast.
+    pub signed_transaction: Option<String>,
 }
 
 /// One line of the journal.

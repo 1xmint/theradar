@@ -244,6 +244,9 @@ pub struct OperationEntry {
 /// What stopped an operation.
 #[derive(Debug, thiserror::Error)]
 pub enum OperationError {
+    /// Missing, conflicting or wrongly staged protected execution metadata.
+    #[error("execution binding is missing, conflicting or not awaiting settlement")]
+    ExecutionBinding,
     /// The durable record could not be written, so nothing was done.
     #[error("the operation could not be recorded, so it did not happen: {0}")]
     Journal(#[from] JournalError),
@@ -346,6 +349,7 @@ impl Released {
 #[derive(Clone, Debug)]
 struct Live {
     entry: OperationEntry,
+    execution: Option<crate::ExecutionBinding>,
     /// The portfolio handle for its claim, when this process is holding one.
     ///
     /// `None` after a replay and before [`OperationLog::rehold`]: a
@@ -460,6 +464,58 @@ impl OperationLog {
         self.operations.get(id).map(|live| &live.entry)
     }
 
+    /// Protected transaction metadata for this operation, including after replay.
+    #[must_use]
+    pub fn execution(&self, id: &OperationId) -> Option<&crate::ExecutionBinding> {
+        self.operations.get(id)?.execution.as_ref()
+    }
+
+    /// Records caller-verified signed bytes without releasing the capital claim.
+    /// The caller must check the wallet signature and authorized message first.
+    ///
+    /// # Errors
+    /// Missing binding, a non-unknown operation, conflicting second bytes or write failure.
+    pub fn record_signed(
+        &mut self,
+        id: &OperationId,
+        signed: String,
+        at: u64,
+    ) -> Result<Applied, OperationError> {
+        let live = self
+            .operations
+            .get_mut(id)
+            .ok_or_else(|| OperationError::NoSuchOperation(id.clone()))?;
+        if live.entry.state != OperationState::SubmissionUnknown {
+            return Err(OperationError::ExecutionBinding);
+        }
+        let mut execution = live
+            .execution
+            .clone()
+            .ok_or(OperationError::ExecutionBinding)?;
+        if let Some(previous) = &execution.signed_transaction {
+            return if previous == &signed {
+                Ok(Applied::AlreadySeen)
+            } else {
+                Err(OperationError::ExecutionBinding)
+            };
+        }
+        execution.signed_transaction = Some(signed);
+        self.journal.record_operation(
+            Outcome::Uncertain,
+            at,
+            Correlation {
+                operation: Some(id.0.clone()),
+                execution: Some(execution.clone()),
+                ..Correlation::default()
+            },
+            live.entry,
+            self.build.clone(),
+            None,
+        )?;
+        live.execution = Some(execution);
+        Ok(Applied::Advanced)
+    }
+
     /// Re-takes every outstanding claim against `portfolio`.
     ///
     /// The half of a restart that costs money if it is skipped. Each claim goes
@@ -512,6 +568,7 @@ impl OperationLog {
             reserved: None,
             state: OperationState::Proposed,
         };
+        let execution = correlation.execution.clone();
         let recorded = self.journal.record_operation(
             Outcome::Ok,
             at,
@@ -521,8 +578,14 @@ impl OperationLog {
             None,
         )?;
         let id = OperationId(recorded.id().to_owned());
-        self.operations
-            .insert(id.clone(), Live { entry, claim: None });
+        self.operations.insert(
+            id.clone(),
+            Live {
+                entry,
+                claim: None,
+                execution,
+            },
+        );
         Ok(id)
     }
 
@@ -797,7 +860,11 @@ fn replay(events: &[Event]) -> Result<BTreeMap<OperationId, Live>, OperationErro
             // The proposal *is* the identity, so it needs no correlation to
             // find itself by.
             let id = OperationId(event.id.clone());
-            operations.entry(id).or_insert(Live { entry, claim: None });
+            operations.entry(id).or_insert(Live {
+                entry,
+                claim: None,
+                execution: event.correlation.execution.clone(),
+            });
             continue;
         }
         let named = event
@@ -812,6 +879,25 @@ fn replay(events: &[Event]) -> Result<BTreeMap<OperationId, Live>, OperationErro
                 event: event.id.clone(),
                 operation: id.0.clone(),
             })?;
+        if let Some(binding) = &event.correlation.execution {
+            let previous = live
+                .execution
+                .as_ref()
+                .ok_or(OperationError::ExecutionBinding)?;
+            if live.entry.state != OperationState::SubmissionUnknown
+                || entry != live.entry
+                || binding.wallet != previous.wallet
+                || binding.transaction != previous.transaction
+                || binding.signed_transaction.is_none()
+                || previous
+                    .signed_transaction
+                    .as_ref()
+                    .is_some_and(|signed| binding.signed_transaction.as_ref() != Some(signed))
+            {
+                return Err(OperationError::ExecutionBinding);
+            }
+            live.execution = Some(binding.clone());
+        }
         if live.entry.state == entry.state {
             continue;
         }

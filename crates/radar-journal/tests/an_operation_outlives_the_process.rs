@@ -67,6 +67,146 @@ fn free(portfolio: &Portfolio) -> u64 {
     portfolio.free(Asset::Sol).expect("free").raw()
 }
 
+#[test]
+fn signed_binding_survives_restart_without_releasing_or_replacing_a_claim() {
+    let dir = tempfile::tempdir().expect("dir");
+    let path = somewhere(&dir);
+    let mut log = OperationLog::open(&path).expect("log");
+    let binding = radar_journal::ExecutionBinding {
+        wallet: WALLET,
+        transaction: "approved bytes".into(),
+        signed_transaction: None,
+    };
+    let correlation = Correlation {
+        execution: Some(binding.clone()),
+        ..Correlation::default()
+    };
+    assert!(!correlation.is_empty());
+    let id = log.propose(intent(), 1, correlation).expect("propose");
+    assert_eq!(log.execution(&id), Some(&binding));
+    assert!(log.record_signed(&id, "signed".into(), 2).is_err());
+    let mut portfolio = account();
+    log.reserve(&id, &mut portfolio, 2).expect("reserve");
+    assert!(log.record_signed(&id, "signed".into(), 3).is_err());
+    log.submit(&id, 3, |_| Ok::<_, ()>(()))
+        .expect("submit")
+        .expect("effect");
+    let moved = dir.path().join("moved");
+    std::fs::rename(&path, &moved).expect("temporarily unavailable journal");
+    std::fs::create_dir(&path).expect("journal path is not writable as a file");
+    assert!(log.record_signed(&id, "signed".into(), 4).is_err());
+    assert_eq!(log.execution(&id), Some(&binding));
+    std::fs::remove_dir(&path).expect("remove empty obstruction");
+    std::fs::rename(&moved, &path).expect("restore journal");
+    assert_eq!(
+        log.record_signed(&id, "signed".into(), 4).expect("record"),
+        Applied::Advanced
+    );
+    assert_eq!(
+        log.record_signed(&id, "signed".into(), 5).expect("repeat"),
+        Applied::AlreadySeen
+    );
+    assert!(log.record_signed(&id, "other".into(), 6).is_err());
+    assert_eq!(free(&portfolio), HELD - CLAIM);
+    drop(log);
+    let mut reopened = OperationLog::open(&path).expect("replay");
+    assert_eq!(
+        reopened.execution(&id),
+        Some(&radar_journal::ExecutionBinding {
+            signed_transaction: Some("signed".into()),
+            ..binding
+        })
+    );
+    assert_eq!(reopened.outstanding().count(), 1);
+    assert_eq!(
+        reopened
+            .record_signed(&id, "signed".into(), 7)
+            .expect("replayed repeat"),
+        Applied::AlreadySeen
+    );
+    assert!(reopened.record_signed(&id, "other".into(), 8).is_err());
+    let mut fresh = account();
+    reopened.rehold(&mut fresh).expect("rehold");
+    assert_eq!(free(&fresh), HELD - CLAIM);
+}
+
+#[test]
+fn replay_refuses_changed_execution_identity_missing_bindings_and_changed_claims() {
+    for change in 0..7 {
+        let dir = tempfile::tempdir().expect("dir");
+        let path = somewhere(&dir);
+        let mut log = OperationLog::open(&path).expect("log");
+        let binding = radar_journal::ExecutionBinding {
+            wallet: WALLET,
+            transaction: "approved".into(),
+            signed_transaction: None,
+        };
+        let id = log
+            .propose(
+                intent(),
+                1,
+                Correlation {
+                    execution: (change != 6).then_some(binding),
+                    ..about()
+                },
+            )
+            .expect("propose");
+        assert!(log.record_signed(&id, "signed".into(), 1).is_err());
+        log.reserve(&id, &mut account(), 2).expect("reserve");
+        if change != 4 {
+            log.submit(&id, 3, |_| Ok::<_, ()>(()))
+                .expect("submit")
+                .expect("effect");
+        }
+        if change == 3 {
+            log.record_signed(&id, "first".into(), 4)
+                .expect("first binding");
+        }
+        let mut entry = *log.entry(&id).expect("entry");
+        let mut binding = radar_journal::ExecutionBinding {
+            wallet: WALLET,
+            transaction: "approved".into(),
+            signed_transaction: Some("signed".into()),
+        };
+        match change {
+            0 => binding.wallet = radar_types::Address::SYSTEM_PROGRAM,
+            1 => binding.transaction = "changed".into(),
+            2 => binding.signed_transaction = None,
+            5 => entry.intent.amount = TokenQuantity::lamports(1),
+            _ => {}
+        }
+        drop(log);
+        radar_journal::Journal::open(&path)
+            .expect("journal")
+            .record_operation(
+                radar_journal::Outcome::Uncertain,
+                5,
+                Correlation {
+                    operation: Some(id.as_str().into()),
+                    execution: Some(binding),
+                    ..Correlation::default()
+                },
+                entry,
+                None,
+                None,
+            )
+            .expect("valid hash chain with invalid execution metadata");
+        assert!(
+            OperationLog::open(&path).is_err(),
+            "invalid binding {change}"
+        );
+    }
+    let dir = tempfile::tempdir().expect("dir");
+    let path = somewhere(&dir);
+    let (mut log, id) = reserved(&path, &mut account());
+    log.submit(&id, 3, |_| Ok::<_, ()>(()))
+        .expect("submit")
+        .expect("effect");
+    assert!(log.record_signed(&id, "signed".into(), 4).is_err());
+    assert_eq!(log.execution(&id), None);
+    assert_eq!(log.outstanding().count(), 1);
+}
+
 /// A journal path inside a directory of its own, so a test can take the
 /// directory away and make the next write fail.
 fn somewhere(dir: &tempfile::TempDir) -> std::path::PathBuf {

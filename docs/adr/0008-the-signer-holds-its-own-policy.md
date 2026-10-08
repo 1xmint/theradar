@@ -437,6 +437,33 @@ by the legacy input guard; this is a verified refusal, not a successful live
 settlement read. The reference's example signature was unavailable on the public
 mainnet endpoint. No user wallet transaction was signed or broadcast.
 
+## Protected operation-to-transaction binding
+
+The offline issuer now puts an `ExecutionBinding` in the proposed operation's
+correlation before reservation/proof output. It contains the configured wallet
+and the canonical transaction copied from the checked Privy request. The
+operation identity therefore covers those bytes in the existing journal chain.
+Absent metadata on older history remains absent; it is never inferred from a
+new candidate or current snapshot.
+
+With `RADAR_ISSUER_CONFIG` pointing to the same private operator configuration,
+`radar-issuer --bind-signed <operation-id> <private-signed-binary-file>` acquires
+the existing journal ownership lock. It accepts only an outstanding operation
+with that configured wallet, exact authorized legacy message and one signature,
+then verifies the wallet's Ed25519 signature locally. It durably appends the
+canonical signed bytes before reporting success. Identical repeats are
+idempotent; conflicting bytes refuse. Replay refuses changed wallet, unsigned
+message, signed binding or capital intent. A write failure leaves the in-memory
+binding unchanged. These are protected-file assertions; the journal does not
+authenticate its host or verify cryptography for generic callers.
+
+Recording a signed artifact neither broadcasts it nor settles the operation.
+The claim remains SubmissionUnknown, including after restart. A future executor
+must call this step before broadcast; no executor does so yet. The protected
+reconciler must match finalized evidence to this recorded artifact and establish
+fees/economic effects and USD accounting before releasing capital. Limits remain
+drafts and live delegation remains closed. Tests use fixture keys only.
+
 ## What would reverse this
 
 Nothing foreseeable reverses holding a policy locally. The specific ceilings are

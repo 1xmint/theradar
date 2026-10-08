@@ -61,7 +61,9 @@ mod event;
 mod file;
 mod operation;
 
-pub use event::{Correlation, Event, MAX_REDACTED, Outcome, Recorded, SCHEMA_VERSION, Stage};
+pub use event::{
+    Correlation, Event, ExecutionBinding, MAX_REDACTED, Outcome, Recorded, SCHEMA_VERSION, Stage,
+};
 pub use file::{Journal, JournalError, Verified};
 pub use operation::{
     Applied, Intent, OperationEntry, OperationError, OperationId, OperationLog, OperationState,

@@ -197,6 +197,43 @@ fn read_evidence_expiry(
         .ok_or_else(|| "evidence expiry overflow".into())
 }
 
+fn verified_signed(
+    binding: &radar_journal::ExecutionBinding,
+    wallet: Address,
+    signed: &[u8],
+) -> Result<String, String> {
+    if binding.wallet != wallet {
+        return Err("operation wallet does not match configured wallet".into());
+    }
+    let unsigned =
+        radar_types::b64::decode(&binding.transaction).ok_or("invalid recorded transaction")?;
+    if signed.len() > 1232
+        || signed.len() < 134
+        || signed[0] != 1
+        || signed[65] != 1
+        || unsigned.len() != signed.len()
+        || unsigned[0] != 1
+        || unsigned[65..] != signed[65..]
+    {
+        return Err("signed transaction does not bind exact authorized bytes".into());
+    }
+    let message = radar_signer::tx::decode(signed).map_err(|_| "invalid signed transaction")?;
+    if message.fee_payer() != Some(*binding.wallet.as_bytes()) {
+        return Err("signed transaction has unsupported wallet/signers".into());
+    }
+    let signature: [u8; 64] = signed[1..65]
+        .try_into()
+        .map_err(|_| "invalid signature extent")?;
+    ed25519_dalek::VerifyingKey::from_bytes(binding.wallet.as_bytes())
+        .map_err(|_| "invalid wallet public key")?
+        .verify_strict(
+            &signed[65..],
+            &ed25519_dalek::Signature::from_bytes(&signature),
+        )
+        .map_err(|_| "wallet signature verification failed")?;
+    Ok(radar_types::b64::encode(signed))
+}
+
 impl Issuer {
     fn load(path: &Path) -> Result<Self, String> {
         let config: Config = serde_json::from_slice(&private_read(path)?)
@@ -391,6 +428,15 @@ impl Issuer {
                 },
                 now,
                 Correlation {
+                    execution: Some(radar_journal::ExecutionBinding {
+                        wallet: self.config.wallet,
+                        transaction: intent
+                            .request
+                            .transaction()
+                            .ok_or("request transaction missing")?
+                            .to_owned(),
+                        signed_transaction: None,
+                    }),
                     mint: Some(intent.authorization.mint.to_string()),
                     receipt: Some(intent.authorization.nonce.clone()),
                     ..Correlation::default()
@@ -416,11 +462,44 @@ impl Issuer {
         }
         Ok(intent)
     }
+
+    fn bind_signed(&mut self, operation: &str, path: &Path) -> Result<(), String> {
+        let id = self
+            .operations
+            .outstanding()
+            .find(|(id, _)| id.as_str() == operation)
+            .map(|(id, _)| id.clone())
+            .ok_or("unknown outstanding operation")?;
+        let binding = self
+            .operations
+            .execution(&id)
+            .ok_or("operation has no transaction binding")?;
+        let signed = verified_signed(binding, self.config.wallet, &private_read(path)?)?;
+        self.operations
+            .record_signed(&id, signed, unix_now()?)
+            .map_err(|_| "signed transaction could not be persisted")?;
+        Ok(())
+    }
 }
 
 fn run() -> Result<(), String> {
     let path = std::env::var_os("RADAR_ISSUER_CONFIG").ok_or("issuer configuration missing")?;
     let mut issuer = Issuer::load(Path::new(&path))?;
+    let args: Vec<_> = std::env::args().skip(1).collect();
+    if !args.is_empty() {
+        if args.len() != 3 || args[0] != "--bind-signed" {
+            return Err(
+                "usage: radar-issuer --bind-signed <operation-id> <private-signed-binary-file>"
+                    .into(),
+            );
+        }
+        issuer.bind_signed(&args[1], Path::new(&args[2]))?;
+        println!(
+            "{}",
+            serde_json::json!({"outcome":"recorded", "operation":args[1], "broadcast":false, "reconciled":false})
+        );
+        return Ok(());
+    }
     let stdin = std::io::stdin();
     let mut input = stdin.lock();
     let mut output = std::io::stdout().lock();
@@ -467,6 +546,76 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn exact_message_and_wallet_signature_are_required_at_packet_boundaries() {
+        use ed25519_dalek::Signer as _;
+        let key = ed25519_dalek::SigningKey::from_bytes(&[0x42; 32]);
+        let wallet = radar_types::Address::new(key.verifying_key().to_bytes());
+        let mut minimum = vec![1];
+        minimum.extend_from_slice(&[0; 64]);
+        minimum.extend_from_slice(&[1, 0, 0, 1]);
+        minimum.extend_from_slice(wallet.as_bytes());
+        minimum.extend_from_slice(&[0xAA; 32]);
+        minimum.push(0);
+        let mut maximum = minimum.clone();
+        maximum[133] = 1;
+        maximum.extend_from_slice(&[0, 0, 0xC6, 0x08]);
+        maximum.resize(1232, 0);
+        for unsigned in [minimum, maximum] {
+            let binding = radar_journal::ExecutionBinding {
+                wallet,
+                transaction: radar_types::b64::encode(&unsigned),
+                signed_transaction: None,
+            };
+            let mut signed = unsigned.clone();
+            let signature = key.sign(&signed[65..]).to_bytes();
+            signed[1..65].copy_from_slice(&signature);
+            assert_eq!(
+                super::verified_signed(&binding, wallet, &signed).expect("valid boundary"),
+                radar_types::b64::encode(&signed)
+            );
+            for end in 0..signed.len() {
+                assert!(super::verified_signed(&binding, wallet, &signed[..end]).is_err());
+            }
+            let mut oversized = signed.clone();
+            oversized.resize(1233, 0);
+            assert!(super::verified_signed(&binding, wallet, &oversized).is_err());
+            let mut wrong = signed.clone();
+            wrong[0] = 2;
+            assert!(super::verified_signed(&binding, wallet, &wrong).is_err());
+            assert!(
+                super::verified_signed(&binding, radar_types::Address::SYSTEM_PROGRAM, &signed)
+                    .is_err()
+            );
+            let mut wrong = binding.clone();
+            wrong.transaction = "invalid".into();
+            assert!(super::verified_signed(&wrong, wallet, &signed).is_err());
+            for at in [65, 69] {
+                let mut foreign = unsigned.clone();
+                foreign[at] ^= 1;
+                let recorded = radar_journal::ExecutionBinding {
+                    transaction: radar_types::b64::encode(&foreign),
+                    ..binding.clone()
+                };
+                let signature = key.sign(&foreign[65..]).to_bytes();
+                foreign[1..65].copy_from_slice(&signature);
+                assert!(super::verified_signed(&recorded, wallet, &foreign).is_err());
+            }
+            let mut wrong = unsigned;
+            wrong[0] = 2;
+            assert!(
+                super::verified_signed(
+                    &radar_journal::ExecutionBinding {
+                        transaction: radar_types::b64::encode(&wrong),
+                        ..binding
+                    },
+                    wallet,
+                    &signed
+                )
+                .is_err()
+            );
+        }
+    }
     #[test]
     fn time_boundaries_are_exclusive_and_future_reads_are_not_fresh() {
         assert!(!super::expired(99, 100));
