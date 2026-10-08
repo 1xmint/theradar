@@ -1223,8 +1223,8 @@ and portfolio reconciliation remain unfinished.
   simulation refuses. Source restored; all 231 CLI tests passed and the restored
   ten process tests passed again. Scoped CLI Clippy, final formatting and all 33
   conformance checks passed.
-- [ ] Await prior documentation CI before pushing; verify full source CI,
-  including all four mutation shards, then record the source hash and result.
+- [x] Prior documentation CI 37712131181 passed before the push. Full source CI
+  37713716962 passed at 5385aa4, including all four mutation shards and final gate.
 
 The existing Jupiter SOL-to-USDC helper is a point quote without the upper USD
 price bound required for live spending. Protected JSON does not authenticate RPC
@@ -1233,3 +1233,29 @@ snapshot construction, full cost/searched exit evidence, activated owner mandate
 settlement reconciliation and verified Privy policy/delegation remain necessary
 before autonomous execution. Site limits remain drafts. No real credential,
 delegation, signature, trade or Serve deployment was provisioned this increment.
+
+**Final handback — verified source 5385aa4d31bbb65d268825336dd9858d4f2d6abc:**
+CI 37713716962 passed build/tests/lint/fmt/MSRV/web/site/licence/cargo-deny,
+all four mutation shards and the final gate. Totals: 2,452 Rust and 352 web
+tests. Previous documentation CI 37712131181 completed successfully before
+this source push; no check was cancelled. Local checks: 231 CLI tests, 132
+signer tests, 33 conformance checks, scoped all-target Clippy and formatting.
+Three manual wrong behaviors (omitted balance binding, omitted wallet expiry
+cap, premature partial packet output) failed regressions; source restored.
+No new lint suppression or mutation exclusion.
+
+The operator collector now produces both read packets consumed by the offline
+issuer, and the issuer requires native balance/identity/context/time binding
+before reservation. Evidence remains protected-file trust, not authenticated
+RPC provenance. This packet is not a complete live snapshot. Next: live USD
+bounds and portfolio/settlement accounting, including searched exit capacity
+and complete costs, then protected activated mandates and verified Privy
+policy/delegation before repeated execution. Site limits remain drafts. No
+real credential, delegation, wallet signature, trade or Serve deployment was
+provisioned. No current VPS health or live wallet read was performed this turn;
+previous live observations must not be treated as current.
+
+No local Cargo/rustc/radar/issuer/signer process remains. Target measured 31.9
+GiB with 116.7 GiB free. Previously rejected ignored-output cleanup was not
+retried. This handback follow-up changes documentation only; its CI may be
+pending while the source above is fully verified.
