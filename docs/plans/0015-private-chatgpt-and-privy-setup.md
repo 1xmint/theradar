@@ -1758,10 +1758,65 @@ prerequisites, not a live ledger or a source of model signing authority.
   and using read completion as absent execution time each fail; restore source.
 - [x] All 187 scoped tests and 33 conformance checks pass; Rust 1.99 scoped
   Clippy and formatting pass. No mutation exclusion or lint suppression added.
-- [ ] Read staged diff, commit, wait prior CI, push and verify all shards/gate.
+- [x] Source 54050e0 passed full CI 37839702196: 2,486 Rust and 352 web
+  tests, all four mutation shards and final gate. Prior run 37826896344 passed
+  before pushing; no awaited check was cancelled. Complete staged diff read.
 
 Next: economic reconciliation using measured fills, cost basis and dated valuation
 inputs; authorizing proposal notional is not measured fill value. Protected live
 snapshots, execution/recovery/exits and activation verification also remain.
 Autonomous trading stays off. No real credential, wallet signature, delegation,
 trade, live chain/provider read or production deployment occurs in this increment.
+
+### Handback: durable reviewed attribution and execution time (2026-10-08)
+
+Source 54050e0b61b5964cea41a9ca4424e8ebd6207570 passed full CI
+37839702196 (https://github.com/1xmint/theradar/actions/runs/37839702196):
+2,486 Rust and 352 web tests, all four mutation shards and final gate. Local
+verification passed 42 journal, 145 signer and 33 conformance tests, scoped Rust
+1.99 Clippy and format. The final timestamp fixture is based on the packet's
+recorded completion rather than a later clock read and passed its actual-process
+regression plus Clippy. Three deliberately reapplied bugs failed and were
+restored: omitted reviewed proposal, accepting changed attribution at replay,
+and using read time for absent execution time. No mutation exclusion or lint
+suppression was added. Prior run 37826896344 passed before the source push; no
+awaited run was cancelled.
+
+The actual issuer normalizes its typed protected Proposal into ExecutionBinding
+before reservation/proof output. Arbitrary input fields are excluded. Context
+retains creator/action, market, quote, notional and risk-input fields. Signing
+updates and terminal replay preserve it; replay rejects replacement, removal or
+invented context. Generic journal callers establish correctness. Older missing
+attribution stays missing and absent fields preserve old hashes; no migration
+infers fields from a nonce or a transaction ceiling.
+
+Protected review/record preserve reported optional execution time as canonical
+unsigned decimal text. Missing/null remains unknown; malformed, negative or
+future-to-read-completion time refuses. Zero and completion equality are measured
+values. Known time survives record/replay, and a changed timestamp conflicts on
+repeat. Previously stored reviews are not rewritten, including reviews without
+the new field; changed normalized shapes conflict. This is protected operator
+provenance, not cryptographic proof of chain time or independently calculated
+execution-day accounting. Read times never fill an absent execution timestamp.
+
+Next: economic reconciliation with measured fills, cost basis and dated valuation
+inputs, feeding exposure and daily-loss state with durable/idempotent accounting.
+Reviewed proposal notional is an authorization input, not measured fill value;
+native net delta is not gross trade value or PnL. Unknown attribution/time/prices
+must remain unknown when later reconciliation needs them. No protected command
+closes a claim or derives USD state yet. Protected live risk-input construction,
+execution/recovery/exits/scheduling, and activation of owner limits, isolated
+keys, verified Privy delegation/policy, funding, deployment and bounded validation
+remain. All four activation gates remain open; this closes attribution/time
+prerequisites within the accounting gate.
+
+Autonomous trading remains off and site settings remain drafts. No live provider
+or chain read, real wallet signature/key/credential/delegation change, trade,
+VPS health read or Serve deployment occurred. Current funding and Privy setup
+are unverified. Tests use fixture signatures only.
+
+No Cargo/rustc/Radar process remains locally. Target measured 33.1 GiB, with
+64.2 GiB free. Previously rejected ignored-output cleanup was not retried. This
+handback is a local documentation commit to include with the next source push;
+no redundant notes-only CI run is triggered. Source and behavior documentation
+are already pushed in PR 334 and fully verified.
