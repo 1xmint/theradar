@@ -1844,8 +1844,9 @@ Existing history, startup configuration and private-file controls still apply.
   source afterward. The signature fixture is otherwise valid for valuation.
 - [x] Final scoped verification passes: 149 signer and 33 conformance tests;
   Rust 1.99 Clippy and formatting pass. No lint suppression or exclusion added.
-- [ ] Read the staged diff, push source with the prior local handback and await
-  full CI, all mutation shards and final gate before recording verification.
+- [x] Source a902e09 passed full CI 37847565387: 2,490 Rust and 352 web
+  tests, all four mutation shards and final gate. Initial run completed before
+  pushing its equality-regression repair; no awaited run was cancelled.
 
 Next: measured fills, cost basis and durable economic reconciliation feeding
 USD exposure and daily-loss state. Protected live risk inputs, the execution/
@@ -1859,4 +1860,45 @@ CI 37844323424 found two missing equality regressions at valuation.rs:81:17
 coverage). The existing arithmetic test now accepts execution exactly at intent
 slot with debit exactly equal to reservation. Applying each exact mutation by
 hand fails this regression; source restored. No exclusion added. Await all
-remaining shards and the gate before pushing this test repair.
+remaining shards and the gate before pushing this test repair (completed).
+
+### Handback: protected historical native valuation (2026-10-08)
+
+Source a902e092a4509be3781fe89c7effb503ecba5c82 passed full CI
+37847565387 (https://github.com/1xmint/theradar/actions/runs/37847565387):
+2,490 Rust and 352 web tests, all four mutation shards and final gate. Local
+verification passed 149 signer and 33 conformance tests, scoped Rust 1.99 Clippy
+and format. Deliberately reapplied floor rounding, future price acceptance and
+signature-verification bypass each fail their regression. Initial CI found two
+missing equality cases, now covered; the exact reported comparisons fail when
+reapplied manually. Runtime source was restored. No mutation exclusions or lint
+suppression added. All initial shards/gate completed before the repair push.
+
+The actual protected `--review-valuation` command binds retained settlement to
+an outstanding SOL operation and re-verifies its wallet signature. Historical
+SOL price input is private operator provisioning, not authenticated market data.
+It must be positive, correctly typed, no later than execution in either slot or
+time and within configured age bounds. Missing execution time refuses. Debit
+and network fee USD conversions use upward-rounded integer arithmetic and
+refuse overflow. The older price watermark is retained. Repeated reviews leave
+history bytes unchanged; outstanding claims still block new issuance.
+
+Measured wallet net debit includes possible rent, tips and refunds. It is not
+gross swap value or PnL. Trade notional, cost basis and realised PnL remain null;
+no portfolio/loss state is updated and no operation is reconciled or claim
+released. Valuation is not yet durable economic accounting or a future sizing
+upper price. Next derive measured fills and acquisition cost, then durable
+idempotent exposure/loss reconciliation. Independent live risk-input snapshots,
+execution/recovery/exits/scheduling and activation of owner limits, isolated
+keys, verified Privy policy/delegation, funding, deployment and bounded validation
+remain. All four activation gates remain open; several integrations remain.
+
+Autonomous trading stays off and site limits remain drafts. No live provider or
+chain read, real wallet signature/key/credential/delegation change, trade, VPS
+health read or Serve deployment occurred. Current funding and Privy setup remain
+unverified. Tests use fixture signatures only. No local watcher remains. This
+verification handback is committed locally to include with the next source push,
+avoiding a redundant documentation-only CI run; verified source is in PR 334.
+
+No Cargo/rustc/Radar process remains locally. Target measured 33.1 GiB, with
+63.2 GiB free. Previously rejected ignored-output cleanup was not retried.
