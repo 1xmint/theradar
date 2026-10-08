@@ -535,6 +535,31 @@ does not establish USD exposure/loss. The protected issuer still has no command
 that closes the claim. Economic reconciliation and independently fresh live
 snapshots remain necessary before repeated autonomous execution.
 
+## Protected accounting coverage checkpoint
+
+The private issuer snapshot requires `accounting_checkpoint`, a string equal to
+the owned operation journal's last complete event digest. Only an empty journal
+uses an empty string. Missing, null or malformed fields refuse. Older snapshots
+must be reprovisioned; candidate stdin cannot supply this field. The issuer
+compares it before evaluating or recording a new operation, and a mismatch
+refuses without changing history or releasing a proof.
+
+The checkpoint includes every journal event, including proposals whose
+reservation was refused, pre-submission failures, normalized settlement records,
+terminal settlements and non-operation events. The journal advances its head
+only after a successful durable append. Replay restores it from the complete
+history. Idempotent repeats do not advance it. Outstanding claims still refuse
+before this check; an accounting marker never clears an unknown submission.
+
+This is the protected operator's coverage assertion, not verification that its
+USD exposure, creator allocations or daily-loss figures are correct. An operator
+copying a current digest onto incorrect figures remains inside the existing
+trusted provisioning boundary. The digest does not authenticate chain origin,
+establish execution day, prevent operator rollback of the journal or verify
+fresh economic reads. The risk kernel still checks the supplied portfolio state.
+Economic reconciliation and independently constructed live snapshots remain
+required; live delegation stays closed.
+
 ## What would reverse this
 
 Nothing foreseeable reverses holding a policy locally. The specific ceilings are

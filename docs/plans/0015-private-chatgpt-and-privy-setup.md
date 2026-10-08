@@ -1493,7 +1493,6 @@ No Cargo/rustc/radar/issuer/signer process remains. Target measured 33.0 GiB,
 with 114.8 GiB free. Previously rejected ignored-output cleanup was not retried.
 This follow-up changes documentation only; its CI may be pending while the
 source above is fully verified.
-
 ### Completed measured native spend (2026-10-08)
 
 Add terminal measured-spend vocabulary for the existing journal confirm/reconcile
@@ -1657,3 +1656,31 @@ No Cargo/rustc/radar/issuer/signer process remains. Target measured 33.1 GiB,
 with 114.5 GiB free. Previously rejected ignored-output cleanup was not retried.
 This follow-up changes documentation only; its CI may be pending while the
 source above is fully verified.
+
+### Protected snapshot history coverage (2026-10-08)
+
+Actual caller: offline Issuer::issue compares a required private snapshot
+accounting_checkpoint with the owned journal's last complete event digest before
+any new operation or proof. Empty string denotes only an empty journal. This
+coverage assertion does not prove economic correctness of operator-provisioned
+figures; USD exposure/loss reconciliation remains open. No live authority changes.
+
+- [x] Expose the existing durable journal head through Journal/OperationLog.
+  All events count, including terminal records and refused reservation proposals.
+- [x] Require a string checkpoint in protected snapshots; stdin cannot supply it.
+  Mismatches refuse without history changes; outstanding claims still refuse.
+- [x] Three new regressions cover append failure, idempotence/restart and
+  non-operation events; malformed/missing/candidate fields; aborted/completed
+  history and unchanged refusals; current coverage preserving daily-loss refusal.
+  Existing insufficient-cash test covers refreshing coverage in a running issuer.
+- [x] Bypassing issuer comparison and returning an empty journal head each fail
+  their targeted regression; both restored. Raise test floor to 2086.
+- [x] All 184 scoped tests and 33 conformance tests pass, with Rust 1.99 scoped
+  Clippy and format.
+- [ ] Read staged diff, commit, wait prior CI, push and verify all CI shards/gate.
+
+Next: derive economic exposure/loss from retained facts with explicit valuation
+and execution-day evidence, then build protected live snapshots. This checkpoint
+only rejects stale history association, not incorrect USD figures carrying a
+current marker. Autonomous execution remains off, with all four activation
+gates still open. No production deployment, real trade or delegation is made.

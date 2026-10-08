@@ -46,6 +46,9 @@ struct Snapshot {
     sol_upper_micro_usd: u64,
     fee_upper_lamports: u64,
     state: PortfolioState,
+    // Operator's coverage assertion, not proof of economic correctness.
+    // Empty only for a journal with no events. Never accepted from stdin.
+    accounting_checkpoint: String,
     // Until the independent live adapter exists, an operator provisions the
     // measured proposal and exact reviewed bytes together. Stdin cannot invent
     // exit capacity, creator identity, costs or a different transaction.
@@ -379,6 +382,9 @@ impl Issuer {
         }
         let snapshot: Snapshot = serde_json::from_slice(&private_read(&self.config.snapshot_path)?)
             .map_err(|_| "invalid trusted snapshot")?;
+        if snapshot.accounting_checkpoint != self.operations.checkpoint() {
+            return Err("snapshot accounting does not cover current journal history".into());
+        }
         if snapshot.wallet != self.config.wallet
             || snapshot.sol_upper_micro_usd == 0
             || !snapshot_current(

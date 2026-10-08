@@ -30,6 +30,66 @@ const HELD: u64 = 10_000_000;
 const CLAIM: u64 = 4_000_000;
 const NOW: Slot = Slot(500);
 
+#[test]
+fn checkpoint_tracks_durable_history_including_terminal_and_non_operation_events() {
+    let dir = tempfile::tempdir().expect("dir");
+    let path = somewhere(&dir);
+    let mut log = OperationLog::open(&path).expect("log");
+    assert_eq!(log.checkpoint(), "");
+    let id = log
+        .propose(
+            intent(),
+            1,
+            Correlation {
+                receipt: Some("fixture".into()),
+                ..Correlation::default()
+            },
+        )
+        .expect("proposal");
+    assert_eq!(log.checkpoint(), id.as_str());
+    let proposed = log.checkpoint().to_owned();
+    let moved = dir.path().join("moved");
+    std::fs::rename(&path, &moved).expect("move history");
+    std::fs::create_dir(&path).expect("obstruct writes");
+    let mut portfolio = account();
+    assert!(log.fail(&id, &mut portfolio, 2).is_err());
+    assert_eq!(log.checkpoint(), proposed);
+    std::fs::remove_dir(&path).expect("remove empty obstruction");
+    std::fs::rename(&moved, &path).expect("restore history");
+    log.fail(&id, &mut portfolio, 2).expect("terminal");
+    let terminal = log.checkpoint().to_owned();
+    assert_ne!(terminal, proposed);
+    log.fail(&id, &mut portfolio, 3).expect("repeat");
+    assert_eq!(log.checkpoint(), terminal);
+    drop(log);
+    let reopened = OperationLog::open(&path).expect("replay");
+    assert_eq!(reopened.checkpoint(), terminal);
+    assert_eq!(reopened.outstanding().count(), 0);
+    drop(reopened);
+    let mut journal = radar_journal::Journal::open(&path).expect("journal");
+    journal
+        .record(
+            radar_journal::Stage::Received,
+            radar_journal::Outcome::Ok,
+            4,
+            Correlation {
+                mention: Some("operator note".into()),
+                ..Correlation::default()
+            },
+            None,
+            Vec::new(),
+            None,
+            None,
+        )
+        .expect("non-operation event");
+    let events = journal.events().expect("events");
+    let last = &events.last().expect("last event").id;
+    assert_ne!(last, &terminal);
+    assert_eq!(journal.checkpoint(), last);
+    let reopened = OperationLog::open(&path).expect("replay note");
+    assert_eq!(reopened.checkpoint(), last);
+}
+
 /// A wallet with ten million lamports in it, as a fresh chain read would give
 /// it: the balance says nothing about what any process has claimed.
 fn account() -> Portfolio {

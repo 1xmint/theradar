@@ -8,6 +8,132 @@ use std::process::{Child, Command, Stdio};
 const SEED: [u8; 32] = [0x6B; 32];
 
 #[test]
+fn accounting_checkpoint_is_required_and_cannot_be_supplied_by_the_candidate() {
+    let mut fixture = Fixture::new();
+    let mut issuer = fixture.start();
+    for value in [Value::Null, json!(1), json!([])] {
+        fixture.snapshot["accounting_checkpoint"] = value;
+        fixture.save();
+        assert_eq!(
+            issuer.ask(&fixture.candidate)["reason"],
+            "invalid trusted snapshot"
+        );
+    }
+    fixture
+        .snapshot
+        .as_object_mut()
+        .expect("object")
+        .remove("accounting_checkpoint");
+    fixture.save();
+    assert_eq!(
+        issuer.ask(&fixture.candidate)["reason"],
+        "invalid trusted snapshot"
+    );
+    fixture.snapshot["accounting_checkpoint"] = json!("invented history");
+    fixture.save();
+    assert_eq!(
+        issuer.ask(&fixture.candidate)["reason"],
+        "snapshot accounting does not cover current journal history"
+    );
+    fixture.snapshot["accounting_checkpoint"] = json!("");
+    fixture.save();
+    let mut candidate = fixture.candidate.clone();
+    candidate["accounting_checkpoint"] = json!("");
+    assert_eq!(issuer.ask(&candidate)["reason"], "invalid candidate");
+    assert_eq!(
+        std::fs::read(fixture.dir.path().join("operations.jsonl")).expect("history"),
+        Vec::<u8>::new()
+    );
+    assert_eq!(issuer.ask(&fixture.candidate)["outcome"], "issued");
+}
+
+#[test]
+fn terminal_history_requires_a_new_protected_accounting_checkpoint_before_issuance() {
+    use radar_types::{
+        Asset, AssetRole, Balance, Holding, Portfolio, Slot, TokenQuantity, Unvaluable, Valuation,
+    };
+    for completed in [false, true] {
+        let mut fixture = Fixture::new();
+        let history = fixture.dir.path().join("operations.jsonl");
+        let wallet = serde_json::from_value(fixture.snapshot["wallet"].clone()).expect("wallet");
+        let mut portfolio = Portfolio::at(wallet, Slot(1000));
+        portfolio
+            .hold(
+                Asset::Sol,
+                Holding::new(
+                    AssetRole::Cash,
+                    Balance::Counted(TokenQuantity::lamports(300_000_000)),
+                    Valuation::Unknown(Unvaluable::NoPrice),
+                    Valuation::Unknown(Unvaluable::NoPrice),
+                ),
+            )
+            .expect("balance");
+        let mut log = radar_journal::OperationLog::open(&history).expect("log");
+        let id = log
+            .propose(
+                radar_journal::Intent {
+                    asset: Asset::Sol,
+                    amount: TokenQuantity::lamports(5000),
+                    at: Slot(1000),
+                },
+                unix_now(),
+                radar_journal::Correlation {
+                    receipt: Some("accounting fixture".into()),
+                    ..radar_journal::Correlation::default()
+                },
+            )
+            .expect("proposal");
+        if completed {
+            log.reserve(&id, &mut portfolio, unix_now())
+                .expect("reserve");
+            log.submit(&id, unix_now(), |_| Ok::<_, ()>(()))
+                .expect("submit")
+                .expect("effect");
+            // Generic caller fixture, not a protected economic reconciliation command.
+            log.reconcile(
+                &id,
+                radar_types::Settlement::Completed(TokenQuantity::lamports(5000)),
+                &mut portfolio,
+                unix_now(),
+            )
+            .expect("complete");
+        } else {
+            log.fail(&id, &mut portfolio, unix_now())
+                .expect("abort before effect");
+        }
+        let checkpoint = log.checkpoint().to_owned();
+        assert_ne!(checkpoint, id.as_str());
+        assert_eq!(log.outstanding().count(), 0);
+        drop(log);
+        let before = std::fs::read(&history).expect("history");
+        for stale in ["", id.as_str(), "different journal head"] {
+            fixture.snapshot["accounting_checkpoint"] = json!(stale);
+            fixture.save();
+            assert_eq!(
+                fixture.start().ask(&fixture.candidate)["reason"],
+                "snapshot accounting does not cover current journal history"
+            );
+            assert_eq!(std::fs::read(&history).expect("unchanged"), before);
+        }
+        // Updating coverage never overrides the independent risk kernel.
+        fixture.snapshot["accounting_checkpoint"] = json!(checkpoint);
+        fixture.snapshot["state"]["realised_loss_today"] = json!(10_000_000);
+        fixture.save();
+        let mut issuer = fixture.start();
+        assert_eq!(issuer.ask(&fixture.candidate)["outcome"], "refused");
+        assert_eq!(std::fs::read(&history).expect("no issuance"), before);
+        // Deliberate protected operator provision in this fixture, not inferred PnL.
+        fixture.snapshot["state"]["realised_loss_today"] = json!(0);
+        fixture.save();
+        assert_eq!(issuer.ask(&fixture.candidate)["outcome"], "issued");
+        assert_eq!(
+            issuer.ask(&fixture.candidate)["reason"],
+            "outstanding operation requires reconciliation"
+        );
+    }
+}
+
+#[test]
 fn settlement_review_reverifies_the_protected_artifact_signature() {
     let key = ed25519_dalek::SigningKey::from_bytes(&[0x42; 32]);
     let (fixture, unsigned) = fixture_for_wallet(&key);
@@ -412,6 +538,7 @@ impl Fixture {
         let candidate =
             json!({"proposal":proposal, "transaction":radar_types::b64::encode(&transaction)});
         let snapshot = json!({
+            "accounting_checkpoint":"",
             "wallet":wallet, "observed_at_unix_secs":unix_now(), "sol_lamports":300_000_000,
             "sol_upper_micro_usd":200_000_000, "fee_upper_lamports":5000, "state":radar_risk::PortfolioState::flat(radar_types::Slot(1000)),
             "proposal":candidate["proposal"], "transaction":candidate["transaction"],
@@ -963,6 +1090,7 @@ fn stdin_cannot_choose_authority_or_invent_the_market_evidence() {
         "policy",
         "transaction_evidence",
         "wallet_evidence",
+        "accounting_checkpoint",
     ] {
         let mut candidate = fixture.candidate.clone();
         candidate[field] = json!("caller chooses");
@@ -1072,6 +1200,15 @@ fn kernel_refusals_and_insufficient_cash_never_produce_a_proof() {
     );
     fixture.snapshot["sol_lamports"] = json!(250_005_000);
     fixture.snapshot["wallet_evidence"]["native_sol"]["raw_amount"] = json!("250005000");
+    fixture.save();
+    assert_eq!(
+        issuer.ask(&fixture.candidate)["reason"],
+        "snapshot accounting does not cover current journal history"
+    );
+    // A refused reservation still recorded a proposal: cover that history too.
+    let journal =
+        radar_journal::Journal::open(fixture.dir.path().join("operations.jsonl")).expect("history");
+    fixture.snapshot["accounting_checkpoint"] = json!(journal.checkpoint());
     fixture.save();
     assert_eq!(issuer.ask(&fixture.candidate)["outcome"], "issued");
 }

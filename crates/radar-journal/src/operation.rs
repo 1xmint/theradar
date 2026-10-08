@@ -474,6 +474,14 @@ impl OperationLog {
         self.operations.get(id).map(|live| &live.entry)
     }
 
+    /// Exact owned journal history a protected accounting snapshot must cover.
+    /// Includes every event, not only outstanding operations. Empty for genesis.
+    /// Does not verify valuations or prevent an operator rolling back the file.
+    #[must_use]
+    pub fn checkpoint(&self) -> &str {
+        self.journal.checkpoint()
+    }
+
     /// Protected transaction metadata for this operation, including after replay.
     #[must_use]
     pub fn execution(&self, id: &OperationId) -> Option<&crate::ExecutionBinding> {
