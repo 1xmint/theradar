@@ -1853,3 +1853,10 @@ recovery/exit loop and activation of owner limits, isolated keys, verified Privy
 policy/delegation, funding and bounded validation remain. All four activation
 gates remain open. Autonomous trading stays off; no live read, real credential,
 wallet signature, trade or production deployment occurs in this increment.
+
+CI 37844323424 found two missing equality regressions at valuation.rs:81:17
+(`<` to `<=` for the intent slot) and :96:14 (`>` to `>=` for reservation
+coverage). The existing arithmetic test now accepts execution exactly at intent
+slot with debit exactly equal to reservation. Applying each exact mutation by
+hand fails this regression; source restored. No exclusion added. Await all
+remaining shards and the gate before pushing this test repair.

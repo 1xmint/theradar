@@ -177,6 +177,23 @@ mod tests {
         assert_eq!(report["network_fee_micro_usd"], "1001");
         assert_eq!(report["valuation_as_of_slot"], "90");
         assert_eq!(report["execution_slot"], "100");
+        let mut boundary = entry;
+        boundary.intent.at = radar_types::Slot(100);
+        boundary.reserved = Some(radar_types::TokenQuantity::lamports(250_005_000));
+        let mut exact = record;
+        exact.review["reserved_lamports"] = json!("250005000");
+        assert!(
+            review(
+                &binding,
+                &boundary,
+                &exact,
+                json!({"version":1,"asset":"sol","micro_usd_per_sol":"200000003",
+                    "as_of_slot":"90","as_of_unix_secs":"980"}),
+                &policy,
+                20,
+            )
+            .is_ok()
+        );
         for field in [
             "trade_notional_micro_usd",
             "position_cost_basis_micro_usd",
