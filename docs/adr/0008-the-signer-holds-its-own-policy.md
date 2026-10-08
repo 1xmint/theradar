@@ -588,6 +588,29 @@ reviewed notional is an authorization input, not measured fill value. No prices,
 cost basis, USD exposure or realised loss are inferred here, and no claim-closing
 command or live delegation is enabled.
 
+## Protected historical native valuation review
+
+`radar-issuer --review-valuation <operation-id> <private-price-file>` prices
+retained wallet net debit and network fee without updating the journal or
+portfolio. It requires an outstanding SOL operation, its retained normalized
+settlement and exact signed artifact, and re-verifies the wallet signature.
+The private price JSON accepts only `version: 1`, `asset: "sol"` and decimal
+strings `micro_usd_per_sol`, `as_of_slot`, `as_of_unix_secs`. Missing fields,
+unknown fields, a zero price or malformed/overflowing integers refuse.
+
+Both price watermarks must precede or equal reported execution context. Age
+must fit the configured slot and seconds budgets; equality is accepted. Missing
+execution time refuses rather than using host read time. The output preserves
+the older price watermark. Integer arithmetic rounds debit and fee valuations
+up to micro-USD and refuses overflow. Native credits, out-of-range effects,
+debits above the reservation and fees above the debit refuse.
+
+This is protected operator historical pricing, not an authenticated live oracle
+or a conservative upper price for future sizing. Wallet net debit can contain
+rent, tips and refunds; it is not gross trade value. Trade notional, cost basis
+and realised PnL remain null. No claim is released, no operation is reconciled,
+and no USD exposure/loss state, signing authority or live delegation changes.
+
 ## What would reverse this
 
 Nothing foreseeable reverses holding a policy locally. The specific ceilings are

@@ -18,6 +18,9 @@ use serde::Deserialize;
 #[path = "radar-issuer/settlement.rs"]
 mod settlement;
 
+#[path = "radar-issuer/valuation.rs"]
+mod valuation;
+
 #[derive(Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 struct Config {
@@ -564,6 +567,40 @@ impl Issuer {
             .map_err(|_| "settlement evidence could not be persisted")?;
         Ok(())
     }
+
+    fn review_valuation(&self, operation: &str, path: &Path) -> Result<serde_json::Value, String> {
+        let (id, entry) = self
+            .operations
+            .outstanding()
+            .find(|(id, _)| id.as_str() == operation)
+            .ok_or("unknown outstanding operation")?;
+        let binding = self
+            .operations
+            .execution(id)
+            .ok_or("operation has no transaction binding")?;
+        let record = self
+            .operations
+            .settlement(id)
+            .ok_or("operation has no retained settlement facts")?;
+        let signed =
+            radar_types::b64::decode(&record.signed_transaction).ok_or("invalid signed binding")?;
+        verified_signed(binding, self.config.wallet, &signed)?;
+        if record.review["operation"] != operation {
+            return Err("retained settlement operation does not match".into());
+        }
+        let price = serde_json::from_slice(&private_read(path)?)
+            .map_err(|_| "invalid protected price JSON")?;
+        let mut report = valuation::review(
+            binding,
+            entry,
+            record,
+            price,
+            &self.config.policy,
+            self.config.max_snapshot_age_secs,
+        )?;
+        report["operation"] = serde_json::json!(operation);
+        Ok(report)
+    }
 }
 
 fn run() -> Result<(), String> {
@@ -584,6 +621,13 @@ fn run() -> Result<(), String> {
             );
             return Ok(());
         }
+        if args[0] == "--review-valuation" {
+            println!(
+                "{}",
+                issuer.review_valuation(&args[1], Path::new(&args[2]))?
+            );
+            return Ok(());
+        }
         if args[0] == "--record-settlement" {
             issuer.record_settlement(&args[1], Path::new(&args[2]))?;
             println!(
@@ -594,7 +638,7 @@ fn run() -> Result<(), String> {
             return Ok(());
         }
         if args[0] != "--bind-signed" {
-            return Err("usage: radar-issuer --bind-signed, --review-settlement or --record-settlement <operation-id> <private-file>".into());
+            return Err("usage: radar-issuer --bind-signed, --review-settlement, --record-settlement or --review-valuation <operation-id> <private-file>".into());
         }
         issuer.bind_signed(&args[1], Path::new(&args[2]))?;
         println!(

@@ -1820,3 +1820,36 @@ No Cargo/rustc/Radar process remains locally. Target measured 33.1 GiB, with
 handback is a local documentation commit to include with the next source push;
 no redundant notes-only CI run is triggered. Source and behavior documentation
 are already pushed in PR 334 and fully verified.
+
+### Protected historical native valuation review (2026-10-08)
+
+The actual caller is `radar-issuer --review-valuation <operation-id>
+<private-price-file>`. It re-verifies the retained wallet signature, requires
+an outstanding bound SOL operation and normalized settlement, and prices known
+wallet net debit and network fee using a protected dated SOL price. Both time
+and slot ages are checked against execution context; future, stale, missing,
+foreign or zero prices refuse. Missing execution time stays unknown and refuses.
+Integer arithmetic rounds costs upward and refuses overflow; the output keeps
+the older valuation watermark. Price provenance remains operator provisioning.
+
+Wallet net debit can include rent, tips or refunds. Trade notional, position
+cost basis and realised PnL remain null. This read-only command does not record
+valuation, close claims, update exposure/loss or enable signing/delegation.
+Existing history, startup configuration and private-file controls still apply.
+
+- [x] Add three arithmetic/binding/freshness unit tests and an actual-process
+  valuation regression; raise the test floor from 2,089 to 2,093.
+- [x] Reapply floor rounding, accepting future time via saturating subtraction,
+  and bypassing signature verification: each targeted test fails. Restore all
+  source afterward. The signature fixture is otherwise valid for valuation.
+- [x] Final scoped verification passes: 149 signer and 33 conformance tests;
+  Rust 1.99 Clippy and formatting pass. No lint suppression or exclusion added.
+- [ ] Read the staged diff, push source with the prior local handback and await
+  full CI, all mutation shards and final gate before recording verification.
+
+Next: measured fills, cost basis and durable economic reconciliation feeding
+USD exposure and daily-loss state. Protected live risk inputs, the execution/
+recovery/exit loop and activation of owner limits, isolated keys, verified Privy
+policy/delegation, funding and bounded validation remain. All four activation
+gates remain open. Autonomous trading stays off; no live read, real credential,
+wallet signature, trade or production deployment occurs in this increment.

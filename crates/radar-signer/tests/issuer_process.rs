@@ -175,11 +175,38 @@ fn settlement_review_reverifies_the_protected_artifact_signature() {
     // provision an invalid artifact to prove review enforces that boundary.
     log.record_signed(&id, radar_types::b64::encode(&unsigned), unix_now())
         .expect("unverified fixture");
+    let time = unix_now();
+    let reserved = log
+        .entry(&id)
+        .expect("entry")
+        .reserved
+        .expect("reserve")
+        .raw();
+    log.record_settlement(
+        &id,
+        radar_journal::SettlementRecord {
+            signed_transaction: radar_types::b64::encode(&unsigned),
+            review: json!({"version":1,"authority":"protected_file_review","operation":id.as_str(),
+                "wallet":fixture.config["wallet"],"signature_verified_locally":true,
+                "reserved_lamports":reserved.to_string(),"slot":"1001","block_time_unix_secs":time.to_string(),
+                "wallet_net_change_lamports":"-5000","network_fee_lamports":"5000"}),
+        },
+        unix_now(),
+    )
+    .expect("unverified generic facts");
     drop(log);
     let path = fixture.dir.path().join("evidence.json");
-    write(&path, &json!({}));
+    write(
+        &path,
+        &json!({"version":1,"asset":"sol","micro_usd_per_sol":"200000000",
+        "as_of_slot":"1000","as_of_unix_secs":time.to_string()}),
+    );
     let saved = std::fs::read(&history).expect("history bytes");
-    for mode in ["--review-settlement", "--record-settlement"] {
+    for mode in [
+        "--review-settlement",
+        "--record-settlement",
+        "--review-valuation",
+    ] {
         let result = fixture
             .command()
             .args([mode, id.as_str()])
@@ -200,6 +227,84 @@ fn settlement_review_reverifies_the_protected_artifact_signature() {
             .outstanding()
             .count(),
         1
+    );
+}
+
+#[test]
+fn protected_valuation_prices_retained_effects_without_changing_history_or_claims() {
+    let (fixture, _, id, mut evidence) = finalized_fixture();
+    let time = evidence["read_completed_at_unix_secs"]
+        .as_u64()
+        .expect("time")
+        - 1;
+    evidence["block_time_unix_secs"] = json!(time.to_string());
+    let path = fixture.dir.path().join("price.json");
+    let price = json!({"version":1,"asset":"sol","micro_usd_per_sol":"200000000",
+        "as_of_slot":"1000","as_of_unix_secs":time.to_string()});
+    write(&path, &price);
+    let review = || {
+        fixture
+            .command()
+            .args(["--review-valuation", id.as_str()])
+            .arg(&path)
+            .output()
+            .expect("valuation process")
+    };
+    let missing = review();
+    assert!(!missing.status.success());
+    assert_eq!(missing.stdout, Vec::<u8>::new());
+    let evidence_path = fixture.dir.path().join("effects.json");
+    write(&evidence_path, &evidence);
+    let record = fixture
+        .command()
+        .args(["--record-settlement", id.as_str()])
+        .arg(&evidence_path)
+        .output()
+        .expect("record");
+    assert!(
+        record.status.success(),
+        "{}",
+        String::from_utf8_lossy(&record.stderr)
+    );
+    let history = fixture.dir.path().join("operations.jsonl");
+    let saved = std::fs::read(&history).expect("history");
+    for _ in 0..2 {
+        let result = review();
+        assert!(
+            result.status.success(),
+            "{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+        let report: Value = serde_json::from_slice(&result.stdout).expect("report");
+        assert_eq!(report["operation"], id.as_str());
+        assert_eq!(report["wallet_net_debit_micro_usd"], "1000");
+        assert_eq!(report["network_fee_micro_usd"], "1000");
+        assert_eq!(report["valuation_as_of_slot"], "1000");
+        assert_eq!(report["realised_pnl_micro_usd"], Value::Null);
+        assert_eq!(report["portfolio_state_updated"], false);
+        assert_eq!(report["operation_reconciled"], false);
+        assert_eq!(std::fs::read(&history).expect("unchanged"), saved);
+    }
+    for (field, bad) in [
+        ("micro_usd_per_sol", json!("0")),
+        ("as_of_slot", json!("1002")),
+        ("as_of_unix_secs", json!((time + 1).to_string())),
+        ("asset", json!("usdc")),
+    ] {
+        let mut bad_price = price.clone();
+        bad_price[field] = bad;
+        write(&path, &bad_price);
+        let result = review();
+        assert!(!result.status.success());
+        assert_eq!(result.stdout, Vec::<u8>::new());
+        assert_eq!(std::fs::read(&history).expect("unchanged"), saved);
+    }
+    let log = radar_journal::OperationLog::open(&history).expect("replay");
+    assert_eq!(log.outstanding().count(), 1);
+    drop(log);
+    assert_eq!(
+        fixture.start().ask(&fixture.candidate)["reason"],
+        "outstanding operation requires reconciliation"
     );
 }
 
