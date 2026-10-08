@@ -1071,7 +1071,8 @@ the source head above is fully verified.
 - [x] Mainnet read-only probe with a zero/unavailable blockhash refused without
   evidence. This is failure-path verification, not a successful funded trade
   simulation. No wallet key, signed transaction or submission was involved.
-- [ ] Await full final-source CI, including all mutation shards, before handback.
+- [x] Full source CI 37705356170 passed at d311614, including all four mutation
+  shards and the final gate. No check was cancelled or skipped.
 
 This adapter only inspects envelope framing locally; the RPC validates message
 structure and the independent signer must still decode and authorize content.
@@ -1080,3 +1081,30 @@ Next bind fresh valuation, exposure/loss, exact-transaction evidence and owner
 mandates to the issuer; close settlement reconciliation and Privy policy refusal
 checks before repeated execution. Site limits are still drafts and live signing
 remains closed. This increment does not require a Serve deployment.
+
+**Handback — verified source d311614c2a51afc756382256570a60ee98dde29f:**
+CI 37705356170 passed build/tests/lint/fmt/MSRV/web/site/licence/cargo-deny,
+all four mutation shards and the final gate. Totals: 2,441 Rust and 352 web tests.
+Local validation: 228 CLI tests, 90 onchain tests, 33 conformance checks, scoped
+all-target Clippy and formatting. The two manual unsafe changes failed their
+intended regressions; restored source passed. No lint suppression or mutation
+exclusion was introduced.
+
+Mainnet RPC confirmed BlockhashNotFound for the zero-blockhash unsigned probe;
+the command refused without partial JSON. Positive simulation/fee response and
+byte/option binding are verified against controlled RPC, not claimed as a funded
+mainnet success. The refreshed owner-wallet read at host 1791418201 found zero
+lamports at slot 454379222 and empty SPL/Token-2022 accounts at slots
+454379224/454379225. Distinct read slots are retained; this is not an atomic
+snapshot or USD valuation.
+
+Next connect these exact-transaction reads to the issuer with protected owner
+mandates and measured fresh valuation, exposure/loss and complete cost bounds;
+then close settlement reconciliation and verify Privy policy refusals/delegation
+before repeated live execution. Wallet funding and activated numeric limits are
+still prerequisites. No real key, delegation, signature or trade was created.
+No Serve deployment or current VPS health verification was made. Working tree
+was clean after the source push; no local Cargo/rustc/wallet process remains.
+Target measured 29.4 GiB with 119.2 GiB free. Previously rejected ignored output
+cleanup was not retried. This final follow-up records verification only; its CI
+may be pending while the source head above is fully verified.
