@@ -1290,8 +1290,9 @@ protected accounting; it does not release any outstanding issuer operation.
   explicit err lookup with missing-as-null lookup fails the required-field test.
   Source restored; all five reader tests and twelve CLI process tests pass.
   Rust 1.99 scoped Clippy/format and all 33 conformance checks passed.
-- [ ] Inspect the staged diff, push after the prior completed CI and verify
-  full source CI including all four mutation shards before handback.
+- [x] Inspect the complete staged diffs and push after completed prior CI.
+  Full repaired-source CI 37724907667 passed at c1b16c1, including all four
+  mutation shards and final gate: 2,460 Rust tests and 352 web tests.
 
 Source CI 37723194570 at 67a6c44 completed every shard: 2,460 Rust tests,
 352 web tests and all non-mutation checks passed; shard zero reported two
@@ -1321,3 +1322,31 @@ binding, protected reconciliation and USD exposure/loss accounting are still
 needed to permit another issuance. Live price/cost/searched-exit evidence,
 activated owner limits and verified Privy policy/delegation remain prerequisites
 for autonomous execution. Site limits are still drafts.
+
+**Final handback — verified source c1b16c190455959f870a9b0f076eb135959ace7f:**
+CI 37724907667 passed build/tests/lint/fmt/MSRV/web/site/licence/cargo-deny,
+all four mutation shards and final gate. Totals: 2,460 Rust and 352 web tests.
+The initial source run completed before the repair push; no check was cancelled.
+Final local checks passed: 95 onchain and 234 CLI tests, Rust 1.99 scoped
+all-target Clippy and formatting. Earlier 33 conformance checks passed, and
+full repaired-source CI includes conformance. The exact-byte, absent-status
+and minimum-size wrong behaviors fail regressions. Redundant count guards
+were removed rather than adding a mutation exclusion. No lint suppression.
+
+The operator can now read finalized historical fees and raw native/token
+balance effects bound to exact signed legacy bytes. A missing transaction
+remains unknown. Positive reads are controlled fixtures; the live public
+version-zero transaction demonstrated refusal only. No user wallet read,
+current VPS health check, Serve deployment, credential/delegation change,
+wallet signature or trade occurred this increment.
+
+Next: persist the protected operation-to-authorized/signed-transaction binding
+and reconcile known finalized effects before releasing claims, with USD
+valuation/exposure/loss evidence. Live price bounds, full costs and searched
+exit capacity, activated owner limits and verified Privy policy/delegation
+remain necessary before autonomous execution. Site limits remain drafts.
+
+No local Cargo/rustc/radar/issuer/signer process remains. Target measured 32.6
+GiB with 116.6 GiB free. Previously rejected ignored-output cleanup was not
+retried. This final handback follow-up changes documentation only; its CI may
+be pending while the source above is fully verified.
