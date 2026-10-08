@@ -270,7 +270,7 @@ impl Issuer {
                 headers: [("privy-app-id".into(), serde_json::json!(self.config.app_id))]
                     .into_iter()
                     .collect(),
-                body: serde_json::json!({"method":"signTransaction", "params":{"encoding":"base64", "transaction":candidate.transaction}}),
+                body: serde_json::json!({"method":"signTransaction", "params":{"encoding":"base64", "transaction":radar_types::b64::encode(checked.bytes())}}),
             },
             wallet: self.config.wallet.to_string(),
             now_slot: snapshot.state.now.get(),

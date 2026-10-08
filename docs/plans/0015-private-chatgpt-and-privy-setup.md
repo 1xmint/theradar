@@ -1141,3 +1141,15 @@ provenance. A live collector must still populate wallet/valuation/exposure/loss
 and complete costs, and the owner mandate must remain outside Serve's authority.
 Settlement reconciliation and verified Privy policy/delegation still precede
 repeated live execution. Site limits remain drafts; no live key or trade enabled.
+
+Final request review found the shared base64 decoder's deliberate legacy
+leniency (whitespace and suffixes after padding). The new evidence check bound
+decoded bytes, while the signing request still forwarded the provisioned string.
+The request now serializes from Checked bytes, guaranteeing the canonical read
+payload also enters the Privy request and issuer proof. Decoder compatibility
+is unchanged. A fifth process regression supplies an equivalent lenient spelling,
+requires canonical request output and verifies its attestation. Restoring the
+original forwarded spelling fails that regression; source restored. Final local
+count is 129 signer tests, with 33 conformance checks, scoped Clippy and fmt.
+The test floor gains one more. Await the initial source CI before pushing this
+request correction, then verify its final source head without cancelled checks.

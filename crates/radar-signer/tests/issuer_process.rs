@@ -339,6 +339,41 @@ fn an_overflowing_evidence_expiry_refuses_without_reserving_capital() {
 }
 
 #[test]
+fn the_privy_request_encodes_checked_bytes_even_when_the_provisioned_spelling_is_lenient() {
+    let mut fixture = Fixture::new();
+    let canonical = fixture.candidate["transaction"]
+        .as_str()
+        .expect("encoding")
+        .to_owned();
+    let alias = format!("{canonical} ignored suffix");
+    assert_eq!(
+        radar_types::b64::decode(&alias),
+        radar_types::b64::decode(&canonical)
+    );
+    fixture.candidate["transaction"] = json!(alias);
+    fixture.snapshot["transaction"] = fixture.candidate["transaction"].clone();
+    fixture.save();
+    let mut issuer = fixture.start();
+    let answer = issuer.ask(&fixture.candidate);
+    assert_eq!(answer["outcome"], "issued", "{answer}");
+    assert_eq!(
+        answer["intent"]["request"]["body"]["params"]["transaction"],
+        canonical
+    );
+    let intent: radar_signer::protocol::PrivyAuthorization =
+        serde_json::from_value(answer["intent"].clone()).expect("intent");
+    let public = radar_types::Address::new(
+        ed25519_dalek::SigningKey::from_bytes(&SEED)
+            .verifying_key()
+            .to_bytes(),
+    );
+    radar_signer::attestation::Issuer::new(&public, 60)
+        .expect("trust")
+        .check(&intent, unix_now())
+        .expect("proof binds canonical request");
+}
+
+#[test]
 fn issuance_runs_the_kernel_and_reserves_before_a_verifiable_proof_leaves() {
     let fixture = Fixture::new();
     let mut issuer = fixture.start();

@@ -350,6 +350,9 @@ not cryptographic proof of RPC origin. A live adapter must still own collection.
 Before capital reservation, the issuer requires version 1, read-only/finalized
 metadata, explicit successful simulation with no blockhash replacement, and
 equality with both the exact transaction bytes and the decoded signable message.
+The Privy request is encoded from those Checked bytes too. The shared decoder's
+legacy leniency is unchanged; an alternate input spelling cannot be forwarded
+as a different signing payload, and the proof binds the canonical request.
 Signature verification remains explicitly disabled in this unsigned read.
 The requested minimum slot cannot precede the proposal's oldest input; both
 reported contexts must meet that minimum and cannot exceed the snapshot's
