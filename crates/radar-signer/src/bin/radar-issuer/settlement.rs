@@ -39,6 +39,17 @@ fn tokens(value: &Value, field: &str, count: usize) -> Result<Vec<TokenBalance>,
     Ok(entries)
 }
 
+fn native_settlement(delta: i128, fee: u64) -> Option<radar_types::Settlement> {
+    // A credit does not measure gross spend; a debit must cover the known fee.
+    // A candidate does not reconcile USD/exposure/loss or release the claim.
+    u64::try_from(-delta)
+        .ok()
+        .filter(|spent| *spent >= fee)
+        .map(|spent| {
+            radar_types::Settlement::Completed(radar_types::TokenQuantity::lamports(spent))
+        })
+}
+
 pub(super) fn review(
     binding: &ExecutionBinding,
     entry: &OperationEntry,
@@ -132,19 +143,12 @@ pub(super) fn review(
     let effects: Vec<_> = accounts.iter().zip(pre.iter().zip(&post)).map(|(account, (pre, post))|
         json!({"account":account.to_string(),"pre_lamports":pre.to_string(),"post_lamports":post.to_string(),
             "net_change_lamports":(i128::from(*post)-i128::from(*pre)).to_string()})).collect();
-    // A net credit does not measure gross spending. A debit smaller than the
-    // known fee also cannot describe a completed native spend on its own.
-    // This is a candidate only; USD/exposure/loss reconciliation is still absent.
-    let native_settlement = u64::try_from(-delta)
-        .ok()
-        .filter(|spent| *spent >= fee)
-        .map(|spent| {
-            radar_types::Settlement::Completed(radar_types::TokenQuantity::lamports(spent))
-        });
+    let native_settlement = native_settlement(delta, fee);
     Ok(
         json!({"version":1,"authority":"protected_file_review","outcome":outcome,
         "wallet":binding.wallet.to_string(),"signature":Signature::new(signature).to_string(),
         "slot":slot.to_string(),"native_account_effects":effects,"wallet_net_change_lamports":delta.to_string(),
+        "minimum_slot":minimum.to_string(),"read_started_at_unix_secs":started,"read_completed_at_unix_secs":completed,
         "network_fee_lamports":fee.to_string(),"reserved_lamports":reserved.raw().to_string(),
         "pre_token_balances":before,"post_token_balances":after,"usd_value":null,"realised_pnl":null,
         "native_settlement_candidate":native_settlement,

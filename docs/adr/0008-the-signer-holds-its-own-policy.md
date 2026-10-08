@@ -511,6 +511,30 @@ independent USD exposure/loss updates are needed before safely enabling repeated
 issuance. Native debit alone cannot reset those limits. Live delegation stays
 closed.
 
+## Durable normalized settlement facts
+
+`radar-issuer --record-settlement <operation-id> <private-settlement-json-file>`
+runs the same protected signature/message/finality/effect review, then records
+only its normalized output with the canonical signed artifact under the existing
+journal ownership lock. It reads the input once; arbitrary input fields and
+provider bodies are not copied into history. The report now also preserves its
+minimum slot and ordered host read window. No raw RPC response is retained.
+
+The journal checks SubmissionUnknown and exact association with its previously
+recorded signed artifact. The append precedes the in-memory update and success
+output. Identical repeats are idempotent; changed facts refuse, including changed
+read windows. Replay rejects unbound, conflicting, wrongly staged or changed
+operation metadata, while retained facts survive later terminal records.
+Absent optional settlement fields do not change hashes of older events. Generic
+journal callers supply verified normalized facts; the journal does not perform
+cryptographic, chain or economic verification for them.
+
+Recording evidence leaves the claim outstanding and still blocks issuance.
+Historical read times do not authorize a future decision, and a saved review
+does not establish USD exposure/loss. The protected issuer still has no command
+that closes the claim. Economic reconciliation and independently fresh live
+snapshots remain necessary before repeated autonomous execution.
+
 ## What would reverse this
 
 Nothing foreseeable reverses holding a policy locally. The specific ceilings are

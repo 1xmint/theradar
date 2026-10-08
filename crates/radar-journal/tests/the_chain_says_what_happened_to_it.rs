@@ -47,6 +47,49 @@ fn journal_of(dir: &std::path::Path, n: u64) -> std::path::PathBuf {
 }
 
 #[test]
+fn normalized_settlement_facts_can_name_an_event_and_remain_in_its_hash() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("settlement.jsonl");
+    let mut journal = Journal::open(&path).expect("open");
+    let facts = radar_journal::SettlementRecord {
+        signed_transaction: "signed".into(),
+        review: serde_json::json!({"network_fee_lamports":"5000"}),
+    };
+    journal
+        .record(
+            Stage::InputFetched,
+            Outcome::Uncertain,
+            1_000,
+            Correlation {
+                settlement: Some(facts.clone()),
+                ..Correlation::default()
+            },
+            None,
+            Vec::new(),
+            None,
+            None,
+        )
+        .expect("named facts");
+    assert_eq!(
+        journal.events().expect("events")[0].correlation.settlement,
+        Some(facts)
+    );
+    assert_eq!(
+        journal.verify().expect("verify"),
+        Verified::Intact { events: 1 }
+    );
+    let text = std::fs::read_to_string(&path).expect("history");
+    std::fs::write(&path, text.replace("5000", "6000")).expect("alter recorded facts");
+    assert!(matches!(
+        Journal::open(&path)
+            .expect("open")
+            .verify()
+            .expect("verify"),
+        Verified::Broken { .. }
+    ));
+}
+
+#[test]
 fn an_empty_journal_and_a_torn_one_are_not_the_same_answer() {
     let dir = tempfile::tempdir().expect("tempdir");
 

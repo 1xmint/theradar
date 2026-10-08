@@ -1566,3 +1566,48 @@ No Cargo/rustc/radar/issuer/signer process remains. Target measured 33.1 GiB,
 with 114.7 GiB free. Previously rejected ignored-output cleanup was not retried.
 This follow-up changes documentation only; its CI may be pending while the
 source above is fully verified.
+
+### Durable normalized settlement facts and activation path (2026-10-08)
+
+The owner asked how much remains until autonomous activation. Four gates remain;
+this is an integration estimate, not a percentage or launch date. Foundation
+components exist, but no production executor broadcasts and the issuer still
+uses protected operator-provisioned snapshots. Several substantial integrations
+remain, rather than a final UI switch.
+
+| Activation gate | Current foundation | Still required |
+| --- | --- | --- |
+| Durable settlement and economic accounting | Exact signed binding, finalized review, terminal measured native spend | Retain normalized facts; reconcile USD exposure/loss and prevent stale accounting from authorizing another operation |
+| Independent live risk inputs | Wallet, transaction, mint/curve/fee and combined read commands | Build protected live snapshots with conservative prices, current valued inventory, full costs and searched sellable capacity |
+| Autonomous execution loop | ChatGPT link, inert proposals, risk kernel, isolated issuer and Privy signer | Connect checked signing, durable broadcast ownership, uncertain-result recovery, settlement, exits and scheduling |
+| Activation and live validation | Private wallet UI and draft limits | Activate owner limits, provision isolated keys, verify Privy policy/delegation, confirm funding, deploy and validate a tightly bounded live trade |
+
+This increment's actual caller is the explicit operator issuer recording mode.
+It runs the existing review, retains only normalized facts and the signed
+artifact in the journal, and leaves the claim SubmissionUnknown. It does not
+close a trade, update USD loss, refresh a live snapshot or enable delegation.
+
+- [x] Optional SettlementRecord correlation preserves existing absent-field
+  event hashes. Records and getters retain facts across replay and terminal moves.
+- [x] Record only for an unknown operation bound to its recorded signed artifact.
+  Append before memory/output; identical repeats are idempotent and conflicts
+  refuse. Proposal/replay reject wrongly staged or changed facts/operation data.
+- [x] Actual --record-settlement shares signature/message/finality review, reads
+  once and persists normalized output only. Preserve minimum slot/read window.
+  Claims remain outstanding and further issuance remains blocked.
+- [x] Five new regressions raise the floor to 2083. Existing actual-process
+  checks cover invalid signatures for both modes. New cases cover durable facts,
+  write failure, replay, binding/stage/conflict refusal, sole correlation hashes,
+  actual recording/idempotence and rejection of unreviewed input-body persistence.
+- [x] Reapplying memory-before-append, conflicting replay acceptance and copying
+  unreviewed input response fields each fails its regression; restore source.
+- [x] All 181 scoped journal/signer tests and 33 conformance checks pass;
+  scoped Rust 1.99 Clippy and format pass. Read the complete staged diff.
+- [ ] Await full source CI including all four mutation shards and record the
+  verified handback.
+
+Next: economic reconciliation of retained evidence and a durable accounting
+watermark before another issuance. Unknown USD value/PnL remains unknown. No
+live chain/provider call, real signature/key/credential/delegation change, trade,
+VPS health read or Serve deployment is performed here. Current funding and live
+Privy setup are unverified; site settings remain drafts in the current code path.

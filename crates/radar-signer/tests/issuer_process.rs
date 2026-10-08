@@ -24,17 +24,22 @@ fn settlement_review_reverifies_the_protected_artifact_signature() {
     drop(log);
     let path = fixture.dir.path().join("evidence.json");
     write(&path, &json!({}));
-    let result = fixture
-        .command()
-        .args(["--review-settlement", id.as_str()])
-        .arg(&path)
-        .output()
-        .expect("review");
-    assert!(!result.status.success());
-    assert_eq!(result.stdout, Vec::<u8>::new());
-    assert!(
-        String::from_utf8_lossy(&result.stderr).contains("wallet signature verification failed")
-    );
+    let saved = std::fs::read(&history).expect("history bytes");
+    for mode in ["--review-settlement", "--record-settlement"] {
+        let result = fixture
+            .command()
+            .args([mode, id.as_str()])
+            .arg(&path)
+            .output()
+            .expect("review");
+        assert!(!result.status.success());
+        assert_eq!(result.stdout, Vec::<u8>::new());
+        assert!(
+            String::from_utf8_lossy(&result.stderr)
+                .contains("wallet signature verification failed")
+        );
+        assert_eq!(std::fs::read(&history).expect("history bytes"), saved);
+    }
     assert_eq!(
         radar_journal::OperationLog::open(&history)
             .expect("history")
@@ -44,8 +49,7 @@ fn settlement_review_reverifies_the_protected_artifact_signature() {
     );
 }
 
-#[test]
-fn settlement_review_binds_exact_evidence_and_keeps_the_journal_outstanding() {
+fn finalized_fixture() -> (Fixture, Vec<u8>, radar_journal::OperationId, Value) {
     use ed25519_dalek::Signer as _;
     let key = ed25519_dalek::SigningKey::from_bytes(&[0x42; 32]);
     let (fixture, mut signed) = fixture_for_wallet(&key);
@@ -60,14 +64,22 @@ fn settlement_review_binds_exact_evidence_and_keeps_the_journal_outstanding() {
     log.record_signed(&id, radar_types::b64::encode(&signed), unix_now())
         .expect("fixture signed binding");
     drop(log);
-    let saved = std::fs::read(&history).expect("history bytes");
-    let path = fixture.dir.path().join("settlement.json");
     let evidence = json!({"version":1,"authority":"read_only","commitment":"finalized","wallet":fixture.config["wallet"],
         "transaction_base64":radar_types::b64::encode(&signed),"signature":radar_types::Signature::new(signature).to_string(),
         "signature_verified_locally":false,"operation_reconciled":false,"usd_value":null,"realised_pnl":null,
         "outcome":"failed","slot":"1001","minimum_slot":"1000","read_started_at_unix_secs":unix_now(),"read_completed_at_unix_secs":unix_now(),
         "account_keys":[fixture.config["wallet"],address(0x22),address(0x11)],"pre_balances_lamports":["300000000","0","0"],
-        "post_balances_lamports":["299995000","0","0"],"network_fee_lamports":"5000","pre_token_balances":[],"post_token_balances":[]});
+        "post_balances_lamports":["299995000","0","0"],"network_fee_lamports":"5000","pre_token_balances":[],"post_token_balances":[],
+        "provider_response":"UNREVIEWED_RESPONSE_MUST_NOT_PERSIST"});
+    (fixture, signed, id, evidence)
+}
+
+#[test]
+fn settlement_review_binds_exact_evidence_and_keeps_the_journal_outstanding() {
+    let (fixture, signed, id, evidence) = finalized_fixture();
+    let history = fixture.dir.path().join("operations.jsonl");
+    let path = fixture.dir.path().join("settlement.json");
+    let saved = std::fs::read(&history).expect("history bytes");
     write(&path, &evidence);
     let result = fixture
         .command()
@@ -122,7 +134,8 @@ fn settlement_review_binds_exact_evidence_and_keeps_the_journal_outstanding() {
             unix_now(),
             radar_journal::Correlation {
                 execution: Some(radar_journal::ExecutionBinding {
-                    wallet: radar_types::Address::new(key.verifying_key().to_bytes()),
+                    wallet: serde_json::from_value(fixture.config["wallet"].clone())
+                        .expect("wallet"),
                     transaction: radar_types::b64::encode(&signed),
                     signed_transaction: None,
                 }),
@@ -139,6 +152,81 @@ fn settlement_review_binds_exact_evidence_and_keeps_the_journal_outstanding() {
         .expect("unknown refusal");
     assert!(!result.status.success());
     assert_eq!(result.stdout, Vec::<u8>::new());
+}
+
+#[test]
+fn finalized_record_persists_only_normalized_facts_and_keeps_issuance_blocked() {
+    let (fixture, signed, id, evidence) = finalized_fixture();
+    let history = fixture.dir.path().join("operations.jsonl");
+    let path = fixture.dir.path().join("settlement.json");
+    let mut saved = std::fs::read(&history).expect("history bytes");
+    write(&path, &evidence);
+    for iteration in 0..2 {
+        let result = fixture
+            .command()
+            .args(["--record-settlement", id.as_str()])
+            .arg(&path)
+            .output()
+            .expect("record");
+        assert!(
+            result.status.success(),
+            "{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+        let result: Value = serde_json::from_slice(&result.stdout).expect("result");
+        assert_eq!(result["settlement_evidence_recorded"], true);
+        assert_eq!(result["reconciled"], false);
+        assert_eq!(result["reservation_released"], false);
+        let history_bytes = std::fs::read(&history).expect("history");
+        if iteration == 0 {
+            assert_ne!(history_bytes, saved);
+            let log = radar_journal::OperationLog::open(&history).expect("replay");
+            let retained = log.settlement(&id).expect("retained evidence");
+            assert_eq!(
+                retained.signed_transaction,
+                radar_types::b64::encode(&signed)
+            );
+            assert_eq!(retained.review["network_fee_lamports"], "5000");
+            assert_eq!(retained.review["signature_verified_locally"], true);
+            assert_eq!(retained.review["minimum_slot"], "1000");
+            assert_eq!(
+                retained.review["read_started_at_unix_secs"],
+                evidence["read_started_at_unix_secs"]
+            );
+            assert_eq!(log.outstanding().count(), 1);
+            assert!(
+                !String::from_utf8_lossy(&history_bytes)
+                    .contains("UNREVIEWED_RESPONSE_MUST_NOT_PERSIST")
+            );
+            saved = history_bytes;
+        } else {
+            assert_eq!(history_bytes, saved);
+        }
+    }
+    let mut issuer = fixture.start();
+    assert_eq!(
+        issuer.ask(&fixture.candidate)["reason"],
+        "outstanding operation requires reconciliation"
+    );
+    drop(issuer);
+    for (field, bad) in [
+        ("transaction_base64", json!("different")),
+        ("read_completed_at_unix_secs", json!(unix_now() + 600)),
+        ("slot", json!("1002")),
+    ] {
+        let mut value = evidence.clone();
+        value[field] = bad;
+        write(&path, &value);
+        let result = fixture
+            .command()
+            .args(["--record-settlement", id.as_str()])
+            .arg(&path)
+            .output()
+            .expect("refused review");
+        assert!(!result.status.success());
+        assert_eq!(result.stdout, Vec::<u8>::new());
+        assert_eq!(std::fs::read(&history).expect("unchanged"), saved);
+    }
 }
 
 #[test]

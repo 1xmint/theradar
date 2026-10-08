@@ -507,6 +507,240 @@ fn the_operation_lines_are_a_chain_like_every_other_line() {
 }
 
 #[test]
+fn finalized_facts_survive_restart_and_terminal_completion_without_releasing_early() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = somewhere(&dir);
+    let mut portfolio = account();
+    let mut log = OperationLog::open(&path).expect("open");
+    let id = log
+        .propose(
+            intent(),
+            1_000,
+            Correlation {
+                execution: Some(radar_journal::ExecutionBinding {
+                    wallet: WALLET,
+                    transaction: "approved".into(),
+                    signed_transaction: None,
+                }),
+                ..about()
+            },
+        )
+        .expect("propose");
+    log.reserve(&id, &mut portfolio, 1_001).expect("reserve");
+    log.submit(&id, 1_002, |_| Ok::<(), ()>(()))
+        .expect("record")
+        .expect("effect");
+    log.record_signed(&id, "signed".into(), 1_003)
+        .expect("signed");
+    let evidence = radar_journal::SettlementRecord {
+        signed_transaction: "signed".into(),
+        review: serde_json::json!({"network_fee_lamports":"5000"}),
+    };
+    let before = portfolio.clone();
+    let history = std::fs::read(&path).expect("history");
+    let moved = dir.path().join("moved");
+    std::fs::rename(&path, &moved).expect("move history");
+    std::fs::create_dir(&path).expect("obstruct write");
+    assert!(log.record_settlement(&id, evidence.clone(), 1_004).is_err());
+    assert_eq!(log.settlement(&id), None);
+    assert_eq!(portfolio, before);
+    std::fs::remove_dir(&path).expect("remove empty obstruction");
+    std::fs::rename(&moved, &path).expect("restore history");
+    assert_eq!(std::fs::read(&path).expect("history"), history);
+    assert_eq!(
+        log.record_settlement(&id, evidence.clone(), 1_004)
+            .expect("record"),
+        Applied::Advanced
+    );
+    assert_eq!(log.settlement(&id), Some(&evidence));
+    assert_eq!(portfolio, before);
+    assert_eq!(log.outstanding().count(), 1);
+    let recorded = std::fs::read(&path).expect("history");
+    assert_eq!(
+        log.record_settlement(&id, evidence.clone(), 1_005)
+            .expect("repeat"),
+        Applied::AlreadySeen
+    );
+    assert_eq!(std::fs::read(&path).expect("history"), recorded);
+    let mut changed = evidence.clone();
+    changed.review["network_fee_lamports"] = serde_json::json!("6000");
+    assert!(matches!(
+        log.record_settlement(&id, changed, 1_005),
+        Err(OperationError::SettlementBinding)
+    ));
+    assert_eq!(std::fs::read(&path).expect("history"), recorded);
+    drop(log);
+    let mut log = OperationLog::open(&path).expect("replay");
+    assert_eq!(log.settlement(&id), Some(&evidence));
+    let mut fresh = account();
+    log.rehold(&mut fresh).expect("rehold");
+    assert_eq!(free(&fresh), HELD - CLAIM);
+    log.reconcile(
+        &id,
+        Settlement::Completed(TokenQuantity::lamports(5_000)),
+        &mut fresh,
+        1_006,
+    )
+    .expect("generic caller established completion");
+    assert!(matches!(
+        log.record_settlement(&id, evidence.clone(), 1_007),
+        Err(OperationError::SettlementBinding)
+    ));
+    drop(log);
+    let log = OperationLog::open(&path).expect("terminal replay");
+    assert_eq!(log.settlement(&id), Some(&evidence));
+    assert_eq!(log.outstanding().count(), 0);
+}
+
+#[test]
+fn finalized_record_requires_an_unknown_operation_with_the_recorded_signed_artifact() {
+    for change in 0..4 {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = somewhere(&dir);
+        let mut portfolio = account();
+        let mut log = OperationLog::open(&path).expect("open");
+        let id = log
+            .propose(
+                intent(),
+                1_000,
+                if change == 0 {
+                    about()
+                } else {
+                    Correlation {
+                        execution: Some(radar_journal::ExecutionBinding {
+                            wallet: WALLET,
+                            transaction: "approved".into(),
+                            signed_transaction: None,
+                        }),
+                        ..about()
+                    }
+                },
+            )
+            .expect("propose");
+        log.reserve(&id, &mut portfolio, 1_001).expect("reserve");
+        log.submit(&id, 1_002, |_| Ok::<(), ()>(()))
+            .expect("record")
+            .expect("effect");
+        if change >= 2 {
+            log.record_signed(&id, "signed".into(), 1_003)
+                .expect("signed");
+        }
+        if change == 3 {
+            log.reconcile(
+                &id,
+                Settlement::Completed(TokenQuantity::lamports(5_000)),
+                &mut portfolio,
+                1_004,
+            )
+            .expect("complete");
+        }
+        let evidence = radar_journal::SettlementRecord {
+            signed_transaction: if change == 2 { "different" } else { "signed" }.into(),
+            review: serde_json::json!({}),
+        };
+        let history = std::fs::read(&path).expect("history");
+        let before = portfolio.clone();
+        assert!(matches!(
+            log.record_settlement(&id, evidence.clone(), 1_005),
+            Err(OperationError::SettlementBinding)
+        ));
+        assert_eq!(std::fs::read(&path).expect("history"), history);
+        assert_eq!(portfolio, before);
+        assert_eq!(log.settlement(&id), None);
+        assert!(matches!(
+            log.propose(
+                intent(),
+                1_006,
+                Correlation {
+                    settlement: Some(evidence),
+                    ..about()
+                }
+            ),
+            Err(OperationError::SettlementBinding)
+        ));
+        assert_eq!(std::fs::read(&path).expect("history"), history);
+    }
+}
+
+#[test]
+fn replay_refuses_unbound_changed_or_misstaged_finalized_facts() {
+    for change in 0..7 {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = somewhere(&dir);
+        let mut portfolio = account();
+        let mut log = OperationLog::open(&path).expect("open");
+        let id = log
+            .propose(
+                intent(),
+                1_000,
+                Correlation {
+                    execution: Some(radar_journal::ExecutionBinding {
+                        wallet: WALLET,
+                        transaction: "approved".into(),
+                        signed_transaction: None,
+                    }),
+                    ..about()
+                },
+            )
+            .expect("propose");
+        log.reserve(&id, &mut portfolio, 1_001).expect("reserve");
+        log.submit(&id, 1_002, |_| Ok::<(), ()>(()))
+            .expect("record")
+            .expect("effect");
+        if change != 4 {
+            log.record_signed(&id, "signed".into(), 1_003)
+                .expect("signed");
+        }
+        if change == 6 {
+            log.reconcile(
+                &id,
+                Settlement::Completed(TokenQuantity::lamports(5_000)),
+                &mut portfolio,
+                1_004,
+            )
+            .expect("terminal operation");
+        }
+        let mut evidence = radar_journal::SettlementRecord {
+            signed_transaction: "signed".into(),
+            review: serde_json::json!({"network_fee_lamports":"5000"}),
+        };
+        if change == 3 {
+            log.record_settlement(&id, evidence.clone(), 1_004)
+                .expect("first");
+            evidence.review = serde_json::json!({"network_fee_lamports":"6000"});
+        }
+        let mut entry = *log.entry(&id).expect("entry");
+        match change {
+            0 => evidence.signed_transaction = "different".into(),
+            1 => entry.state = OperationState::Reserved,
+            2 => entry.reserved = Some(TokenQuantity::lamports(CLAIM + 1)),
+            5 => entry.state = OperationState::Proposed,
+            _ => {}
+        }
+        drop(log);
+        radar_journal::Journal::open(&path)
+            .expect("journal")
+            .record_operation(
+                radar_journal::Outcome::Uncertain,
+                1_005,
+                Correlation {
+                    operation: Some(id.as_str().into()),
+                    settlement: Some(evidence),
+                    ..Correlation::default()
+                },
+                entry,
+                None,
+                None,
+            )
+            .expect("hashed but invalid record");
+        assert!(matches!(
+            OperationLog::open(&path),
+            Err(OperationError::SettlementBinding)
+        ));
+    }
+}
+
+#[test]
 fn completed_spends_close_durably_once_without_redebiting_fresh_balances() {
     for spent in [0, 5_000, CLAIM] {
         for confirmed in [true, false] {

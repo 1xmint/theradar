@@ -514,6 +514,34 @@ impl Issuer {
         review["operation"] = serde_json::json!(operation);
         Ok(review)
     }
+
+    fn record_settlement(&mut self, operation: &str, path: &Path) -> Result<(), String> {
+        // Review exactly one read of the protected input before retaining only
+        // its normalized facts. No reread can substitute an unchecked packet.
+        let review = self.review_settlement(operation, path)?;
+        let id = self
+            .operations
+            .outstanding()
+            .find(|(id, _)| id.as_str() == operation)
+            .map(|(id, _)| id.clone())
+            .ok_or("unknown outstanding operation")?;
+        let signed_transaction = self
+            .operations
+            .execution(&id)
+            .and_then(|binding| binding.signed_transaction.clone())
+            .ok_or("operation has no signed transaction")?;
+        self.operations
+            .record_settlement(
+                &id,
+                radar_journal::SettlementRecord {
+                    signed_transaction,
+                    review,
+                },
+                unix_now()?,
+            )
+            .map_err(|_| "settlement evidence could not be persisted")?;
+        Ok(())
+    }
 }
 
 fn run() -> Result<(), String> {
@@ -534,8 +562,17 @@ fn run() -> Result<(), String> {
             );
             return Ok(());
         }
+        if args[0] == "--record-settlement" {
+            issuer.record_settlement(&args[1], Path::new(&args[2]))?;
+            println!(
+                "{}",
+                serde_json::json!({"outcome":"recorded","operation":args[1],
+                "settlement_evidence_recorded":true,"reconciled":false,"reservation_released":false})
+            );
+            return Ok(());
+        }
         if args[0] != "--bind-signed" {
-            return Err("usage: radar-issuer --bind-signed or --review-settlement <operation-id> <private-file>".into());
+            return Err("usage: radar-issuer --bind-signed, --review-settlement or --record-settlement <operation-id> <private-file>".into());
         }
         issuer.bind_signed(&args[1], Path::new(&args[2]))?;
         println!(

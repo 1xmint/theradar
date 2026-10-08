@@ -92,6 +92,9 @@ pub enum Outcome {
 /// find that run from a mint, a week, or a transaction they are holding.
 #[derive(Clone, Default, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub struct Correlation {
+    /// Protected caller's normalized finalized facts. Never a provider body.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub settlement: Option<SettlementRecord>,
     /// Protected caller's exact transaction binding. Not signing authority.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub execution: Option<ExecutionBinding>,
@@ -134,7 +137,8 @@ impl Correlation {
     /// [`Journal::record`](crate::Journal::record) can say so.
     #[must_use]
     pub const fn is_empty(&self) -> bool {
-        self.execution.is_none()
+        self.settlement.is_none()
+            && self.execution.is_none()
             && self.mention.is_none()
             && self.receipt.is_none()
             && self.nomination.is_none()
@@ -155,6 +159,17 @@ pub struct ExecutionBinding {
     pub transaction: String,
     /// Canonical signed bytes, recorded after caller verification and before broadcast.
     pub signed_transaction: Option<String>,
+}
+
+/// Caller-verified normalized review, durably tied to the recorded artifact.
+/// Generic journal callers establish correctness; this is not authority to
+/// release capital or a claim that the journal authenticates chain evidence.
+#[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
+pub struct SettlementRecord {
+    /// Exact canonical signed bytes the protected caller reverified.
+    pub signed_transaction: String,
+    /// Normalized facts only: never credentials, provider bodies or model reasoning.
+    pub review: serde_json::Value,
 }
 
 /// One line of the journal.

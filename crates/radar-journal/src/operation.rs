@@ -244,6 +244,9 @@ pub struct OperationEntry {
 /// What stopped an operation.
 #[derive(Debug, thiserror::Error)]
 pub enum OperationError {
+    /// Missing, changed or wrongly staged finalized evidence.
+    #[error("settlement record is unbound, conflicting or not awaiting reconciliation")]
+    SettlementBinding,
     /// A reserved operation must reclaim its portfolio reservation after replay.
     #[error("the operation's reservation must be reheld before settlement")]
     ClaimNotReheld,
@@ -356,6 +359,7 @@ impl Released {
 struct Live {
     entry: OperationEntry,
     execution: Option<crate::ExecutionBinding>,
+    settlement: Option<crate::SettlementRecord>,
     /// The portfolio handle for its claim, when this process is holding one.
     ///
     /// `None` after a replay and before [`OperationLog::rehold`]: a
@@ -476,6 +480,60 @@ impl OperationLog {
         self.operations.get(id)?.execution.as_ref()
     }
 
+    /// Retained normalized finalized facts, including after terminal replay.
+    #[must_use]
+    pub fn settlement(&self, id: &OperationId) -> Option<&crate::SettlementRecord> {
+        self.operations.get(id)?.settlement.as_ref()
+    }
+
+    /// Persists caller-verified normalized facts without closing the claim.
+    /// The protected caller verifies signature, exact message, finality and
+    /// effects. The journal only checks artifact binding/stage/immutability.
+    ///
+    /// # Errors
+    /// Missing or conflicting binding, non-unknown state or persistence failure.
+    pub fn record_settlement(
+        &mut self,
+        id: &OperationId,
+        settlement: crate::SettlementRecord,
+        at: u64,
+    ) -> Result<Applied, OperationError> {
+        let live = self
+            .operations
+            .get_mut(id)
+            .ok_or_else(|| OperationError::NoSuchOperation(id.clone()))?;
+        if live.entry.state != OperationState::SubmissionUnknown
+            || live
+                .execution
+                .as_ref()
+                .and_then(|e| e.signed_transaction.as_ref())
+                != Some(&settlement.signed_transaction)
+        {
+            return Err(OperationError::SettlementBinding);
+        }
+        if let Some(previous) = &live.settlement {
+            return if previous == &settlement {
+                Ok(Applied::AlreadySeen)
+            } else {
+                Err(OperationError::SettlementBinding)
+            };
+        }
+        self.journal.record_operation(
+            Outcome::Uncertain,
+            at,
+            Correlation {
+                operation: Some(id.0.clone()),
+                settlement: Some(settlement.clone()),
+                ..Correlation::default()
+            },
+            live.entry,
+            self.build.clone(),
+            None,
+        )?;
+        live.settlement = Some(settlement);
+        Ok(Applied::Advanced)
+    }
+
     /// Records caller-verified signed bytes without releasing the capital claim.
     /// The caller must check the wallet signature and authorized message first.
     ///
@@ -574,6 +632,9 @@ impl OperationLog {
             reserved: None,
             state: OperationState::Proposed,
         };
+        if correlation.settlement.is_some() {
+            return Err(OperationError::SettlementBinding);
+        }
         let execution = correlation.execution.clone();
         let recorded = self.journal.record_operation(
             Outcome::Ok,
@@ -590,6 +651,7 @@ impl OperationLog {
                 entry,
                 claim: None,
                 execution,
+                settlement: None,
             },
         );
         Ok(id)
@@ -874,6 +936,9 @@ fn replay(events: &[Event]) -> Result<BTreeMap<OperationId, Live>, OperationErro
             continue;
         };
         if entry.state == OperationState::Proposed {
+            if event.correlation.settlement.is_some() {
+                return Err(OperationError::SettlementBinding);
+            }
             // The proposal *is* the identity, so it needs no correlation to
             // find itself by.
             let id = OperationId(event.id.clone());
@@ -881,6 +946,7 @@ fn replay(events: &[Event]) -> Result<BTreeMap<OperationId, Live>, OperationErro
                 entry,
                 claim: None,
                 execution: event.correlation.execution.clone(),
+                settlement: None,
             });
             continue;
         }
@@ -896,6 +962,23 @@ fn replay(events: &[Event]) -> Result<BTreeMap<OperationId, Live>, OperationErro
                 event: event.id.clone(),
                 operation: id.0.clone(),
             })?;
+        if let Some(settlement) = &event.correlation.settlement {
+            if live.entry.state != OperationState::SubmissionUnknown
+                || entry != live.entry
+                || live
+                    .execution
+                    .as_ref()
+                    .and_then(|e| e.signed_transaction.as_ref())
+                    != Some(&settlement.signed_transaction)
+                || live
+                    .settlement
+                    .as_ref()
+                    .is_some_and(|previous| previous != settlement)
+            {
+                return Err(OperationError::SettlementBinding);
+            }
+            live.settlement = Some(settlement.clone());
+        }
         if let OperationState::Confirmed(Settlement::Completed(spent))
         | OperationState::Reconciled(Settlement::Completed(spent)) = entry.state
             && (entry.intent != live.entry.intent
