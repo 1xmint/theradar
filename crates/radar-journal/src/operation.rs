@@ -244,6 +244,12 @@ pub struct OperationEntry {
 /// What stopped an operation.
 #[derive(Debug, thiserror::Error)]
 pub enum OperationError {
+    /// A reserved operation must reclaim its portfolio reservation after replay.
+    #[error("the operation's reservation must be reheld before settlement")]
+    ClaimNotReheld,
+    /// A completed spend in replay must fit the unchanged recorded reservation.
+    #[error("completed spend does not match the recorded operation and reservation")]
+    InvalidCompletedSettlement,
     /// Missing, conflicting or wrongly staged protected execution metadata.
     #[error("execution binding is missing, conflicting or not awaiting settlement")]
     ExecutionBinding,
@@ -690,13 +696,15 @@ impl OperationLog {
     }
 
     /// Records the answer that came back, and settles the claim against it.
+    /// Checks the debit before writing completion; persistence failure changes
+    /// neither the operation nor the portfolio. Replayed claims must be reheld.
     ///
     /// # Errors
     ///
     /// [`OperationError::NoSuchOperation`],
     /// [`OperationError::IllegalTransition`] for an operation nothing was
     /// submitted for, whatever the account refuses the settlement with, and
-    /// [`OperationError::Journal`].
+    /// [`OperationError::Journal`] or [`OperationError::ClaimNotReheld`].
     pub fn confirm(
         &mut self,
         id: &OperationId,
@@ -805,14 +813,23 @@ impl OperationLog {
             }
         }
 
+        // Validate on a copy before the durable terminal record. A rejected
+        // debit must not leave history saying the claim was closed. Apply the
+        // copy only after the write succeeds, so an I/O failure changes neither.
+        if claim.is_none() && entry.reserved.is_some() {
+            return Err(OperationError::ClaimNotReheld);
+        }
+        let mut settled = portfolio.clone();
+        if let Some(claim) = claim {
+            settled.settle(claim, settlement)?;
+        }
+
         let outcome = match next {
             OperationState::Failed => Outcome::Failed,
             _ => Outcome::Ok,
         };
         self.write(id, entry, outcome, at)?;
-        if let Some(claim) = claim {
-            portfolio.settle(claim, settlement)?;
-        }
+        *portfolio = settled;
         self.set(id, entry, None);
         Ok(Applied::Advanced)
     }
@@ -879,6 +896,14 @@ fn replay(events: &[Event]) -> Result<BTreeMap<OperationId, Live>, OperationErro
                 event: event.id.clone(),
                 operation: id.0.clone(),
             })?;
+        if let OperationState::Confirmed(Settlement::Completed(spent))
+        | OperationState::Reconciled(Settlement::Completed(spent)) = entry.state
+            && (entry.intent != live.entry.intent
+                || entry.reserved != live.entry.reserved
+                || entry.reserved.and_then(|q| q.checked_sub(spent)).is_none())
+        {
+            return Err(OperationError::InvalidCompletedSettlement);
+        }
         if let Some(binding) = &event.correlation.execution {
             let previous = live
                 .execution

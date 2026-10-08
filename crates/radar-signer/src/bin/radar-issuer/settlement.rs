@@ -132,12 +132,22 @@ pub(super) fn review(
     let effects: Vec<_> = accounts.iter().zip(pre.iter().zip(&post)).map(|(account, (pre, post))|
         json!({"account":account.to_string(),"pre_lamports":pre.to_string(),"post_lamports":post.to_string(),
             "net_change_lamports":(i128::from(*post)-i128::from(*pre)).to_string()})).collect();
+    // A net credit does not measure gross spending. A debit smaller than the
+    // known fee also cannot describe a completed native spend on its own.
+    // This is a candidate only; USD/exposure/loss reconciliation is still absent.
+    let native_settlement = u64::try_from(-delta)
+        .ok()
+        .filter(|spent| *spent >= fee)
+        .map(|spent| {
+            radar_types::Settlement::Completed(radar_types::TokenQuantity::lamports(spent))
+        });
     Ok(
         json!({"version":1,"authority":"protected_file_review","outcome":outcome,
         "wallet":binding.wallet.to_string(),"signature":Signature::new(signature).to_string(),
         "slot":slot.to_string(),"native_account_effects":effects,"wallet_net_change_lamports":delta.to_string(),
         "network_fee_lamports":fee.to_string(),"reserved_lamports":reserved.raw().to_string(),
         "pre_token_balances":before,"post_token_balances":after,"usd_value":null,"realised_pnl":null,
+        "native_settlement_candidate":native_settlement,
         "signature_verified_locally":true,"operation_reconciled":false,"reservation_released":false}),
     )
 }
@@ -177,6 +187,30 @@ mod tests {
             "account_keys":[wallet.to_string()],"pre_balances_lamports":[u64::MAX.to_string()],"post_balances_lamports":["0"],
             "network_fee_lamports":"5000","pre_token_balances":[],"post_token_balances":[]});
         (binding, entry, value)
+    }
+
+    #[test]
+    fn completed_native_candidates_require_a_measured_debit_covering_the_known_fee() {
+        let (binding, entry, mut value) = fixture();
+        for (pre, post, fee, candidate) in [
+            (5_000, 0, 5_000, Some(5_000)),
+            (5_001, 0, 5_000, Some(5_001)),
+            (4_999, 0, 5_000, None),
+            (0, 0, 0, Some(0)),
+            (0, 1, 0, None),
+        ] {
+            value["pre_balances_lamports"] = json!([pre.to_string()]);
+            value["post_balances_lamports"] = json!([post.to_string()]);
+            value["network_fee_lamports"] = json!(fee.to_string());
+            let report = review(&binding, &entry, &value, 100, 20).expect("review");
+            assert_eq!(
+                report["native_settlement_candidate"],
+                json!(candidate.map(|spent| radar_types::Settlement::Completed(
+                    radar_types::TokenQuantity::lamports(spent)
+                )))
+            );
+            assert_eq!(report["reservation_released"], false);
+        }
     }
 
     #[test]

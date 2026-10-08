@@ -486,9 +486,30 @@ boundary, not authenticated RPC or host provenance.
 Review leaves the journal and reservation unchanged, including across restart.
 This is an operator evidence check before reconciliation, not a reconciler that
 closes an operation. A completed transaction can spend less than its reservation;
-the existing PartiallyFilled settlement leaves the remainder open. Terminal
-measured-spend accounting and independent USD exposure/loss updates are still
-needed before safely enabling repeated issuance. Live delegation stays closed.
+the existing PartiallyFilled settlement leaves the remainder open.
+
+The report now includes a typed `native_settlement_candidate` only when the
+wallet has a measured nonnegative native debit covering the known network fee.
+It is `Settlement::Completed` with that debit in lamports; a native credit or a
+debit smaller than the fee leaves the candidate absent. Zero debit with a known
+zero fee is representable. This candidate neither mutates the journal nor
+establishes trade notional, gross spending, USD costs or realised loss.
+
+`Portfolio::settle` accepts Completed as a terminal measured spend within the
+outstanding claim's unit/ceiling. It debits only that spend, releases unused
+capital and preserves other claims. PartiallyFilled retains its existing
+meaning. The journal's confirm/reconcile callers preflight settlement on a
+portfolio copy before writing the terminal outcome, and apply that copy only
+after the write succeeds. A reserved operation must rehold its claim after
+replay before closing. Replay checks Completed against the unchanged recorded
+intent/reservation and does not debit balances read fresh after restart.
+
+Generic journal callers remain responsible for establishing the outcome; these
+methods do not consume or authenticate finalized chain evidence. The protected
+issuer still performs review only. Binding reconciliation evidence durably and
+independent USD exposure/loss updates are needed before safely enabling repeated
+issuance. Native debit alone cannot reset those limits. Live delegation stays
+closed.
 
 ## What would reverse this
 

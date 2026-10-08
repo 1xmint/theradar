@@ -84,6 +84,12 @@ fn settlement_review_binds_exact_evidence_and_keeps_the_journal_outstanding() {
     assert_eq!(report["operation"], id.as_str());
     assert_eq!(report["wallet_net_change_lamports"], "-5000");
     assert_eq!(report["network_fee_lamports"], "5000");
+    assert_eq!(
+        report["native_settlement_candidate"],
+        serde_json::json!(radar_types::Settlement::Completed(
+            radar_types::TokenQuantity::lamports(5_000)
+        ))
+    );
     assert_eq!(report["reservation_released"], false);
     assert_eq!(report["signature_verified_locally"], true);
     assert_eq!(std::fs::read(&history).expect("unchanged"), saved);

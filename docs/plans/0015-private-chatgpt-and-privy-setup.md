@@ -1493,3 +1493,34 @@ No Cargo/rustc/radar/issuer/signer process remains. Target measured 33.0 GiB,
 with 114.8 GiB free. Previously rejected ignored-output cleanup was not retried.
 This follow-up changes documentation only; its CI may be pending while the
 source above is fully verified.
+
+### Completed measured native spend (2026-10-08)
+
+Add terminal measured-spend vocabulary for the existing journal confirm/reconcile
+callers and expose a candidate in the protected issuer review. A partial fill
+still holds the remainder; completed spend debits only the measured amount and
+releases unused capital. Review itself remains read-only and USD accounting is
+not inferred from native balance changes.
+
+- [x] Add Settlement::Completed with matching units and spend at/below the claim.
+  Preserve other claims, partial-fill behavior, and known zero/exact ceilings.
+- [x] Preflight journal terminal settlement before writing, apply the validated
+  portfolio only after successful persistence, and refuse unreheld reservations.
+  Replay checks completed spend against unchanged intent/reservation/units.
+- [x] Review reports a typed native settlement candidate only for a measured
+  debit covering known fees. Credits and debits below the fee remain absent;
+  journal bytes and claims remain unchanged, with USD/PnL still unknown.
+- [x] All 262 scoped types/journal/signer tests and 33 conformance checks pass.
+  Scoped Rust 1.99 Clippy passes. Six new regressions raise the floor to 2078.
+  Removing completed remainder release, moving journal writes before preflight,
+  rejecting exact fee equality and bypassing replay checks each fail the
+  corresponding regression. Restore source after every manual demonstration.
+- [ ] Finish format/staged review and full source CI including every mutation
+  shard; record the verified handback.
+
+No protected reconcile command is enabled by this increment. Generic journal
+callers establish completion; they do not authenticate chain evidence. Next:
+retain finalized reconciliation evidence durably and account for exposure/loss
+before another issuance. Full protected snapshot construction, live valuation,
+cost/searched exit evidence, activated limits and verified Privy policy/delegation
+remain necessary. Autonomous execution is off and site settings remain drafts.

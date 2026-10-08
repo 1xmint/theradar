@@ -507,6 +507,185 @@ fn the_operation_lines_are_a_chain_like_every_other_line() {
 }
 
 #[test]
+fn completed_spends_close_durably_once_without_redebiting_fresh_balances() {
+    for spent in [0, 5_000, CLAIM] {
+        for confirmed in [true, false] {
+            let dir = tempfile::tempdir().expect("tempdir");
+            let path = somewhere(&dir);
+            let mut portfolio = account();
+            let (mut log, id) = reserved(&path, &mut portfolio);
+            log.submit(&id, 1_002, |_| Ok::<(), ()>(()))
+                .expect("record")
+                .expect("effect");
+            let settlement = Settlement::Completed(TokenQuantity::lamports(spent));
+            let apply = |log: &mut OperationLog, portfolio: &mut Portfolio| {
+                if confirmed {
+                    log.confirm(&id, settlement, portfolio, 1_003)
+                } else {
+                    log.reconcile(&id, settlement, portfolio, 1_003)
+                }
+            };
+            assert_eq!(
+                apply(&mut log, &mut portfolio).expect("complete"),
+                Applied::Advanced
+            );
+            assert_eq!(free(&portfolio), HELD - spent);
+            assert_eq!(portfolio.reservations().count(), 0);
+            assert_eq!(log.outstanding().count(), 0);
+            let history = std::fs::read(&path).expect("history");
+            assert_eq!(
+                apply(&mut log, &mut portfolio).expect("repeat"),
+                Applied::AlreadySeen
+            );
+            assert_eq!(std::fs::read(&path).expect("history"), history);
+            assert_eq!(free(&portfolio), HELD - spent);
+            drop(log);
+            let mut log = OperationLog::open(&path).expect("replay");
+            let mut fresh = account();
+            fresh
+                .hold(
+                    Asset::Sol,
+                    Holding::new(
+                        AssetRole::Cash,
+                        Balance::Counted(TokenQuantity::lamports(HELD - spent)),
+                        Valuation::Unknown(Unvaluable::NoPrice),
+                        Valuation::Unknown(Unvaluable::NoPrice),
+                    ),
+                )
+                .expect("fresh balance");
+            log.rehold(&mut fresh).expect("rehold");
+            assert_eq!(fresh.reservations().count(), 0);
+            assert_eq!(
+                apply(&mut log, &mut fresh).expect("replayed repeat"),
+                Applied::AlreadySeen
+            );
+            assert_eq!(free(&fresh), HELD - spent);
+            assert_eq!(
+                log.entry(&id).expect("entry").state,
+                if confirmed {
+                    OperationState::Confirmed(settlement)
+                } else {
+                    OperationState::Reconciled(settlement)
+                }
+            );
+        }
+    }
+}
+
+#[test]
+fn rejected_or_unwritten_completion_changes_neither_history_nor_portfolio() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = somewhere(&dir);
+    let mut portfolio = account();
+    let (mut log, id) = reserved(&path, &mut portfolio);
+    log.submit(&id, 1_002, |_| Ok::<(), ()>(()))
+        .expect("record")
+        .expect("effect");
+    let history = std::fs::read(&path).expect("history");
+    let before = portfolio.clone();
+    for spent in [
+        TokenQuantity::lamports(CLAIM + 1),
+        TokenQuantity::new(
+            1,
+            radar_types::Decimals::from_mint_account(6).expect("fixture decimals"),
+        ),
+    ] {
+        assert!(
+            log.reconcile(&id, Settlement::Completed(spent), &mut portfolio, 1_003)
+                .is_err()
+        );
+        assert_eq!(portfolio, before);
+        assert_eq!(std::fs::read(&path).expect("history"), history);
+        assert_eq!(
+            log.entry(&id).expect("entry").state,
+            OperationState::SubmissionUnknown
+        );
+    }
+    let moved = dir.path().join("moved");
+    std::fs::rename(&path, &moved).expect("move journal");
+    std::fs::create_dir(&path).expect("obstruct journal");
+    let settlement = Settlement::Completed(TokenQuantity::lamports(5_000));
+    assert!(
+        log.reconcile(&id, settlement, &mut portfolio, 1_003)
+            .is_err()
+    );
+    assert_eq!(portfolio, before);
+    assert_eq!(
+        log.entry(&id).expect("entry").state,
+        OperationState::SubmissionUnknown
+    );
+    std::fs::remove_dir(&path).expect("remove empty obstruction");
+    std::fs::rename(&moved, &path).expect("restore journal");
+    assert_eq!(std::fs::read(&path).expect("history"), history);
+    drop(log);
+    let mut log = OperationLog::open(&path).expect("replay");
+    assert!(matches!(
+        log.reconcile(&id, settlement, &mut portfolio, 1_004),
+        Err(OperationError::ClaimNotReheld)
+    ));
+    assert_eq!(std::fs::read(&path).expect("history"), history);
+    assert_eq!(portfolio, before);
+    let mut fresh = account();
+    log.rehold(&mut fresh).expect("rehold");
+    log.reconcile(&id, settlement, &mut fresh, 1_005)
+        .expect("complete after rehold");
+    assert_eq!(free(&fresh), HELD - 5_000);
+}
+
+#[test]
+fn replay_refuses_completed_spends_that_change_or_exceed_the_recorded_reservation() {
+    for change in 0..6 {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = somewhere(&dir);
+        let mut portfolio = account();
+        let (mut log, id) = reserved(&path, &mut portfolio);
+        log.submit(&id, 1_002, |_| Ok::<(), ()>(()))
+            .expect("record")
+            .expect("effect");
+        let mut entry = *log.entry(&id).expect("entry");
+        entry.state =
+            OperationState::Reconciled(Settlement::Completed(TokenQuantity::lamports(5_000)));
+        match change {
+            0 => entry.intent.amount = TokenQuantity::lamports(CLAIM + 1),
+            1 => entry.reserved = Some(TokenQuantity::lamports(CLAIM + 1)),
+            2 => {
+                entry.state = OperationState::Confirmed(Settlement::Completed(
+                    TokenQuantity::lamports(CLAIM + 1),
+                ));
+            }
+            3 => {
+                entry.state =
+                    OperationState::Reconciled(Settlement::Completed(TokenQuantity::new(
+                        1,
+                        radar_types::Decimals::from_mint_account(6).expect("fixture decimals"),
+                    )));
+            }
+            4 => entry.reserved = None,
+            _ => entry.intent.asset = Asset::Usdc,
+        }
+        drop(log);
+        radar_journal::Journal::open(&path)
+            .expect("journal")
+            .record_operation(
+                radar_journal::Outcome::Ok,
+                1_003,
+                Correlation {
+                    operation: Some(id.as_str().into()),
+                    ..Correlation::default()
+                },
+                entry,
+                None,
+                None,
+            )
+            .expect("hashed but invalid completion");
+        assert!(matches!(
+            OperationLog::open(&path),
+            Err(OperationError::InvalidCompletedSettlement)
+        ));
+    }
+}
+
+#[test]
 fn a_settlement_that_would_strand_the_remainder_is_refused() {
     // A partial fill leaves the rest of the claim reserved. Closing the
     // operation on one puts it in a state `rehold` does not re-take, so the
