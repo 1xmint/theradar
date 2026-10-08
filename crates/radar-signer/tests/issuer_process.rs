@@ -334,6 +334,70 @@ fn finalized_fixture() -> (Fixture, Vec<u8>, radar_journal::OperationId, Value) 
 }
 
 #[test]
+fn recorded_token_acquisition_is_measured_or_unknown_and_keeps_claims_outstanding() {
+    for case in ["paired", "missing_pre", "failed"] {
+        let (fixture, _, id, mut evidence) = finalized_fixture();
+        evidence["outcome"] = json!(if case == "failed" {
+            "failed"
+        } else {
+            "succeeded"
+        });
+        let pre = json!({"account_index":1,"mint":fixture.snapshot["proposal"]["mint"],
+            "owner":fixture.config["wallet"],"program_id":address(0x44),"decimals":6,"raw_amount":"10"});
+        let mut post = pre.clone();
+        post["raw_amount"] = json!("25");
+        evidence["pre_token_balances"] = if case == "missing_pre" {
+            json!([])
+        } else {
+            json!([pre])
+        };
+        evidence["post_token_balances"] = json!([post]);
+        let path = fixture.dir.path().join("effects.json");
+        write(&path, &evidence);
+        let run = |mode| {
+            fixture
+                .command()
+                .args([mode, id.as_str()])
+                .arg(&path)
+                .output()
+                .expect("issuer mode")
+        };
+        let result = run("--review-settlement");
+        assert!(
+            result.status.success(),
+            "{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+        let report: Value = serde_json::from_slice(&result.stdout).expect("review");
+        if case == "paired" {
+            assert_eq!(report["wallet_token_acquisition"]["net_acquired_raw"], "15");
+            assert_eq!(
+                report["wallet_token_acquisition"]["mint"],
+                fixture.snapshot["proposal"]["mint"]
+            );
+            assert_eq!(report["wallet_token_acquisition"]["decimals"], 6);
+        } else {
+            assert_eq!(report["wallet_token_acquisition"], Value::Null);
+        }
+        assert_eq!(report["usd_value"], Value::Null);
+        assert_eq!(report["realised_pnl"], Value::Null);
+        assert!(run("--record-settlement").status.success());
+        let history = fixture.dir.path().join("operations.jsonl");
+        let saved = std::fs::read(&history).expect("history");
+        assert!(run("--record-settlement").status.success());
+        assert_eq!(std::fs::read(&history).expect("unchanged"), saved);
+        let log = radar_journal::OperationLog::open(&history).expect("replay");
+        assert_eq!(log.settlement(&id).expect("facts").review, report);
+        assert_eq!(log.outstanding().count(), 1);
+        drop(log);
+        assert_eq!(
+            fixture.start().ask(&fixture.candidate)["reason"],
+            "outstanding operation requires reconciliation"
+        );
+    }
+}
+
+#[test]
 fn settlement_review_binds_exact_evidence_and_keeps_the_journal_outstanding() {
     let (fixture, signed, id, evidence) = finalized_fixture();
     let history = fixture.dir.path().join("operations.jsonl");

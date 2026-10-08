@@ -1902,3 +1902,37 @@ avoiding a redundant documentation-only CI run; verified source is in PR 334.
 
 No Cargo/rustc/Radar process remains locally. Target measured 33.1 GiB, with
 63.2 GiB free. Previously rejected ignored-output cleanup was not retried.
+
+### Retained measured net token acquisition (2026-10-08)
+
+The actual protected settlement review/record commands derive optional
+`wallet_token_acquisition` from paired pre/post token metadata for the retained
+buy proposal's mint and configured wallet. Successful native-SOL buy context,
+both sides of every included account, matching owner/mint/program/decimals,
+usable units and overflow-free totals are required. Internal transfers cancel;
+only a positive aggregate change supplies known net acquired units. Failed
+execution, absent/invalid context, missing metadata (including a newly created
+ATA's pre balance), changed identity, inconsistent units or zero/negative gain
+remain null. Other wallets are excluded. No new dependency or command added.
+
+This is measured net acquisition under operator evidence, not authenticated
+gross venue fill or attribution of every transfer. Token-2022 extensions are
+not interpreted. Cost basis, USD exposure/loss and PnL remain unknown. Existing
+record/replay retains the field; repeat shape conflicts remain fail-closed and
+older reviews are not rewritten. The claim stays outstanding.
+
+- [x] Three unit regressions cover paired aggregation, unknown/changed metadata,
+  buy context, inconsistent units, decimal bounds and overflow; one actual CLI
+  regression covers review, durable/idempotent recording, replay and blocked
+  issuance. Raise test floor from 2,093 to 2,097.
+- [x] Reapply accepting failed execution, skipping pre-owner checks and
+  saturating post totals: each acquisition regression fails; restore source.
+- [x] Scoped verification passes: 153 signer and 33 conformance tests, Rust
+  1.99 Clippy and formatting. Complete staged diff read. Prior CI completed.
+- [ ] Push and verify full CI, all mutation shards and final gate.
+
+Next: establish acquisition costs and gross fill attribution, then durable
+idempotent USD exposure/loss reconciliation. Protected live risk inputs,
+execution/recovery/exits/scheduling and activation/funding verification remain.
+All four activation gates remain open. Autonomous trading remains off. No live
+provider/chain read, real key/signature/delegation/trade or deployment occurs.

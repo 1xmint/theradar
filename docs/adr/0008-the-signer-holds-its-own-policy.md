@@ -611,6 +611,29 @@ rent, tips and refunds; it is not gross trade value. Trade notional, cost basis
 and realised PnL remain null. No claim is released, no operation is reconciled,
 and no USD exposure/loss state, signing authority or live delegation changes.
 
+## Retained measured net token acquisition
+
+Protected settlement review and recording now include optional
+`wallet_token_acquisition`. It is derived only for a successful native-SOL buy
+with a retained typed reviewed proposal. Both pre and post metadata must exist
+for every reported account belonging to that wallet and mint. Account index,
+owner, mint, token program and usable decimals must match on both sides; all
+included accounts must share program and decimals. Integer totals are checked
+for overflow. A positive aggregate post-minus-pre quantity is reported as
+decimal strings alongside mint, owner, program, decimals and both totals.
+
+Internal transfers between included accounts cancel. Empty, unpaired or
+inconsistent metadata, failed execution, absent/invalid buy context, unusable
+decimals, overflow and zero/negative aggregate changes produce null. A newly
+created account with absent pre metadata is unknown, not an inferred zero.
+Other wallets' accounts are excluded. The result is a measured net quantity
+under protected operator provenance, not authenticated gross venue fill,
+transfer attribution or interpreted Token-2022 extension behavior. Acquisition
+cost, USD value and realised PnL remain unknown; no claim closes or authority
+changes. The existing record command persists the normalized field and replay
+retains it. Older reviews are not backfilled; repeats with a changed normalized
+shape conflict rather than rewriting history.
+
 ## What would reverse this
 
 Nothing foreseeable reverses holding a policy locally. The specific ceilings are

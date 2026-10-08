@@ -39,6 +39,67 @@ fn tokens(value: &Value, field: &str, count: usize) -> Result<Vec<TokenBalance>,
     Ok(entries)
 }
 
+fn acquisition(
+    binding: &ExecutionBinding,
+    outcome: &str,
+    before: &[TokenBalance],
+    after: &[TokenBalance],
+) -> Option<Value> {
+    let proposal: radar_risk::Proposal =
+        serde_json::from_value(binding.reviewed_proposal.clone()?).ok()?;
+    if outcome != "succeeded"
+        || proposal.action != radar_risk::Action::Buy
+        || proposal.quote != Asset::Sol
+    {
+        return None;
+    }
+    let owned =
+        |balance: &&TokenBalance| balance.mint == proposal.mint && balance.owner == binding.wallet;
+    let indices: std::collections::BTreeSet<_> = before
+        .iter()
+        .chain(after)
+        .filter(owned)
+        .map(|balance| balance.account_index)
+        .collect();
+    // Missing one side is not a measured zero, including newly created ATAs.
+    let mut identity = None;
+    let (mut pre_total, mut post_total) = (0_u64, 0_u64);
+    for index in indices {
+        let pre = before
+            .iter()
+            .find(|balance| balance.account_index == index)?;
+        let post = after
+            .iter()
+            .find(|balance| balance.account_index == index)?;
+        if !owned(&pre)
+            || !owned(&post)
+            || pre.program_id != post.program_id
+            || pre.decimals != post.decimals
+            || radar_types::Decimals::from_mint_account(pre.decimals).is_none()
+        {
+            return None;
+        }
+        let units = (pre.program_id, pre.decimals);
+        if identity.is_some_and(|previous| previous != units) {
+            return None;
+        }
+        identity = Some(units);
+        pre_total = pre_total.checked_add(pre.raw_amount.parse::<u64>().ok()?)?;
+        post_total = post_total.checked_add(post.raw_amount.parse::<u64>().ok()?)?;
+    }
+    let (program, decimals) = identity?;
+    let acquired = post_total
+        .checked_sub(pre_total)
+        .filter(|amount| *amount > 0)?;
+    // Net acquisition is not gross venue fill, price, cost basis or attribution
+    // of each transfer. Token-2022 extensions are not interpreted here.
+    Some(
+        json!({"mint":proposal.mint,"owner":binding.wallet,"program_id":program,
+        "decimals":decimals,"pre_raw_amount":pre_total.to_string(),
+        "post_raw_amount":post_total.to_string(),"net_acquired_raw":acquired.to_string()}),
+    )
+}
+
 fn native_settlement(delta: i128, fee: u64) -> Option<radar_types::Settlement> {
     // A credit does not measure gross spend; a debit must cover the known fee.
     // A candidate does not reconcile USD/exposure/loss or release the claim.
@@ -157,6 +218,7 @@ pub(super) fn review(
             "net_change_lamports":(i128::from(*post)-i128::from(*pre)).to_string()})).collect();
     let native_settlement = native_settlement(delta, fee);
     let block_time = block_time(value, completed)?;
+    let acquisition = acquisition(binding, outcome, &before, &after);
     Ok(
         json!({"version":1,"authority":"protected_file_review","outcome":outcome,
         "wallet":binding.wallet.to_string(),"signature":Signature::new(signature).to_string(),
@@ -164,7 +226,8 @@ pub(super) fn review(
         "minimum_slot":minimum.to_string(),"read_started_at_unix_secs":started,"read_completed_at_unix_secs":completed,
         "block_time_unix_secs":block_time.map(|time|time.to_string()),
         "network_fee_lamports":fee.to_string(),"reserved_lamports":reserved.raw().to_string(),
-        "pre_token_balances":before,"post_token_balances":after,"usd_value":null,"realised_pnl":null,
+        "pre_token_balances":before,"post_token_balances":after,"wallet_token_acquisition":acquisition,
+        "usd_value":null,"realised_pnl":null,
         "native_settlement_candidate":native_settlement,
         "signature_verified_locally":true,"operation_reconciled":false,"reservation_released":false}),
     )
@@ -175,6 +238,159 @@ mod tests {
     use super::*;
     use radar_journal::Intent;
     use radar_types::{Slot, TokenQuantity};
+
+    fn acquisition_fixture() -> ExecutionBinding {
+        let (mut binding, _, _) = fixture();
+        binding.reviewed_proposal = Some(json!({"mint":Address::new([2;32]),
+            "market":radar_types::Market::PUMP_FUN_BONDING_CURVE,"quote":"sol",
+            "creator":Address::new([4;32]),"action":"buy","notional":1,
+            "estimated_round_trip_cost":0,"oldest_input_slot":50,"simulated_exit_capacity":1}));
+        binding
+    }
+
+    fn token(binding: &ExecutionBinding, index: usize, amount: u64) -> TokenBalance {
+        TokenBalance {
+            account_index: index,
+            mint: Address::new([2; 32]),
+            owner: binding.wallet,
+            program_id: Address::new([3; 32]),
+            raw_amount: amount.to_string(),
+            decimals: 6,
+        }
+    }
+
+    #[test]
+    fn net_acquisition_aggregates_paired_accounts_without_counting_internal_transfers() {
+        let binding = acquisition_fixture();
+        let before = [token(&binding, 0, 10), token(&binding, 1, 20)];
+        let after = [token(&binding, 1, 30), token(&binding, 0, 5)];
+        let result = acquisition(&binding, "succeeded", &before, &after).expect("net acquisition");
+        assert_eq!(result["pre_raw_amount"], "30");
+        assert_eq!(result["post_raw_amount"], "35");
+        assert_eq!(result["net_acquired_raw"], "5");
+        assert_eq!(result["decimals"], 6);
+        assert_eq!(result["mint"], Address::new([2; 32]).to_string());
+        assert!(acquisition(&binding, "succeeded", &before, &before).is_none());
+        assert!(acquisition(&binding, "succeeded", &after, &before).is_none());
+        assert!(acquisition(&binding, "failed", &before, &after).is_none());
+        let result = acquisition(
+            &binding,
+            "succeeded",
+            &[token(&binding, 0, 0)],
+            &[token(&binding, 0, u64::MAX)],
+        )
+        .expect("full range measured units");
+        assert_eq!(result["net_acquired_raw"], u64::MAX.to_string());
+    }
+
+    #[test]
+    fn missing_or_changed_token_identity_never_supplies_zero_acquisition() {
+        let binding = acquisition_fixture();
+        let before = [token(&binding, 0, 0)];
+        let after = [token(&binding, 0, 1)];
+        assert!(acquisition(&binding, "succeeded", &[], &after).is_none());
+        assert!(acquisition(&binding, "succeeded", &before, &[]).is_none());
+        assert!(acquisition(&binding, "succeeded", &[], &[]).is_none());
+        for side in [false, true] {
+            for field in [
+                "owner",
+                "mint",
+                "program",
+                "decimals",
+                "invalid_decimals",
+                "index",
+                "amount",
+            ] {
+                let mut changed = token(&binding, 0, u64::from(side));
+                match field {
+                    "owner" => changed.owner = Address::SYSTEM_PROGRAM,
+                    "mint" => changed.mint = Address::SYSTEM_PROGRAM,
+                    "program" => changed.program_id = Address::SYSTEM_PROGRAM,
+                    "decimals" => changed.decimals = 9,
+                    "invalid_decimals" => changed.decimals = u8::MAX,
+                    "index" => changed.account_index = 1,
+                    _ => changed.raw_amount = "unknown".into(),
+                }
+                let result = if side {
+                    acquisition(&binding, "succeeded", &before, &[changed])
+                } else {
+                    acquisition(&binding, "succeeded", &[changed], &after)
+                };
+                assert!(result.is_none(), "changed {field}, after={side}");
+            }
+        }
+        let partial = [token(&binding, 0, 1), token(&binding, 1, 1)];
+        assert!(acquisition(&binding, "succeeded", &before, &partial).is_none());
+        for decimals in [0, 18, u8::MAX] {
+            let mut pre = token(&binding, 0, 0);
+            let mut post = token(&binding, 0, 1);
+            pre.decimals = decimals;
+            post.decimals = decimals;
+            assert_eq!(
+                acquisition(&binding, "succeeded", &[pre], &[post]).is_some(),
+                decimals != u8::MAX
+            );
+        }
+        let mut foreign = token(&binding, 1, u64::MAX);
+        foreign.owner = Address::SYSTEM_PROGRAM;
+        assert!(
+            acquisition(
+                &binding,
+                "succeeded",
+                &before,
+                &[token(&binding, 0, 1), foreign]
+            )
+            .is_some()
+        );
+    }
+
+    #[test]
+    fn acquisition_requires_reviewed_buy_context_consistent_units_and_bounded_totals() {
+        let binding = acquisition_fixture();
+        let before = [token(&binding, 0, 0), token(&binding, 1, 0)];
+        let after = [token(&binding, 0, u64::MAX), token(&binding, 1, 1)];
+        assert!(acquisition(&binding, "succeeded", &before, &after).is_none());
+        assert!(acquisition(&binding, "succeeded", &after, &after).is_none());
+        for program in [false, true] {
+            let mut mixed_before = token(&binding, 1, 0);
+            let mut mixed_after = token(&binding, 1, 1);
+            if program {
+                mixed_before.program_id = Address::SYSTEM_PROGRAM;
+                mixed_after.program_id = Address::SYSTEM_PROGRAM;
+            } else {
+                mixed_before.decimals = 9;
+                mixed_after.decimals = 9;
+            }
+            assert!(
+                acquisition(
+                    &binding,
+                    "succeeded",
+                    &[token(&binding, 0, 0), mixed_before],
+                    &[token(&binding, 0, 1), mixed_after]
+                )
+                .is_none()
+            );
+        }
+        for context in [None, Some(json!({})), Some(Value::Null)] {
+            let mut bad = acquisition_fixture();
+            bad.reviewed_proposal = context;
+            assert!(
+                acquisition(&bad, "succeeded", &before[..1], &[token(&binding, 0, 1)]).is_none()
+            );
+        }
+        for (field, value) in [
+            ("action", json!("exit")),
+            ("action", json!("reduce")),
+            ("quote", json!("usdc")),
+            ("mint", json!(Address::SYSTEM_PROGRAM)),
+        ] {
+            let mut bad = acquisition_fixture();
+            bad.reviewed_proposal.as_mut().expect("proposal")[field] = value;
+            assert!(
+                acquisition(&bad, "succeeded", &before[..1], &[token(&binding, 0, 1)]).is_none()
+            );
+        }
+    }
 
     fn fixture() -> (ExecutionBinding, OperationEntry, Value) {
         let wallet = Address::new([0x55; 32]);
