@@ -7,6 +7,24 @@ use std::process::{Child, Command, Stdio};
 
 const SEED: [u8; 32] = [0x6B; 32];
 
+#[test]
+fn signed_binding_mode_requires_the_exact_flag_and_argument_count() {
+    let fixture = Fixture::new();
+    for args in [
+        vec!["--bind-signed"],
+        vec!["--bind-signed", "id"],
+        vec!["--other", "id", "absent"],
+        vec!["--bind-signed", "id", "absent", "extra"],
+    ] {
+        let result = fixture.command().args(args).output().expect("issuer");
+        assert!(!result.status.success());
+        assert_eq!(result.stdout, Vec::<u8>::new());
+        assert!(
+            String::from_utf8_lossy(&result.stderr).contains("usage: radar-issuer --bind-signed")
+        );
+    }
+}
+
 fn fixture_for_wallet(wallet_key: &ed25519_dalek::SigningKey) -> (Fixture, Vec<u8>) {
     let mut fixture = Fixture::new();
     let wallet = radar_types::Address::new(wallet_key.verifying_key().to_bytes());

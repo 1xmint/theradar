@@ -1382,3 +1382,12 @@ and no USD exposure/loss is inferred here. Protected settlement accounting,
 live price/cost/searched-exit evidence, activated owner limits and verified Privy
 policy/delegation remain before autonomous execution. No real wallet/key/Privy
 credential, delegation, trade, current wallet read or Serve deployment changed.
+
+Initial source CI 37797820882 at 6267503 completed all shards. Rust tests
+(2,464), web tests (352) and other gates passed; shard three reported one
+survivor at radar-issuer.rs:490:28, changing the mode guard's `||` to `&&`.
+Add a fifth regression requiring the exact command flag and three arguments,
+including misspelled flags and too few/many arguments; raise the floor to 2068.
+Applying that exact mutation fails the usage-error regression. Source restored;
+all 19 issuer process tests and scoped Rust 1.99 Clippy passed after the repair.
+No check was cancelled, and no mutation exclusion or lint suppression is added.
