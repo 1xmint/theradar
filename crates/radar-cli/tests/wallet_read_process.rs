@@ -14,6 +14,114 @@ fn now() -> u64 {
         .as_secs()
 }
 
+fn collected_reads() -> Vec<Value> {
+    vec![
+        json!({"result":{"context":{"slot":50},"value":u64::MAX}}),
+        json!({"result":{"context":{"slot":51},"value":[]}}),
+        json!({"result":{"context":{"slot":52},"value":[]}}),
+        json!({"result":{"context":{"slot":53},"value":{"err":null}}}),
+        json!({"result":{"context":{"slot":54},"value":5000}}),
+    ]
+}
+
+fn collect(endpoint: &str) -> std::process::Output {
+    let mut file = tempfile::NamedTempFile::new().expect("input");
+    let mut bytes = vec![0; 100];
+    bytes[0] = 1;
+    bytes[65] = 1;
+    file.write_all(&bytes).expect("transaction");
+    Command::new(env!("CARGO_BIN_EXE_radar"))
+        .args([
+            "evidence-read",
+            "--wallet",
+            &radar_types::Address::new([0x55; 32]).to_string(),
+            "--transaction",
+            file.path().to_str().expect("path"),
+            "--min-slot",
+            "50",
+            "--rpc",
+            endpoint,
+        ])
+        .output()
+        .expect("collector")
+}
+
+#[test]
+fn collector_emits_both_issuer_read_packets_with_exact_amounts_bytes_contexts_and_windows() {
+    let (endpoint, server) = fixture(collected_reads());
+    let before = now();
+    let output = collect(&endpoint);
+    assert!(output.status.success(), "{:?}", output.stderr);
+    let evidence: Value = serde_json::from_slice(&output.stdout).expect("packet");
+    let wallet = &evidence["wallet_evidence"];
+    let transaction = &evidence["transaction_evidence"];
+    assert_eq!(
+        wallet["wallet"],
+        radar_types::Address::new([0x55; 32]).to_string()
+    );
+    let mut expected = vec![0; 100];
+    expected[0] = 1;
+    expected[65] = 1;
+    assert_eq!(
+        transaction["transaction_base64"],
+        radar_types::b64::encode(&expected)
+    );
+    assert_eq!(
+        transaction["message_base64"],
+        radar_types::b64::encode(&expected[65..])
+    );
+    assert_eq!(wallet["native_sol"]["raw_amount"], u64::MAX.to_string());
+    assert_eq!(wallet["native_sol"]["slot"], "50");
+    assert_eq!(wallet["token_program"]["slot"], "51");
+    assert_eq!(wallet["token_2022"]["slot"], "52");
+    assert_eq!(transaction["simulation"]["slot"], "53");
+    assert_eq!(transaction["network_fee"]["slot"], "54");
+    assert_eq!(transaction["network_fee"]["lamports"], "5000");
+    assert!(wallet["usd_value"].is_null());
+    assert!(wallet["realised_pnl"].is_null());
+    assert!(transaction["rent_and_other_instruction_costs"].is_null());
+    for read in [wallet, transaction] {
+        assert_eq!(read["authority"], "read_only");
+        assert_eq!(read["commitment"], "finalized");
+        let start = read["read_started_at_unix_secs"].as_u64().expect("start");
+        let end = read["read_completed_at_unix_secs"].as_u64().expect("end");
+        assert!(before <= start && start <= end && end <= now());
+    }
+    assert!(
+        wallet["read_completed_at_unix_secs"]
+            .as_u64()
+            .expect("wallet end")
+            <= transaction["read_started_at_unix_secs"]
+                .as_u64()
+                .expect("transaction start")
+    );
+    let calls = server.join().expect("server");
+    assert_eq!(calls.len(), 5);
+    assert_eq!(calls[0]["method"], "getBalance");
+    assert_eq!(calls[1]["method"], "getTokenAccountsByOwner");
+    assert_eq!(calls[2]["method"], "getTokenAccountsByOwner");
+    assert_eq!(calls[3]["method"], "simulateTransaction");
+    assert_eq!(calls[4]["method"], "getFeeForMessage");
+    assert_eq!(calls[3]["params"][0], transaction["transaction_base64"]);
+    assert_eq!(calls[4]["params"][0], transaction["message_base64"]);
+    assert_eq!(transaction["minimum_context_slot"], "50");
+}
+
+#[test]
+fn collector_refuses_every_failed_read_without_emitting_a_partial_issuer_packet() {
+    for index in 0..5 {
+        let mut answers = collected_reads();
+        answers.truncate(index + 1);
+        answers[index] = json!({"error":{"message":"private provider detail"}});
+        let (endpoint, server) = fixture(answers);
+        let output = collect(&endpoint);
+        assert!(!output.status.success());
+        assert_eq!(output.stdout, Vec::<u8>::new());
+        assert!(!String::from_utf8_lossy(&output.stderr).contains("private provider detail"));
+        assert_eq!(server.join().expect("server").len(), index + 1);
+    }
+}
+
 #[test]
 fn actual_transaction_read_preserves_bytes_and_reports_separate_fee_and_simulation() {
     let (endpoint, server) = fixture(vec![

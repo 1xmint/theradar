@@ -60,6 +60,14 @@ impl Fixture {
             "wallet":wallet, "observed_at_unix_secs":unix_now(), "sol_lamports":300_000_000,
             "sol_upper_micro_usd":200_000_000, "fee_upper_lamports":5000, "state":radar_risk::PortfolioState::flat(radar_types::Slot(1000)),
             "proposal":candidate["proposal"], "transaction":candidate["transaction"],
+            "wallet_evidence":{
+                "version":1,"authority":"read_only","commitment":"finalized","wallet":wallet,
+                "native_sol":{"slot":"1000","raw_amount":"300000000","decimals":9},
+                "token_program":{"slot":"1000","accounts":[]},
+                "token_2022":{"slot":"1000","accounts":[]},
+                "usd_value":null,"realised_pnl":null,"common_reported_slot":"1000",
+                "read_started_at_unix_secs":unix_now(),"read_completed_at_unix_secs":unix_now()
+            },
             "transaction_evidence":{
                 "version":1,"authority":"read_only","commitment":"finalized",
                 "minimum_context_slot":"1000","transaction_base64":candidate["transaction"],
@@ -166,6 +174,147 @@ fn raw_response(fixture: &Fixture, raw: &[u8]) -> (String, bool) {
     let mut answer = String::new();
     process.reader.read_line(&mut answer).expect("response");
     (answer, process.child.wait().expect("exit").success())
+}
+
+#[test]
+fn wallet_read_identity_balance_and_complete_contexts_are_required_before_reservation() {
+    let mut fixture = Fixture::new();
+    let original = fixture.snapshot.clone();
+    let mut issuer = fixture.start();
+    for pointer in [
+        "/version",
+        "/authority",
+        "/commitment",
+        "/wallet",
+        "/native_sol/decimals",
+        "/native_sol/raw_amount",
+        "/native_sol/slot",
+        "/token_program/slot",
+        "/token_2022/slot",
+        "/token_program/accounts",
+        "/token_2022/accounts",
+        "/read_started_at_unix_secs",
+        "/read_completed_at_unix_secs",
+    ] {
+        fixture.snapshot = original.clone();
+        let (parent, key) = pointer.rsplit_once('/').expect("pointer");
+        fixture.snapshot["wallet_evidence"]
+            .pointer_mut(parent)
+            .expect("parent")
+            .as_object_mut()
+            .expect("object")
+            .remove(key);
+        fixture.save();
+        assert_eq!(
+            issuer.ask(&fixture.candidate)["outcome"],
+            "refused",
+            "missing {pointer}"
+        );
+    }
+    for (pointer, value) in [
+        ("/version", json!(2)),
+        ("/authority", json!("issued")),
+        ("/commitment", json!("processed")),
+        ("/wallet", json!(address(0x44))),
+        ("/native_sol/decimals", json!(6)),
+        ("/native_sol/raw_amount", json!("300000001")),
+        ("/native_sol/raw_amount", json!(300_000_000)),
+        ("/native_sol/raw_amount", json!("unknown")),
+        ("/native_sol/raw_amount", json!("18446744073709551616")),
+        ("/token_program/accounts", Value::Null),
+        ("/token_2022/accounts", json!({})),
+    ] {
+        fixture.snapshot = original.clone();
+        *fixture.snapshot["wallet_evidence"]
+            .pointer_mut(pointer)
+            .expect("field") = value;
+        fixture.save();
+        assert_eq!(
+            issuer.ask(&fixture.candidate)["outcome"],
+            "refused",
+            "bad {pointer}"
+        );
+    }
+    fixture.snapshot = original.clone();
+    fixture
+        .snapshot
+        .as_object_mut()
+        .expect("snapshot")
+        .remove("wallet_evidence");
+    fixture.save();
+    assert_eq!(issuer.ask(&fixture.candidate)["outcome"], "refused");
+    assert_eq!(
+        std::fs::read(fixture.dir.path().join("operations.jsonl")).expect("history"),
+        Vec::<u8>::new()
+    );
+    fixture.snapshot = original;
+    fixture.save();
+    assert_eq!(issuer.ask(&fixture.candidate)["outcome"], "issued");
+}
+
+#[test]
+fn wallet_contexts_must_fit_the_reviewed_window_without_claiming_atomicity() {
+    let mut fixture = Fixture::new();
+    let original = fixture.snapshot.clone();
+    let mut issuer = fixture.start();
+    for read in ["native_sol", "token_program", "token_2022"] {
+        for slot in [json!("999"), json!("1001"), json!(1000), json!("unknown")] {
+            fixture.snapshot = original.clone();
+            fixture.snapshot["wallet_evidence"][read]["slot"] = slot;
+            fixture.save();
+            assert_eq!(
+                issuer.ask(&fixture.candidate)["outcome"],
+                "refused",
+                "{read}"
+            );
+        }
+    }
+    assert_eq!(
+        std::fs::read(fixture.dir.path().join("operations.jsonl")).expect("history"),
+        Vec::<u8>::new()
+    );
+    fixture.snapshot = original;
+    fixture.snapshot["state"]["now"] = json!(1002);
+    fixture.snapshot["wallet_evidence"]["token_program"]["slot"] = json!("1001");
+    fixture.snapshot["wallet_evidence"]["token_2022"]["slot"] = json!("1002");
+    fixture.snapshot["wallet_evidence"]["common_reported_slot"] = Value::Null;
+    fixture.save();
+    assert_eq!(issuer.ask(&fixture.candidate)["outcome"], "issued");
+}
+
+#[test]
+fn wallet_read_start_caps_the_proof_even_when_its_completion_is_recent() {
+    let mut fixture = Fixture::new();
+    fixture.config["intent_lifetime_secs"] = json!(300);
+    fixture.save();
+    let original = fixture.snapshot.clone();
+    let mut issuer = fixture.start();
+    let now = unix_now();
+    for (start, end) in [
+        (now - 121, now),
+        (now + 600, now + 600),
+        (now, now + 600),
+        (now, now - 1),
+    ] {
+        fixture.snapshot = original.clone();
+        fixture.snapshot["wallet_evidence"]["read_started_at_unix_secs"] = json!(start);
+        fixture.snapshot["wallet_evidence"]["read_completed_at_unix_secs"] = json!(end);
+        fixture.save();
+        assert_eq!(issuer.ask(&fixture.candidate)["outcome"], "refused");
+    }
+    assert_eq!(
+        std::fs::read(fixture.dir.path().join("operations.jsonl")).expect("history"),
+        Vec::<u8>::new()
+    );
+    fixture.snapshot = original;
+    fixture.snapshot["wallet_evidence"]["read_started_at_unix_secs"] = json!(now - 90);
+    fixture.save();
+    let answer = issuer.ask(&fixture.candidate);
+    assert_eq!(answer["outcome"], "issued", "{answer}");
+    assert_eq!(
+        answer["intent"]["proof"]["expires_at_unix_secs"],
+        now - 90 + 120
+    );
 }
 
 #[test]
@@ -458,6 +607,7 @@ fn stdin_cannot_choose_authority_or_invent_the_market_evidence() {
         "wallet",
         "policy",
         "transaction_evidence",
+        "wallet_evidence",
     ] {
         let mut candidate = fixture.candidate.clone();
         candidate[field] = json!("caller chooses");
@@ -559,12 +709,14 @@ fn kernel_refusals_and_insufficient_cash_never_produce_a_proof() {
     }
     fixture.snapshot = original;
     fixture.snapshot["sol_lamports"] = json!(250_004_999);
+    fixture.snapshot["wallet_evidence"]["native_sol"]["raw_amount"] = json!("250004999");
     fixture.save();
     assert_eq!(
         issuer.ask(&fixture.candidate)["reason"],
         "capital reservation refused"
     );
     fixture.snapshot["sol_lamports"] = json!(250_005_000);
+    fixture.snapshot["wallet_evidence"]["native_sol"]["raw_amount"] = json!("250005000");
     fixture.save();
     assert_eq!(issuer.ask(&fixture.candidate)["outcome"], "issued");
 }

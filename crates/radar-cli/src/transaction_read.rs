@@ -7,6 +7,16 @@ use std::time::Duration;
 use radar_onchain::preflight::MAX_TRANSACTION_BYTES;
 use radar_onchain::{Budget, RpcClient};
 
+pub(super) fn bytes(path: &str) -> Result<Vec<u8>, String> {
+    let mut bytes = Vec::new();
+    std::fs::File::open(path)
+        .map_err(|_| "transaction file unavailable")?
+        .take((MAX_TRANSACTION_BYTES + 1) as u64)
+        .read_to_end(&mut bytes)
+        .map_err(|_| "transaction file read failed")?;
+    Ok(bytes)
+}
+
 pub fn run(args: &[String]) -> Result<(), String> {
     let path = crate::flag(args, "--transaction")
         .ok_or("transaction-read needs --transaction <binary-file>")?;
@@ -16,12 +26,7 @@ pub fn run(args: &[String]) -> Result<(), String> {
     let minimum = crate::flag(args, "--min-slot")
         .and_then(|value| value.parse::<u64>().ok())
         .ok_or("transaction-read needs --min-slot <u64>")?;
-    let mut bytes = Vec::new();
-    std::fs::File::open(path)
-        .map_err(|_| "transaction file unavailable")?
-        .take((MAX_TRANSACTION_BYTES + 1) as u64)
-        .read_to_end(&mut bytes)
-        .map_err(|_| "transaction file read failed")?;
+    let bytes = bytes(&path)?;
     let started = crate::wallet_read::now()?;
     let mut budget = Budget::new(2, 0, Duration::from_secs(20));
     let mut evidence =

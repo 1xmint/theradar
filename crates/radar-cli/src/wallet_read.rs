@@ -24,7 +24,7 @@ fn token_read(value: TokenAccountsRead) -> Result<Value, String> {
     Ok(json!({"slot":slot.get().to_string(), "accounts":accounts}))
 }
 
-fn read(rpc: &RpcClient, wallet: Address, budget: &mut Budget) -> Result<Value, String> {
+pub(super) fn read(rpc: &RpcClient, wallet: Address, budget: &mut Budget) -> Result<Value, String> {
     let balance = rpc
         .balance(budget, &wallet)
         .map_err(|_| "native SOL read failed")?;

@@ -20,6 +20,7 @@ mod cost;
 mod curve_exit;
 mod dossier;
 mod edge;
+mod evidence_read;
 mod exits;
 mod features;
 mod graduations;
@@ -119,6 +120,8 @@ commands:
     One-context curve/mint/fee read; conservative hypothetical sell, no authority.
   transaction-read --transaction <binary-file> --min-slot <N> --rpc <URL>
     Exact unsigned legacy simulation and message fee; JSON, no signing or sending.
+  evidence-read --wallet <address> --transaction <binary-file> --min-slot <N> --rpc <URL>
+    Collect wallet and exact transaction evidence together; no valuation or authority.
 
   dossier <mint> [--rpc URL] [--seconds N]
                                  everything Radar can say about one token, read
@@ -895,6 +898,7 @@ fn main() -> ExitCode {
         "wallet-read" => wallet_read::run(&args),
         "curve-exit" => curve_exit::run(&args),
         "transaction-read" => transaction_read::run(&args),
+        "evidence-read" => evidence_read::run(&args),
         "audit" => audit::run(&args),
         "model-prices" => model_prices::run(&args),
         "selection" => selection_report(&args),

@@ -368,6 +368,34 @@ reservation/proof output. Optional units and unknown rent/USD fields grant no
 authority; this does not establish complete costs, portfolio valuation, losses,
 settlement or Privy delegation. Live execution remains closed.
 
+`radar evidence-read --wallet <address> --transaction <binary-file> --min-slot <N>
+--rpc <URL>` collects both read packets with one explicit endpoint and a shared
+five-call, twenty-second budget. It reuses the wallet and preflight readers,
+preserves each read's slots and host window, and emits `wallet_evidence` plus
+`transaction_evidence` only after every call succeeds. A failure prints neither
+packet. Its operator caller can use the fields in the protected issuer snapshot;
+the output itself is not a complete snapshot and grants no authority. It does
+not fill missing USD bounds, kernel portfolio state or other instruction costs.
+
+The private snapshot also requires `wallet_evidence`, containing the JSON from
+`radar wallet-read`. Before reserving capital the issuer binds version 1,
+read-only/finalized metadata, configured wallet identity, native decimals of
+nine, and the exact integer SOL balance to the reviewed snapshot. Native, SPL
+and Token-2022 contexts must each lie between the proposal's oldest input slot
+and the decision slot; both token account arrays must be present. Independent
+contexts remain independent, even when their slot numbers agree.
+
+The same ordered, non-future read-window check applies to both evidence sources.
+Proof lifetime follows the oldest read start as well as the existing snapshot,
+mandate and intent deadlines. Missing wallet evidence or a balance mismatch
+refuses before reservation, and candidate stdin cannot replace the evidence.
+The issuer does not infer USD exposure or realised loss from token arrays,
+nor authenticate RPC origin from this JSON. Those remain protected operator
+facts pending live collection, valuation and settlement reconciliation. The
+existing Jupiter SOL-to-USDC quote is a point quote, not the conservative upper
+USD price required for a live spending ceiling. This increment does not activate
+delegation or change the site's draft limits.
+
 ## What would reverse this
 
 Nothing foreseeable reverses holding a policy locally. The specific ceilings are

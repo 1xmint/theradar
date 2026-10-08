@@ -1186,3 +1186,50 @@ No local Cargo/rustc/radar/issuer/signer process remains. Target measured 29.4 G
 with 119.1 GiB free. Previously rejected ignored-output cleanup was not retried.
 This follow-up changes documentation only; its CI may be pending while the
 source head above is fully verified.
+
+### Combined read collection and wallet balance binding (2026-10-07)
+
+The existing offline issuer consumes protected read packets. The operator now
+has `radar evidence-read` to collect wallet and transaction evidence together;
+its output fields fit the issuer snapshot. No network dependency or model
+signing authority is added to the issuer. Complete live snapshot construction
+and portfolio reconciliation remain unfinished.
+
+- [x] Require `wallet_evidence` in the private snapshot. Bind read-only/finalized
+  version 1 metadata, configured wallet, native decimals and exact reviewed
+  integer SOL balance before reservation. Candidate stdin cannot replace it.
+- [x] Require native, SPL and Token-2022 contexts within the proposal/decision
+  slot window and both token account arrays. Preserve independent contexts;
+  do not infer an atomic bank, USD exposure or realised loss from these reads.
+- [x] Share ordered, non-future read-window validation with transaction evidence.
+  Cap proof lifetime by the wallet read start, not its recent completion.
+- [x] Three issuer process regressions cover required fields, identity/balance
+  mismatches, malformed quantities, absent holdings reads, slot boundaries,
+  independent contexts, stale/future/reversed reads and proof lifetime. Existing
+  capital boundary tests now provision matching balance evidence.
+- [x] Removing balance equality causes missing quantities to issue incorrectly;
+  removing the wallet expiry cap fails the lifetime test by 90 seconds. Both
+  wrong behaviors restored. Scoped tests passed: 132 signer tests plus 33
+  conformance tests. Rust 1.99 signer Clippy and format checks passed.
+- [x] Add operator `radar evidence-read` with an explicit wallet, unsigned file,
+  minimum simulation slot and RPC endpoint. Reuse wallet/preflight readers and
+  bounded file input under one five-call, twenty-second budget. Emit both
+  packets only after every read succeeds; preserve individual slots/windows.
+- [x] Two CLI process regressions cover exact quantities/bytes, independent
+  contexts/windows and failure at each RPC read with no partial packet or
+  provider details. One unit test refuses invalid/missing collection scope
+  before file/network reads. Raise the Rust floor by six in total.
+- [x] Premature wallet output makes the collector failure test fail when
+  simulation refuses. Source restored; all 231 CLI tests passed and the restored
+  ten process tests passed again. Scoped CLI Clippy, final formatting and all 33
+  conformance checks passed.
+- [ ] Await prior documentation CI before pushing; verify full source CI,
+  including all four mutation shards, then record the source hash and result.
+
+The existing Jupiter SOL-to-USDC helper is a point quote without the upper USD
+price bound required for live spending. Protected JSON does not authenticate RPC
+origin or reconcile token valuations, exposure and losses. Complete protected
+snapshot construction, full cost/searched exit evidence, activated owner mandate,
+settlement reconciliation and verified Privy policy/delegation remain necessary
+before autonomous execution. Site limits remain drafts. No real credential,
+delegation, signature, trade or Serve deployment was provisioned this increment.

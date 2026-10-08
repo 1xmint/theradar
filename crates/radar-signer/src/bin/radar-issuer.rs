@@ -51,6 +51,8 @@ struct Snapshot {
     // The operator copies transaction-read output into the private snapshot.
     // Stdin cannot supply or replace this read evidence.
     transaction_evidence: serde_json::Value,
+    // Bind the reviewed balance to protected wallet-read evidence.
+    wallet_evidence: serde_json::Value,
 }
 
 #[derive(Deserialize)]
@@ -111,7 +113,31 @@ fn evidence_integer(value: &serde_json::Value, field: &str) -> Result<u64, Strin
     value[field]
         .as_str()
         .and_then(|value| value.parse().ok())
-        .ok_or_else(|| "invalid transaction evidence integer".into())
+        .ok_or_else(|| "invalid read evidence integer".into())
+}
+
+fn wallet_evidence_expiry(snapshot: &Snapshot, config: &Config, now: u64) -> Result<u64, String> {
+    let value = &snapshot.wallet_evidence;
+    if value["version"] != 1
+        || value["authority"] != "read_only"
+        || value["commitment"] != "finalized"
+        || value["wallet"] != config.wallet.to_string()
+        || value["native_sol"]["decimals"] != 9
+        || evidence_integer(&value["native_sol"], "raw_amount")? != snapshot.sol_lamports
+        || !value["token_program"]["accounts"].is_array()
+        || !value["token_2022"]["accounts"].is_array()
+    {
+        return Err("wallet evidence does not bind the reviewed native balance".into());
+    }
+    // Preserve separate bank contexts; matching slot numbers are not proof of
+    // an atomic read. Token quantities are not dollar exposure or realised loss.
+    for read in ["native_sol", "token_program", "token_2022"] {
+        let slot = evidence_integer(&value[read], "slot")?;
+        if slot < snapshot.proposal.oldest_input_slot.get() || slot > snapshot.state.now.get() {
+            return Err("wallet evidence slot is outside reviewed bounds".into());
+        }
+    }
+    read_evidence_expiry(value, config, now)
 }
 
 fn transaction_evidence_expiry(
@@ -146,6 +172,14 @@ fn transaction_evidence_expiry(
     {
         return Err("transaction evidence slots or network fee exceed reviewed bounds".into());
     }
+    read_evidence_expiry(value, config, now)
+}
+
+fn read_evidence_expiry(
+    value: &serde_json::Value,
+    config: &Config,
+    now: u64,
+) -> Result<u64, String> {
     let started = value["read_started_at_unix_secs"]
         .as_u64()
         .ok_or("missing evidence start time")?;
@@ -156,7 +190,7 @@ fn transaction_evidence_expiry(
         || completed > now
         || !snapshot_current(now, started, config.max_snapshot_age_secs)
     {
-        return Err("transaction evidence read window is not current".into());
+        return Err("evidence read window is not current".into());
     }
     started
         .checked_add(config.max_snapshot_age_secs)
@@ -245,11 +279,13 @@ impl Issuer {
         )
         .map_err(|_| "transaction refused")?;
         let evidence_expiry = transaction_evidence_expiry(snapshot, &self.config, &checked, now)?;
+        let wallet_expiry = wallet_evidence_expiry(snapshot, &self.config, now)?;
         let expires = now
             .checked_add(self.config.intent_lifetime_secs)
             .ok_or("intent expiry overflow")?
             .min(self.config.valid_until_unix_secs)
             .min(evidence_expiry)
+            .min(wallet_expiry)
             .min(
                 snapshot
                     .observed_at_unix_secs
