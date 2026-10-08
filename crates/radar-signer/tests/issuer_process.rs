@@ -334,6 +334,94 @@ fn finalized_fixture() -> (Fixture, Vec<u8>, radar_journal::OperationId, Value) 
 }
 
 #[test]
+fn protected_acquisition_cost_review_accounts_for_exact_outlay_without_settling() {
+    let (fixture, signed, id, mut evidence) = finalized_fixture();
+    let time = evidence["read_completed_at_unix_secs"]
+        .as_u64()
+        .expect("read")
+        - 1;
+    evidence["block_time_unix_secs"] = json!(time.to_string());
+    evidence["outcome"] = json!("succeeded");
+    evidence["post_balances_lamports"] = json!(["284844000", "150000", "15001000"]);
+    let pre = json!({"account_index":1,"mint":fixture.snapshot["proposal"]["mint"],
+        "owner":fixture.config["wallet"],"program_id":address(0x44),"decimals":6,"raw_amount":"10"});
+    let mut post = pre.clone();
+    post["raw_amount"] = json!("25");
+    evidence["pre_token_balances"] = json!([pre]);
+    evidence["post_token_balances"] = json!([post]);
+    let evidence_path = fixture.dir.path().join("effects.json");
+    write(&evidence_path, &evidence);
+    let record = fixture
+        .command()
+        .args(["--record-settlement", id.as_str()])
+        .arg(&evidence_path)
+        .output()
+        .expect("record");
+    assert!(
+        record.status.success(),
+        "{}",
+        String::from_utf8_lossy(&record.stderr)
+    );
+    let price_path = fixture.dir.path().join("price.json");
+    let price = json!({"version":1,"asset":"sol","micro_usd_per_sol":"200000000",
+        "as_of_slot":"1000","as_of_unix_secs":time.to_string(),"acquisition_costs":{
+            "version":1,"operation":id.as_str(),"signed_transaction":radar_types::b64::encode(&signed),
+            "wallet":fixture.config["wallet"],"mint":fixture.snapshot["proposal"]["mint"],
+            "token_program":address(0x44),"decimals":6,"net_acquired_raw":"15",
+            "swap_lamports":"15000000","rent_lamports":"150000","tip_lamports":"1000",
+            "other_cash_flows_absent":true}});
+    write(&price_path, &price);
+    let history = fixture.dir.path().join("operations.jsonl");
+    let saved = std::fs::read(&history).expect("history");
+    let review = || {
+        fixture
+            .command()
+            .args(["--review-valuation", id.as_str()])
+            .arg(&price_path)
+            .output()
+            .expect("valuation")
+    };
+    for _ in 0..2 {
+        let result = review();
+        assert!(
+            result.status.success(),
+            "{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+        let report: Value = serde_json::from_slice(&result.stdout).expect("report");
+        assert_eq!(report["trade_notional_micro_usd"], "3000000");
+        assert_eq!(report["position_cost_basis_micro_usd"], "3001200");
+        assert_eq!(report["acquisition_costs"]["rent_micro_usd"], "30000");
+        assert_eq!(report["wallet_net_debit_micro_usd"], "3031200");
+        assert_eq!(report["realised_pnl_micro_usd"], Value::Null);
+        assert_eq!(report["portfolio_state_updated"], false);
+        assert_eq!(report["operation_reconciled"], false);
+        assert_eq!(std::fs::read(&history).expect("unchanged"), saved);
+    }
+    for (field, value) in [
+        ("operation", json!("foreign")),
+        ("net_acquired_raw", json!("14")),
+        ("other_cash_flows_absent", json!(false)),
+        ("swap_lamports", json!("15000001")),
+    ] {
+        let mut bad = price.clone();
+        bad["acquisition_costs"][field] = value;
+        write(&price_path, &bad);
+        let result = review();
+        assert!(!result.status.success());
+        assert_eq!(result.stdout, Vec::<u8>::new());
+        assert_eq!(std::fs::read(&history).expect("unchanged"), saved);
+    }
+    let log = radar_journal::OperationLog::open(&history).expect("replay");
+    assert_eq!(log.outstanding().count(), 1);
+    drop(log);
+    assert_eq!(
+        fixture.start().ask(&fixture.candidate)["reason"],
+        "outstanding operation requires reconciliation"
+    );
+}
+
+#[test]
 fn recorded_token_acquisition_is_measured_or_unknown_and_keeps_claims_outstanding() {
     for case in ["paired", "missing_pre", "failed"] {
         let (fixture, _, id, mut evidence) = finalized_fixture();

@@ -594,8 +594,9 @@ command or live delegation is enabled.
 retained wallet net debit and network fee without updating the journal or
 portfolio. It requires an outstanding SOL operation, its retained normalized
 settlement and exact signed artifact, and re-verifies the wallet signature.
-The private price JSON accepts only `version: 1`, `asset: "sol"` and decimal
-strings `micro_usd_per_sol`, `as_of_slot`, `as_of_unix_secs`. Missing fields,
+The private price JSON accepts `version: 1`, `asset: "sol"`, decimal strings
+`micro_usd_per_sol`, `as_of_slot`, `as_of_unix_secs`, and an optional
+`acquisition_costs` object described below. Missing required fields,
 unknown fields, a zero price or malformed/overflowing integers refuse.
 
 Both price watermarks must precede or equal reported execution context. Age
@@ -607,8 +608,9 @@ debits above the reservation and fees above the debit refuse.
 
 This is protected operator historical pricing, not an authenticated live oracle
 or a conservative upper price for future sizing. Wallet net debit can contain
-rent, tips and refunds; it is not gross trade value. Trade notional, cost basis
-and realised PnL remain null. No claim is released, no operation is reconciled,
+rent, tips and refunds; it is not gross trade value. Without the separate complete
+cost breakdown, trade notional and cost basis remain null; realised PnL remains
+null in all cases. No claim is released, no operation is reconciled,
 and no USD exposure/loss state, signing authority or live delegation changes.
 
 ## Retained measured net token acquisition
@@ -633,6 +635,41 @@ cost, USD value and realised PnL remain unknown; no claim closes or authority
 changes. The existing record command persists the normalized field and replay
 retains it. Older reviews are not backfilled; repeats with a changed normalized
 shape conflict rather than rewriting history.
+
+## Optional protected acquisition cost breakdown
+
+The existing `--review-valuation` price file may include `acquisition_costs`.
+Absent or null means cash valuation only, with unknown trade notional/basis.
+A supplied object must be complete and have no unknown fields; invalid costs
+refuse the entire review. It contains `version: 1`, `operation`, exact canonical
+`signed_transaction`, `wallet`, `mint`, `token_program`, numeric `decimals`,
+decimal strings `net_acquired_raw`, `swap_lamports`, `rent_lamports`,
+`tip_lamports`, and `other_cash_flows_absent: true`.
+
+Costs require a successful native-SOL buy with retained reviewed context and
+known token acquisition. Operation, signed artifact, wallet, mint, token program,
+usable decimals and positive measured quantity must match. Swap spend must be
+positive; explicit measured zero rent/tips are valid. Checked integer addition
+of swap, the retained network fee, tip and rent must equal the retained wallet
+debit exactly. Neither an under-accounted debit nor a claimed unrelated credit,
+refund or absent component is accepted. Price freshness, watermark, signature,
+reservation and upward-rounded USD conversion checks still apply.
+
+The bookkeeping convention capitalizes swap consideration plus network fee
+and tip into `position_cost_basis_micro_usd`. Rent remains separately priced in
+`acquisition_costs.rent_micro_usd`; this does not classify its recoverability or
+recognize a realised loss. `trade_notional_micro_usd` prices only the swap.
+Network fees are already included in basis and must not later be double-expensed.
+Reported known costs carry `authority: "protected_operator_breakdown"`.
+
+This proves binding and arithmetic consistency of private operator-reviewed
+components, not their independent origin or the truth of their classification.
+A balanced false split remains inside the existing operator trust boundary.
+It does not establish gross venue fill attribution, tax basis or a live sizing
+oracle. The review is read-only: costs are not yet retained durably, no exposure
+or daily-loss state changes, PnL stays null and the claim remains outstanding.
+Independent live collection, durable reconciliation and delegation activation
+remain required.
 
 ## What would reverse this
 

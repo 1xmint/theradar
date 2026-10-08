@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-//! Prices retained native cash effects, not fills, cost basis or realised PnL.
+//! Prices retained effects and optional operator-reviewed acquisition costs.
 
 use radar_journal::{ExecutionBinding, OperationEntry, OperationState, SettlementRecord};
 use radar_risk::Policy;
@@ -15,6 +15,89 @@ struct Price {
     micro_usd_per_sol: String,
     as_of_slot: String,
     as_of_unix_secs: String,
+    acquisition_costs: Option<AcquisitionCosts>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AcquisitionCosts {
+    version: u8,
+    operation: String,
+    signed_transaction: String,
+    wallet: radar_types::Address,
+    mint: radar_types::Address,
+    token_program: radar_types::Address,
+    decimals: u8,
+    net_acquired_raw: String,
+    swap_lamports: String,
+    rent_lamports: String,
+    tip_lamports: String,
+    other_cash_flows_absent: bool,
+}
+
+fn costs(
+    binding: &ExecutionBinding,
+    value: &Value,
+    input: Option<AcquisitionCosts>,
+    debit: u64,
+    fee: u64,
+    price: u64,
+) -> Result<Option<Value>, String> {
+    let Some(input) = input else { return Ok(None) };
+    let proposal: radar_risk::Proposal = serde_json::from_value(
+        binding
+            .reviewed_proposal
+            .clone()
+            .ok_or("acquisition lacks reviewed context")?,
+    )
+    .map_err(|_| "invalid reviewed acquisition context")?;
+    let acquired = &value["wallet_token_acquisition"];
+    let raw = input
+        .net_acquired_raw
+        .parse::<u64>()
+        .map_err(|_| "invalid acquired units")?;
+    if input.version != 1
+        || value["outcome"] != "succeeded"
+        || proposal.action != radar_risk::Action::Buy
+        || proposal.quote != Asset::Sol
+        || value["operation"] != input.operation
+        || binding.signed_transaction.as_ref() != Some(&input.signed_transaction)
+        || input.wallet != binding.wallet
+        || input.mint != proposal.mint
+        || acquired["mint"] != input.mint.to_string()
+        || acquired["owner"] != input.wallet.to_string()
+        || acquired["program_id"] != input.token_program.to_string()
+        || acquired["decimals"] != input.decimals
+        || Decimals::from_mint_account(input.decimals).is_none()
+        || raw == 0
+        || integer(acquired, "net_acquired_raw")? != raw
+        || !input.other_cash_flows_absent
+    {
+        return Err("acquisition costs do not bind complete reviewed effects".into());
+    }
+    let parse = |raw: &str| raw.parse::<u64>().map_err(|_| "invalid acquisition cost");
+    let swap = parse(&input.swap_lamports)?;
+    let rent = parse(&input.rent_lamports)?;
+    let tip = parse(&input.tip_lamports)?;
+    let basis = swap
+        .checked_add(fee)
+        .and_then(|sum| sum.checked_add(tip))
+        .ok_or("acquisition cost exceeds native range")?;
+    let outlay = basis
+        .checked_add(rent)
+        .ok_or("acquisition outlay exceeds native range")?;
+    if swap == 0 || outlay != debit {
+        return Err("acquisition breakdown does not account for exact wallet debit".into());
+    }
+    // This convention capitalizes swap, network fee and tip. Rent remains
+    // separate; a balanced operator breakdown is not independent provenance.
+    Ok(Some(json!({"authority":"protected_operator_breakdown",
+        "mint":input.mint,"token_program":input.token_program,"decimals":input.decimals,
+        "net_acquired_raw":raw.to_string(),"swap_lamports":swap.to_string(),
+        "rent_lamports":rent.to_string(),"tip_lamports":tip.to_string(),
+        "basis_lamports":basis.to_string(),"trade_notional_micro_usd":dollars(swap,price)?.get().to_string(),
+        "position_cost_basis_micro_usd":dollars(basis,price)?.get().to_string(),
+        "rent_micro_usd":dollars(rent,price)?.get().to_string()})))
 }
 
 fn integer(value: &Value, field: &str) -> Result<u64, String> {
@@ -98,6 +181,13 @@ pub(super) fn review(
     }
     let cash = dollars(debit, amount)?;
     let fee_usd = dollars(fee, amount)?;
+    let costs = costs(binding, value, price.acquisition_costs, debit, fee, amount)?;
+    let notional = costs
+        .as_ref()
+        .map(|value| value["trade_notional_micro_usd"].clone());
+    let basis = costs
+        .as_ref()
+        .map(|value| value["position_cost_basis_micro_usd"].clone());
     Ok(
         json!({"version":1,"authority":"protected_operator_valuation",
         "wallet":binding.wallet.to_string(),"execution_slot":slot.to_string(),
@@ -105,7 +195,8 @@ pub(super) fn review(
         "price_at_unix_secs":price_time.to_string(),"micro_usd_per_sol":amount.to_string(),
         "wallet_net_debit_lamports":debit.to_string(),"wallet_net_debit_micro_usd":cash.get().to_string(),
         "network_fee_lamports":fee.to_string(),"network_fee_micro_usd":fee_usd.get().to_string(),
-        "trade_notional_micro_usd":null,"position_cost_basis_micro_usd":null,"realised_pnl_micro_usd":null,
+        "acquisition_costs":costs,"trade_notional_micro_usd":notional,
+        "position_cost_basis_micro_usd":basis,"realised_pnl_micro_usd":null,
         "portfolio_state_updated":false,"operation_reconciled":false,"reservation_released":false}),
     )
 }
@@ -153,6 +244,206 @@ mod tests {
             ..Policy::CLOSED
         };
         (binding, entry, record, price, policy)
+    }
+
+    fn acquisition_fixture() -> (
+        ExecutionBinding,
+        OperationEntry,
+        SettlementRecord,
+        Value,
+        Policy,
+    ) {
+        let (mut binding, entry, mut record, mut price, policy) = fixture();
+        let mint = Address::new([2; 32]);
+        let program = Address::new([3; 32]);
+        binding.reviewed_proposal = Some(
+            json!({"mint":mint,"market":radar_types::Market::PUMP_FUN_BONDING_CURVE,
+            "quote":"sol","creator":Address::new([4;32]),"action":"buy","notional":1,
+            "estimated_round_trip_cost":0,"oldest_input_slot":90,"simulated_exit_capacity":1}),
+        );
+        record.review["operation"] = json!("operation");
+        record.review["outcome"] = json!("succeeded");
+        record.review["wallet_net_change_lamports"] = json!("-251006000");
+        record.review["wallet_token_acquisition"] = json!({"mint":mint,"owner":binding.wallet,
+            "program_id":program,"decimals":6,"net_acquired_raw":"1000"});
+        price["acquisition_costs"] = json!({"version":1,"operation":"operation",
+            "signed_transaction":"signed","wallet":binding.wallet,"mint":mint,
+            "token_program":program,"decimals":6,"net_acquired_raw":"1000",
+            "swap_lamports":"250000000","rent_lamports":"1000000","tip_lamports":"1000",
+            "other_cash_flows_absent":true});
+        (binding, entry, record, price, policy)
+    }
+
+    #[test]
+    fn bound_acquisition_costs_price_exact_components_without_capitalizing_rent() {
+        let (binding, entry, record, price, policy) = acquisition_fixture();
+        let report =
+            review(&binding, &entry, &record, price.clone(), &policy, 20).expect("bound costs");
+        assert_eq!(report["trade_notional_micro_usd"], "50000001");
+        assert_eq!(report["position_cost_basis_micro_usd"], "50001201");
+        assert_eq!(report["acquisition_costs"]["basis_lamports"], "250006000");
+        assert_eq!(report["acquisition_costs"]["rent_micro_usd"], "200001");
+        assert_eq!(report["acquisition_costs"]["net_acquired_raw"], "1000");
+        assert_eq!(
+            report["acquisition_costs"]["authority"],
+            "protected_operator_breakdown"
+        );
+        assert_eq!(report["realised_pnl_micro_usd"], Value::Null);
+        assert_eq!(report["portfolio_state_updated"], false);
+        assert_eq!(report["reservation_released"], false);
+        for omitted in [false, true] {
+            let mut absent = price.clone();
+            if omitted {
+                absent
+                    .as_object_mut()
+                    .expect("price")
+                    .remove("acquisition_costs");
+            } else {
+                absent["acquisition_costs"] = Value::Null;
+            }
+            let report = review(&binding, &entry, &record, absent, &policy, 20)
+                .expect("cash valuation only");
+            assert_eq!(report["trade_notional_micro_usd"], Value::Null);
+            assert_eq!(report["position_cost_basis_micro_usd"], Value::Null);
+        }
+        let mut zero_costs = price;
+        zero_costs["acquisition_costs"]["rent_lamports"] = json!("0");
+        zero_costs["acquisition_costs"]["tip_lamports"] = json!("0");
+        let mut exact = record;
+        exact.review["wallet_net_change_lamports"] = json!("-250005000");
+        assert!(review(&binding, &entry, &exact, zero_costs, &policy, 20).is_ok());
+    }
+
+    #[test]
+    fn incomplete_foreign_or_unbalanced_breakdowns_never_become_cost_basis() {
+        let (binding, entry, record, price, policy) = acquisition_fixture();
+        for key in price["acquisition_costs"]
+            .as_object()
+            .expect("costs")
+            .keys()
+        {
+            let mut bad = price.clone();
+            bad["acquisition_costs"]
+                .as_object_mut()
+                .expect("costs")
+                .remove(key);
+            assert!(
+                review(&binding, &entry, &record, bad, &policy, 20).is_err(),
+                "missing {key}"
+            );
+        }
+        for (field, value) in [
+            ("version", json!(2)),
+            ("operation", json!("foreign")),
+            ("signed_transaction", json!("foreign")),
+            ("wallet", json!(Address::SYSTEM_PROGRAM)),
+            ("mint", json!(Address::SYSTEM_PROGRAM)),
+            ("token_program", json!(Address::SYSTEM_PROGRAM)),
+            ("decimals", json!(9)),
+            ("net_acquired_raw", json!("0")),
+            ("net_acquired_raw", json!("999")),
+            ("other_cash_flows_absent", json!(false)),
+            ("swap_lamports", json!("0")),
+            ("swap_lamports", json!("250000001")),
+            ("swap_lamports", json!("249999999")),
+            ("rent_lamports", json!("1000001")),
+            ("tip_lamports", json!("1001")),
+            ("swap_lamports", json!(u64::MAX.to_string())),
+            ("rent_lamports", json!(u64::MAX.to_string())),
+            ("tip_lamports", json!(u64::MAX.to_string())),
+            ("rent_lamports", json!("unknown")),
+            ("tip_lamports", json!(-1)),
+            ("provider_body", json!("unreviewed")),
+        ] {
+            let mut bad = price.clone();
+            bad["acquisition_costs"][field] = value;
+            assert!(
+                review(&binding, &entry, &record, bad, &policy, 20).is_err(),
+                "bad {field}"
+            );
+        }
+        for (field, value) in [
+            ("outcome", json!("failed")),
+            ("operation", Value::Null),
+            ("wallet_token_acquisition", Value::Null),
+        ] {
+            let mut bad = record.clone();
+            bad.review[field] = value;
+            assert!(review(&binding, &entry, &bad, price.clone(), &policy, 20).is_err());
+        }
+        for (field, value) in [
+            ("mint", json!(Address::SYSTEM_PROGRAM)),
+            ("owner", json!(Address::SYSTEM_PROGRAM)),
+            ("program_id", json!(Address::SYSTEM_PROGRAM)),
+            ("decimals", json!(9)),
+            ("net_acquired_raw", Value::Null),
+        ] {
+            let mut bad = record.clone();
+            bad.review["wallet_token_acquisition"][field] = value;
+            assert!(review(&binding, &entry, &bad, price.clone(), &policy, 20).is_err());
+        }
+        for context in [None, Some(json!({}))] {
+            let mut bad = binding.clone();
+            bad.reviewed_proposal = context;
+            assert!(review(&bad, &entry, &record, price.clone(), &policy, 20).is_err());
+        }
+        for (field, value) in [
+            ("action", json!("exit")),
+            ("action", json!("reduce")),
+            ("quote", json!("usdc")),
+            ("mint", json!(Address::SYSTEM_PROGRAM)),
+        ] {
+            let mut bad = binding.clone();
+            bad.reviewed_proposal.as_mut().expect("proposal")[field] = value;
+            assert!(review(&bad, &entry, &record, price.clone(), &policy, 20).is_err());
+        }
+    }
+
+    #[test]
+    fn acquisition_unit_bounds_and_retained_identity_fields_are_required() {
+        let (binding, entry, record, price, policy) = acquisition_fixture();
+        for (input_field, retained_field, value) in [
+            ("wallet", "owner", json!(Address::SYSTEM_PROGRAM)),
+            ("mint", "mint", json!(Address::SYSTEM_PROGRAM)),
+            ("net_acquired_raw", "net_acquired_raw", json!("0")),
+        ] {
+            let mut record = record.clone();
+            let mut price = price.clone();
+            record.review["wallet_token_acquisition"][retained_field] = value.clone();
+            price["acquisition_costs"][input_field] = value;
+            assert!(review(&binding, &entry, &record, price, &policy, 20).is_err());
+        }
+        let mut zero_swap = price.clone();
+        zero_swap["acquisition_costs"]["swap_lamports"] = json!("0");
+        zero_swap["acquisition_costs"]["rent_lamports"] = json!("251000000");
+        assert!(review(&binding, &entry, &record, zero_swap, &policy, 20).is_err());
+        for decimals in [0, 18, u8::MAX] {
+            let mut record = record.clone();
+            let mut price = price.clone();
+            record.review["wallet_token_acquisition"]["decimals"] = json!(decimals);
+            price["acquisition_costs"]["decimals"] = json!(decimals);
+            assert_eq!(
+                review(&binding, &entry, &record, price, &policy, 20).is_ok(),
+                decimals != u8::MAX
+            );
+        }
+        for field in [
+            "mint",
+            "owner",
+            "program_id",
+            "decimals",
+            "net_acquired_raw",
+        ] {
+            let mut record = record.clone();
+            record.review["wallet_token_acquisition"]
+                .as_object_mut()
+                .expect("acquisition")
+                .remove(field);
+            assert!(
+                review(&binding, &entry, &record, price.clone(), &policy, 20).is_err(),
+                "missing {field}"
+            );
+        }
     }
 
     #[test]

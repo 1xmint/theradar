@@ -1978,3 +1978,46 @@ redundant documentation-only CI run. Verified source is pushed in PR 334.
 
 No Cargo/rustc/Radar process remains locally. Target measured 33.1 GiB with
 61.1 GiB free. Previously rejected ignored-output cleanup was not retried.
+
+### Protected acquisition cost breakdown review (2026-10-08)
+
+Actual caller: existing `radar-issuer --review-valuation` with optional private
+price-file `acquisition_costs`. Missing/null leaves notional and basis unknown;
+a supplied incomplete/malformed/foreign breakdown refuses. It binds operation,
+exact signed artifact, wallet, reviewed successful native-SOL buy, mint, token
+program, usable decimals and known positive acquired units. Explicit swap/rent/
+tip integers and retained network fee must sum exactly to wallet debit without
+overflow; swap is positive and other cash flows must be explicitly absent.
+Both under- and over-accounted outlay refuse. Historical price/slot/time,
+reservation, private-file and wallet-signature checks remain in force.
+
+Bookkeeping basis capitalizes swap plus fee plus tip; rent is priced separately
+without claiming recoverability or a realised loss. Swap alone supplies trade
+notional. Existing costs round upward. This is operator-reviewed classification
+and arithmetic consistency, not authenticated gross fill or independently
+collected economics. A balanced false split cannot be detected within this trust
+boundary. PnL stays null; no history/portfolio/loss/claim or authority update.
+Cost results are read-only and not yet durable; no new command or dependency.
+
+- [x] Three unit regressions cover complete/absent costs, integer pricing,
+  exact accounting, invalid/missing components, artifact/context/quantity/unit
+  bindings and decimal bounds. One actual-process regression verifies repeated
+  read-only review, refusals and retained outstanding claims. Raise test floor
+  from 2,097 to 2,101.
+- [x] Reapply accepting underreported outlay, capitalizing rent and bypassing
+  signed-artifact binding; the complete issuer unit suite catches each. Restore
+  source. An initial narrow name filter omitted the imbalance test; rerunning
+  the full issuer unit suite proves the actual regressions.
+- [x] Final scoped verification passes: 157 signer and 33 conformance tests,
+  Rust 1.99 Clippy and formatting. The final matched-identity/zero-swap boundary
+  fixture passes its targeted regression and Clippy.
+- [ ] Read staged diff, push after prior completed CI and await all mutation
+  shards/final gate.
+
+Next retain reviewed acquisition costs durably and implement idempotent economic
+reconciliation, including inventory/cost basis, exposure and daily loss. Gross
+fill attribution, new-account evidence and independent live component collection
+remain. Protected live risk inputs, execution/recovery/exits/scheduling and
+activation of limits, isolated keys, verified Privy policy/delegation, funding,
+deployment and bounded validation remain. All four gates remain open; autonomy
+stays off. No live read, real key/signature/delegation/trade or deployment occurs.
