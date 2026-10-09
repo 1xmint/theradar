@@ -478,6 +478,12 @@ impl OperationLog {
         self.operations.get(id).map(|live| &live.entry)
     }
 
+    /// Every retained operation once, including completed and failed entries.
+    /// Digest order is deterministic, not execution chronology.
+    pub fn entries(&self) -> impl Iterator<Item = (&OperationId, &OperationEntry)> {
+        self.operations.iter().map(|(id, live)| (id, &live.entry))
+    }
+
     /// Exact owned journal history a protected accounting snapshot must cover.
     /// Includes every event, not only outstanding operations. Empty for genesis.
     /// Does not verify valuations or prevent an operator rolling back the file.

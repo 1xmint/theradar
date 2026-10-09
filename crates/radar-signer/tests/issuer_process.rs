@@ -514,6 +514,357 @@ fn protected_cost_record_is_durable_idempotent_and_refuses_changed_economics() {
     );
 }
 
+fn acquisition_report(fixture: &Fixture) -> std::process::Output {
+    fixture
+        .command()
+        .arg("--review-acquisitions")
+        .output()
+        .expect("acquisition report")
+}
+
+fn native_portfolio(fixture: &Fixture) -> radar_types::Portfolio {
+    use radar_types::{
+        Asset, AssetRole, Balance, Holding, Portfolio, Slot, TokenQuantity, Unvaluable, Valuation,
+    };
+    let wallet = serde_json::from_value(fixture.config["wallet"].clone()).expect("wallet");
+    let mut portfolio = Portfolio::at(wallet, Slot(1000));
+    portfolio
+        .hold(
+            Asset::Sol,
+            Holding::new(
+                AssetRole::Cash,
+                Balance::Counted(TokenQuantity::lamports(300_000_000)),
+                Valuation::Unknown(Unvaluable::NoPrice),
+                Valuation::Unknown(Unvaluable::NoPrice),
+            ),
+        )
+        .expect("cash");
+    portfolio
+}
+
+#[test]
+fn acquisition_history_includes_completed_lots_once_and_keeps_wallet_risk_unknown() {
+    let (fixture, id, price_path, _) = acquisition_cost_fixture();
+    assert!(
+        fixture
+            .command()
+            .args(["--record-valuation", id.as_str()])
+            .arg(price_path)
+            .output()
+            .expect("record costs")
+            .status
+            .success()
+    );
+    let history = fixture.dir.path().join("operations.jsonl");
+    let saved = std::fs::read(&history).expect("history");
+    let result = acquisition_report(&fixture);
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    let first: Value = serde_json::from_slice(&result.stdout).expect("report");
+    assert_eq!(first["lots"].as_array().expect("lots").len(), 1);
+    assert_eq!(first["lots"][0]["operation"], id.as_str());
+    assert_eq!(
+        first["lots"][0]["creator"],
+        fixture.snapshot["proposal"]["creator"]
+    );
+    let group = &first["acquisitions_by_mint_and_creator"][0];
+    assert_eq!(group["net_acquired_raw"], "15");
+    assert_eq!(group["position_cost_basis_micro_usd"], "3001200");
+    assert_eq!(group["rent_micro_usd"], "30000");
+    assert_eq!(group["oldest_valuation_slot"], "1000");
+    assert_eq!(first["wallet_inventory_complete"], false);
+    assert_eq!(first["current_exposure_micro_usd"], Value::Null);
+    assert_eq!(first["realised_loss_today_micro_usd"], Value::Null);
+    assert_eq!(first["portfolio_state_updated"], false);
+    assert_eq!(first["economic_reconciliation_complete"], false);
+    assert_eq!(first["reservation_released"], false);
+    assert_eq!(
+        serde_json::from_slice::<Value>(&acquisition_report(&fixture).stdout).expect("restart"),
+        first
+    );
+    assert_eq!(std::fs::read(&history).expect("unchanged"), saved);
+    assert_eq!(
+        fixture.start().ask(&fixture.candidate)["reason"],
+        "outstanding operation requires reconciliation"
+    );
+    let mut log = radar_journal::OperationLog::open(&history).expect("log");
+    let mut portfolio = native_portfolio(&fixture);
+    log.rehold(&mut portfolio).expect("rehold");
+    log.reconcile(
+        &id,
+        radar_types::Settlement::Completed(radar_types::TokenQuantity::lamports(15_156_000)),
+        &mut portfolio,
+        1_010,
+    )
+    .expect("generic completion");
+    let checkpoint = log.checkpoint().to_owned();
+    assert_eq!(log.outstanding().count(), 0);
+    drop(log);
+    let saved = std::fs::read(&history).expect("terminal history");
+    let result = acquisition_report(&fixture);
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    let after: Value = serde_json::from_slice(&result.stdout).expect("terminal report");
+    assert_eq!(after["lots"], first["lots"]);
+    assert_eq!(
+        after["acquisitions_by_mint_and_creator"],
+        first["acquisitions_by_mint_and_creator"]
+    );
+    assert_eq!(after["accounting_checkpoint"], checkpoint);
+    assert_eq!(std::fs::read(&history).expect("unchanged"), saved);
+}
+
+#[test]
+fn acquisition_report_refuses_missing_changed_duplicate_or_invalid_retained_economics() {
+    use radar_journal::{Correlation, OperationLog};
+    for case in [
+        "missing",
+        "duplicate",
+        "signature",
+        "normalized",
+        "facts_signature",
+        "terminal",
+    ] {
+        let (fixture, id, price_path, _) = acquisition_cost_fixture();
+        if case != "missing" {
+            assert!(
+                fixture
+                    .command()
+                    .args(["--record-valuation", id.as_str()])
+                    .arg(price_path)
+                    .output()
+                    .expect("costs")
+                    .status
+                    .success()
+            );
+        }
+        let history = fixture.dir.path().join("operations.jsonl");
+        let mut log = OperationLog::open(&history).expect("log");
+        if case == "terminal" {
+            let mut portfolio = native_portfolio(&fixture);
+            log.rehold(&mut portfolio).expect("rehold");
+            log.reconcile(
+                &id,
+                radar_types::Settlement::Completed(radar_types::TokenQuantity::lamports(
+                    15_000_000,
+                )),
+                &mut portfolio,
+                1_010,
+            )
+            .expect("generic mismatched spend");
+        } else if case != "missing" {
+            let intent = log.entry(&id).expect("entry").intent;
+            let mut binding = log.execution(&id).expect("binding").clone();
+            let mut value = log.valuation(&id).expect("value").clone();
+            if case == "normalized" || case == "facts_signature" {
+                let (unsigned, signed) = another_fixture_transaction(&binding);
+                binding.transaction = unsigned;
+                binding.signed_transaction = Some(signed.clone());
+                value.settlement.signed_transaction = signed;
+                value.settlement.review["signature"] =
+                    fixture_signature(&value.settlement.signed_transaction);
+            }
+            if case == "signature" {
+                let mut bytes =
+                    radar_types::b64::decode(binding.signed_transaction.as_ref().expect("signed"))
+                        .expect("bytes");
+                bytes[1] ^= 1;
+                binding.signed_transaction = Some(radar_types::b64::encode(&bytes));
+                value.settlement.signed_transaction =
+                    binding.signed_transaction.clone().expect("signed");
+            }
+            let signed = binding.signed_transaction.take().expect("signed");
+            let second = log
+                .propose(
+                    intent,
+                    1_011,
+                    Correlation {
+                        execution: Some(binding),
+                        ..Correlation::default()
+                    },
+                )
+                .expect("second operation");
+            let mut portfolio = native_portfolio(&fixture);
+            log.reserve(&second, &mut portfolio, 1_012)
+                .expect("reserve");
+            log.submit(&second, 1_013, |_| Ok::<(), ()>(()))
+                .expect("submit")
+                .expect("effect");
+            log.record_signed(&second, signed, 1_014).expect("signed");
+            value.settlement.review["operation"] = json!(second.as_str());
+            value.review["operation"] = json!(second.as_str());
+            if case == "normalized" {
+                value.review["position_cost_basis_micro_usd"] = json!("3001201");
+            }
+            if case == "facts_signature" {
+                value.settlement.review["signature"] = json!("another signature");
+            }
+            log.record_settlement(&second, value.settlement.clone(), 1_015)
+                .expect("facts");
+            log.record_valuation(&second, value, 1_016)
+                .expect("generic costs");
+        }
+        drop(log);
+        let saved = std::fs::read(&history).expect("history");
+        let result = acquisition_report(&fixture);
+        assert!(!result.status.success(), "{case}");
+        assert_eq!(result.stdout, Vec::<u8>::new(), "{case}");
+        assert_eq!(std::fs::read(&history).expect("unchanged"), saved);
+    }
+}
+
+fn another_fixture_transaction(binding: &radar_journal::ExecutionBinding) -> (String, String) {
+    use ed25519_dalek::Signer as _;
+    let mut unsigned = radar_types::b64::decode(&binding.transaction).expect("unsigned");
+    // This fixture has three legacy account keys; change only its blockhash.
+    unsigned[69 + 3 * 32] ^= 1;
+    let mut signed = unsigned.clone();
+    let signature = ed25519_dalek::SigningKey::from_bytes(&[0x42; 32])
+        .sign(&unsigned[65..])
+        .to_bytes();
+    signed[1..65].copy_from_slice(&signature);
+    (
+        radar_types::b64::encode(&unsigned),
+        radar_types::b64::encode(&signed),
+    )
+}
+
+fn fixture_signature(signed: &str) -> Value {
+    let bytes = radar_types::b64::decode(signed).expect("bytes");
+    json!(radar_types::Signature::new(bytes[1..65].try_into().expect("signature")).to_string())
+}
+
+#[test]
+fn distinct_signed_acquisitions_are_both_counted_after_restart() {
+    let (fixture, id, price_path, _) = acquisition_cost_fixture();
+    assert!(
+        fixture
+            .command()
+            .args(["--record-valuation", id.as_str()])
+            .arg(price_path)
+            .output()
+            .expect("costs")
+            .status
+            .success()
+    );
+    let history = fixture.dir.path().join("operations.jsonl");
+    let mut log = radar_journal::OperationLog::open(&history).expect("log");
+    let intent = log.entry(&id).expect("entry").intent;
+    let mut binding = log.execution(&id).expect("binding").clone();
+    let mut value = log.valuation(&id).expect("value").clone();
+    let (unsigned, signed) = another_fixture_transaction(&binding);
+    binding.transaction = unsigned;
+    binding.signed_transaction = None;
+    value.settlement.signed_transaction = signed;
+    value.settlement.review["signature"] = fixture_signature(&value.settlement.signed_transaction);
+    let second = log
+        .propose(
+            intent,
+            1_011,
+            radar_journal::Correlation {
+                execution: Some(binding),
+                ..Default::default()
+            },
+        )
+        .expect("second");
+    let mut portfolio = native_portfolio(&fixture);
+    log.reserve(&second, &mut portfolio, 1_012)
+        .expect("reserve");
+    log.submit(&second, 1_013, |_| Ok::<(), ()>(()))
+        .expect("submit")
+        .expect("effect");
+    log.record_signed(&second, value.settlement.signed_transaction.clone(), 1_014)
+        .expect("signed");
+    value.settlement.review["operation"] = json!(second.as_str());
+    value.review["operation"] = json!(second.as_str());
+    log.record_settlement(&second, value.settlement.clone(), 1_015)
+        .expect("facts");
+    log.record_valuation(&second, value, 1_016).expect("costs");
+    drop(log);
+    let saved = std::fs::read(&history).expect("history");
+    let result = acquisition_report(&fixture);
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    let report: Value = serde_json::from_slice(&result.stdout).expect("report");
+    assert_eq!(report["lots"].as_array().expect("lots").len(), 2);
+    assert_eq!(
+        report["acquisitions_by_mint_and_creator"][0]["net_acquired_raw"],
+        "30"
+    );
+    assert_eq!(
+        report["acquisitions_by_mint_and_creator"][0]["position_cost_basis_micro_usd"],
+        "6002400"
+    );
+    assert_eq!(
+        report["acquisitions_by_mint_and_creator"][0]["rent_micro_usd"],
+        "60000"
+    );
+    assert_eq!(std::fs::read(&history).expect("unchanged"), saved);
+}
+
+#[test]
+fn empty_or_unsubmitted_history_does_not_claim_flat_wallet_inventory() {
+    for stage in ["empty", "proposed", "reserved", "failed"] {
+        let fixture = Fixture::new();
+        let history = fixture.dir.path().join("operations.jsonl");
+        let mut log = radar_journal::OperationLog::open(&history).expect("log");
+        if stage != "empty" {
+            let id = log
+                .propose(
+                    radar_journal::Intent {
+                        asset: radar_types::Asset::Sol,
+                        amount: radar_types::TokenQuantity::lamports(1_000),
+                        at: radar_types::Slot(1000),
+                    },
+                    1_000,
+                    radar_journal::Correlation {
+                        mention: Some("unsubmitted".into()),
+                        ..Default::default()
+                    },
+                )
+                .expect("propose");
+            let mut portfolio = native_portfolio(&fixture);
+            if stage == "reserved" {
+                log.reserve(&id, &mut portfolio, 1_001).expect("reserve");
+            }
+            if stage == "failed" {
+                log.fail(&id, &mut portfolio, 1_002).expect("fail");
+            }
+        }
+        let checkpoint = log.checkpoint().to_owned();
+        drop(log);
+        let saved = std::fs::read(&history).expect("history");
+        let result = acquisition_report(&fixture);
+        assert!(
+            result.status.success(),
+            "{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+        let result: Value = serde_json::from_slice(&result.stdout).expect("report");
+        assert_eq!(result["lots"], json!([]));
+        assert_eq!(
+            result["unsubmitted_operations"]
+                .as_array()
+                .expect("unsubmitted")
+                .len(),
+            usize::from(stage != "empty")
+        );
+        assert_eq!(result["accounting_checkpoint"], checkpoint);
+        assert_eq!(result["wallet_inventory_complete"], false);
+        assert_eq!(result["current_exposure_micro_usd"], Value::Null);
+        assert_eq!(std::fs::read(&history).expect("unchanged"), saved);
+    }
+}
+
 #[test]
 fn recorded_token_acquisition_is_measured_or_unknown_and_keeps_claims_outstanding() {
     for case in ["paired", "missing_pre", "failed"] {

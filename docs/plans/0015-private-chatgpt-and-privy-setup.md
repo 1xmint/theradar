@@ -2174,3 +2174,51 @@ redundant documentation-only CI run. Verified source is pushed in PR 334.
 
 No Cargo/rustc/Radar process remains locally. Target measured 33.1 GiB with
 59.5 GiB free. Previously rejected ignored-output cleanup was not retried.
+
+
+### Replay-derived acquisition history (2026-10-08)
+
+Actual caller: `radar-issuer --review-acquisitions` over the owned journal.
+New OperationLog.entries exposes every retained operation once, including
+terminal entries, in deterministic digest order rather than execution chronology.
+The report rebuilds native-SOL acquisition lots from complete retained costs,
+re-verifies wallet signatures/exact messages and redoes the historical valuation;
+all normalized fields must agree and retained facts must name that signed
+transaction signature. Unsubmitted operations are listed separately.
+Terminal acquisitions require Completed spend equal to measured debit. Missing,
+changed, unsupported or duplicate-artifact acquisitions refuse the whole report.
+Mint/program/unit identity is consistent across creator groups; aggregation of
+measured units, basis and rent is checked, with the oldest price watermark.
+
+Acquisition history remains distinct from complete wallet inventory and current
+risk state. Empty lots do not mean flat inventory. Output names the journal
+checkpoint but keeps inventory completeness false and exposure/daily loss null.
+No history/portfolio/claim/authority changes. Opening inventory, external changes,
+failed fees, disposals and current pricing require later reconciliation.
+
+- [x] Six new regressions cover exact multi-lot/mint/creator aggregation, units,
+  overflow, terminal replay/repeat, valid distinct signed trades, missing/changed/
+  duplicate/invalid evidence and empty/unsubmitted history through the actual
+  protected process. Raise test floor from 2,106 to 2,112.
+- [x] Reapply taking newest price watermark, accepting duplicate artifacts,
+  accepting changed normalized valuation and dropping terminal operations; each
+  relevant regression fails. A final diff review added retained-fact signature
+  association; removing it also fails the distinct-artifact refusal regression.
+  Source restored. No mutation exclusion, lint suppression or dependency added.
+  The distinct-trade fixture initially used
+  the issuer seed; strict signature verification refused it. Corrected to its
+  fixture wallet seed and the positive two-trade case passes.
+- [x] Final scoped checks pass: 46 journal, 164 signer and 33 conformance
+  tests, Rust 1.99 scoped Clippy and formatting. Complete staged diff reviewed
+  before committing; full CI follows below.
+- [ ] Push after prior CI completion; verify full CI tests, all four mutation
+  shards and final gate, then record source/counts in the handback.
+
+Next reconcile these historical lots with protected opening/current wallet
+inventory and integrate coverage with economic risk state before claim closure.
+Failed execution fees, disposals/day/failure ordering, external changes and
+independent current USD valuation remain. Four major activation areas remain:
+economic reconciliation, protected live risk inputs, execution/recovery/exits/
+scheduling and limits/isolated keys/verified Privy policy/delegation/funding/
+deployment/bounded validation. Autonomous trading stays off. No live provider or
+chain read, real key/signature/delegation/trade or Serve deployment occurs.

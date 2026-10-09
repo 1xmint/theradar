@@ -699,6 +699,43 @@ cost basis, USD exposure or loss, or release capital. The claim remains
 outstanding and blocks another issuance. Economic reconciliation must consume
 these retained records idempotently before repeated autonomous execution.
 
+## Replay-derived acquisition history review
+
+`radar-issuer --review-acquisitions` reads every retained operation under the
+journal ownership lock, including completed entries. It reconstructs one
+historical acquisition lot per submitted operation, re-verifies its configured
+wallet signature/exact message, checks the retained facts name that signature,
+and reruns the existing complete historical
+valuation from normalized retained inputs. The entire normalized result must
+match, including every price, cost, watermark and operation field. The journal
+already guarantees exact settlement association; the report adds no duplicate
+storage or association rule.
+
+Proposed, Reserved and pre-submission Failed operations are listed separately,
+with no inferred acquisition or released claim. Every other operation needs
+complete successful native-SOL buy costs. SubmissionUnknown is supported;
+Confirmed/Reconciled are supported only with Completed native spend equal to
+the retained wallet debit. Missing costs, unsupported terminal outcomes or
+inconsistent retained reviews refuse the whole report. The same signed artifact
+under different operation identities also refuses rather than double-counting.
+
+Lots preserve reviewed creator, mint/program/decimals, measured acquired units,
+cost basis, separately priced rent and execution/price watermarks. Aggregation
+by mint and creator uses checked integer totals and the oldest price slot.
+A mint changing program or decimals refuses, including across creators. The
+report names the owned journal's current accounting checkpoint and is stable
+across replay/repeat; no history or portfolio state is written.
+
+This is protected operator acquisition history, not verified current wallet
+inventory. An empty report does not establish a flat wallet. Opening inventory,
+external transfers, disposals, failed execution fees, current valuations and
+complete daily-loss accounting remain unresolved. Output explicitly reports
+wallet inventory incomplete and exposure/loss unknown. Existing claims remain
+outstanding; no operation is closed or signing authority activated. Historical
+basis is bookkeeping acquisition cost, not current liquidation value. Changes
+to configured valuation age bounds can refuse older records; history is never
+rewritten to accommodate them.
+
 ## What would reverse this
 
 Nothing foreseeable reverses holding a policy locally. The specific ceilings are

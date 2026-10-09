@@ -21,6 +21,9 @@ mod settlement;
 #[path = "radar-issuer/valuation.rs"]
 mod valuation;
 
+#[path = "radar-issuer/acquisitions.rs"]
+mod acquisitions;
+
 #[derive(Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 struct Config {
@@ -634,6 +637,13 @@ fn run() -> Result<(), String> {
     let path = std::env::var_os("RADAR_ISSUER_CONFIG").ok_or("issuer configuration missing")?;
     let mut issuer = Issuer::load(Path::new(&path))?;
     let args: Vec<_> = std::env::args().skip(1).collect();
+    if args == ["--review-acquisitions"] {
+        println!(
+            "{}",
+            acquisitions::review(&issuer.operations, &issuer.config)?
+        );
+        return Ok(());
+    }
     if !args.is_empty() {
         if args.len() != 3 {
             return Err(
