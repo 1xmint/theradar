@@ -2011,8 +2011,9 @@ Cost results are read-only and not yet durable; no new command or dependency.
 - [x] Final scoped verification passes: 157 signer and 33 conformance tests,
   Rust 1.99 Clippy and formatting. The final matched-identity/zero-swap boundary
   fixture passes its targeted regression and Clippy.
-- [ ] Read staged diff, push after prior completed CI and await all mutation
-  shards/final gate.
+- [x] Source 72b86d6 passed full CI 37860126670: 2,498 Rust and 352 web
+  tests, all four mutation shards and final gate. Staged diff read; prior CI
+  passed before pushing. No awaited run was cancelled.
 
 Next retain reviewed acquisition costs durably and implement idempotent economic
 reconciliation, including inventory/cost basis, exposure and daily loss. Gross
@@ -2021,3 +2022,53 @@ remain. Protected live risk inputs, execution/recovery/exits/scheduling and
 activation of limits, isolated keys, verified Privy policy/delegation, funding,
 deployment and bounded validation remain. All four gates remain open; autonomy
 stays off. No live read, real key/signature/delegation/trade or deployment occurs.
+
+### Handback: protected acquisition cost breakdown (2026-10-08)
+
+Source 72b86d68c7d1a614a72b8af839eb067d5faa988e passed full CI
+37860126670 (https://github.com/1xmint/theradar/actions/runs/37860126670):
+2,498 Rust and 352 web tests, all four mutation shards and final gate. Local
+verification passed 157 signer and 33 conformance tests, Rust 1.99 scoped Clippy
+and formatting. The final matched-identity/zero-swap fixture passed its targeted
+test and Clippy. Reapplied underreported outlay, rent capitalization and omitted
+signed-artifact binding each failed the complete issuer unit suite; restored.
+The first name-filtered run omitted the imbalance test; the full suite proves
+the regressions. No dependency, mutation exclusion or lint suppression added.
+Complete staged diff read; prior CI 37852448900 passed before the source push.
+
+Actual caller remains the protected `--review-valuation` command. Its private
+price input now accepts an optional complete acquisition-cost object bound to
+operation, exact signed artifact, wallet, reviewed successful native-SOL buy,
+mint/program/usable decimals and positive measured acquired quantity. Checked
+swap plus retained network fee plus tip plus rent must equal wallet debit
+exactly. Swap must be positive and other cash flows explicitly absent. Foreign,
+incomplete, unbalanced or overflowing costs refuse the whole review; absent/null
+costs keep trade notional/basis unknown. Historical price/signature/reservation
+checks remain. Upward-rounded trade notional prices swap alone; position basis
+capitalizes swap, network fee and tip. Rent is separately priced without a
+recoverability assertion. Fees are already in basis; do not double-expense them.
+
+This verifies binding and arithmetic of operator-reviewed classification, not
+independent gross-fill or component provenance. A balanced false split remains
+inside the provisioning trust boundary. The result is read-only, not yet durable
+cost accounting, tax basis or a live sizing oracle. Repeated actual-process
+reviews/refusals preserve history; PnL stays null, portfolio/loss state is not
+updated and the outstanding claim still blocks issuance.
+
+Next durably retain reviewed acquisition costs and implement idempotent inventory/
+cost-basis, exposure and daily-loss reconciliation. Gross fill attribution,
+new-account evidence and independent component collection remain. Protected live
+risk inputs, execution/recovery/exits/scheduling and activation of owner limits,
+isolated keys, verified Privy policy/delegation, funding, deployment and bounded
+validation remain. All four activation gates remain open; several substantial
+integrations remain before live autonomy.
+
+Autonomous trading stays off and site limits remain drafts. No live provider or
+chain read, real wallet key/signature/credential/delegation change, trade, VPS
+health read or Serve deployment occurred. Current funding/Privy setup remains
+unverified; fixture signatures only. No local watcher remains. Verification
+notes are committed locally to include with the next source push, avoiding a
+redundant documentation-only CI run. Verified source is pushed in PR 334.
+
+No Cargo/rustc/Radar process remains locally. Target measured 33.1 GiB with
+59.5 GiB free. Previously rejected ignored-output cleanup was not retried.
