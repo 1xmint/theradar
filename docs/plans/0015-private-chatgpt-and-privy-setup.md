@@ -2350,5 +2350,59 @@ and state validation failed the running RPC regression. Disabling cross-program
 duplicate validation failed the CLI regression. All restored-source tests passed.
 An initial duplicate mutation removed HashSet type inference and was unviable;
 the reapplied guard-preserving variant failed the running test. No mutation
-exclusions, lint suppressions or dependencies added. Full CI is pending the
-source push; every awaited job must complete before any repair push or handback.
+exclusions, lint suppressions or dependencies added. Full CI passed source
+95f10cb in run 37871441513; the verified handback below records the result.
+
+### Next inspected inventory evidence step (2026-10-08)
+
+The shared jsonParsed reader still does not verify extensions, delegates or
+mint restrictions, and accepts a u128 amount although an individual raw token
+account stores u64. This is read-only evidence, not risk inventory. Inspection
+found existing RpcClient::accounts in crates/radar-onchain/src/rpc.rs returns
+base64-decoded owned accounts under one reported finalized context. Existing
+TokenAccount::parse and MintAccount::parse in crates/radar-pumpfun/src/token.rs
+check the raw program layouts and refuse unsupported extensions. Reuse these
+actual callers/parsers for a protected inventory read, rather than adding
+another parser or assuming initialized means spendable.
+
+Retain account/mint identities, independently parsed units/state/program and
+individual contexts/read windows. Refuse missing, mismatched or unsupported
+raw metadata instead of interpreting it as zero or safe. Establish protected
+opening/current coverage before matching inventory to acquisition lots;
+external transfers, unexplained holdings and absent disposal/fee accounting
+cannot become a complete portfolio. Enumeration and a subsequent account read
+are still distinct bank observations; one context for the second call does not
+prove complete wallet enumeration or atomicity with native balance/history.
+
+### Handback: token-account evidence identity (2026-10-08)
+
+Verified source 95f10cbda2ce166445e6a65bf6eb81ff3c702b96 is pushed in PR 334.
+Full CI 37871441513 completed successfully on that exact source: 2,511 Rust and
+352 web tests, build/lint/MSRV/site/dependency/format/licence checks, every
+mutation shard and final gate. The last shard tested 197 mutants in 25 minutes,
+116 caught and 81 unviable, none missed. Every awaited job completed; no repair
+push, cancellation, exclusion, lint suppression or dependency added.
+
+Local checks and manual regressions are recorded above. Full staged source
+diff was read before commit. The actual wallet-read caller now retains token
+account identities/program/state and refuses duplicate accounts within and
+across program reads. Frozen/uninitialized amounts remain holdings with unknown
+spendability. Separate same-mint accounts remain separate. Individual slots,
+exact quantities, host read windows and unknown USD/P&L remain unchanged.
+
+Next: the inspected raw account/mint verification step above, then protected
+opening/current inventory coverage and reconciliation against retained
+acquisition lots. Unexplained holdings, external transfers, disposal/failed fee
+accounting, current exposure and daily loss remain unresolved. Four major
+activation areas remain: economic reconciliation, protected live risk inputs,
+execution/recovery/exits/scheduling, and owner limits/isolated keys/verified Privy
+policy/delegation/funding/deployment/bounded validation. No percentage or launch
+date claimed. Historical acquisition bookkeeping is not current inventory.
+
+Autonomous trading remains off and site limits remain drafts. No live chain
+read, wallet key/signature/credential/delegation change, trade, VPS health read
+or Serve deployment occurred. Funding/Privy setup remains unverified. The CI
+watch finished and no local Cargo/rustc/Radar process remains. Target measured
+34.9 GiB with 57.6 GiB free after local checks; previously rejected ignored-output
+cleanup was not retried. This verified handback is committed locally for the
+next source push, avoiding a redundant documentation-only full CI run.
