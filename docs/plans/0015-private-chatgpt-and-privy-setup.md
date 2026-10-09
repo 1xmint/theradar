@@ -2882,3 +2882,42 @@ intent to 5,000. Production refusal was correct and unchanged. No live chain,
 key, delegation, trade, deployment or numeric owner limit change. Full CI is
 required before handback. Next: complete disposal/transfer cash-flow coverage,
 opening/failed-fee ordering, current valuation and idempotent economic closure.
+
+
+### Verified disposal handback (2026-10-09)
+
+Source 8c06bd905e078827f5adc170c3423750dcf0b36e passed full CI 37957176724:
+https://github.com/1xmint/theradar/actions/runs/37957176724 . Every job succeeded,
+including 2,537 Rust and 352 web tests, build, lint, formatting, MSRV, dependency,
+licence and site checks, all four mutation shards and the final gate. Shards
+0/1/2/3 each tested 248 mutants (992 total), caught 182/168/193/197 with
+66/80/55/51 unviable and none missed. The longest mutation step ran 26 minutes.
+No check was cancelled or pushed over. Verified with gh run view and completed
+job logs through gh api. Local cargo test -p radar-signer -p repo-conformance
+passed 181 signer and 33 conformance tests; restored issuer unit/process tests,
+Rust 1.99 scoped all-target Clippy and formatting passed. Six manually reapplied
+logic faults failed their regressions; all were restored before source commit.
+
+Protected settlement review/record now retains measured net disposal for reviewed
+successful SOL Reduce/Exit contexts. Paired identity/units and checked totals are
+shared with acquisition review. Synthetic fixtures prove protected process
+retention, repeat/replay and immutable conflict refusal, not live exit issuance
+or accepted sale transactions. Unknown disposal is omitted, preserving older
+buy/failed review shapes. No proceeds, transfer attribution, allocated basis,
+realised PnL, portfolio update or claim release is inferred.
+
+Next: complete disposal/transfer cash flows, opening/failed-fee ordering, current
+valuation/exposure/loss and idempotent economic reconciliation. Four activation
+areas remain: economic reconciliation; independently constructed live risk
+inputs; execution/exits/recovery/scheduling; owner numeric limits, isolated keys,
+verified Privy policy/delegation, funding, deployment and bounded validation.
+No percentage or activation date claimed. Live autonomy remains off and site
+limits remain drafts. Outstanding claims still block issuance; complete wallet
+inventory, current exposure and daily loss remain unknown.
+
+No live chain read, real credential/key/signature/delegation change, trade, VPS
+read or deployment occurred. Funding/current Privy policy remain unverified.
+CI watch completed; no Cargo/rustc/Radar process remained at final inspection.
+Target measured 35.1 GiB and free disk 58.2 GiB. Previously rejected cleanup was
+not retried. This verified handback is committed locally for the next source
+push, avoiding a redundant documentation-only full CI run.
