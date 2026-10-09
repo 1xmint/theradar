@@ -2814,3 +2814,48 @@ signature association, facts operation association and terminal consistency
 failures individually still fails the mixed-history regression. Restored source,
 scoped Rust 1.99 Clippy/formatting and 33 conformance checks passed. The same
 owner is borrowed through both transitions; no production change or retry.
+
+### Verified mixed-history handback (2026-10-09)
+
+Source b3679745de588e6812a9b79ce38960aa69121520 passed full CI 37952931702:
+https://github.com/1xmint/theradar/actions/runs/37952931702 . Every job completed
+successfully: 2,534 Rust and 352 web tests, build, lint, format, MSRV, dependency,
+licence and site checks, all four mutation shards and final gate. Shards
+0/1/2/3 tested 243/243/243/242 mutants, caught 178/164/201/191 with
+65/79/42/51 unviable and none missed. The last mutation step ran 23 minutes.
+Both earlier runs completed fully before their repairs were pushed; none was
+cancelled. Initial 6e6af9d passed ordinary tests but shard 3's baseline hit the
+terminal-fixture reopen. First repair f24e968 still hit the copy-helper reopen
+in ordinary tests and shard 1 baseline. Complete repair keeps both transitions
+under their existing owner; production locking/refusals remain unchanged.
+Holder identity at the earlier contention points remains unknown. LEARNINGS 53
+records both failures and the limit of the inference. Complete Linux CI now
+passes; this is no claim of a deterministic local reproduction of the window.
+
+The protected history path recomputes both acquisition and failed-fee valuation,
+checks exact configured-wallet signature/message, facts operation/signature and
+terminal debit, and refuses duplicate signed artifacts across categories.
+Recorded failed fees remain separate from token quantities/basis/rent. Checked
+native/USD fee totals cover retained costs only. Inventory review carries this
+history and refuses native/token contexts predating retained failed executions.
+Reports are read-only, stable across replay/repeat and retain terminal costs once.
+Local 178 signer tests, Rust 1.99 scoped all-target Clippy/formatting and 33
+conformance checks passed; all 11 manual behavior variants failed regressions.
+Facts association and terminal consistency faults still fail after the complete
+fixture repair. No dependency, mutation exclusion or lint suppression.
+
+Next: transfer/disposal and complete cash-flow coverage, including failed-fee
+ordering against opening inventory, then current valuation, exposure/loss and
+idempotent economic reconciliation. Four activation areas remain: economic
+reconciliation; protected live risk inputs; execution/recovery/exits/scheduling;
+owner limits, isolated keys, verified Privy policy/delegation, funding, deployment
+and bounded validation. No percentage or launch date claimed. Autonomous trading
+remains off; site limits remain drafts. Complete inventory/exposure/daily loss
+remain unknown; outstanding claims still block issuance.
+
+No live chain read, real credential/key/signature/delegation change, trade, VPS
+health read or Serve deployment occurred. Funding/current Privy policy remain
+unverified. CI watches ended; no Cargo/rustc/Radar process remained at local
+inspection. Target measured 35.1 GiB with 58.3 GiB free; previously rejected
+ignored-output cleanup was not retried. This handback is committed locally for
+the next source push, avoiding redundant documentation-only full CI.
