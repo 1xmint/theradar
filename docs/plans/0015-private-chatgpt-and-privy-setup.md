@@ -3170,3 +3170,65 @@ extended process regression, then restore source. LEARNINGS 55 records the gap.
 The manual fault total is now 19. Restored 196 signer tests, 33 conformance
 checks, scoped Rust 1.99 Clippy and formatting passed. Await every initial job
 before repair push; whole repaired CI remains pending. No live change.
+
+
+### Verified FIFO disposal accounting handback (2026-10-09)
+
+Source caa96f0ada7ed69898ded0ab24d291c06ca71073 passed every job in
+CI 37983976833: https://github.com/1xmint/theradar/actions/runs/37983976833 .
+2,552 Rust and 352 web tests passed, with build, lint, formatting, MSRV,
+dependency, licence/site checks, all four mutation shards and the final gate.
+Shards 0/1/2/3 tested 272/272/272/270 mutants (1,086 total), caught
+206/183/221/208 with 66/89/51/62 unviable (818 caught, 268 unviable),
+none missed. The final mutation step ran 25 minutes. Proof read with gh run view
+and completed job logs through gh api; head SHA matches the repaired source.
+
+Initial source f5115048a73213a4c0842a87839e916888e4c90b completed CI
+37981032392: 2,552 Rust tests and every ordinary check passed, as did mutation
+shards 0/1/2 (272 each; 206/183/221 caught and 66/89/51 unviable). Shard 3
+reported two missed > to >= mutations at inventory.rs:180:17 and :180:35,
+with 270 tested, 206 caught and 62 unviable. The original code accepted exact
+sale-slot observations correctly, but its process test omitted equality.
+Extend that test to accept exact-slot and later observations, keeping independent
+older native/classic/Token-2022 refusals. Both reported mutants were reapplied
+at their exact positions and failed. LEARNINGS 55 records this test gap.
+Every initial job and final gate completed before the repair push; neither run
+was cancelled. Repaired whole CI caught both previously missed mutations.
+
+The existing owned history reader now allocates recorded sales against FIFO
+buy lots and retains exact remaining quantities/basis. Opening wallet/read/
+unique-mint checks are shared with inventory. Require an opening snapshot and
+zero opening quantities for sold mints; unknown opening costs stay unknown.
+Trade slots must follow the opening read; same-mint ties and sales exceeding
+preceding lots refuse. Partial allocation rounds micro-USD upward, uses wide
+products and conserves exact remainder across later sales. Checked sums and
+signed net proceeds minus basis refuse overflow. Each allocation preserves its
+acquisition operation and creator. The inventory caller compares the remaining
+quantities, separately preserving original acquired and recorded disposed counts,
+and requires native/token observations at or after every recorded sale.
+
+This remains operator-provisioned recorded-trade bookkeeping. Per-sale recorded
+trade PnL excludes separately retained rent/failed fees and does not establish
+complete wallet realised PnL or daily loss. External transfers/cash flows, native
+cash reconciliation, current valuation/exposure/loss and idempotent application
+remain unfinished. Reading/replay writes nothing; claims stay outstanding and
+block issuance. 196 local signer tests, 33 conformance checks, Rust 1.99 scoped
+all-target Clippy and formatting passed after restoration. All 19 manually
+reapplied logic faults failed their regressions. Six tests added; no dependency,
+lint suppression or mutation exclusion. Synthetic process fixtures do not
+establish network-accepted venue execution or independent evidence provenance.
+
+Next: complete transfer/cash-flow coverage and native cash reconciliation,
+opening/failed-fee ordering, current valuation/exposure/loss and idempotent
+application. Four activation areas remain: economic reconciliation; independent
+live risk inputs; execution/exits/recovery/scheduling; owner numeric limits,
+isolated keys, verified Privy policy/delegation, funding/deployment/validation.
+Autonomy remains off. No percentage or activation date claimed. Site limits
+remain drafts; current funding and Privy policy are unverified.
+
+No live chain read, real credential/key/signature/delegation change, trade,
+owner-limit change, VPS read or deployment occurred. No local Cargo/rustc/
+issuer/signer process remained at inspection. Target measured 35.1 GiB; disk
+free 57.1 GiB. No rejected cleanup was retried. Both CI watches completed.
+This verified handback is committed locally for the next source push, avoiding
+a redundant documentation-only full CI run.
