@@ -2072,3 +2072,42 @@ redundant documentation-only CI run. Verified source is pushed in PR 334.
 
 No Cargo/rustc/Radar process remains locally. Target measured 33.1 GiB with
 59.5 GiB free. Previously rejected ignored-output cleanup was not retried.
+
+
+### Durable reviewed acquisition valuation (2026-10-08)
+
+Actual caller: new protected `radar-issuer --record-valuation` command. It runs
+one input read through the existing signature/message/historical-price/full-cost
+review and refuses cash-only valuation. The journal retains exact prior
+SettlementRecord plus normalized review under the existing lock. It requires
+SubmissionUnknown and exact prior facts/unchanged metadata; proposal injection
+or a combined first settlement/valuation replay event refuses. Append precedes
+memory; identical repeats do not append or advance the checkpoint, while changed
+costs or prices refuse even if rounded USD basis agrees. Terminal replay retains
+the record. Older hashes and history are unchanged when the field is absent.
+
+This is durable operator-reviewed evidence, not economic reconciliation or
+independent provenance. Raw input declarations/provider bodies are not stored.
+No portfolio, inventory, exposure, loss, PnL, claim or signing authority changes.
+Outstanding claims continue to block issuance after restart.
+
+- [x] Five new regressions cover hash coverage, append failure, exact binding,
+  repeat/conflict/restart/terminal replay, injected or misstaged records and the
+  actual protected CLI. Existing signature and cash-only process regressions
+  also exercise recording. Test floor rises from 2,101 to 2,106.
+- [x] Reapply memory-before-append, accepting changed runtime/replay valuations
+  and recording cash-only reviews: each relevant regression fails. Source
+  restored; no mutation exclusion, lint suppression or dependency added.
+- [x] Final scoped tests pass: 46 journal, 158 signer and 33 conformance tests;
+  Rust 1.99 scoped Clippy and formatting pass. Staged diff reviewed before
+  committing; full CI verification remains below.
+- [ ] Push after prior CI completion and verify every full CI job, all four
+  mutation shards and final gate. Record actual counts and source below.
+
+Next implement idempotent economic reconciliation using the retained costs:
+inventory/cost basis, exposure and daily loss. Gross fill attribution,
+new-account evidence and independent live collection remain. Protected live risk
+inputs, execution/recovery/exits/scheduling and activation of owner limits,
+isolated keys, verified Privy policy/delegation, funding, deployment and bounded
+validation remain. All four activation gates remain open. Autonomous trading
+stays off; no live read, real key/signature/delegation/trade or deployment occurs.

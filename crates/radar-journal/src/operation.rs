@@ -247,6 +247,9 @@ pub enum OperationError {
     /// Missing, changed or wrongly staged finalized evidence.
     #[error("settlement record is unbound, conflicting or not awaiting reconciliation")]
     SettlementBinding,
+    /// Reviewed costs lack an exact retained settlement or conflict with history.
+    #[error("valuation does not bind immutable retained settlement facts")]
+    ValuationBinding,
     /// A reserved operation must reclaim its portfolio reservation after replay.
     #[error("the operation's reservation must be reheld before settlement")]
     ClaimNotReheld,
@@ -360,6 +363,7 @@ struct Live {
     entry: OperationEntry,
     execution: Option<crate::ExecutionBinding>,
     settlement: Option<crate::SettlementRecord>,
+    valuation: Option<crate::ValuationRecord>,
     /// The portfolio handle for its claim, when this process is holding one.
     ///
     /// `None` after a replay and before [`OperationLog::rehold`]: a
@@ -492,6 +496,56 @@ impl OperationLog {
     #[must_use]
     pub fn settlement(&self, id: &OperationId) -> Option<&crate::SettlementRecord> {
         self.operations.get(id)?.settlement.as_ref()
+    }
+
+    /// Retained caller-reviewed costs, including after terminal replay.
+    #[must_use]
+    pub fn valuation(&self, id: &OperationId) -> Option<&crate::ValuationRecord> {
+        self.operations.get(id)?.valuation.as_ref()
+    }
+
+    /// Durably retains caller-reviewed costs against exact existing facts.
+    /// Does not settle capital or derive portfolio state. Generic callers
+    /// verify economic content; this checks stage, association and immutability.
+    ///
+    /// # Errors
+    /// Missing/conflicting settlement, wrong state or persistence failure.
+    pub fn record_valuation(
+        &mut self,
+        id: &OperationId,
+        valuation: crate::ValuationRecord,
+        at: u64,
+    ) -> Result<Applied, OperationError> {
+        let live = self
+            .operations
+            .get_mut(id)
+            .ok_or_else(|| OperationError::NoSuchOperation(id.clone()))?;
+        if live.entry.state != OperationState::SubmissionUnknown
+            || live.settlement.as_ref() != Some(&valuation.settlement)
+        {
+            return Err(OperationError::ValuationBinding);
+        }
+        if let Some(previous) = &live.valuation {
+            return if previous == &valuation {
+                Ok(Applied::AlreadySeen)
+            } else {
+                Err(OperationError::ValuationBinding)
+            };
+        }
+        self.journal.record_operation(
+            Outcome::Uncertain,
+            at,
+            Correlation {
+                operation: Some(id.0.clone()),
+                valuation: Some(valuation.clone()),
+                ..Correlation::default()
+            },
+            live.entry,
+            self.build.clone(),
+            None,
+        )?;
+        live.valuation = Some(valuation);
+        Ok(Applied::Advanced)
     }
 
     /// Persists caller-verified normalized facts without closing the claim.
@@ -643,6 +697,9 @@ impl OperationLog {
         if correlation.settlement.is_some() {
             return Err(OperationError::SettlementBinding);
         }
+        if correlation.valuation.is_some() {
+            return Err(OperationError::ValuationBinding);
+        }
         let execution = correlation.execution.clone();
         let recorded = self.journal.record_operation(
             Outcome::Ok,
@@ -660,6 +717,7 @@ impl OperationLog {
                 claim: None,
                 execution,
                 settlement: None,
+                valuation: None,
             },
         );
         Ok(id)
@@ -944,6 +1002,9 @@ fn replay(events: &[Event]) -> Result<BTreeMap<OperationId, Live>, OperationErro
             continue;
         };
         if entry.state == OperationState::Proposed {
+            if event.correlation.valuation.is_some() {
+                return Err(OperationError::ValuationBinding);
+            }
             if event.correlation.settlement.is_some() {
                 return Err(OperationError::SettlementBinding);
             }
@@ -955,6 +1016,7 @@ fn replay(events: &[Event]) -> Result<BTreeMap<OperationId, Live>, OperationErro
                 claim: None,
                 execution: event.correlation.execution.clone(),
                 settlement: None,
+                valuation: None,
             });
             continue;
         }
@@ -970,6 +1032,19 @@ fn replay(events: &[Event]) -> Result<BTreeMap<OperationId, Live>, OperationErro
                 event: event.id.clone(),
                 operation: id.0.clone(),
             })?;
+        if let Some(valuation) = &event.correlation.valuation {
+            if live.entry.state != OperationState::SubmissionUnknown
+                || entry != live.entry
+                || live.settlement.as_ref() != Some(&valuation.settlement)
+                || live
+                    .valuation
+                    .as_ref()
+                    .is_some_and(|previous| previous != valuation)
+            {
+                return Err(OperationError::ValuationBinding);
+            }
+            live.valuation = Some(valuation.clone());
+        }
         if let Some(settlement) = &event.correlation.settlement {
             if live.entry.state != OperationState::SubmissionUnknown
                 || entry != live.entry

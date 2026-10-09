@@ -92,6 +92,9 @@ pub enum Outcome {
 /// find that run from a mint, a week, or a transaction they are holding.
 #[derive(Clone, Default, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub struct Correlation {
+    /// Protected caller's normalized costs bound to previously retained facts.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub valuation: Option<ValuationRecord>,
     /// Protected caller's normalized finalized facts. Never a provider body.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub settlement: Option<SettlementRecord>,
@@ -137,7 +140,8 @@ impl Correlation {
     /// [`Journal::record`](crate::Journal::record) can say so.
     #[must_use]
     pub const fn is_empty(&self) -> bool {
-        self.settlement.is_none()
+        self.valuation.is_none()
+            && self.settlement.is_none()
             && self.execution.is_none()
             && self.mention.is_none()
             && self.receipt.is_none()
@@ -173,6 +177,16 @@ pub struct SettlementRecord {
     /// Exact canonical signed bytes the protected caller reverified.
     pub signed_transaction: String,
     /// Normalized facts only: never credentials, provider bodies or model reasoning.
+    pub review: serde_json::Value,
+}
+
+/// Caller-reviewed costs bound to the exact retained settlement, not authority
+/// to close a claim. Generic callers establish economic correctness.
+#[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
+pub struct ValuationRecord {
+    /// Exact previously recorded facts, including their signed artifact.
+    pub settlement: SettlementRecord,
+    /// Normalized valuation only, never raw operator input or credentials.
     pub review: serde_json::Value,
 }
 

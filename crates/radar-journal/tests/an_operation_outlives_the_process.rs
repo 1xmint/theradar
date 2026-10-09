@@ -30,6 +30,226 @@ const HELD: u64 = 10_000_000;
 const CLAIM: u64 = 4_000_000;
 const NOW: Slot = Slot(500);
 
+fn signed_operation(
+    path: &std::path::Path,
+) -> (
+    OperationLog,
+    OperationId,
+    Portfolio,
+    radar_journal::SettlementRecord,
+) {
+    let mut log = OperationLog::open(path).expect("open");
+    let mut portfolio = account();
+    let id = log
+        .propose(
+            intent(),
+            1_000,
+            Correlation {
+                execution: Some(radar_journal::ExecutionBinding {
+                    wallet: WALLET,
+                    transaction: "approved".into(),
+                    signed_transaction: None,
+                    reviewed_proposal: None,
+                }),
+                ..about()
+            },
+        )
+        .expect("propose");
+    log.reserve(&id, &mut portfolio, 1_001).expect("reserve");
+    log.submit(&id, 1_002, |_| Ok::<(), ()>(()))
+        .expect("record")
+        .expect("effect");
+    log.record_signed(&id, "signed".into(), 1_003)
+        .expect("signed");
+    let facts = radar_journal::SettlementRecord {
+        signed_transaction: "signed".into(),
+        review: serde_json::json!({"network_fee_lamports":"5000"}),
+    };
+    (log, id, portfolio, facts)
+}
+
+fn cost_record(facts: &radar_journal::SettlementRecord) -> radar_journal::ValuationRecord {
+    radar_journal::ValuationRecord {
+        settlement: facts.clone(),
+        review: serde_json::json!({"position_cost_basis_micro_usd":"1000"}),
+    }
+}
+
+#[test]
+fn cost_records_append_before_memory_and_survive_repeats_restart_and_completion() {
+    let dir = tempfile::tempdir().expect("dir");
+    let path = somewhere(&dir);
+    let (mut log, id, _portfolio, facts) = signed_operation(&path);
+    log.record_settlement(&id, facts.clone(), 1_004)
+        .expect("facts");
+    let value = cost_record(&facts);
+    let checkpoint = log.checkpoint().to_owned();
+    let moved = dir.path().join("moved");
+    std::fs::rename(&path, &moved).expect("move");
+    std::fs::create_dir(&path).expect("obstruct");
+    assert!(log.record_valuation(&id, value.clone(), 1_005).is_err());
+    assert_eq!(log.valuation(&id), None);
+    assert_eq!(log.checkpoint(), checkpoint);
+    std::fs::remove_dir(&path).expect("remove obstruction");
+    std::fs::rename(&moved, &path).expect("restore");
+    assert_eq!(
+        log.record_valuation(&id, value.clone(), 1_005)
+            .expect("costs"),
+        Applied::Advanced
+    );
+    assert_eq!(log.valuation(&id), Some(&value));
+    assert_ne!(log.checkpoint(), checkpoint);
+    let checkpoint = log.checkpoint().to_owned();
+    let saved = std::fs::read(&path).expect("history");
+    assert_eq!(
+        log.record_valuation(&id, value.clone(), 1_006)
+            .expect("repeat"),
+        Applied::AlreadySeen
+    );
+    assert_eq!(log.checkpoint(), checkpoint);
+    assert_eq!(std::fs::read(&path).expect("history"), saved);
+    let mut conflict = value.clone();
+    conflict.review["position_cost_basis_micro_usd"] = serde_json::json!("1001");
+    assert!(matches!(
+        log.record_valuation(&id, conflict, 1_006),
+        Err(OperationError::ValuationBinding)
+    ));
+    assert_eq!(std::fs::read(&path).expect("history"), saved);
+    assert_eq!(log.outstanding().count(), 1);
+    drop(log);
+    let mut log = OperationLog::open(&path).expect("replay");
+    assert_eq!(log.valuation(&id), Some(&value));
+    let mut fresh = account();
+    log.rehold(&mut fresh).expect("rehold");
+    assert_eq!(free(&fresh), HELD - CLAIM);
+    log.reconcile(
+        &id,
+        Settlement::Completed(TokenQuantity::lamports(5000)),
+        &mut fresh,
+        1_007,
+    )
+    .expect("generic caller completion");
+    assert!(matches!(
+        log.record_valuation(&id, value.clone(), 1_008),
+        Err(OperationError::ValuationBinding)
+    ));
+    drop(log);
+    let log = OperationLog::open(&path).expect("terminal replay");
+    assert_eq!(log.valuation(&id), Some(&value));
+    assert_eq!(log.outstanding().count(), 0);
+}
+
+#[test]
+fn cost_records_require_exact_preexisting_settlement_and_cannot_name_a_proposal() {
+    for case in 0..4 {
+        let dir = tempfile::tempdir().expect("dir");
+        let path = somewhere(&dir);
+        let (mut log, id, mut portfolio, facts) = signed_operation(&path);
+        let mut value = cost_record(&facts);
+        if case != 0 {
+            log.record_settlement(&id, facts, 1_004).expect("facts");
+        }
+        match case {
+            1 => value.settlement.signed_transaction = "foreign".into(),
+            2 => value.settlement.review = serde_json::json!({"network_fee_lamports":"6000"}),
+            3 => {
+                log.reconcile(
+                    &id,
+                    Settlement::Completed(TokenQuantity::lamports(5000)),
+                    &mut portfolio,
+                    1_005,
+                )
+                .expect("terminal");
+            }
+            _ => {}
+        }
+        let saved = std::fs::read(&path).expect("history");
+        assert!(matches!(
+            log.record_valuation(&id, value.clone(), 1_006),
+            Err(OperationError::ValuationBinding)
+        ));
+        assert_eq!(log.valuation(&id), None);
+        assert!(matches!(
+            log.propose(
+                intent(),
+                1_006,
+                Correlation {
+                    valuation: Some(value),
+                    ..about()
+                }
+            ),
+            Err(OperationError::ValuationBinding)
+        ));
+        assert_eq!(std::fs::read(&path).expect("history"), saved);
+    }
+}
+
+#[test]
+fn replay_refuses_changed_unbound_or_misstaged_cost_records() {
+    for case in 0..10 {
+        let dir = tempfile::tempdir().expect("dir");
+        let path = somewhere(&dir);
+        let (mut log, id, mut portfolio, facts) = signed_operation(&path);
+        let mut value = cost_record(&facts);
+        if case != 0 && case != 9 {
+            log.record_settlement(&id, facts.clone(), 1_004)
+                .expect("facts");
+        }
+        if case == 2 || case == 8 {
+            log.record_valuation(&id, value.clone(), 1_005)
+                .expect("first costs");
+        }
+        if case == 7 {
+            log.reconcile(
+                &id,
+                Settlement::Completed(TokenQuantity::lamports(5000)),
+                &mut portfolio,
+                1_005,
+            )
+            .expect("terminal");
+        }
+        let mut entry = *log.entry(&id).expect("entry");
+        match case {
+            1 => value.settlement.signed_transaction = "foreign".into(),
+            2 => value.review["position_cost_basis_micro_usd"] = serde_json::json!("1001"),
+            3 => entry.state = OperationState::Reserved,
+            4 => entry.intent.amount = TokenQuantity::lamports(CLAIM + 1),
+            5 => entry.reserved = Some(TokenQuantity::lamports(CLAIM + 1)),
+            6 => entry.state = OperationState::Proposed,
+            _ => {}
+        }
+        drop(log);
+        radar_journal::Journal::open(&path)
+            .expect("journal")
+            .record_operation(
+                radar_journal::Outcome::Uncertain,
+                1_006,
+                Correlation {
+                    operation: Some(id.as_str().into()),
+                    valuation: Some(value.clone()),
+                    settlement: if case == 9 { Some(facts) } else { None },
+                    ..Correlation::default()
+                },
+                entry,
+                None,
+                None,
+            )
+            .expect("hashed record");
+        let opened = OperationLog::open(&path);
+        if case == 8 {
+            assert_eq!(
+                opened.expect("identical replay").valuation(&id),
+                Some(&value)
+            );
+        } else {
+            assert!(
+                matches!(opened, Err(OperationError::ValuationBinding)),
+                "case {case}"
+            );
+        }
+    }
+}
+
 #[test]
 fn checkpoint_tracks_durable_history_including_terminal_and_non_operation_events() {
     let dir = tempfile::tempdir().expect("dir");

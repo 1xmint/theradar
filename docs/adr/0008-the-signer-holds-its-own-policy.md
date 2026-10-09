@@ -545,7 +545,7 @@ compares it before evaluating or recording a new operation, and a mismatch
 refuses without changing history or releasing a proof.
 
 The checkpoint includes every journal event, including proposals whose
-reservation was refused, pre-submission failures, normalized settlement records,
+reservation was refused, pre-submission failures, normalized settlement and valuation records,
 terminal settlements and non-operation events. The journal advances its head
 only after a successful durable append. Replay restores it from the complete
 history. Idempotent repeats do not advance it. Outstanding claims still refuse
@@ -666,10 +666,38 @@ This proves binding and arithmetic consistency of private operator-reviewed
 components, not their independent origin or the truth of their classification.
 A balanced false split remains inside the existing operator trust boundary.
 It does not establish gross venue fill attribution, tax basis or a live sizing
-oracle. The review is read-only: costs are not yet retained durably, no exposure
-or daily-loss state changes, PnL stays null and the claim remains outstanding.
-Independent live collection, durable reconciliation and delegation activation
-remain required.
+oracle. Review remains read-only; the separate record mode below retains its
+normalized result. Neither mode changes exposure or daily-loss state. PnL stays
+null and the claim remains outstanding. Independent live collection, economic
+reconciliation and delegation activation remain required.
+
+## Durable reviewed acquisition valuation
+
+`radar-issuer --record-valuation <operation-id> <private-price-file>` performs
+one protected input read through the same valuation review, including wallet
+signature, exact authorized message, historical price and complete acquisition
+cost checks. Cash-only reviews cannot be recorded. It retains a ValuationRecord
+containing the exact previously retained SettlementRecord and normalized review;
+raw input declarations, arbitrary fields and provider bodies are not stored.
+The same journal ownership lock covers review and append.
+
+The journal requires SubmissionUnknown, an exact preexisting settlement record
+and unchanged operation metadata. A proposal cannot carry valuation, and a replay
+event cannot establish its first settlement and valuation together. Append comes
+before the in-memory update. Identical repeats do not append or advance the
+accounting checkpoint; any changed normalized cost or price refuses, even when
+its rounded USD basis is unchanged. Replay rejects unbound, conflicting or
+misstaged records. Retained valuation survives later terminal records; a new
+record after completion refuses. Absent optional valuation fields preserve older
+event hashes; older history is not backfilled.
+
+Generic journal callers establish economic validity; this storage layer checks
+association, stage and immutability, not signatures or economic classification.
+The actual protected issuer repeats those signature and cost checks before
+recording. Retention does not authenticate operator evidence, update inventory,
+cost basis, USD exposure or loss, or release capital. The claim remains
+outstanding and blocks another issuance. Economic reconciliation must consume
+these retained records idempotently before repeated autonomous execution.
 
 ## What would reverse this
 

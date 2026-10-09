@@ -206,6 +206,7 @@ fn settlement_review_reverifies_the_protected_artifact_signature() {
         "--review-settlement",
         "--record-settlement",
         "--review-valuation",
+        "--record-valuation",
     ] {
         let result = fixture
             .command()
@@ -299,6 +300,16 @@ fn protected_valuation_prices_retained_effects_without_changing_history_or_claim
         assert_eq!(result.stdout, Vec::<u8>::new());
         assert_eq!(std::fs::read(&history).expect("unchanged"), saved);
     }
+    write(&path, &price);
+    let incomplete = fixture
+        .command()
+        .args(["--record-valuation", id.as_str()])
+        .arg(&path)
+        .output()
+        .expect("incomplete costs");
+    assert!(!incomplete.status.success());
+    assert_eq!(incomplete.stdout, Vec::<u8>::new());
+    assert_eq!(std::fs::read(&history).expect("unchanged"), saved);
     let log = radar_journal::OperationLog::open(&history).expect("replay");
     assert_eq!(log.outstanding().count(), 1);
     drop(log);
@@ -333,8 +344,12 @@ fn finalized_fixture() -> (Fixture, Vec<u8>, radar_journal::OperationId, Value) 
     (fixture, signed, id, evidence)
 }
 
-#[test]
-fn protected_acquisition_cost_review_accounts_for_exact_outlay_without_settling() {
+fn acquisition_cost_fixture() -> (
+    Fixture,
+    radar_journal::OperationId,
+    std::path::PathBuf,
+    Value,
+) {
     let (fixture, signed, id, mut evidence) = finalized_fixture();
     let time = evidence["read_completed_at_unix_secs"]
         .as_u64()
@@ -371,6 +386,12 @@ fn protected_acquisition_cost_review_accounts_for_exact_outlay_without_settling(
             "swap_lamports":"15000000","rent_lamports":"150000","tip_lamports":"1000",
             "other_cash_flows_absent":true}});
     write(&price_path, &price);
+    (fixture, id, price_path, price)
+}
+
+#[test]
+fn protected_acquisition_cost_review_accounts_for_exact_outlay_without_settling() {
+    let (fixture, id, price_path, price) = acquisition_cost_fixture();
     let history = fixture.dir.path().join("operations.jsonl");
     let saved = std::fs::read(&history).expect("history");
     let review = || {
@@ -415,6 +436,78 @@ fn protected_acquisition_cost_review_accounts_for_exact_outlay_without_settling(
     let log = radar_journal::OperationLog::open(&history).expect("replay");
     assert_eq!(log.outstanding().count(), 1);
     drop(log);
+    assert_eq!(
+        fixture.start().ask(&fixture.candidate)["reason"],
+        "outstanding operation requires reconciliation"
+    );
+}
+
+#[test]
+fn protected_cost_record_is_durable_idempotent_and_refuses_changed_economics() {
+    let (fixture, id, price_path, price) = acquisition_cost_fixture();
+    let run = |mode| {
+        fixture
+            .command()
+            .args([mode, id.as_str()])
+            .arg(&price_path)
+            .output()
+            .expect("issuer mode")
+    };
+    let reviewed = run("--review-valuation");
+    assert!(reviewed.status.success());
+    let expected: Value = serde_json::from_slice(&reviewed.stdout).expect("review");
+    let history = fixture.dir.path().join("operations.jsonl");
+    let mut log = radar_journal::OperationLog::open(&history).expect("log");
+    assert_eq!(log.valuation(&id), None);
+    let checkpoint = log.checkpoint().to_owned();
+    let settlement = log.settlement(&id).expect("facts").clone();
+    drop(log);
+    let result = run("--record-valuation");
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    let result: Value = serde_json::from_slice(&result.stdout).expect("record result");
+    assert_eq!(result["valuation_recorded"], true);
+    assert_eq!(result["portfolio_state_updated"], false);
+    assert_eq!(result["reconciled"], false);
+    assert_eq!(result["reservation_released"], false);
+    log = radar_journal::OperationLog::open(&history).expect("replay");
+    assert_ne!(log.checkpoint(), checkpoint);
+    assert_eq!(
+        log.valuation(&id),
+        Some(&radar_journal::ValuationRecord {
+            settlement,
+            review: expected
+        })
+    );
+    assert_eq!(log.outstanding().count(), 1);
+    drop(log);
+    let saved = std::fs::read(&history).expect("history");
+    assert!(run("--record-valuation").status.success());
+    assert_eq!(std::fs::read(&history).expect("unchanged"), saved);
+    let text = String::from_utf8(saved.clone()).expect("text");
+    assert!(!text.contains("UNREVIEWED_RESPONSE_MUST_NOT_PERSIST"));
+    assert!(!text.contains("other_cash_flows_absent"));
+    for price_changed in [false, true] {
+        let mut conflict = price.clone();
+        if price_changed {
+            conflict["micro_usd_per_sol"] = json!("201000000");
+        } else {
+            conflict["acquisition_costs"]["swap_lamports"] = json!("14999999");
+            conflict["acquisition_costs"]["rent_lamports"] = json!("150001");
+        }
+        write(&price_path, &conflict);
+        assert!(
+            run("--review-valuation").status.success(),
+            "valid conflicting review"
+        );
+        let result = run("--record-valuation");
+        assert!(!result.status.success());
+        assert_eq!(result.stdout, Vec::<u8>::new());
+        assert_eq!(std::fs::read(&history).expect("unchanged"), saved);
+    }
     assert_eq!(
         fixture.start().ask(&fixture.candidate)["reason"],
         "outstanding operation requires reconciliation"

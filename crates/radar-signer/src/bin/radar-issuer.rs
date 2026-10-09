@@ -601,6 +601,33 @@ impl Issuer {
         report["operation"] = serde_json::json!(operation);
         Ok(report)
     }
+
+    fn record_valuation(&mut self, operation: &str, path: &Path) -> Result<(), String> {
+        // Review one protected input read before retaining normalized costs.
+        let review = self.review_valuation(operation, path)?;
+        if !review["acquisition_costs"].is_object() {
+            return Err("recording valuation requires complete acquisition costs".into());
+        }
+        let id = self
+            .operations
+            .outstanding()
+            .find(|(id, _)| id.as_str() == operation)
+            .map(|(id, _)| id.clone())
+            .ok_or("unknown outstanding operation")?;
+        let settlement = self
+            .operations
+            .settlement(&id)
+            .cloned()
+            .ok_or("operation has no retained settlement facts")?;
+        self.operations
+            .record_valuation(
+                &id,
+                radar_journal::ValuationRecord { settlement, review },
+                unix_now()?,
+            )
+            .map_err(|_| "valuation could not be persisted")?;
+        Ok(())
+    }
 }
 
 fn run() -> Result<(), String> {
@@ -628,6 +655,16 @@ fn run() -> Result<(), String> {
             );
             return Ok(());
         }
+        if args[0] == "--record-valuation" {
+            issuer.record_valuation(&args[1], Path::new(&args[2]))?;
+            println!(
+                "{}",
+                serde_json::json!({"outcome":"recorded","operation":args[1],
+                "valuation_recorded":true,"portfolio_state_updated":false,
+                "reconciled":false,"reservation_released":false})
+            );
+            return Ok(());
+        }
         if args[0] == "--record-settlement" {
             issuer.record_settlement(&args[1], Path::new(&args[2]))?;
             println!(
@@ -638,7 +675,7 @@ fn run() -> Result<(), String> {
             return Ok(());
         }
         if args[0] != "--bind-signed" {
-            return Err("usage: radar-issuer --bind-signed, --review-settlement, --record-settlement or --review-valuation <operation-id> <private-file>".into());
+            return Err("usage: radar-issuer --bind-signed, --review-settlement, --record-settlement, --review-valuation or --record-valuation <operation-id> <private-file>".into());
         }
         issuer.bind_signed(&args[1], Path::new(&args[2]))?;
         println!(
