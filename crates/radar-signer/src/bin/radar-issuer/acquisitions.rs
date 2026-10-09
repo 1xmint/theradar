@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-//! Historical acquisitions from the owned journal, not current wallet inventory.
+//! Reviewed buys and failed fees from the owned journal, not wallet reconciliation.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -16,12 +16,17 @@ fn integer(value: &Value, field: &str) -> Result<u64, String> {
         .ok_or_else(|| "invalid retained acquisition integer".into())
 }
 
-fn lot(
+enum HistoricalEffect {
+    Acquisition(Value),
+    FailedFee(Value),
+}
+
+fn effect(
     log: &OperationLog,
     id: &radar_journal::OperationId,
     entry: &OperationEntry,
     config: &Config,
-) -> Result<Value, String> {
+) -> Result<HistoricalEffect, String> {
     let binding = log
         .execution(id)
         .ok_or("acquisition lacks transaction binding")?;
@@ -34,24 +39,28 @@ fn lot(
     let signature: [u8; 64] = signed[1..65]
         .try_into()
         .map_err(|_| "invalid signature extent")?;
-    if record.settlement.review["signature"] != radar_types::Signature::new(signature).to_string() {
+    if record.settlement.review["signature"] != radar_types::Signature::new(signature).to_string()
+        || record.settlement.review["operation"] != id.as_str()
+    {
         return Err("retained settlement names another transaction signature".into());
     }
     let value = &record.review;
     let costs = &value["acquisition_costs"];
     // Reconstruct only the previously normalized complete review. Equality with
     // the rerun below verifies every retained price/cost output, not just basis.
-    let price = json!({"version":1,"asset":"sol",
+    let mut price = json!({"version":1,"asset":"sol",
         "micro_usd_per_sol":value["micro_usd_per_sol"],
         "as_of_slot":value["valuation_as_of_slot"],
-        "as_of_unix_secs":value["price_at_unix_secs"],
-        "acquisition_costs":{"version":1,"operation":id.as_str(),
+        "as_of_unix_secs":value["price_at_unix_secs"]});
+    if costs.is_object() {
+        price["acquisition_costs"] = json!({"version":1,"operation":id.as_str(),
             "signed_transaction":record.settlement.signed_transaction,
             "wallet":config.wallet,"mint":costs["mint"],
             "token_program":costs["token_program"],"decimals":costs["decimals"],
             "net_acquired_raw":costs["net_acquired_raw"],
             "swap_lamports":costs["swap_lamports"],"rent_lamports":costs["rent_lamports"],
-            "tip_lamports":costs["tip_lamports"],"other_cash_flows_absent":true}});
+            "tip_lamports":costs["tip_lamports"],"other_cash_flows_absent":true});
+    }
     let mut historical = *entry;
     historical.state = OperationState::SubmissionUnknown;
     let mut checked = valuation::review(
@@ -74,6 +83,24 @@ fn lot(
             if spent == debit => {}
         _ => return Err("unsupported acquisition terminal settlement".into()),
     }
+    if checked["failed_execution_costs"].is_object() {
+        return Ok(HistoricalEffect::FailedFee(json!({"operation":id.as_str(),
+            "network_fee_lamports":checked["failed_execution_costs"]["network_fee_lamports"],
+            "network_fee_micro_usd":checked["failed_execution_costs"]["network_fee_micro_usd"],
+            "execution_slot":checked["execution_slot"],
+            "execution_at_unix_secs":checked["execution_at_unix_secs"],
+            "valuation_as_of_slot":checked["valuation_as_of_slot"],
+            "price_at_unix_secs":checked["price_at_unix_secs"]})));
+    }
+    acquisition_lot(binding, id, value)
+}
+
+fn acquisition_lot(
+    binding: &radar_journal::ExecutionBinding,
+    id: &radar_journal::OperationId,
+    value: &Value,
+) -> Result<HistoricalEffect, String> {
+    let costs = &value["acquisition_costs"];
     let proposal: radar_risk::Proposal = serde_json::from_value(
         binding
             .reviewed_proposal
@@ -81,7 +108,8 @@ fn lot(
             .ok_or("acquisition lacks reviewed attribution")?,
     )
     .map_err(|_| "invalid acquisition attribution")?;
-    Ok(json!({"operation":id.as_str(),"creator":proposal.creator,
+    Ok(HistoricalEffect::Acquisition(
+        json!({"operation":id.as_str(),"creator":proposal.creator,
         "mint":costs["mint"],"token_program":costs["token_program"],
         "decimals":costs["decimals"],"net_acquired_raw":costs["net_acquired_raw"],
         "position_cost_basis_micro_usd":costs["position_cost_basis_micro_usd"],
@@ -89,7 +117,23 @@ fn lot(
         "execution_slot":value["execution_slot"],
         "execution_at_unix_secs":value["execution_at_unix_secs"],
         "valuation_as_of_slot":value["valuation_as_of_slot"],
-        "price_at_unix_secs":value["price_at_unix_secs"]}))
+        "price_at_unix_secs":value["price_at_unix_secs"]}),
+    ))
+}
+
+fn fee_totals(fees: &[Value]) -> Result<Value, String> {
+    let mut lamports = 0_u64;
+    let mut micro_usd = 0_u64;
+    for fee in fees {
+        lamports = lamports
+            .checked_add(integer(fee, "network_fee_lamports")?)
+            .ok_or("failed-fee native total overflow")?;
+        micro_usd = micro_usd
+            .checked_add(integer(fee, "network_fee_micro_usd")?)
+            .ok_or("failed-fee dollar total overflow")?;
+    }
+    Ok(json!({"network_fee_lamports":lamports.to_string(),
+        "network_fee_micro_usd":micro_usd.to_string()}))
 }
 
 fn aggregate(lots: &[Value]) -> Result<Vec<Value>, String> {
@@ -140,6 +184,7 @@ pub(super) fn review(log: &OperationLog, config: &Config) -> Result<Value, Strin
     let mut lots = Vec::new();
     let mut artifacts = BTreeSet::new();
     let mut unsubmitted = Vec::new();
+    let mut failed_fees = Vec::new();
     for (id, entry) in log.entries() {
         if matches!(
             entry.state,
@@ -148,7 +193,7 @@ pub(super) fn review(log: &OperationLog, config: &Config) -> Result<Value, Strin
             unsubmitted.push(id.as_str());
             continue;
         }
-        let acquired = lot(log, id, entry, config)?;
+        let reviewed = effect(log, id, entry, config)?;
         let artifact = &log
             .valuation(id)
             .ok_or("missing acquisition")?
@@ -157,13 +202,18 @@ pub(super) fn review(log: &OperationLog, config: &Config) -> Result<Value, Strin
         if !artifacts.insert(artifact) {
             return Err("signed transaction occurs under multiple acquisition operations".into());
         }
-        lots.push(acquired);
+        match reviewed {
+            HistoricalEffect::Acquisition(lot) => lots.push(lot),
+            HistoricalEffect::FailedFee(fee) => failed_fees.push(fee),
+        }
     }
     let groups = aggregate(&lots)?;
+    let fees = fee_totals(&failed_fees)?;
     Ok(
         json!({"version":1,"authority":"protected_operator_acquisition_history",
         "wallet":config.wallet,"accounting_checkpoint":log.checkpoint(),
         "lots":lots,"acquisitions_by_mint_and_creator":groups,
+        "failed_execution_fees":failed_fees,"recorded_failed_fee_totals":fees,
         "unsubmitted_operations":unsubmitted,
         "wallet_inventory_complete":false,"current_exposure_micro_usd":null,
         "realised_loss_today_micro_usd":null,"portfolio_state_updated":false,
@@ -174,6 +224,25 @@ pub(super) fn review(log: &OperationLog, config: &Config) -> Result<Value, Strin
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn failed_fee_totals_are_exact_and_refuse_overflow_without_claiming_daily_loss() {
+        let first = json!({"network_fee_lamports":"7","network_fee_micro_usd":"11"});
+        let second = json!({"network_fee_lamports":"13","network_fee_micro_usd":"17"});
+        assert_eq!(
+            fee_totals(&[first.clone(), second]).expect("totals"),
+            json!({"network_fee_lamports":"20","network_fee_micro_usd":"28"})
+        );
+        assert_eq!(
+            fee_totals(&[]).expect("no recorded fees"),
+            json!({"network_fee_lamports":"0","network_fee_micro_usd":"0"})
+        );
+        for field in ["network_fee_lamports", "network_fee_micro_usd"] {
+            let mut overflow = first.clone();
+            overflow[field] = json!(u64::MAX.to_string());
+            assert!(fee_totals(&[first.clone(), overflow]).is_err());
+        }
+    }
 
     fn acquisition(raw: u64, basis: u64, rent: u64, slot: u64) -> Value {
         json!({"mint":Address::new([2;32]),"creator":Address::new([3;32]),

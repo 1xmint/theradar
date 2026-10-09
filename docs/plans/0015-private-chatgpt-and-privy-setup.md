@@ -2754,3 +2754,38 @@ Cargo/rustc/Radar process remained at local inspection. Target measured 35.1 GiB
 with 57.1 GiB free; previously rejected ignored-output cleanup was not retried.
 This handback is committed locally for the next source push, avoiding redundant
 documentation-only full CI.
+
+### Mixed retained acquisition and failed-fee history (2026-10-09)
+
+Extend --review-acquisitions to revalidate retained successful buys and classified
+failed-execution fees through the same configured-wallet signature/exact message,
+facts signature/operation association, full normalized historical price/cost
+recomputation and terminal debit checks. A shared signed-artifact set refuses
+reusing a transaction across either category. Failed fees remain separate from
+token lots, creator basis and rent; checked native/USD totals cover only recorded
+failed fees. Empty totals are zero recorded costs, not zero wallet loss.
+
+--review-inventory carries the entire checked history and requires both token
+listing contexts and native balance to be no earlier than every retained failed
+execution. It compares token lots unchanged; native cash reconciliation and
+failed-fee ordering against the opening baseline remain unresolved. Reports are
+read-only, stable across restart/repeat and retain completed costs once. Daily
+loss/exposure and complete coverage remain unknown; live activation stays off.
+
+Three new regressions cover exact/empty/overflow totals and actual mixed-history
+repeat/restart/terminal behavior, separate fee/token accounting, missing/changed/
+misassociated/duplicate retained evidence, inconsistent terminal costs and stale
+native/token contexts. Existing fee-only process regression now verifies history
+integration. Test floor increased by three. Synthetic generic journal fixtures
+have no live signing effect; fee reservations fit the fixture's capital.
+
+Local proof: 178 signer tests passed after restoring source. All 11 manually
+reapplied bugs failed running regressions: facts operation/signature association,
+full review equality, artifact uniqueness, terminal debit consistency, category
+classification, fee omission, each checked total overflow and independent native/
+token observation floors. Scoped Rust 1.99 lint/format and 33 conformance checks
+are pending below, followed by whole source CI. No dependency, mutation exclusion
+or lint suppression.
+
+Final local gate: Rust 1.99 scoped all-target Clippy and formatting passed,
+followed by all 33 conformance checks. Whole source CI remains pending.

@@ -194,6 +194,15 @@ pub(super) fn review(
         .min()
         .ok_or("inventory contexts missing")?;
     let observed = observations(value, snapshot.state.now.get())?;
+    if let Some(fees) = history["failed_execution_fees"].as_array() {
+        let native = evidence_integer(&value["native_sol"], "slot")?;
+        for fee in fees {
+            let slot = evidence_integer(fee, "execution_slot")?;
+            if slot > minimum || slot > native {
+                return Err("wallet observations precede a retained failed execution".into());
+            }
+        }
+    }
     let mut lots = history["lots"]
         .as_array()
         .ok_or("acquisition lots missing")?

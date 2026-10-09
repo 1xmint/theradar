@@ -768,17 +768,18 @@ immutable ValuationRecord association, append-before-memory and replay rules.
 Repeated records are no-ops; changed price/cost records refuse even if rounding
 produces equal USD amounts. This is a historical fee cost, not total realised
 PnL, daily loss or economic reconciliation. No operation closes, reservation
-releases or portfolio changes. The acquisition-only history reader still refuses
-submitted failed-fee operations rather than dropping them; mixed-history review
-and idempotent economic reconciliation remain to be implemented. Live delegation
+releases or portfolio changes. The history reader below revalidates both buys
+and submitted failed-fee costs rather than dropping either category. Idempotent
+economic reconciliation remains to be implemented. Live delegation
 and autonomous execution remain closed.
 
 ## Replay-derived acquisition history review
 
 `radar-issuer --review-acquisitions` reads every retained operation under the
 journal ownership lock, including completed entries. It reconstructs one
-historical acquisition lot per submitted operation, re-verifies its configured
-wallet signature/exact message, checks the retained facts name that signature,
+historical acquisition lot or failed-fee record per submitted operation,
+re-verifies its configured wallet signature/exact message, checks the retained
+facts name that signature and operation,
 and reruns the existing complete historical
 valuation from normalized retained inputs. The entire normalized result must
 match, including every price, cost, watermark and operation field. The journal
@@ -787,7 +788,8 @@ storage or association rule.
 
 Proposed, Reserved and pre-submission Failed operations are listed separately,
 with no inferred acquisition or released claim. Every other operation needs
-complete successful native-SOL buy costs. SubmissionUnknown is supported;
+complete successful native-SOL buy costs or classified failed-execution fees.
+SubmissionUnknown is supported;
 Confirmed/Reconciled are supported only with Completed native spend equal to
 the retained wallet debit. Missing costs, unsupported terminal outcomes or
 inconsistent retained reviews refuse the whole report. The same signed artifact
@@ -796,13 +798,20 @@ under different operation identities also refuses rather than double-counting.
 Lots preserve reviewed creator, mint/program/decimals, measured acquired units,
 cost basis, separately priced rent and execution/price watermarks. Aggregation
 by mint and creator uses checked integer totals and the oldest price slot.
+Failed fees are a separate array with operation, exact native and historical USD
+fee cost, execution time/slot and price watermarks. Checked native/USD totals
+cover only recorded failed fees; empty history has zero recorded fees, not zero
+wallet loss. Failed fees never become token lots, creator basis or rent. Artifact
+uniqueness and terminal debit consistency apply across both categories. Entire
+normalized valuation is recomputed before classification; missing or changed
+fee classification refuses even if a public total would be unchanged.
 A mint changing program or decimals refuses, including across creators. The
 report names the owned journal's current accounting checkpoint and is stable
 across replay/repeat; no history or portfolio state is written.
 
 This is protected operator acquisition history, not verified current wallet
 inventory. An empty report does not establish a flat wallet. Opening inventory,
-external transfers, disposals, failed execution fees, current valuations and
+external transfers, disposals, complete failed-execution coverage, current valuations and
 complete daily-loss accounting remain unresolved. Output explicitly reports
 wallet inventory incomplete and exposure/loss unknown. Existing claims remain
 outstanding; no operation is closed or signing authority activated. Historical
@@ -827,6 +836,11 @@ precede native balance or either listing and cannot exceed the snapshot's
 reviewed slot. Empty listings require an empty raw set and unknown raw context;
 they do not establish a flat wallet. Both token listing contexts must be at
 least as recent as every retained acquisition execution slot.
+Both token listing contexts and the native read must also be at least as recent
+as every reviewed failed-fee execution. Preserve its history and separate fee
+totals in the report without adding fees to token quantities or inferring native
+cash reconciliation. Ordering failed fees against an opening baseline, complete
+cash-flow coverage and idempotent fee application remain for economic reconciliation.
 
 Sum observed holdings and retained acquisitions by mint using checked u64
 arithmetic, including frozen/uninitialized quantities and separate accounts.
