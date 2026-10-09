@@ -2225,6 +2225,15 @@ a release; its completed output precedes the necessary later open. No retries,
 serialization or production lock changes. The contending holder was not captured;
 complete repaired Linux CI is required, not a local Windows pass alone.
 
+Repair 3baa4cc CI 37995345383 failed another unmodified shard-1 baseline at
+issuer_process.rs:1321:60: the native-cash regression immediately reopened the
+inventory fixture owner. Carry that owner into its first checkpoint read and
+return the failed-history owner for the next read. Pass the existing inventory
+owner into all four immediate sale-history setups as well. The prior repair
+was incomplete. Actual contending holder remains unknown; subprocess boundaries
+still require release and completed output before a later open. Linux CI must
+verify this additional fixture-only repair.
+
 No release/reacquire is needed for these fixture transitions; production locking remains
 nonblocking with no retry, deletion or weaker refusal. Terminal consistency and
 facts signature/operation regressions still fail when their guards are disabled.

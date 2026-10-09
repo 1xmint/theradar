@@ -3405,3 +3405,21 @@ LEARNINGS 57 records the masked guards. No production logic, dependency, lint
 suppression or mutation exclusion changed. Restored 208 signer tests, 33
 conformance checks, scoped Rust 1.99 all-target Clippy and formatting passed.
 Repaired whole CI pending. No cancelled CI job or live change.
+
+
+### Native-transfer second baseline fixture repair (2026-10-09)
+
+Repair 3baa4ccaa4ff2bdf5792b0d5a460a491ef86d066 CI 37995345383 failed
+shard 1's unmodified baseline at issuer_process.rs:1321:60, in the native-cash
+regression's immediate journal reopen after inventory_fixture_opening. Preserve
+that known owner through the first checkpoint read and return the failed-history
+owner for the second read. All four immediate sale-history setups now receive
+their existing inventory owner too. The first repair was incomplete; actual
+contending holder remains unknown. Necessary subprocess boundaries still release
+ownership and await completed output before a later open. Production locking and
+all assertions are unchanged; no retry, sleep, deletion or serialization. This
+is fixture plumbing, with no changed production logic to mutate. Existing 35
+manual logic faults remain the behavior evidence. Restored 208 signer tests,
+33 conformance checks and scoped Rust 1.99 all-target Clippy passed locally.
+Whole repaired Linux CI remains required. Await every current job and final gate
+before pushing this additional repair. No live change or autonomous activation.

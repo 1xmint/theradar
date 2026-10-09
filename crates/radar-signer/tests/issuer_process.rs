@@ -1055,9 +1055,11 @@ fn acquisition_report(fixture: &Fixture) -> std::process::Output {
         .expect("acquisition report")
 }
 
-fn append_sale_history(fixture: &Fixture, case: &str) -> radar_journal::OperationId {
-    let history = fixture.dir.path().join("operations.jsonl");
-    let mut log = radar_journal::OperationLog::open(&history).expect("history");
+fn append_sale_history(
+    fixture: &Fixture,
+    case: &str,
+    mut log: radar_journal::OperationLog,
+) -> radar_journal::OperationId {
     let source = log.outstanding().next().expect("buy").0.clone();
     let mut intent = log.entry(&source).expect("entry").intent;
     intent.amount = radar_types::TokenQuantity::lamports(5000);
@@ -1173,8 +1175,8 @@ fn retain_sale_history(
 
 #[test]
 fn mixed_sale_history_is_exact_durable_and_cannot_be_used_as_buy_only_inventory() {
-    let mut fixture = inventory_fixture();
-    let sale = append_sale_history(&fixture, "valid");
+    let (mut fixture, log) = inventory_fixture_owned(None);
+    let sale = append_sale_history(&fixture, "valid", log);
     let history = fixture.dir.path().join("operations.jsonl");
     let saved = std::fs::read(&history).expect("saved");
     let mut expected = None;
@@ -1221,8 +1223,8 @@ fn mixed_sale_history_is_exact_durable_and_cannot_be_used_as_buy_only_inventory(
 #[test]
 fn mixed_sale_history_refuses_missing_changed_duplicate_or_terminal_sales() {
     for case in ["missing", "normalized", "category", "duplicate", "terminal"] {
-        let fixture = inventory_fixture();
-        append_sale_history(&fixture, case);
+        let (fixture, log) = inventory_fixture_owned(None);
+        append_sale_history(&fixture, case, log);
         let history = fixture.dir.path().join("operations.jsonl");
         let saved = std::fs::read(&history).expect("saved");
         let output = acquisition_report(&fixture);
@@ -1234,8 +1236,8 @@ fn mixed_sale_history_refuses_missing_changed_duplicate_or_terminal_sales() {
 
 #[test]
 fn protected_fifo_history_compares_remaining_inventory_without_releasing_claims() {
-    let mut fixture = inventory_fixture_opening(Some(0));
-    append_sale_history(&fixture, "valid");
+    let (mut fixture, log) = inventory_fixture_owned(Some(0));
+    append_sale_history(&fixture, "valid", log);
     let history = fixture.dir.path().join("operations.jsonl");
     let saved = std::fs::read(&history).expect("saved");
     let output = acquisition_report(&fixture);
@@ -1312,13 +1314,15 @@ fn protected_fifo_history_compares_remaining_inventory_without_releasing_claims(
 
 #[test]
 fn protected_native_cash_comparison_keeps_buy_and_failed_fee_gaps_without_mutating_claims() {
-    let mut fixture = inventory_fixture_opening(Some(0));
+    let (mut fixture, log) = inventory_fixture_owned(Some(0));
+    let mut owner = Some(log);
     let path = fixture.dir.path().join("operations.jsonl");
     for failed in [false, true] {
-        if failed {
-            append_failed_history(&fixture, "valid");
-        }
-        let log = radar_journal::OperationLog::open(&path).expect("owned");
+        let log = if failed {
+            append_failed_history(&fixture, "valid").1
+        } else {
+            owner.take().expect("fixture owner")
+        };
         fixture.snapshot["accounting_checkpoint"] = json!(log.checkpoint());
         assert_eq!(log.outstanding().count(), if failed { 2 } else { 1 });
         drop(log);
@@ -1465,8 +1469,8 @@ fn protected_native_transfer_comparison_refuses_older_tied_future_or_duplicate_e
 
 #[test]
 fn protected_fifo_history_keeps_nonzero_opening_basis_unknown() {
-    let fixture = inventory_fixture_opening(Some(10));
-    append_sale_history(&fixture, "valid");
+    let (fixture, log) = inventory_fixture_owned(Some(10));
+    append_sale_history(&fixture, "valid", log);
     let history = fixture.dir.path().join("operations.jsonl");
     let saved = std::fs::read(&history).expect("saved");
     let output = acquisition_report(&fixture);
@@ -1477,7 +1481,10 @@ fn protected_fifo_history_keeps_nonzero_opening_basis_unknown() {
     assert_eq!(std::fs::read(&history).expect("unchanged"), saved);
 }
 
-fn append_failed_history(fixture: &Fixture, case: &str) -> radar_journal::OperationId {
+fn append_failed_history(
+    fixture: &Fixture,
+    case: &str,
+) -> (radar_journal::OperationId, radar_journal::OperationLog) {
     let path = fixture.dir.path().join("operations.jsonl");
     let log = radar_journal::OperationLog::open(&path).expect("history");
     append_failed_history_owned(fixture, case, log)
@@ -1487,7 +1494,7 @@ fn append_failed_history_owned(
     fixture: &Fixture,
     case: &str,
     mut log: radar_journal::OperationLog,
-) -> radar_journal::OperationId {
+) -> (radar_journal::OperationId, radar_journal::OperationLog) {
     let path = fixture.dir.path().join("operations.jsonl");
     let source = log.outstanding().next().expect("buy").0.clone();
     let mut intent = log.entry(&source).expect("entry").intent;
@@ -1523,10 +1530,10 @@ fn append_failed_history_owned(
     set_failed_facts(facts, fixture);
     log.record_settlement(&id, settlement.clone(), 1015)
         .expect("facts");
-    drop(log);
     if case == "missing" {
-        return id;
+        return (id, log);
     }
+    drop(log);
     let price_path = fixture.dir.path().join("fee-price.json");
     write(
         &price_path,
@@ -1570,7 +1577,8 @@ fn append_failed_history_owned(
             1016,
         )
         .expect("valid predecessor");
-        return append_invalid_fee_copy(&mut log, fixture, &id, settlement, review);
+        let copy = append_invalid_fee_copy(&mut log, fixture, &id, settlement, review);
+        return (copy, log);
     }
     let mut log = radar_journal::OperationLog::open(&path).expect("history");
     log.record_valuation(
@@ -1582,7 +1590,7 @@ fn append_failed_history_owned(
     if case == "terminal" {
         mismatched_fee_completion(&mut log, &id, fixture);
     }
-    id
+    (id, log)
 }
 
 fn mismatched_fee_completion(
@@ -1675,7 +1683,8 @@ fn append_invalid_fee_copy(
 #[test]
 fn mixed_history_keeps_buy_and_failed_fee_once_across_restart_and_terminal_records() {
     let (mut fixture, log) = inventory_fixture_owned(None);
-    let fee = append_failed_history_owned(&fixture, "valid", log);
+    let (fee, log) = append_failed_history_owned(&fixture, "valid", log);
+    drop(log);
     let path = fixture.dir.path().join("operations.jsonl");
     let saved = std::fs::read(&path).expect("history");
     let first = acquisition_report(&fixture);
@@ -1772,7 +1781,8 @@ fn mixed_history_refuses_missing_changed_duplicate_or_misassociated_fee_evidence
         "terminal",
     ] {
         let (fixture, log) = inventory_fixture_owned(None);
-        append_failed_history_owned(&fixture, case, log);
+        let (_, log) = append_failed_history_owned(&fixture, case, log);
+        drop(log);
         let path = fixture.dir.path().join("operations.jsonl");
         let saved = std::fs::read(&path).expect("history");
         let output = acquisition_report(&fixture);
