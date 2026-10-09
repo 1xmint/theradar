@@ -796,7 +796,26 @@ fn append_failed_history(fixture: &Fixture, case: &str) -> radar_journal::Operat
         1016,
     )
     .expect("generic record");
+    if case == "terminal" {
+        mismatched_fee_completion(&mut log, &id, fixture);
+    }
     id
+}
+
+fn mismatched_fee_completion(
+    log: &mut radar_journal::OperationLog,
+    id: &radar_journal::OperationId,
+    fixture: &Fixture,
+) {
+    let mut portfolio = native_portfolio(fixture);
+    log.rehold(&mut portfolio).expect("claims");
+    log.reconcile(
+        id,
+        radar_types::Settlement::Completed(radar_types::TokenQuantity::lamports(4999)),
+        &mut portfolio,
+        1030,
+    )
+    .expect("generic mismatched completion");
 }
 
 fn set_failed_facts(facts: &mut Value, fixture: &Fixture) {
@@ -971,20 +990,8 @@ fn mixed_history_refuses_missing_changed_duplicate_or_misassociated_fee_evidence
         "terminal",
     ] {
         let fixture = inventory_fixture();
-        let fee = append_failed_history(&fixture, case);
+        append_failed_history(&fixture, case);
         let path = fixture.dir.path().join("operations.jsonl");
-        if case == "terminal" {
-            let mut log = radar_journal::OperationLog::open(&path).expect("history");
-            let mut portfolio = native_portfolio(&fixture);
-            log.rehold(&mut portfolio).expect("claims");
-            log.reconcile(
-                &fee,
-                radar_types::Settlement::Completed(radar_types::TokenQuantity::lamports(4999)),
-                &mut portfolio,
-                1030,
-            )
-            .expect("generic mismatched completion");
-        }
         let saved = std::fs::read(&path).expect("history");
         let output = acquisition_report(&fixture);
         assert!(!output.status.success(), "{case}");

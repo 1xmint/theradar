@@ -2789,3 +2789,15 @@ or lint suppression.
 
 Final local gate: Rust 1.99 scoped all-target Clippy and formatting passed,
 followed by all 33 conformance checks. Whole source CI remains pending.
+
+Initial source 6e6af9d: CI 37948602727 shard 3 failed its unmodified baseline
+at issuer_process.rs:977:68 with WouldBlock reacquiring the terminal fixture's
+journal lock. Holder identity was not captured. Keep the existing owned handle
+through that fixture transition; production locking and refusals are unchanged.
+LEARNINGS 53 records the evidence and limits. Scoped regression/lint passed;
+await every initial job before repair push, then full Linux CI verification.
+
+Repair local proof: all 178 signer tests, scoped Rust 1.99 all-target Clippy,
+formatting and all 33 conformance checks passed. Disabling terminal debit
+consistency still fails the terminal case after its fixture ownership repair.
+Production source is unchanged by this repair. Whole initial CI is still awaited.

@@ -13,8 +13,8 @@ benefit of the doubt on everything else.
 
 ## Index
 
-**39 of these 52 name something mechanical that would catch a
-recurrence. 13 name only a habit, and say so** — which is this file's opening
+**39 of these 53 name something mechanical that would catch a
+recurrence. 14 name only a habit, and say so** — which is this file's opening
 standard rather than a gap in it. The habit-only rows are the ones worth reading
 twice; nothing will stop those repeating except somebody remembering.
 
@@ -77,6 +77,7 @@ quietly absent.
 | [50](#50-a-byte-check-left-the-encoded-request-unchanged) | A byte check left the encoded request unchanged | canonical Privy request process regression |
 | [51](#51-an-ordinary-supply-bound-refused-wrapped-sol) | An ordinary supply bound refused wrapped SOL | captured native mint and constrained wrapping regressions |
 | [52](#52-a-yielded-command-was-mistaken-for-a-completed-check) | A yielded command was mistaken for a completed check | habit only: confirm the parent command exit before the next Cargo |
+| [53](#53-a-test-reacquired-journal-ownership-it-already-had) | A test reacquired journal ownership it already had | habit only: retain ownership through one fixture transition |
 
 ---
 
@@ -2187,3 +2188,22 @@ exited successfully; the affected CLI lint was repeated after source restoration
 mutating source under its check, require the previous shell session's final
 exit code. A finished child or yielded output does not establish parent completion.
 CI cannot enforce this local orchestration rule.
+
+## 53. A test reacquired journal ownership it already had
+
+**Found:** 2026-10-09, mixed-history CI 37948602727. Mutation shard 3 failed
+its unmodified baseline at issuer_process.rs:977:68: the terminal-cost fixture
+received WouldBlock opening operations.jsonl.lock. Local full tests had passed.
+The fixture released its existing history handle and immediately reopened it
+to add its terminal record. Which process held the Unix lock was not captured;
+a fork/inherited-descriptor window is an inference, not an established cause.
+
+Move that terminal fixture transition under the existing owned OperationLog.
+No release/reacquire is needed; production locking remains nonblocking with no
+retry, deletion or weaker refusal. The terminal mismatch regression still fails
+when debit consistency is disabled. The fixture repair needs a complete Linux CI
+run; a Windows pass alone does not establish resolution of the observed failure.
+
+**What catches a recurrence:** habit only. Keep a fixture's known owner through
+one transition when it already has the handle. The baseline CI exposed contention
+but no deterministic test reproduces this particular ownership window locally.
