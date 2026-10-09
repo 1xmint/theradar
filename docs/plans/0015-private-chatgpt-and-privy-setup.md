@@ -2970,3 +2970,53 @@ Rust 1.99 scoped all-target Clippy and formatting passed. Three additional
 manual faults (fee bound, debit bound, reservation forwarding) failed their
 regressions; restored source passed. LEARNINGS 54 records the source review
 finding and the limits of its evidence. Initial CI is still awaited.
+
+
+### Verified sale proceeds handback (2026-10-09)
+
+Source 3e0e4f82d63fccba34f1c0be35ee6f75e48d95e8 passed all jobs in CI
+37965634236: https://github.com/1xmint/theradar/actions/runs/37965634236 .
+2,544 Rust and 352 web tests passed, as did build, lint, formatting, MSRV,
+dependency, licence and site checks, all four mutation shards and final gate.
+Shards 0/1/2/3 tested 262/262/262/261 mutants (1,047 total), caught
+196/178/208/208 with 66/84/54/53 unviable and none missed. The longest mutation
+step ran 24 minutes. Verified with gh run view and completed job logs via gh api.
+Initial 459504270032aa08d7581a9103163d5b511c0ac4 also passed whole CI
+37962107913: 2,542 Rust/352 web tests; shards tested 260/260/260/258,
+caught 194/176/206/205 with 66/84/54/53 unviable, none missed, final gate green.
+That run completed fully before the repair push; neither run was cancelled.
+
+The follow-up reservation finding was a source review finding while initial CI
+ran, not a live execution failure. Initial tests passed without those new
+regressions. LEARNINGS 54 records the missing fee/net-debit reservation checks
+and explicit dispatcher forwarding repair. Repaired source passed 188 signer
+and 33 conformance tests, Rust 1.99 scoped all-target Clippy and formatting.
+All 19 manually reapplied logic faults failed their regressions; overflow faults
+still fail after factoring their unit fixture. Source was restored before push.
+No dependency, lint suppression or mutation exclusion was added.
+
+Protected review/record now retains exact bound operator sale cash flows. Gross
+plus rent refund minus fee/tip/rent paid must match the measured signed wallet
+effect, with checked native totals and fee/net debit within the recorded claim.
+Credit/zero/fee-dominated effects are supported. Credits round USD down, costs
+up; signed net trade proceeds exclude separately priced rent paid/refunded.
+Mixed acquisition/sale classification and changed immutable economics refuse.
+Synthetic process fixtures exercise exact artifacts, reading, durable repeats
+and replay; they do not establish a network-accepted venue sale. No disposed
+basis, realised PnL, complete cash-flow coverage, risk update or claim release
+is inferred. Acquisition/inventory history still refuses incomplete sales.
+
+Next: basis allocation and disposal-history accounting, complete transfer/cash
+flows, opening/failed-fee ordering, current valuation/exposure/loss and idempotent
+economic reconciliation. Four activation areas remain: economic reconciliation;
+independent live risk inputs; execution/exits/recovery/scheduling; owner numeric
+limits, isolated keys, verified Privy policy/delegation, funding, deployment and
+bounded validation. No percentage or activation date claimed. Autonomy is off;
+site limits remain drafts and outstanding claims still block issuance.
+
+No live chain read, real credential/key/signature/delegation change, trade,
+owner-limit change, VPS read or deployment occurred. Funding/current Privy policy
+remain unverified. CI watches completed; no Cargo/rustc/issuer/signer process
+remained at final inspection. Target measured 35.1 GiB; free disk 58.2 GiB.
+Previously rejected cleanup was not retried. This verified handback is committed
+locally for the next source push, avoiding redundant documentation-only full CI.
