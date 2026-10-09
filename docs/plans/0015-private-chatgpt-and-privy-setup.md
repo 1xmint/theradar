@@ -3465,3 +3465,47 @@ or bypass the run. On green, close this increment's verification record, then
 continue complete wallet activity coverage/durable economic reconciliation. Live
 risk inputs, execution/recovery/exits/scheduling, and activated owner limits plus
 verified Privy policy/delegation/funding/deployment validation still remain.
+
+
+### Handback: native-transfer CI runtime limit and coverage inspection (2026-10-09)
+
+CI 37999235384 attempt 1 completed at source
+1438626dda4422372e83ca5dcf85c913f9e28219. All ordinary jobs passed:
+2,564 Rust tests, 352 web tests, build, lint, format, MSRV, dependencies, licence
+and site. Shards 0/2/3 passed: 296/296/293 tested, 228/246/228 caught and
+68/50/65 unviable (885 total, 702 caught, 183 unviable, none missed).
+Shard 1's unmodified baseline passed (103s build, 11s test), then its job
+exceeded the configured 30-minute maximum. The check-run annotation explicitly
+says the maximum execution time was exceeded. It was cancelled by that limit;
+no agent cancellation or new push caused it. No mutation totals or survivors
+were reported for that shard. The aggregate failed; full verification remains
+incomplete. Disk telemetry still showed 76GB free on the runner. No evidence
+establishes a wedged test or resource exhaustion.
+
+Rerun only the failed shard with gh run rerun --job against the same source,
+preserving the passed checks. Attempt 2 is running; shard-1 job 114061977905
+and its dependent final gate remain required. No workflow deadline, mutation
+exclusion or production code was changed. If this attempt also reaches the
+limit, inspect its logs and discuss the CI runtime/sharding trade-off before
+changing the gate or substituting local verification. Do not cancel or push
+over the active rerun.
+
+Independent source/protocol inspection is recorded in
+[research 0038](../research/0038-wallet-address-history-is-not-complete-wallet-coverage.md).
+The existing dossier pager neither explicitly requests finalized commitment nor
+provides an accounting interval. Wallet-address signatures and current token
+account enumeration do not establish historical token-account coverage. The next
+bounded operator collector must preserve failures, cursor/order integrity, exact
+raw transaction bindings and explicit incomplete-read reasons. The collector is
+not implemented. All 33 conformance checks passed after saving the research as
+UTF-8; its initial Windows default encoding was rejected and corrected.
+
+Documentation commits remain local for the next source push. At inspection,
+no local Cargo/rustc process was active; target was 35.17GiB with 56.91GiB free
+on C. No cleanup was attempted. No real wallet read, key, signing, delegation,
+owner limit, deployment or trade changed. Autonomous execution remains off.
+Next: read every rerun job/final gate, then close transfer verification on green
+and implement the bounded finalized activity collector. Other activation gates
+remain live risk inputs, durable economic/risk-state application, execution/
+recovery/exits/scheduling and owner limits/verified Privy authority/funding/
+deployment validation.
