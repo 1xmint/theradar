@@ -2561,3 +2561,38 @@ mutation exclusion or lint suppression. Full CI remains pending. This review
 is not accepted as risk state by the signing path.
 
 All 33 repo-conformance checks passed after staging the new module and docs.
+
+### Verified protected inventory comparison handback (2026-10-09)
+
+Source 95ecce31b86a56fe3b2cafba2af87b11b0dd4d7f passed full CI 37885067007:
+https://github.com/1xmint/theradar/actions/runs/37885067007 . All jobs completed
+successfully: 2,522 Rust and 352 web tests, build, lint, format, MSRV, dependency,
+licence and site checks, all four mutation shards and final gate. Shards
+0/1/2/3 tested 217/217/217/216 mutants, caught 158/140/179/170 with
+59/77/38/46 unviable; none missed. The last shard ran 25 minutes. No repair
+push or cancellation. Scoped local signer tests, Rust 1.99 Clippy/formatting,
+33 conformance checks and all 22 manual behavior mutations passed as recorded
+above. No dependency, mutation exclusion or lint suppression was added.
+
+The actual protected --review-inventory caller compares normalized wallet-read
+evidence and revalidated retained acquisitions against the exact journal
+checkpoint. Exact matches, unexplained excess and unaccounted reductions remain
+read-only comparison outputs. Complete inventory, opening holdings, exposure
+and daily loss remain unknown. Existing outstanding claims still block issuance.
+The signing path does not consume this report. The protected operator file is
+the trust boundary; no independent live adapter or chain truth is established.
+
+Next: a protected opening inventory baseline and transfer/disposal/failed-fee
+coverage, followed by current valuation, exposure/loss and idempotent economic
+reconciliation. All four major activation areas remain: economic reconciliation;
+protected live risk inputs; execution/recovery/exits/scheduling; owner limits,
+isolated keys, verified Privy policy/delegation, funding, deployment and bounded
+validation. No percentage or launch date claimed.
+
+Autonomous trading remains off; site limits remain drafts. No live chain read,
+real credential/key/signature/delegation change, trade, VPS health read or Serve
+deployment occurred. Funding/current Privy policy remain unverified. The CI
+watch finished and no Cargo/rustc/Radar process remained at final inspection.
+Target measured 35.1 GiB with 57.3 GiB free; previously rejected ignored-output
+cleanup was not retried. This verified handback is committed locally for the
+next source push, avoiding a redundant documentation-only full CI run.
