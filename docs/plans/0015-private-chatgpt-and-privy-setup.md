@@ -3276,3 +3276,48 @@ execution/exits/recovery/scheduling and owner limits/keys/Privy policy/delegatio
 funding/deployment/validation. Autonomous trading remains off; no activation
 percentage or date. No live read, real key/signature/delegation/trade, VPS access,
 Serve deployment or owner-limit change in this increment.
+
+
+### Verified recorded native cash comparison handback (2026-10-09)
+
+Source 8c7881480f556aceaa7049b84f0ba5443df3247a passed every job in
+CI 37988123308: https://github.com/1xmint/theradar/actions/runs/37988123308 .
+2,557 Rust and 352 web tests passed, with build, lint, formatting, MSRV,
+dependency, licence/site checks, all four mutation shards and the final gate.
+Shards 0/1/2/3 tested 279/279/279/276 mutants (1,113 total), caught
+213/190/223/216 with 66/89/56/60 unviable (842 caught, 271 unviable),
+none missed. The slowest mutation step ran 27 minutes. Read completed job logs
+through gh api and matched the head SHA through gh run view. Every job completed;
+no repair push or cancelled run. PR 334 description updated with this evidence.
+
+The owned history reader derives exact native pre/post/delta effects only after
+full retained binding/valuation replay and cross-category artifact deduplication.
+The existing inventory reader projects opening cash through recorded buys,
+sales and failed fees in slot order, compares every transaction pre-balance and
+the current native read, and preserves signed unexplained discrepancies. A final
+match cannot hide an earlier anchor gap. Missing opening stays null; same-slot
+ordering, execution at/before the highest opening context, future native effects
+and intermediate balance under/overflow refuse. Exact current-slot equality is
+accepted. Coverage remains recorded operations only, not complete transfers or
+independent chain provenance. No risk-state update, daily-loss conclusion,
+operation closure or claim release. All 16 manually reapplied logic faults
+failed their regressions and were restored. 201 local signer tests, 33
+conformance checks, Rust 1.99 scoped all-target Clippy and formatting passed;
+the four cash unit tests passed after the final test-helper borrowing change.
+Five tests added, floor raised to 2160. No dependency, lint suppression, mutation
+exclusion or durable-record schema change. Process fixtures remain synthetic.
+
+Next: complete external transfer/cash-flow coverage, current valuation/exposure/
+loss and idempotent application. Four activation areas remain: economic
+reconciliation; independent live risk inputs; execution/exits/recovery/scheduling;
+owner numeric limits, isolated keys, verified Privy policy/delegation, funding,
+deployment and bounded validation. Autonomous execution remains off. The site
+limits are still drafts; current funding and Privy policy are unverified. No
+activation percentage or date is claimed. This increment was not deployed;
+last Serve deployment remains 3f38ee0ffaf2d1e349f54b43475f36c010bb335d.
+
+No live chain read, real key/credential/signature/delegation/trade, owner-limit
+change, VPS access or deployment occurred. No local Cargo/rustc/issuer/signer
+process remained at inspection. Target measured 35.1 GiB; disk free 57.2 GiB.
+No rejected cleanup was retried. CI watches ended. This verified handback is
+committed locally for the next source push, avoiding redundant doc-only CI.
