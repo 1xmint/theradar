@@ -325,9 +325,7 @@ fn finalized_fixture() -> (Fixture, Vec<u8>, radar_journal::OperationId, Value) 
 }
 
 fn disposal_fixture(action: &str) -> (Fixture, radar_journal::OperationId, Value) {
-    let (fixture, _, source, mut evidence) = finalized_fixture();
-    let history = fixture.dir.path().join("operations.jsonl");
-    let mut log = radar_journal::OperationLog::open(&history).expect("history");
+    let (fixture, _, source, mut evidence, mut log) = finalized_fixture_owned(false);
     let mut intent = log.entry(&source).expect("entry").intent;
     intent.amount = radar_types::TokenQuantity::lamports(5000);
     let mut binding = log.execution(&source).expect("binding").clone();
@@ -798,6 +796,20 @@ fn protected_failed_fee_record_refuses_unexplained_native_or_token_changes() {
 fn finalized_fixture_with_opening(
     with_opening: bool,
 ) -> (Fixture, Vec<u8>, radar_journal::OperationId, Value) {
+    let (fixture, signed, id, evidence, log) = finalized_fixture_owned(with_opening);
+    drop(log);
+    (fixture, signed, id, evidence)
+}
+
+fn finalized_fixture_owned(
+    with_opening: bool,
+) -> (
+    Fixture,
+    Vec<u8>,
+    radar_journal::OperationId,
+    Value,
+    radar_journal::OperationLog,
+) {
     use ed25519_dalek::Signer as _;
     let key = ed25519_dalek::SigningKey::from_bytes(&[0x42; 32]);
     let (mut fixture, mut signed) = fixture_for_wallet(&key);
@@ -820,7 +832,6 @@ fn finalized_fixture_with_opening(
     let id = log.outstanding().next().expect("operation").0.clone();
     log.record_signed(&id, radar_types::b64::encode(&signed), unix_now())
         .expect("fixture signed binding");
-    drop(log);
     let evidence = json!({"version":1,"authority":"read_only","commitment":"finalized","wallet":fixture.config["wallet"],
         "transaction_base64":radar_types::b64::encode(&signed),"signature":radar_types::Signature::new(signature).to_string(),
         "signature_verified_locally":false,"operation_reconciled":false,"usd_value":null,"realised_pnl":null,
@@ -828,7 +839,7 @@ fn finalized_fixture_with_opening(
         "account_keys":[fixture.config["wallet"],address(0x22),address(0x11)],"pre_balances_lamports":["300000000","0","0"],
         "post_balances_lamports":["299995000","0","0"],"network_fee_lamports":"5000","pre_token_balances":[],"post_token_balances":[],
         "provider_response":"UNREVIEWED_RESPONSE_MUST_NOT_PERSIST"});
-    (fixture, signed, id, evidence)
+    (fixture, signed, id, evidence, log)
 }
 
 fn acquisition_cost_fixture() -> (

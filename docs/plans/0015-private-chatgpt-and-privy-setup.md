@@ -3052,3 +3052,17 @@ independent live risk inputs; execution/exits/recovery/scheduling; owner limits,
 isolated keys, verified Privy policy/delegation, funding/deployment and validation.
 Autonomy remains off. No live chain read, credential, key, delegation, trade,
 owner-limit, VPS or deployment change. Current funding/policy remain unverified.
+
+
+Mixed-sale initial CI 37973753478 failed mutation shard 3's unmodified
+baseline at issuer_process.rs:330:63 in the existing sale fixture's disposal
+constructor (WouldBlock reacquiring operations.jsonl.lock). Both new mixed-sale
+regressions passed in that baseline. Return the signed source fixture's known
+owner through a shared helper, and keep it for disposal construction. Production
+locking, test parallelism and refusal semantics stay unchanged. LEARNINGS 53
+records this additional occurrence; the actual lock holder was not captured.
+Repair local proof: 190 signer tests and 33 conformance checks passed, along
+with Rust 1.99 scoped all-target Clippy and formatting. Fixture-only ownership
+plumbing is not separately mutated; the six behavior faults already failed
+their regressions with restored production source. Await every initial job
+before repair push; whole repaired Linux CI remains required.

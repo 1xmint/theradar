@@ -2205,6 +2205,13 @@ hit WouldBlock at issuer_process.rs:845:10, where the invalid-evidence copy
 helper reopened the journal. Fix that helper to borrow the existing owner too.
 The first repair was incomplete; moving one reopen did not establish resolution.
 
+Mixed-sale source 3b99e8b CI 37973753478 later failed shard 3's unmodified
+baseline at issuer_process.rs:330:63 in disposal_fixture. The signed source
+fixture released its owner before the disposal helper immediately reopened it.
+Return the known owner through a shared fixture helper and use that same handle
+for disposal construction. No lock retry or test serialization; Linux CI must
+verify this additional fixture repair. The lock holder was again not captured.
+
 No release/reacquire is needed for either transition; production locking remains
 nonblocking with no retry, deletion or weaker refusal. Terminal consistency and
 facts signature/operation regressions still fail when their guards are disabled.
