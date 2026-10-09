@@ -55,6 +55,7 @@ pub mod preflight;
 pub mod reserves;
 pub mod rpc;
 pub mod settlement;
+pub mod wallet_activity;
 pub mod wallet_inventory;
 
 pub use budget::{Budget, Count, Exhausted};

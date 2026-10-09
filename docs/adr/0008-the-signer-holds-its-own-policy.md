@@ -1078,6 +1078,43 @@ Neither command updates a kernel portfolio, closes an operation, releases
 capital or grants authority. Ordinary issuance does not yet construct risk
 state from the opening record; live activation remains closed.
 
+## Bounded operator address history collection
+
+`radar wallet-activity-read --wallet <address> --after-slot <N> --through-slot <N> --rpc <URL>`
+collects provider-reported address history in an explicit exclusive/inclusive
+slot interval. Its caller is the operator CLI; the signer remains offline.
+Request finalized signature pages of 32 with a context floor at the upper slot,
+then explicitly filter transaction slots. Validate finalized status, explicit
+success/failure, descending slots and unique canonical signatures across pages.
+Retain failed executions. Full pages advance the before cursor; stop at the
+lower slot boundary, provider-reported history exhaustion or an explicit bound.
+The CLI allows 36 calls, three pages and 20 seconds, using the existing Budget.
+Read-start/completion timestamps describe the host collection window.
+
+Fetch raw base64 transactions for enumerated entries at finalized commitment.
+Require exact first wire signature, slot and outcome agreement, a bounded packet
+and signature extent, and an explicit integer fee. Preserve raw metadata as
+untrusted evidence for later classification; never interpret its UI quantities
+as accounting values. The collector does not decode full messages, verify
+signatures locally, establish query-address membership, or classify supported
+transfers. These missing guarantees are explicit in its output. Multi-signature
+and versioned messages can be collected as unresolved data, not authorized.
+
+Report signature_scan_finished and transaction_fetch_finished separately with
+stop reasons. Provider errors, missing transactions and page/call/deadline bounds
+produce incomplete evidence, including already collected entries. Malformed or
+inconsistent rows refuse. Empty/short pages mean only provider-reported exhaustion;
+no archival completeness or absence of external activity follows. Current token
+accounts omit historical/closed accounts, and an owner-wallet scan can omit
+transactions naming only its token accounts. See [research 0038](../research/0038-wallet-address-history-is-not-complete-wallet-coverage.md).
+
+Coverage is provider_reported_address_history, wallet_coverage_complete remains
+false, and no economic reconciliation, portfolio update, reservation release,
+journal write, key, signing or sending occurs. Output is not automatically
+installed as an issuer snapshot. Independent metadata provenance, the historical
+account universe, transfer classification and durable idempotent application
+remain required before the collector can contribute to live reconciliation.
+
 ## What would reverse this
 
 Nothing foreseeable reverses holding a policy locally. The specific ceilings are

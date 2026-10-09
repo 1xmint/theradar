@@ -3509,3 +3509,48 @@ and implement the bounded finalized activity collector. Other activation gates
 remain live risk inputs, durable economic/risk-state application, execution/
 recovery/exits/scheduling and owner limits/verified Privy authority/funding/
 deployment validation.
+
+
+### Bounded finalized address collector, isolated increment (2026-10-09)
+
+While source 1438626 CI 37999235384 attempt 2 remains in flight, implement the
+independent read-only collector on feat/wallet-activity-read in the sibling
+radar-wallet-activity worktree. It uses only the existing RpcClient/Budget and
+does not alter the pending signer source, its fixtures or its workflow. This
+collector is finishable offline and cannot authorize capital regardless of the
+pending mutation result. No new push interrupts that run.
+
+The operator command wallet-activity-read requires wallet, RPC endpoint and an
+exclusive after/inclusive through slot interval. Fetch finalized signature pages
+of 32 with a context floor at the upper bound; validate explicit status/outcome,
+canonical signature identity, nonincreasing slots and global duplicate/cursor
+integrity. Ignore entries above the upper slot and stop at the lower boundary
+or provider-reported exhaustion, with page/call/deadline stop reasons. Preserve
+failed executions. Fetch base64 raw transactions and bind their first wire
+signature, exact slot and outcome to enumeration. Check packet/signature extent
+and integer fee; retain raw metadata explicitly as untrusted unresolved input.
+No full message decoding, local signature verification or address-membership
+proof is claimed. Multi-signature/versioned bytes remain unresolved.
+
+Report signature scan and transaction fetch completion separately. Missing
+transactions/provider errors/bounds produce incomplete evidence with retained
+entries; malformed or inconsistent rows refuse. The CLI Budget is 36 calls,
+three pages and 20 seconds. Wallet coverage, economic reconciliation, portfolio
+updates and claim release remain false. No issuer snapshot is installed and no
+journal is written. ADR 0008 and research 0038 document these limits. Historical
+token accounts, independent metadata provenance, classification and durable
+idempotent application remain unfinished.
+
+Eight tests added; floor raised from 2167 to 2175. Restored verification passed
+238 CLI tests (224 unit, 14 process), 107 on-chain tests (89 unit, 18 process),
+33 conformance checks, scoped Rust 1.99 all-target Clippy and formatting. All 27 manually applied logic
+faults failed their regressions: exact interval/packet/signature boundaries,
+identity/outcome/fee checks, finalized status, order, duplicate/cursor checks,
+full/oversized pages, completion flags, query commitment/context and page budget.
+The first local harness was interrupted after five caught faults, with the
+sixth temporary guard mutation still present. Restore that guard, complete all
+22 remaining faults and verify exact restoration against a saved baseline. No
+fault is retained. Normalize newline style with rustfmt after restoration.
+No mutation exclusion, dependency or lint suppression added. Full CI for this
+collector remains required after the pending run completes. No live read, key,
+signing, delegation, owner-limit change, trade or deployment. Autonomy stays off.

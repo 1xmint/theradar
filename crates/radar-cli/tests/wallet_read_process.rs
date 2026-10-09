@@ -30,6 +30,63 @@ fn settlement_result() -> Value {
             "preTokenBalances":[],"postTokenBalances":[]}})
 }
 
+#[test]
+fn address_activity_command_fetches_finalized_raw_failures_without_claiming_coverage() {
+    for failed in [false, true] {
+        let mut raw = settlement_result();
+        let err = if failed {
+            json!({"InstructionError":[0,1]})
+        } else {
+            Value::Null
+        };
+        raw["meta"]["err"] = err.clone();
+        let signature = radar_types::Signature::new([0xAB; 64]).to_string();
+        let (endpoint, server) = fixture(vec![
+            json!({"result":[{"signature":signature,"slot":50,
+            "err":err,"confirmationStatus":"finalized"}]}),
+            json!({"result":raw}),
+        ]);
+        let before = now();
+        let output = Command::new(env!("CARGO_BIN_EXE_radar"))
+            .args([
+                "wallet-activity-read",
+                "--wallet",
+                &radar_types::Address::new([0x55; 32]).to_string(),
+                "--after-slot",
+                "49",
+                "--through-slot",
+                "50",
+                "--rpc",
+                &endpoint,
+            ])
+            .output()
+            .expect("activity command");
+        assert!(output.status.success(), "{:?}", output.stderr);
+        let evidence: Value = serde_json::from_slice(&output.stdout).expect("activity evidence");
+        assert_eq!(evidence["authority"], "read_only");
+        assert_eq!(evidence["signature_scan_finished"], true);
+        assert_eq!(evidence["transaction_fetch_finished"], true);
+        assert_eq!(evidence["wallet_coverage_complete"], false);
+        assert_eq!(evidence["economic_reconciliation_complete"], false);
+        assert_eq!(
+            evidence["transactions"][0]["outcome"],
+            if failed { "failed" } else { "succeeded" }
+        );
+        assert_eq!(evidence["transactions"][0]["network_fee_lamports"], "5000");
+        assert_eq!(evidence["transactions"][0]["classification"], "unresolved");
+        assert!(evidence["read_started_at_unix_secs"].as_u64().unwrap() >= before);
+        assert!(evidence["read_completed_at_unix_secs"].as_u64().unwrap() <= now());
+        let calls = server.join().expect("activity RPC");
+        assert_eq!(calls.len(), 2);
+        assert_eq!(calls[0]["method"], "getSignaturesForAddress");
+        assert_eq!(calls[0]["params"][1]["commitment"], "finalized");
+        assert_eq!(calls[0]["params"][1]["minContextSlot"], 50);
+        assert_eq!(calls[1]["method"], "getTransaction");
+        assert_eq!(calls[1]["params"][0], signature);
+        assert_eq!(calls[1]["params"][1]["encoding"], "base64");
+    }
+}
+
 fn settlement_command(endpoint: &str) -> std::process::Output {
     let mut file = tempfile::NamedTempFile::new().expect("signed input");
     file.write_all(&settlement_bytes()).expect("file");

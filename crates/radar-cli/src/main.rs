@@ -32,6 +32,7 @@ mod session;
 mod settlement_read;
 mod study;
 mod transaction_read;
+mod wallet_activity_read;
 mod wallet_read;
 
 use radar_sim::{JupiterQuoter, RpcClient};
@@ -117,6 +118,8 @@ commands:
                                  whether it is fixed or proportional
   wallet-read --wallet <address> --rpc <URL>
     Finalized balances plus raw token/mint verification; no prices or authority.
+  wallet-activity-read --wallet <address> --after-slot <N> --through-slot <N> --rpc <URL>
+    Bounded finalized address history and raw transactions; incomplete wallet coverage.
   curve-exit --mint <address> --raw-tokens <N> --rpc <URL>
     One-context curve/mint/fee read; conservative hypothetical sell, no authority.
   transaction-read --transaction <binary-file> --min-slot <N> --rpc <URL>
@@ -899,6 +902,7 @@ fn main() -> ExitCode {
         "creator-index" => creator_index(&args),
         "dossier" => dossier::run(&args),
         "wallet-read" => wallet_read::run(&args),
+        "wallet-activity-read" => wallet_activity_read::run(&args),
         "curve-exit" => curve_exit::run(&args),
         "transaction-read" => transaction_read::run(&args),
         "evidence-read" => evidence_read::run(&args),

@@ -2,7 +2,8 @@
 # 0038 — Wallet address history is not complete wallet coverage
 
 **Date:** 2026-10-09.
-**Status:** source and protocol inspection; collector not implemented, no live measurement.
+**Status:** source and protocol inspection; bounded address collector implemented
+on an isolated branch, local tests/lint/format passed; full CI pending, no live measurement.
 **Bears on:** [private setup plan](../plans/0015-private-chatgpt-and-privy-setup.md)
 and [issuer policy](../adr/0008-the-signer-holds-its-own-policy.md).
 
@@ -70,5 +71,8 @@ Required regressions: exact slot boundaries; newer rows across pages; repeated
 cursor/signature; out-of-order rows; missing status/outcome; failed executions;
 page/call/deadline exhaustion; empty/short/full pages; missing or mismatched raw
 transactions; and a token-account transfer whose owner is absent from accountKeys.
-These describe the next collector, not tests already present. Durable transfer
-retention and idempotent application follow collection and remain unimplemented.
+The bounded collector now has local regressions for these boundaries, including
+an unresolved transaction whose wire bytes omit the queried owner. This checks
+that collection never claims local membership or complete wallet coverage; it
+is not a live token-account transfer measurement. Durable transfer retention
+and idempotent application remain unimplemented.
