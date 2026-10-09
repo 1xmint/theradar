@@ -234,6 +234,7 @@ pub(super) fn review(log: &OperationLog, config: &Config) -> Result<Value, Strin
     let mut unsubmitted = Vec::new();
     let mut failed_fees = Vec::new();
     let mut sales = Vec::new();
+    let mut cash_flows = Vec::new();
     for (id, entry) in log.entries() {
         if matches!(
             entry.state,
@@ -251,6 +252,14 @@ pub(super) fn review(log: &OperationLog, config: &Config) -> Result<Value, Strin
         if !artifacts.insert(artifact) {
             return Err("signed transaction occurs under multiple acquisition operations".into());
         }
+        cash_flows.push(super::cash::flow(
+            &log.valuation(id)
+                .ok_or("missing cash flow")?
+                .settlement
+                .review,
+            id.as_str(),
+            config.wallet,
+        )?);
         match reviewed {
             HistoricalEffect::Acquisition(lot) => lots.push(lot),
             HistoricalEffect::FailedFee(fee) => failed_fees.push(fee),
@@ -270,6 +279,7 @@ pub(super) fn review(log: &OperationLog, config: &Config) -> Result<Value, Strin
         "lots":lots,"acquisitions_by_mint_and_creator":groups,
         "failed_execution_fees":failed_fees,"recorded_failed_fee_totals":fees,
         "sales":sales,"recorded_disposal_accounting":accounting,
+        "recorded_native_cash_flows":cash_flows,
         "unsubmitted_operations":unsubmitted,
         "wallet_inventory_complete":false,"current_exposure_micro_usd":null,
         "realised_loss_today_micro_usd":null,"portfolio_state_updated":false,

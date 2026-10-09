@@ -961,6 +961,36 @@ closes no operation and releases no reservation. The signing path does not
 consume its report or gain authority. Live activation remains closed until the
 remaining economic coverage and protected live adapter are implemented.
 
+## Recorded native cash comparison
+
+The acquisition-history caller also derives `recorded_native_cash_flows` from
+exact retained settlements after replaying their signed binding and normalized
+valuation. Each submitted buy, sale or failed-fee operation contributes once;
+the existing cross-category signed-artifact deduplication still applies. Require
+one configured-wallet native effect and exact pre/post/delta agreement with the
+retained wallet delta. This adds derived output, not a new durable record shape.
+
+The inventory caller exposes `recorded_native_cash_comparison`. Without an
+opening inventory it is null. With an opening record, share the existing wallet
+and opening-read validation, sort recorded native effects by execution slot,
+require every execution strictly after the highest opening context and at or
+before the current native read, and refuse same-slot effects because transaction
+indices are unavailable. Include failed fees in these bounds. Project cash from
+opening lamports plus exact native deltas, checking the u64 balance range after
+every operation; a later offset cannot rescue an impossible intermediate balance.
+
+Compare each recorded pre-balance against the projected pre-balance and retain
+signed unexplained differences, then compare the current native observation
+against the final projection. Never reset the projection to an unexplained
+pre-balance. Report final `balance_matches` separately from
+`transaction_anchors_match`: offsetting missing flows can leave a final match
+while transaction anchors differ. These are discrepancy observations, not
+proven transfer classifications. Coverage remains `recorded_operations_only`;
+even both matches do not prove external cash-flow completeness, independently
+sourced evidence, realised wallet PnL, current exposure or daily loss. Complete
+transfer enumeration and idempotent application remain absent. Review writes
+nothing, releases no claims and enables no execution.
+
 ## Immutable opening inventory before operations
 
 `radar-issuer --record-opening-inventory` reads the configured private genesis

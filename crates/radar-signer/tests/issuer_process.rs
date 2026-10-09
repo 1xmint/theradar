@@ -1282,6 +1282,14 @@ fn protected_fifo_history_compares_remaining_inventory_without_releasing_claims(
         assert_eq!(row["retained_acquired_raw"], "15");
         assert_eq!(row["retained_disposed_raw"], "6");
         assert_eq!(row["quantity_matches"], true);
+        let cash = &inventory["recorded_native_cash_comparison"];
+        assert_eq!(cash["expected_lamports"], "285844000");
+        assert_eq!(cash["unexplained_change_lamports"], "14156000");
+        assert_eq!(cash["transaction_anchors_match"], false);
+        assert_eq!(
+            cash["transaction_anchors"][1]["unexplained_change_lamports"],
+            "15156000"
+        );
         assert_eq!(inventory["realised_loss_today_micro_usd"], Value::Null);
         assert_eq!(inventory["economic_reconciliation_complete"], false);
     }
@@ -1300,6 +1308,53 @@ fn protected_fifo_history_compares_remaining_inventory_without_releasing_claims(
     }
     fixture.save();
     assert_eq!(std::fs::read(&history).expect("unchanged"), saved);
+}
+
+#[test]
+fn protected_native_cash_comparison_keeps_buy_and_failed_fee_gaps_without_mutating_claims() {
+    let mut fixture = inventory_fixture_opening(Some(0));
+    let path = fixture.dir.path().join("operations.jsonl");
+    for failed in [false, true] {
+        if failed {
+            append_failed_history(&fixture, "valid");
+        }
+        let log = radar_journal::OperationLog::open(&path).expect("owned");
+        fixture.snapshot["accounting_checkpoint"] = json!(log.checkpoint());
+        assert_eq!(log.outstanding().count(), if failed { 2 } else { 1 });
+        drop(log);
+        set_inventory(&mut fixture, 15, 1003);
+        let saved = std::fs::read(&path).expect("saved");
+        let output = inventory_report(&fixture);
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let report: Value = serde_json::from_slice(&output.stdout).expect("comparison");
+        let cash = &report["recorded_native_cash_comparison"];
+        assert_eq!(
+            cash["expected_lamports"],
+            if failed { "284839000" } else { "284844000" }
+        );
+        assert_eq!(
+            cash["unexplained_change_lamports"],
+            if failed { "15161000" } else { "15156000" }
+        );
+        assert_eq!(cash["balance_matches"], false);
+        assert_eq!(cash["transaction_anchors_match"], !failed);
+        assert_eq!(
+            cash["transaction_anchors"].as_array().unwrap().len(),
+            if failed { 2 } else { 1 }
+        );
+        assert_eq!(cash["external_cash_flows_complete"], false);
+        assert_eq!(report["reservation_released"], false);
+        assert_eq!(report["economic_reconciliation_complete"], false);
+        assert_eq!(
+            serde_json::from_slice::<Value>(&inventory_report(&fixture).stdout).unwrap(),
+            report
+        );
+        assert_eq!(std::fs::read(&path).expect("unchanged"), saved);
+    }
 }
 
 #[test]
@@ -1837,6 +1892,7 @@ fn protected_inventory_comparison_reports_differences_without_releasing_or_flatt
         );
         for field in [
             "opening_inventory",
+            "recorded_native_cash_comparison",
             "current_exposure_micro_usd",
             "realised_loss_today_micro_usd",
         ] {

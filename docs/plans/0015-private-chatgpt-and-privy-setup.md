@@ -3232,3 +3232,47 @@ issuer/signer process remained at inspection. Target measured 35.1 GiB; disk
 free 57.1 GiB. No rejected cleanup was retried. Both CI watches completed.
 This verified handback is committed locally for the next source push, avoiding
 a redundant documentation-only full CI run.
+
+
+### Recorded native cash comparison increment (2026-10-09)
+
+Continue after the verified FIFO handback. Add derived recorded native effects
+for every replay-validated buy, sale and failed-fee operation, preserving existing
+signed-artifact deduplication. Validate exactly one wallet effect and agreement
+between pre/post native balances and retained signed deltas. No durable schema
+or record hash changes. The existing inventory reader compares opening native
+cash plus ordered effects against every transaction pre-balance and the current
+native read. Missing opening remains null; ambiguous same-slot executions,
+executions at/before the highest opening context, future executions and any
+intermediate balance outside u64 refuse. Equality at the current slot is valid.
+
+Retain both signed discrepancies and separate final/transaction-anchor match
+flags. Never absorb an unexplained flow by resetting the projection. A final
+match cannot hide a prior gap or establish complete transfer coverage. Keep
+external cash flows incomplete, all economic completion/update/release flags
+false, and exposure/daily loss unknown. Process regressions cover exact retained
+buy/sale/failed-fee projection, repeat reads and unchanged journal/claims. Four
+unit tests cover signs, sorting, equality, gaps, zero and wide balances,
+intermediate under/overflow, missing opening and inconsistent wallet effects.
+Five new tests raise the Rust floor to 2160.
+
+All 16 manually reapplied cash logic faults failed a regression; source restored.
+A first deletion of the same-slot check was unviable due to BTreeSet inference;
+repeat retaining the insertion while suppressing refusal failed as required.
+Plumbing is exercised by process tests rather than manually mutated. Initial
+201 signer tests passed. Formatting returned a session ID before the first test
+command started; both parent sessions were then polled to final successful exits.
+This was an orchestration mistake under LEARNINGS 52, not evidence that a yielded
+formatter had completed. Subsequent Cargo commands must remain strictly serial.
+Restored 201 signer tests and 33 conformance checks passed. Rust 1.99 scoped
+all-target Clippy passed after changing the test helper to borrow its slice;
+formatting passed and all four cash tests passed after that test-only change.
+Full CI is pending. Previous CI 37983976833 was read
+as completed success at caa96f0ada7ed69898ded0ab24d291c06ca71073 before pushing.
+
+Next: complete transfer/cash-flow coverage, independently sourced current
+valuation/exposure/loss and idempotent application; then live risk inputs,
+execution/exits/recovery/scheduling and owner limits/keys/Privy policy/delegation/
+funding/deployment/validation. Autonomous trading remains off; no activation
+percentage or date. No live read, real key/signature/delegation/trade, VPS access,
+Serve deployment or owner-limit change in this increment.
