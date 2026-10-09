@@ -2480,3 +2480,37 @@ individual native identity/program/flag/metadata mistakes failed running tests.
 Source was restored; scoped Rust 1.99 all-target Clippy with warnings denied and
 formatting passed. LEARNINGS 51 records the pre-push correction. Full CI remains
 pending, with autonomy closed.
+
+### Verified raw wallet evidence handback (2026-10-09)
+
+Source b8623e3892c2895c5010cba3a9391da744a32d64 passed full CI 37882564346:
+https://github.com/1xmint/theradar/actions/runs/37882564346 . Every job completed
+successfully, including build, lint, formatting, MSRV, site, dependencies,
+licence headers, 2,517 Rust and 352 web tests, all four mutation shards and the
+final gate. Shards 0/1/2/3 tested 208/208/208/205 mutants respectively, with
+150/132/169/165 caught and 58/76/39/40 unviable; none missed. The final shard ran
+21 minutes. No repair push, cancellation, new dependency, mutation exclusion or
+lint suppression. Local conformance passed all 33 checks after LEARNINGS 51.
+
+The actual wallet-read and combined evidence-read paths now require raw token
+and mint checks for listed holdings. Captured classic native mint semantics
+preserve nonzero wrapped SOL despite its zero supply. This establishes locally
+decoded metadata consistency under the provider trust assumption, not complete
+inventory, spendability or independent chain authentication.
+
+Next: protected opening/current inventory coverage and reconciliation against
+retained acquisition lots. Unexplained holdings, external transfers, disposals,
+failed fees, current USD exposure and daily loss remain unresolved. Four major
+activation areas remain: economic reconciliation; protected live risk inputs;
+execution/recovery/exits/scheduling; owner limits, isolated keys, verified Privy
+policy/delegation, funding, deployment and bounded validation. No percentage or
+launch date is claimed. The model may propose trades; deterministic risk checks
+and the separate signer must enforce the owner's limits before funds can move.
+
+Autonomous trading remains off; site limits remain drafts. No live chain read,
+credential/key/signature/delegation change, trade, VPS health read or Serve
+deployment occurred. Funding and current Privy policy remain unverified. The CI
+watch finished and no local Cargo/rustc/Radar process remained at inspection.
+Target measured 35.1 GiB with 57.4 GiB free; previously rejected ignored-output
+cleanup was not retried. This verified handback is committed locally for the
+next source push, avoiding a redundant documentation-only full CI run.
