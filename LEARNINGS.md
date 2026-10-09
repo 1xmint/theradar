@@ -13,7 +13,7 @@ benefit of the doubt on everything else.
 
 ## Index
 
-**38 of these 50 name something mechanical that would catch a
+**39 of these 51 name something mechanical that would catch a
 recurrence. 12 name only a habit, and say so** — which is this file's opening
 standard rather than a gap in it. The habit-only rows are the ones worth reading
 twice; nothing will stop those repeating except somebody remembering.
@@ -75,6 +75,7 @@ quietly absent.
 | [48](#48-valid-proofs-left-durable-links-and-input-boundaries-untested) | Valid proofs left durable links and input boundaries untested | issuer process correlation and exact-boundary regressions |
 | [49](#49-a-fee-rate-bound-did-not-bound-rounded-component-costs) | A fee rate bound did not bound rounded component costs | component-rounding and process quote regressions |
 | [50](#50-a-byte-check-left-the-encoded-request-unchanged) | A byte check left the encoded request unchanged | canonical Privy request process regression |
+| [51](#51-an-ordinary-supply-bound-refused-wrapped-sol) | An ordinary supply bound refused wrapped SOL | captured native mint and constrained wrapping regressions |
 
 ---
 
@@ -2151,3 +2152,24 @@ evidence. The correction required another full source CI run.
 supplies an equivalent lenient spelling, asserts canonical request output and
 verifies the resulting attestation. Restoring original-string forwarding fails
 that assertion. The test uses temporary fixture credentials only.
+
+## 51. An ordinary supply bound refused wrapped SOL
+
+**Found:** 2026-10-09, before pushing raw wallet verification. The initial
+same-mint total check required holdings not to exceed mint supply for every
+mint. Radar's captured classic native mint reports supply zero, so that check
+would refuse a valid wrapped-SOL holding. This was caught locally; no live
+wallet measurement or trade established the mistake.
+
+Bind the exception to the canonical native mint under classic SPL Token and
+require the native-account flag, nine decimals, zero mint supply and absent
+mint/freeze authorities. Keep checked quantity addition. Other native identities
+and inconsistent wrapping metadata refuse; a reserve is not extra native cash.
+
+**What catches a recurrence:**
+`captured_classic_native_mint_has_zero_supply_without_zero_wrapped_balance`
+uses the captured mint bytes with a synthetic wallet-owned account. Restoring
+the unconditional supply bound fails that regression. Disabling each wrapping
+identity, program, flag or canonical metadata check also fails its negative
+cases, including matching raw/listed decimals that incorrectly redefine native
+units. Source was restored and the scoped suites passed.

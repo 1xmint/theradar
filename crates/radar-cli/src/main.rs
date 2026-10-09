@@ -116,7 +116,7 @@ commands:
                                  re-derives the 850 bps constant and says
                                  whether it is fixed or proportional
   wallet-read --wallet <address> --rpc <URL>
-    Direct finalized SOL/SPL/Token-2022 reads; JSON, no prices or authority.
+    Finalized balances plus raw token/mint verification; no prices or authority.
   curve-exit --mint <address> --raw-tokens <N> --rpc <URL>
     One-context curve/mint/fee read; conservative hypothetical sell, no authority.
   transaction-read --transaction <binary-file> --min-slot <N> --rpc <URL>

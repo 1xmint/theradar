@@ -262,11 +262,38 @@ identities refuse a program read. The CLI also refuses an identity repeated
 across the two program reads, even at different slots; distinct accounts of the
 same mint remain separate. Account address/program/state survive its version 1
 output as additive fields. Frozen/uninitialized balances remain holdings rather
-than disappearing. Spendability is explicitly null: mint restrictions, account
-extensions, delegates and native wrapping semantics are not verified here.
-This report must not be treated as spendable inventory. The shape is checked
+than disappearing. The jsonParsed listing alone does not verify mint restrictions,
+account extensions, delegates or native wrapping. The operator command now adds
+the raw verification below; spendability remains explicitly null because exit
+capacity, transaction feasibility and complete inventory are not established.
+The shape is checked
 against the [Solana RPC reference](https://solana.com/docs/rpc/http/gettokenaccountsbyowner),
 not a live capture of the configured wallet.
+
+For nonempty token listings, wallet-read now uses one additional finalized
+getMultipleAccounts batch for every distinct listed token account and mint,
+bounded to [100 addresses](https://solana.com/docs/rpc/http/getmultipleaccounts).
+Its context must not precede any of the three enumeration contexts. Existing
+raw token/mint parsers validate owner programs, layouts and supported extensions.
+Raw wallet/mint identity, u64 amount, state and mint decimals must agree with the
+listing. Missing/changed data, unsupported extensions or noncanonical mint
+initialization refuse the entire output. Same-mint amounts are checked for u64
+overflow. Ordinary token totals cannot exceed observed mint supply; the captured
+classic wrapped-SOL mint reports zero supply despite nonzero wrapped balances.
+That exception requires its canonical mint/program, matching native flag,
+nine decimals, zero supply and absent mint/freeze authority. Other wrapping
+identities refuse; a native flag cannot exempt an arbitrary mint. Frozen/uninitialized
+holdings remain evidence with state, not safe capital.
+
+Version 1 adds raw_token_verification with its own slot, raw quantities/units,
+mint supply, mint authority activity, freeze authority, delegation and native
+wrapping reserve. Wrapping reserve is not additional native cash. Provider truth
+remains a trust assumption; locally decoded bytes are not independent chain
+authentication. Empty listings need no extra batch and explicitly retain
+inventory_complete=false and unknown raw context. Matching slot numbers still
+do not prove atomic enumeration/native/history coverage; the common reported
+slot now includes the raw batch when present. Spendability, USD/P&L and portfolio
+completeness remain unknown. Wallet-read has a four-call, twenty-second budget.
 
 This operator command is the first live wallet measurement piece, not an
 activated mandate, complete kernel state or trusted market adapter. Its output
@@ -383,7 +410,8 @@ settlement or Privy delegation. Live execution remains closed.
 
 `radar evidence-read --wallet <address> --transaction <binary-file> --min-slot <N>
 --rpc <URL>` collects both read packets with one explicit endpoint and a shared
-five-call, twenty-second budget. It reuses the wallet and preflight readers,
+six-call, twenty-second budget (the raw token batch is omitted for empty listings).
+It reuses the wallet and preflight readers,
 preserves each read's slots and host window, and emits `wallet_evidence` plus
 `transaction_evidence` only after every call succeeds. A failure prints neither
 packet. Its operator caller can use the fields in the protected issuer snapshot;

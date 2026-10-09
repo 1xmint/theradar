@@ -125,6 +125,94 @@ fn collected_reads() -> Vec<Value> {
     ]
 }
 
+fn wallet_with_tokens() -> Vec<Value> {
+    let wallet = radar_types::Address::new([0x55; 32]);
+    let mint = radar_types::Address::new([0x22; 32]);
+    let account = radar_types::Address::new([0x44; 32]);
+    let program = radar_onchain::rpc::TOKEN_PROGRAM_ID;
+    let mut mint_data = vec![0; 82];
+    mint_data[36..44].copy_from_slice(&10u64.to_le_bytes());
+    mint_data[44] = 6;
+    mint_data[45] = 1;
+    let mut account_data = vec![0; 165];
+    account_data[..32].copy_from_slice(mint.as_bytes());
+    account_data[32..64].copy_from_slice(wallet.as_bytes());
+    account_data[64..72].copy_from_slice(&7u64.to_le_bytes());
+    account_data[108] = 2;
+    let mut answers = collected_reads()[..3].to_vec();
+    answers[1]["result"]["value"] = json!([{"pubkey":account.to_string(),
+        "account":{"owner":program,"data":{"parsed":{"info":{
+            "mint":mint.to_string(),"owner":wallet.to_string(),"state":"frozen",
+            "tokenAmount":{"amount":"7","decimals":6}}}}}}]);
+    answers.push(json!({"result":{"context":{"slot":53},"value":[
+        {"owner":program,"data":[radar_types::b64::encode(&mint_data),"base64"]},
+        {"owner":program,"data":[radar_types::b64::encode(&account_data),"base64"]}]}}));
+    answers
+}
+
+#[test]
+fn actual_wallet_and_collector_require_raw_tokens_and_emit_no_partial_packet_on_failure() {
+    let wallet = radar_types::Address::new([0x55; 32]).to_string();
+    let (endpoint, server) = fixture(wallet_with_tokens());
+    let output = Command::new(env!("CARGO_BIN_EXE_radar"))
+        .args(["wallet-read", "--wallet", &wallet, "--rpc", &endpoint])
+        .output()
+        .expect("command");
+    assert!(output.status.success(), "{:?}", output.stderr);
+    let evidence: Value = serde_json::from_slice(&output.stdout).expect("evidence");
+    assert_eq!(evidence["raw_token_verification"]["slot"], "53");
+    assert_eq!(
+        evidence["raw_token_verification"]["accounts"][0]["state"],
+        "frozen"
+    );
+    assert_eq!(
+        evidence["raw_token_verification"]["accounts"][0]["raw_amount"],
+        "7"
+    );
+    assert_eq!(
+        evidence["raw_token_verification"]["inventory_complete"],
+        false
+    );
+    assert!(evidence["common_reported_slot"].is_null());
+    let calls = server.join().expect("server");
+    assert_eq!(calls.len(), 4);
+    assert_eq!(
+        calls[3]["params"],
+        json!([
+        [radar_types::Address::new([0x22;32]).to_string(),radar_types::Address::new([0x44;32]).to_string()],
+        {"encoding":"base64","commitment":"finalized"}])
+    );
+    let mut combined = wallet_with_tokens();
+    combined.extend_from_slice(&collected_reads()[3..]);
+    let (endpoint, server) = fixture(combined);
+    let output = collect(&endpoint);
+    assert!(output.status.success(), "{:?}", output.stderr);
+    let evidence: Value = serde_json::from_slice(&output.stdout).expect("combined");
+    assert_eq!(
+        evidence["wallet_evidence"]["raw_token_verification"]["accounts"][0]["raw_amount"],
+        "7"
+    );
+    assert_eq!(server.join().expect("server").len(), 6);
+    let mut old = wallet_with_tokens()[3].clone();
+    old["result"]["context"]["slot"] = json!(51);
+    let mut missing = wallet_with_tokens()[3].clone();
+    missing["result"]["value"][0] = Value::Null;
+    for bad in [
+        old,
+        missing,
+        json!({"error":{"message":"private provider detail"}}),
+    ] {
+        let mut answers = wallet_with_tokens();
+        answers[3] = bad;
+        let (endpoint, server) = fixture(answers);
+        let output = collect(&endpoint);
+        assert!(!output.status.success());
+        assert_eq!(output.stdout, Vec::<u8>::new());
+        assert!(!String::from_utf8_lossy(&output.stderr).contains("private provider detail"));
+        assert_eq!(server.join().expect("server").len(), 4);
+    }
+}
+
 fn collect(endpoint: &str) -> std::process::Output {
     let mut file = tempfile::NamedTempFile::new().expect("input");
     let mut bytes = vec![0; 100];

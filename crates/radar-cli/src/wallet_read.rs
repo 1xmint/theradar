@@ -1,11 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 //! Direct wallet evidence, before any valuation or kernel portfolio is inferred.
-//! Three reads are not an atomic snapshot; their individual slots survive output.
+//! Enumeration and raw token verification are not an atomic wallet snapshot.
 
-use std::{
-    collections::HashSet,
-    time::{Duration, SystemTime, UNIX_EPOCH},
-};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use radar_onchain::rpc::{TOKEN_2022_PROGRAM_ID, TOKEN_PROGRAM_ID, TokenAccountsRead};
 use radar_onchain::{Budget, RpcClient};
@@ -39,20 +36,26 @@ pub(super) fn read(rpc: &RpcClient, wallet: Address, budget: &mut Budget) -> Res
     let extended = rpc
         .token_accounts_by_owner(budget, &wallet, TOKEN_2022_PROGRAM_ID)
         .map_err(|_| "Token-2022 read failed")?;
-    let mut seen = HashSet::new();
-    for account in tokens.accounts.iter().chain(&extended.accounts) {
-        if !seen.insert(account.address) {
-            return Err("token account repeated across program reads".into());
-        }
-    }
+    let verification = radar_onchain::wallet_inventory::read(
+        rpc,
+        budget,
+        wallet,
+        balance.slot,
+        &tokens,
+        &extended,
+    )?;
     let tokens = token_read(tokens)?;
     let extended = token_read(extended)?;
     let slot = balance.slot.get().to_string();
-    let coherent = (tokens["slot"] == slot && extended["slot"] == slot).then_some(&slot);
+    let coherent = (tokens["slot"] == slot
+        && extended["slot"] == slot
+        && (verification["slot"].is_null() || verification["slot"] == slot))
+        .then_some(&slot);
     Ok(json!({
         "version":1, "wallet":wallet.to_string(), "commitment":"finalized",
         "native_sol":{"slot":slot, "raw_amount":balance.lamports.to_string(), "decimals":9},
         "token_program":tokens, "token_2022":extended, "common_reported_slot":coherent,
+        "raw_token_verification":verification,
         "usd_value":null, "realised_pnl":null, "authority":"read_only"
     }))
 }
@@ -73,8 +76,8 @@ pub fn run(args: &[String]) -> Result<(), String> {
         .filter(|value| !value.trim().is_empty())
         .ok_or("wallet-read needs an explicit --rpc <URL>")?;
     let started = now()?;
-    // Exactly one call per read. This is a read deadline, not a trading policy.
-    let mut budget = Budget::new(3, 0, Duration::from_secs(20));
+    // Three enumeration calls and at most one raw token/mint batch.
+    let mut budget = Budget::new(4, 0, Duration::from_secs(20));
     let mut evidence = read(&RpcClient::new(endpoint), wallet, &mut budget)?;
     evidence["read_started_at_unix_secs"] = json!(started);
     evidence["read_completed_at_unix_secs"] = json!(now()?);
@@ -115,8 +118,13 @@ mod tests {
         json!({"result":result}).to_string()
     }
     fn account(amount: &str, program: &str, identity: u8) -> Value {
+        let mint = if program == TOKEN_PROGRAM_ID {
+            0x22
+        } else {
+            0x33
+        };
         json!({"pubkey":Address::new([identity;32]).to_string(),"account":{"owner":program,
-            "data":{"parsed":{"info":{"mint":Address::new([0x22;32]).to_string(),
+            "data":{"parsed":{"info":{"mint":Address::new([mint;32]).to_string(),
             "owner":wallet().to_string(), "state":"initialized", "tokenAmount":{"amount":amount, "decimals":6}}}}}})
     }
     fn client(answers: Vec<String>) -> (RpcClient, Arc<Mutex<Vec<Value>>>) {
@@ -136,7 +144,30 @@ mod tests {
         json!({"result":{"context":{"slot":40},"value":u64::MAX}}).to_string()
     }
     fn budget() -> Budget {
-        Budget::new(3, 0, Duration::from_secs(20))
+        Budget::new(4, 0, Duration::from_secs(20))
+    }
+
+    fn raw(slot: u64, values: &[(bool, u8, u64, u8)]) -> String {
+        let accounts: Vec<_> = values
+            .iter()
+            .map(|&(mint, identity, amount, state)| {
+                let extended = identity == 0x33 || identity == 3;
+                let mut bytes = vec![0; if mint { 82 } else { 165 }];
+                if mint {
+                    bytes[36..44].copy_from_slice(&amount.to_le_bytes());
+                    bytes[44] = 6;
+                    bytes[45] = 1;
+                } else {
+                    bytes[..32].copy_from_slice(&[if extended { 0x33 } else { 0x22 }; 32]);
+                    bytes[32..64].copy_from_slice(&[0x55; 32]);
+                    bytes[64..72].copy_from_slice(&amount.to_le_bytes());
+                    bytes[108] = state;
+                }
+                json!({"owner":if extended {TOKEN_2022_PROGRAM_ID} else {TOKEN_PROGRAM_ID},
+                "data":[radar_types::b64::encode(&bytes),"base64"]})
+            })
+            .collect();
+        token(json!({"slot":slot}), json!(accounts))
     }
 
     #[test]
@@ -146,7 +177,7 @@ mod tests {
             token(
                 json!({"slot":40}),
                 json!([
-                    account("18446744073709551615", TOKEN_PROGRAM_ID, 1),
+                    account("18446744073709551614", TOKEN_PROGRAM_ID, 1),
                     account("1", TOKEN_PROGRAM_ID, 2)
                 ]),
             ),
@@ -154,13 +185,23 @@ mod tests {
                 json!({"slot":40}),
                 json!([account("2", TOKEN_2022_PROGRAM_ID, 3)]),
             ),
+            raw(
+                40,
+                &[
+                    (false, 1, u64::MAX - 1, 1),
+                    (false, 2, 1, 1),
+                    (false, 3, 2, 1),
+                    (true, 0x22, u64::MAX, 1),
+                    (true, 0x33, 2, 1),
+                ],
+            ),
         ]);
         let output = read(&rpc, wallet(), &mut budget()).expect("complete");
         assert_eq!(output["native_sol"]["raw_amount"], u64::MAX.to_string());
         assert_eq!(output["native_sol"]["decimals"], 9);
         assert_eq!(
             output["token_program"]["accounts"][0]["raw_amount"],
-            "18446744073709551615"
+            "18446744073709551614"
         );
         assert_eq!(
             output["token_program"]["accounts"]
@@ -194,7 +235,19 @@ mod tests {
         assert!(output["usd_value"].is_null());
         assert!(output["realised_pnl"].is_null());
         let calls = calls.lock().expect("calls");
-        assert_eq!(calls.len(), 3);
+        assert_eq!(calls.len(), 4);
+        assert_eq!(calls[3]["method"], "getMultipleAccounts");
+        assert_eq!(
+            calls[3]["params"],
+            json!([
+            ([1u8,2,3,0x22,0x33].map(|byte| Address::new([byte;32]).to_string())),
+            {"encoding":"base64","commitment":"finalized"}])
+        );
+        assert_eq!(output["raw_token_verification"]["slot"], "40");
+        assert_eq!(
+            output["raw_token_verification"]["inventory_complete"],
+            false
+        );
         assert_eq!(calls[0]["method"], "getBalance");
         assert_eq!(
             calls[0]["params"],
@@ -223,18 +276,25 @@ mod tests {
         ]);
         assert_eq!(
             read(&rpc, wallet(), &mut budget()),
-            Err("token account repeated across program reads".into())
+            Err("duplicate raw token account identity".into())
         );
         let (rpc, _) = client(vec![
             balance(),
             token(json!({"slot":40}), json!([frozen])),
             token(json!({"slot":40}), json!([])),
+            raw(41, &[(false, 1, 10, 2), (true, 0x22, 10, 1)]),
         ]);
         let output =
             read(&rpc, wallet(), &mut budget()).expect("frozen holding, no spendability claim");
         assert_eq!(output["token_program"]["accounts"][0]["state"], "frozen");
         assert_eq!(output["token_program"]["accounts"][0]["raw_amount"], "10");
         assert!(output["token_program"]["accounts"][0]["spendable"].is_null());
+        assert_eq!(
+            output["raw_token_verification"]["accounts"][0]["state"],
+            "frozen"
+        );
+        assert_eq!(output["raw_token_verification"]["slot"], "41");
+        assert!(output["common_reported_slot"].is_null());
     }
 
     #[test]

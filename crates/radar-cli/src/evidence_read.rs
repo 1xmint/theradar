@@ -22,7 +22,7 @@ pub fn run(args: &[String]) -> Result<(), String> {
         .ok_or("evidence-read needs an explicit --rpc <URL>")?;
     let bytes = crate::transaction_read::bytes(&path)?;
     let rpc = RpcClient::new(endpoint);
-    let mut budget = Budget::new(5, 0, Duration::from_secs(20));
+    let mut budget = Budget::new(6, 0, Duration::from_secs(20));
     let started = crate::wallet_read::now()?;
     let mut wallet_evidence = crate::wallet_read::read(&rpc, wallet, &mut budget)?;
     wallet_evidence["read_started_at_unix_secs"] = json!(started);

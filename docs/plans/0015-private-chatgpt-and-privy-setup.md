@@ -1213,7 +1213,8 @@ and portfolio reconciliation remain unfinished.
   conformance tests. Rust 1.99 signer Clippy and format checks passed.
 - [x] Add operator `radar evidence-read` with an explicit wallet, unsigned file,
   minimum simulation slot and RPC endpoint. Reuse wallet/preflight readers and
-  bounded file input under one five-call, twenty-second budget. Emit both
+  bounded file input under one six-call, twenty-second budget, including the
+  raw token/mint batch when holdings are present. Emit both
   packets only after every read succeeds; preserve individual slots/windows.
 - [x] Two CLI process regressions cover exact quantities/bytes, independent
   contexts/windows and failure at each RPC read with no partial packet or
@@ -2406,3 +2407,76 @@ watch finished and no local Cargo/rustc/Radar process remains. Target measured
 34.9 GiB with 57.6 GiB free after local checks; previously rejected ignored-output
 cleanup was not retried. This verified handback is committed locally for the
 next source push, avoiding a redundant documentation-only full CI run.
+
+### Raw token/mint verification for operator evidence (2026-10-08)
+
+The actual wallet-read and combined evidence-read caller now invoke
+crates/radar-onchain/src/wallet_inventory.rs after both token listings. One
+getMultipleAccounts batch reads the sorted union of token account and mint
+addresses, at most 100 distinct addresses, under one finalized context. This
+limit follows Solana's getMultipleAccounts reference. Raw context must not
+precede native balance or either listing. Duplicate identities refuse before
+batching. The shared RPC boundary checks response count/request order; the
+wallet verifier consumes that result rather than duplicating the same guard.
+
+Existing raw token/mint parsers check program layouts and supported extensions.
+Raw programs, wallet/mint identity, u64 amounts, account state and mint decimals
+must match the listings; noncanonical mint initialization refuses. Same-mint
+amount totals use checked u64 addition. Ordinary tokens cannot exceed observed
+supply; the classic native-mint exception below preserves wrapped SOL.
+Missing/changed/unsupported raw metadata refuses the whole output. This is
+locally decoded provider evidence, not independent chain authentication.
+
+The version 1 packet adds raw_token_verification with its separate context,
+quantities/units, mint supply, mint authority activity, freeze authority,
+delegation and wrapping reserve. Frozen/uninitialized holdings are retained;
+spendability stays unknown. Wrapping reserve is not additional native cash.
+Empty enumeration skips the raw RPC batch and does not prove complete inventory.
+Matching reported slots still do not establish atomic enumeration/native/history
+coverage; common_reported_slot includes the raw batch when one is present.
+
+Wallet-read now has a four-call budget and evidence-read a six-call budget,
+both sharing a twenty-second deadline. Empty token lists still use three/five
+actual calls. The collector prints neither packet after a raw-read failure.
+No issuer snapshot, portfolio, cost basis, claim, loss or authority is changed.
+
+Five raw-verifier regressions and one real CLI-process regression were added;
+MIN_TESTS raised by six. Tests exercise frozen/delegated/wrapped holdings,
+active mint/freeze authority, supported and unsupported Token-2022 layouts,
+missing/malformed/changed ownership/identity/state/amount/units, canonical mint
+initialization, supply/overflow, all context floors, exact 100-address boundary,
+duplicate accounts, incomplete empty inventory, successful wallet/collector
+outputs and raw failures with no partial packet or provider detail. Existing
+CLI fixtures now use amounts/mint ownership/supply possible under raw layouts.
+Local verification passed below; full source CI is pending. Activation remains closed.
+
+Local proof: cargo +stable-x86_64-pc-windows-gnullvm test -p radar-onchain
+passed 82 unit and 18 integration tests; final -p radar-cli passed 223 unit and
+13 process tests; -p repo-conformance passed all 33 checks. Rust 1.99 scoped
+onchain/CLI all-target Clippy with warnings denied and final formatting passed.
+Disabling each of the eleven context/program/identity/quantity/state/unit/
+initialization/supply/batch-limit checks failed running regressions. Replacing
+checked addition with saturating addition and disabling duplicate identity
+refusal each failed its regression. Source was restored and final raw tests,
+Clippy and full CLI tests passed. No new dependency, mutation exclusion or lint
+suppression. Await every CI job and final gate before any repair push or final
+handback. Full staged diff must be read before source commit.
+
+Pre-push correction (2026-10-09): the first generic supply guard would have
+refused valid wrapped SOL. The existing pumpswap_reserves.json capture records
+the classic So111 mint under SPL Token at 82 bytes, nine decimals and supply
+zero. Correct the exception by binding canonical mint AND program, requiring
+its native-account flag, nine decimals, zero supply and absent mint/freeze
+authority. Arbitrary native flags, missing wrapping flags, changed native
+metadata and other wrapping identities refuse. Native reserve remains separate
+from native cash. A new regression uses the actual captured mint bytes and a
+synthetic wallet-owned account; this is not a live wallet measurement. The new
+test also checks listing/mint agreement cannot redefine native decimals.
+
+Final local proof after the wrapping correction (2026-10-09): onchain passed
+83 unit and 18 integration tests (101 total); CLI passed 223 unit and 13 process
+tests (236 total). Reapplying the original unconditional supply bound and seven
+individual native identity/program/flag/metadata mistakes failed running tests.
+Source was restored; scoped Rust 1.99 all-target Clippy with warnings denied and
+formatting passed. LEARNINGS 51 records the pre-push correction. Full CI remains
+pending, with autonomy closed.
