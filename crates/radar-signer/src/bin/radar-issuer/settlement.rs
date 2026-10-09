@@ -39,6 +39,22 @@ fn tokens(value: &Value, field: &str, count: usize) -> Result<Vec<TokenBalance>,
     Ok(entries)
 }
 
+pub(super) fn unchanged_tokens(value: &Value, count: usize) -> Result<bool, String> {
+    let mut before = tokens(value, "pre_token_balances", count)?;
+    let mut after = tokens(value, "post_token_balances", count)?;
+    before.sort_by_key(|entry| entry.account_index);
+    after.sort_by_key(|entry| entry.account_index);
+    Ok(before.len() == after.len()
+        && before.iter().zip(&after).all(|(pre, post)| {
+            pre.account_index == post.account_index
+                && pre.mint == post.mint
+                && pre.owner == post.owner
+                && pre.program_id == post.program_id
+                && pre.decimals == post.decimals
+                && pre.raw_amount.parse::<u64>().ok() == post.raw_amount.parse::<u64>().ok()
+        }))
+}
+
 fn acquisition(
     binding: &ExecutionBinding,
     outcome: &str,

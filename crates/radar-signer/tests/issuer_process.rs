@@ -234,6 +234,7 @@ fn settlement_review_reverifies_the_protected_artifact_signature() {
 #[test]
 fn protected_valuation_prices_retained_effects_without_changing_history_or_claims() {
     let (fixture, _, id, mut evidence) = finalized_fixture();
+    evidence["outcome"] = json!("succeeded");
     let time = evidence["read_completed_at_unix_secs"]
         .as_u64()
         .expect("time")
@@ -321,6 +322,156 @@ fn protected_valuation_prices_retained_effects_without_changing_history_or_claim
 
 fn finalized_fixture() -> (Fixture, Vec<u8>, radar_journal::OperationId, Value) {
     finalized_fixture_with_opening(false)
+}
+
+#[test]
+fn protected_failed_fee_costs_are_durable_without_releasing_or_closing_claims() {
+    let (fixture, _, id, mut evidence) = finalized_fixture();
+    let time = evidence["read_completed_at_unix_secs"]
+        .as_u64()
+        .expect("time")
+        - 1;
+    evidence["block_time_unix_secs"] = json!(time.to_string());
+    let effects_path = fixture.dir.path().join("effects.json");
+    write(&effects_path, &evidence);
+    assert!(
+        fixture
+            .command()
+            .args(["--record-settlement", id.as_str()])
+            .arg(&effects_path)
+            .output()
+            .expect("settlement")
+            .status
+            .success()
+    );
+    let price_path = fixture.dir.path().join("price.json");
+    let price = json!({"version":1,"asset":"sol","micro_usd_per_sol":"200000003",
+        "as_of_slot":"1000","as_of_unix_secs":time.to_string()});
+    write(&price_path, &price);
+    let run = |mode| {
+        fixture
+            .command()
+            .args([mode, id.as_str()])
+            .arg(&price_path)
+            .output()
+            .expect("valuation")
+    };
+    let history = fixture.dir.path().join("operations.jsonl");
+    let before = std::fs::read(&history).expect("history");
+    let reviewed = run("--review-valuation");
+    assert!(
+        reviewed.status.success(),
+        "{}",
+        String::from_utf8_lossy(&reviewed.stderr)
+    );
+    let report: Value = serde_json::from_slice(&reviewed.stdout).expect("report");
+    assert_eq!(
+        report["failed_execution_costs"]["network_fee_micro_usd"],
+        "1001"
+    );
+    assert_eq!(
+        report["failed_execution_costs"]["network_fee_lamports"],
+        "5000"
+    );
+    assert_eq!(report["acquisition_costs"], Value::Null);
+    assert_eq!(report["position_cost_basis_micro_usd"], Value::Null);
+    assert_eq!(report["realised_pnl_micro_usd"], Value::Null);
+    assert_eq!(report["portfolio_state_updated"], false);
+    assert_eq!(report["reservation_released"], false);
+    assert_eq!(std::fs::read(&history).expect("unchanged"), before);
+    assert!(run("--record-valuation").status.success());
+    let saved = std::fs::read(&history).expect("recorded");
+    assert_ne!(saved, before);
+    for _ in 0..2 {
+        assert!(run("--record-valuation").status.success());
+        assert_eq!(std::fs::read(&history).expect("unchanged"), saved);
+        let log = radar_journal::OperationLog::open(&history).expect("replay");
+        assert_eq!(log.valuation(&id).expect("fee record").review, report);
+        assert_eq!(log.outstanding().count(), 1);
+    }
+    let mut changed = price;
+    changed["micro_usd_per_sol"] = json!("200000004");
+    write(&price_path, &changed);
+    assert!(!run("--record-valuation").status.success());
+    assert_eq!(std::fs::read(&history).expect("unchanged"), saved);
+    assert_eq!(
+        fixture.start().ask(&fixture.candidate)["reason"],
+        "outstanding operation requires reconciliation"
+    );
+    // The acquisition-only history reader still refuses this separate cost category.
+    assert!(
+        !fixture
+            .command()
+            .arg("--review-acquisitions")
+            .output()
+            .expect("history review")
+            .status
+            .success()
+    );
+}
+
+#[test]
+fn protected_failed_fee_record_refuses_unexplained_native_or_token_changes() {
+    for case in [
+        "extra_debit",
+        "other_native",
+        "token_change",
+        "missing_pair",
+    ] {
+        let (fixture, _, id, mut evidence) = finalized_fixture();
+        let time = evidence["read_completed_at_unix_secs"]
+            .as_u64()
+            .expect("time")
+            - 1;
+        evidence["block_time_unix_secs"] = json!(time.to_string());
+        match case {
+            "extra_debit" => evidence["post_balances_lamports"][0] = json!("299994999"),
+            "other_native" => evidence["post_balances_lamports"][1] = json!("1"),
+            _ => {
+                let pre = json!({"account_index":1,"mint":fixture.snapshot["proposal"]["mint"],
+                    "owner":fixture.config["wallet"],"program_id":address(0x44),"decimals":6,"raw_amount":"10"});
+                let mut post = pre.clone();
+                post["raw_amount"] = json!("11");
+                evidence["pre_token_balances"] = json!([pre]);
+                evidence["post_token_balances"] = if case == "missing_pair" {
+                    json!([])
+                } else {
+                    json!([post])
+                };
+            }
+        }
+        let effects_path = fixture.dir.path().join("effects.json");
+        write(&effects_path, &evidence);
+        assert!(
+            fixture
+                .command()
+                .args(["--record-settlement", id.as_str()])
+                .arg(&effects_path)
+                .output()
+                .expect("settlement")
+                .status
+                .success()
+        );
+        let price_path = fixture.dir.path().join("price.json");
+        write(
+            &price_path,
+            &json!({"version":1,"asset":"sol","micro_usd_per_sol":"200000000",
+            "as_of_slot":"1000","as_of_unix_secs":time.to_string()}),
+        );
+        let history = fixture.dir.path().join("operations.jsonl");
+        let saved = std::fs::read(&history).expect("history");
+        for mode in ["--review-valuation", "--record-valuation"] {
+            let output = fixture
+                .command()
+                .args([mode, id.as_str()])
+                .arg(&price_path)
+                .output()
+                .expect("refusal");
+            assert!(!output.status.success(), "{case}");
+            assert_eq!(output.stdout, Vec::<u8>::new());
+            assert_eq!(std::fs::read(&history).expect("unchanged"), saved);
+        }
+    }
 }
 
 fn finalized_fixture_with_opening(

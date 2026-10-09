@@ -2686,3 +2686,35 @@ at local inspection. Target measured 35.1 GiB with 57.1 GiB free; previously
 rejected ignored-output cleanup was not retried. This verified handback is
 committed locally for the next source push, avoiding redundant documentation-only
 full CI.
+
+### Protected failed-execution fee classification (2026-10-09)
+
+Extend actual --review-valuation and --record-valuation to classify and retain
+failed execution costs when measured native debit equals network fee, distinct
+native accounts show only the wallet fee deduction, all other balances and
+signed deltas agree, paired token identities/units/quantities are unchanged,
+and acquisition metadata is null. Reuse wallet signature/exact message and
+historical price bounds with upward integer rounding. No operator fee-only
+assertion is accepted. Zero is retained only when measured. Empty token lists
+are not complete inventory. Raw/unrelated provider fields are not retained.
+
+Retain classified fee costs through existing immutable valuation storage;
+repeat/restart is idempotent, changed prices refuse even at equal rounded USD.
+Successful review shape remains unchanged for older acquisition comparison.
+Daily loss and realised PnL stay unknown, claims outstanding, portfolio unchanged.
+The acquisition-only history reader still refuses mixed submitted failed costs;
+whole-history integration, transfers/disposals, valuation/exposure/loss and
+idempotent economic reconciliation remain required before live activation.
+
+Three new regressions cover fee-only native/token classification including
+identity, ordering, missing evidence, measured zero and refusals, and actual
+protected-process retention/replay/repeats/changed prices/unchanged claims.
+The test floor increases by three. Local checks and full CI pending below.
+
+Local proof: all 175 signer tests and 33 conformance checks passed, plus scoped
+Rust 1.99 all-target Clippy and formatting. All 18 manually reapplied native,
+token, outcome, rounding and record-eligibility mistakes failed running
+regressions; restored source passed. An initial duplicate-guard removal did
+not compile because it removed the set's type inference; the viable variant
+retained insertion and disabled only its refusal, and failed the regression.
+No dependency, mutation exclusion or lint suppression. Whole source CI pending.

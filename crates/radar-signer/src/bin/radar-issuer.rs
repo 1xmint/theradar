@@ -652,8 +652,9 @@ impl Issuer {
     fn record_valuation(&mut self, operation: &str, path: &Path) -> Result<(), String> {
         // Review one protected input read before retaining normalized costs.
         let review = self.review_valuation(operation, path)?;
-        if !review["acquisition_costs"].is_object() {
-            return Err("recording valuation requires complete acquisition costs".into());
+        if !review["acquisition_costs"].is_object() && !review["failed_execution_costs"].is_object()
+        {
+            return Err("recording valuation requires classified complete costs".into());
         }
         let id = self
             .operations

@@ -716,8 +716,9 @@ reconciliation and delegation activation remain required.
 
 `radar-issuer --record-valuation <operation-id> <private-price-file>` performs
 one protected input read through the same valuation review, including wallet
-signature, exact authorized message, historical price and complete acquisition
-cost checks. Cash-only reviews cannot be recorded. It retains a ValuationRecord
+signature, exact authorized message, historical price and classified cost checks.
+Complete acquisition costs or the failed-execution fee review below are required;
+unclassified cash-only reviews cannot be recorded. It retains a ValuationRecord
 containing the exact previously retained SettlementRecord and normalized review;
 raw input declarations, arbitrary fields and provider bodies are not stored.
 The same journal ownership lock covers review and append.
@@ -739,6 +740,38 @@ recording. Retention does not authenticate operator evidence, update inventory,
 cost basis, USD exposure or loss, or release capital. The claim remains
 outstanding and blocks another issuance. Economic reconciliation must consume
 these retained records idempotently before repeated autonomous execution.
+
+## Protected failed-execution fee costs
+
+The existing valuation review can classify a retained failed execution as a
+fee-only cost. The measured wallet debit must equal the retained network fee.
+Native effects must be nonempty, name distinct accounts with the configured
+wallet first, and show only that fee deduction; all other native balances must
+be unchanged. Recorded pre/post amounts and signed deltas must agree. Paired
+token metadata must contain the same indices, mint, owner, program, decimals and
+integer quantities regardless of enumeration order. Missing pairs or changed
+metadata refuse classification. Empty paired lists establish no token changes
+in this packet, not complete wallet inventory. Acquisition metadata must remain
+null. Measured zero fees remain zero, never inferred from absent fields.
+
+This uses the same verified signed binding and historical SOL price bounds and
+upward integer rounding as acquisition valuation. It retains
+failed_execution_costs with the measured native fee and its historical USD cost.
+No price-file declaration can assert that a failure was fee-only. Successful
+reviews keep their previous serialization shape, so earlier retained acquisition
+reviews can still be compared exactly. The fee-only classification is consistent
+with [Solana's fee rules](https://solana.com/docs/core/fees/fee-structure), which
+charge a landed failure; operator evidence remains the trust boundary.
+
+The existing record command stores this classified review through the same
+immutable ValuationRecord association, append-before-memory and replay rules.
+Repeated records are no-ops; changed price/cost records refuse even if rounding
+produces equal USD amounts. This is a historical fee cost, not total realised
+PnL, daily loss or economic reconciliation. No operation closes, reservation
+releases or portfolio changes. The acquisition-only history reader still refuses
+submitted failed-fee operations rather than dropping them; mixed-history review
+and idempotent economic reconciliation remain to be implemented. Live delegation
+and autonomous execution remain closed.
 
 ## Replay-derived acquisition history review
 

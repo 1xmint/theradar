@@ -115,6 +115,48 @@ fn dollars(lamports: u64, price: u64) -> Result<MicroUsd, String> {
         .map_err(|_| "native valuation exceeds dollar range".into())
 }
 
+fn failed_costs(
+    binding: &ExecutionBinding,
+    value: &Value,
+    debit: u64,
+    fee: u64,
+    fee_usd: MicroUsd,
+) -> Result<Option<Value>, String> {
+    if value["outcome"] != "failed" {
+        return Ok(None);
+    }
+    let effects = value["native_account_effects"]
+        .as_array()
+        .filter(|effects| !effects.is_empty())
+        .ok_or("failed execution lacks native effects")?;
+    let mut accounts = std::collections::BTreeSet::new();
+    for (index, effect) in effects.iter().enumerate() {
+        let account: radar_types::Address = serde_json::from_value(effect["account"].clone())
+            .map_err(|_| "invalid failed execution account")?;
+        let pre = integer(effect, "pre_lamports")?;
+        let post = integer(effect, "post_lamports")?;
+        let delta = i128::from(post) - i128::from(pre);
+        let expected = if index == 0 { -i128::from(fee) } else { 0 };
+        if !accounts.insert(account)
+            || (index == 0 && account != binding.wallet)
+            || delta != expected
+            || effect["net_change_lamports"] != delta.to_string()
+        {
+            return Err("failed execution has effects beyond the wallet fee".into());
+        }
+    }
+    if debit != fee
+        || !super::settlement::unchanged_tokens(value, effects.len())?
+        || !value["wallet_token_acquisition"].is_null()
+    {
+        return Err("failed execution is not a measured fee-only debit".into());
+    }
+    // A classified historical cost is not total realised PnL or daily loss.
+    Ok(Some(json!({"authority":"protected_failed_fee_review",
+        "network_fee_lamports":fee.to_string(),
+        "network_fee_micro_usd":fee_usd.get().to_string()})))
+}
+
 pub(super) fn review(
     binding: &ExecutionBinding,
     entry: &OperationEntry,
@@ -181,6 +223,7 @@ pub(super) fn review(
     }
     let cash = dollars(debit, amount)?;
     let fee_usd = dollars(fee, amount)?;
+    let failed = failed_costs(binding, value, debit, fee, fee_usd)?;
     let costs = costs(binding, value, price.acquisition_costs, debit, fee, amount)?;
     let notional = costs
         .as_ref()
@@ -188,8 +231,7 @@ pub(super) fn review(
     let basis = costs
         .as_ref()
         .map(|value| value["position_cost_basis_micro_usd"].clone());
-    Ok(
-        json!({"version":1,"authority":"protected_operator_valuation",
+    let mut report = json!({"version":1,"authority":"protected_operator_valuation",
         "wallet":binding.wallet.to_string(),"execution_slot":slot.to_string(),
         "execution_at_unix_secs":time.to_string(),"valuation_as_of_slot":price_slot.to_string(),
         "price_at_unix_secs":price_time.to_string(),"micro_usd_per_sol":amount.to_string(),
@@ -197,8 +239,12 @@ pub(super) fn review(
         "network_fee_lamports":fee.to_string(),"network_fee_micro_usd":fee_usd.get().to_string(),
         "acquisition_costs":costs,"trade_notional_micro_usd":notional,
         "position_cost_basis_micro_usd":basis,"realised_pnl_micro_usd":null,
-        "portfolio_state_updated":false,"operation_reconciled":false,"reservation_released":false}),
-    )
+        "portfolio_state_updated":false,"operation_reconciled":false,"reservation_released":false});
+    // Preserve the shape of older successful acquisition reviews during replay.
+    if let Some(failed) = failed {
+        report["failed_execution_costs"] = failed;
+    }
+    Ok(report)
 }
 
 #[cfg(test)]
@@ -206,6 +252,103 @@ mod tests {
     use super::*;
     use radar_journal::Intent;
     use radar_types::{Address, Slot, SlotDelta, TokenQuantity};
+
+    #[test]
+    fn failed_fee_classification_requires_exact_native_and_paired_token_effects() {
+        let (binding, _, _, _, _) = fixture();
+        let token = json!({"account_index":1,"mint":Address::new([2;32]),
+            "owner":binding.wallet,"program_id":Address::new([3;32]),
+            "raw_amount":"10","decimals":6});
+        let value = json!({"outcome":"failed","wallet_token_acquisition":null,
+            "native_account_effects":[
+                {"account":binding.wallet,"pre_lamports":"6000","post_lamports":"1000","net_change_lamports":"-5000"},
+                {"account":Address::new([2;32]),"pre_lamports":"42","post_lamports":"42","net_change_lamports":"0"}],
+            "pre_token_balances":[token.clone()],"post_token_balances":[token]});
+        let cost = failed_costs(&binding, &value, 5000, 5000, MicroUsd(1001))
+            .expect("fee only")
+            .expect("classified");
+        assert_eq!(cost["network_fee_micro_usd"], "1001");
+        assert_eq!(cost["network_fee_lamports"], "5000");
+        for (field, bad) in [
+            ("account", json!(Address::SYSTEM_PROGRAM)),
+            ("pre_lamports", json!("6001")),
+            ("post_lamports", json!("999")),
+            ("net_change_lamports", json!("-4999")),
+        ] {
+            let mut bad_value = value.clone();
+            bad_value["native_account_effects"][0][field] = bad;
+            assert!(failed_costs(&binding, &bad_value, 5000, 5000, MicroUsd(1001)).is_err());
+        }
+        for (field, bad) in [
+            ("account", json!(binding.wallet)),
+            ("post_lamports", json!("43")),
+            ("net_change_lamports", json!("1")),
+        ] {
+            let mut bad_value = value.clone();
+            bad_value["native_account_effects"][1][field] = bad;
+            assert!(failed_costs(&binding, &bad_value, 5000, 5000, MicroUsd(1001)).is_err());
+        }
+        for (field, bad) in [
+            ("account_index", json!(0)),
+            ("mint", json!(Address::SYSTEM_PROGRAM)),
+            ("owner", json!(Address::SYSTEM_PROGRAM)),
+            ("program_id", json!(Address::SYSTEM_PROGRAM)),
+            ("decimals", json!(9)),
+            ("raw_amount", json!("11")),
+        ] {
+            let mut bad_value = value.clone();
+            bad_value["post_token_balances"][0][field] = bad;
+            assert!(failed_costs(&binding, &bad_value, 5000, 5000, MicroUsd(1001)).is_err());
+        }
+        for (field, bad) in [
+            ("native_account_effects", json!([])),
+            ("pre_token_balances", json!([])),
+            ("post_token_balances", Value::Null),
+            ("wallet_token_acquisition", json!({})),
+        ] {
+            let mut bad_value = value.clone();
+            bad_value[field] = bad;
+            assert!(failed_costs(&binding, &bad_value, 5000, 5000, MicroUsd(1001)).is_err());
+        }
+        assert!(failed_costs(&binding, &value, 5001, 5000, MicroUsd(1001)).is_err());
+        let mut success = value.clone();
+        success["outcome"] = json!("succeeded");
+        assert!(
+            failed_costs(&binding, &success, 5000, 5000, MicroUsd(1001))
+                .expect("success")
+                .is_none()
+        );
+        let mut zero = value;
+        zero["native_account_effects"][0]["post_lamports"] = json!("6000");
+        zero["native_account_effects"][0]["net_change_lamports"] = json!("0");
+        zero["post_token_balances"][0]["raw_amount"] = json!("0010");
+        assert!(
+            failed_costs(&binding, &zero, 0, 0, MicroUsd::ZERO)
+                .expect("measured zero")
+                .is_some()
+        );
+        let mut empty = zero.clone();
+        empty["native_account_effects"] = json!([]);
+        empty["pre_token_balances"] = json!([]);
+        empty["post_token_balances"] = json!([]);
+        assert!(failed_costs(&binding, &empty, 0, 0, MicroUsd::ZERO).is_err());
+        let mut reordered = zero;
+        let mut second = reordered["pre_token_balances"][0].clone();
+        second["account_index"] = json!(0);
+        reordered["pre_token_balances"]
+            .as_array_mut()
+            .expect("tokens")
+            .push(second.clone());
+        reordered["post_token_balances"]
+            .as_array_mut()
+            .expect("tokens")
+            .insert(0, second);
+        assert!(
+            failed_costs(&binding, &reordered, 0, 0, MicroUsd::ZERO)
+                .expect("token order is immaterial")
+                .is_some()
+        );
+    }
 
     fn fixture() -> (
         ExecutionBinding,
