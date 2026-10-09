@@ -13,7 +13,7 @@ benefit of the doubt on everything else.
 
 ## Index
 
-**40 of these 54 name something mechanical that would catch a
+**41 of these 55 name something mechanical that would catch a
 recurrence. 14 name only a habit, and say so** — which is this file's opening
 standard rather than a gap in it. The habit-only rows are the ones worth reading
 twice; nothing will stop those repeating except somebody remembering.
@@ -79,6 +79,7 @@ quietly absent.
 | [52](#52-a-yielded-command-was-mistaken-for-a-completed-check) | A yielded command was mistaken for a completed check | habit only: confirm the parent command exit before the next Cargo |
 | [53](#53-a-test-reacquired-journal-ownership-it-already-had) | A test reacquired journal ownership it already had | habit only: retain ownership through one fixture transition |
 | [54](#54-a-new-classification-returned-before-shared-reservation-checks) | A new classification returned before shared reservation checks | sale helper and valuation dispatcher boundary regressions |
+| [55](#55-observation-tests-skipped-the-accepted-equality-boundary) | Observation tests skipped the accepted equality boundary | exact-slot native and token inventory process regression |
 
 ---
 
@@ -2244,3 +2245,22 @@ push, then require whole CI on the repaired source.
 regression in `crates/radar-signer/src/bin/radar-issuer/valuation.rs`. These catch
 this bypass mechanically; reviewing shared checks before introducing any new
 classification remains a habit, not a general static proof.
+
+
+## 55. Observation tests skipped the accepted equality boundary
+
+**Found:** 2026-10-09, FIFO CI 37981032392. The new process regression
+accepted wallet observations newer than the sale and refused older ones, but
+never tested equality. Mutation shard 3 reported two survivors at inventory.rs:
+180:17 and 180:35, changing either sale observation comparison from > to >=.
+Production comparisons were already correct; the tests did not protect the
+accepted boundary. A follow-up review added equality while CI was still running,
+then the completed shard established the exact survivor positions.
+
+**What catches a recurrence:**
+`protected_fifo_history_compares_remaining_inventory_without_releasing_claims`
+accepts both native and token observations at the sale slot and at a later slot,
+then independently refuses older native/classic/Token-2022 observations. Both
+reported mutations were reapplied at those exact file:line:column positions and
+each failed that regression; source restored. Whole repaired CI remains required.
+No live snapshot or trade exhibited this test gap.

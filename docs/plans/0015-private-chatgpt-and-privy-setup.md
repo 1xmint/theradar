@@ -3159,3 +3159,14 @@ live risk inputs; execution/exits/recovery/scheduling; owner numeric limits,
 isolated keys, verified Privy policy/delegation, funding/deployment/validation.
 Autonomy remains off; no live chain read, credential/key/delegation change,
 trade, owner-limit change, VPS access or deployment. Funding/policy unverified.
+
+
+FIFO boundary follow-up: initial CI 37981032392 shard 3 reported two missed
+mutations at inventory.rs:180:17 and :180:35 (> to >=). The production bounds
+already accept equality, but the process regression exercised only newer and
+older snapshots. Add successful exact-sale-slot comparison alongside the newer
+case. Reapply each mutation at its exact reported position: both fail the
+extended process regression, then restore source. LEARNINGS 55 records the gap.
+The manual fault total is now 19. Restored 196 signer tests, 33 conformance
+checks, scoped Rust 1.99 Clippy and formatting passed. Await every initial job
+before repair push; whole repaired CI remains pending. No live change.

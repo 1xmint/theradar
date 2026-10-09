@@ -1268,21 +1268,23 @@ fn protected_fifo_history_compares_remaining_inventory_without_releasing_claims(
     fixture.snapshot["accounting_checkpoint"] = json!(log.checkpoint());
     assert_eq!(log.outstanding().count(), 2);
     drop(log);
-    set_inventory(&mut fixture, 9, 1004);
-    let output = inventory_report(&fixture);
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let inventory: Value = serde_json::from_slice(&output.stdout).expect("inventory");
-    let row = &inventory["tokens_by_mint"][0];
-    assert_eq!(row["expected_raw"], "9");
-    assert_eq!(row["retained_acquired_raw"], "15");
-    assert_eq!(row["retained_disposed_raw"], "6");
-    assert_eq!(row["quantity_matches"], true);
-    assert_eq!(inventory["realised_loss_today_micro_usd"], Value::Null);
-    assert_eq!(inventory["economic_reconciliation_complete"], false);
+    for slot in [1003, 1004] {
+        set_inventory(&mut fixture, 9, slot);
+        let output = inventory_report(&fixture);
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let inventory: Value = serde_json::from_slice(&output.stdout).expect("inventory");
+        let row = &inventory["tokens_by_mint"][0];
+        assert_eq!(row["expected_raw"], "9");
+        assert_eq!(row["retained_acquired_raw"], "15");
+        assert_eq!(row["retained_disposed_raw"], "6");
+        assert_eq!(row["quantity_matches"], true);
+        assert_eq!(inventory["realised_loss_today_micro_usd"], Value::Null);
+        assert_eq!(inventory["economic_reconciliation_complete"], false);
+    }
     for read in ["native_sol", "token_program", "token_2022"] {
         let original = fixture.snapshot["wallet_evidence"][read]["slot"].clone();
         fixture.snapshot["wallet_evidence"][read]["slot"] = json!("1002");
