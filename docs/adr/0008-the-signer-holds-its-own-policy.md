@@ -1115,6 +1115,30 @@ installed as an issuer snapshot. Independent metadata provenance, the historical
 account universe, transfer classification and durable idempotent application
 remain required before the collector can contribute to live reconciliation.
 
+## Collected plain SOL transfers in protected inventory review
+
+The operator may put wallet-activity-read output under wallet_activity in the
+protected wallet evidence used by --review-inventory. It is mutually exclusive
+with native_transfers. No network or additional signer dependency is introduced.
+Require completed signature enumeration and transaction fetching, the expected
+address-history coverage label, matching entry/transaction extents and identities,
+and an explicit (after, through] interval no newer than the native observation.
+Existing wallet identity and host freshness checks apply unchanged.
+
+Normalize only integer raw native balances, exact fee/outcome agreement and raw
+token-balance arrays. Reuse the existing plain native transfer decoder, strict
+Ed25519 verification and exact balance/fee effect checks; bind the verified wire
+signature back to the collected entry. Successful and failed supported transfers
+contribute to the same cash comparison. Duplicates against retained operations
+still refuse. Any unsupported message, missing effects or incomplete collection
+blocks the comparison rather than silently being skipped.
+
+This is a protected operator adapter, not automatic snapshot installation or a
+live accounting service. Collection completion never establishes full wallet
+coverage. Provider metadata provenance, historical account coverage, durable
+transfer retention and idempotent risk-state application remain absent. Inventory
+review keeps its existing incomplete/unknown accounting and authority flags.
+
 ## What would reverse this
 
 Nothing foreseeable reverses holding a policy locally. The specific ceilings are

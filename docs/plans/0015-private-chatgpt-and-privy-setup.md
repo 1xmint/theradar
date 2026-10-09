@@ -3610,3 +3610,49 @@ Prior source CI attempt 2 was still running at the most recent check. No push
 occurred. The next source publication still requires its completed jobs and final
 gate; collector CI remains pending. All four activation areas in the preceding
 handback remain open. Autonomous execution is off.
+
+
+### Collected native-transfer adapter, isolated increment (2026-10-09)
+
+On feat/wallet-activity-read, independently of pending source 1438626 CI, connect
+optional protected wallet_activity evidence to inventory native cash comparison.
+Reuse the native-transfer decoder/signature/effect checks rather than introducing
+a second classifier. Reject competing supplied/collected packets, incomplete
+scans/fetches, invalid intervals/newer contexts, missing or mismatched entries,
+wire identities and raw metadata. Normalize raw u64 native balances only; absent
+token effects and unsupported transactions refuse. Existing freshness, wallet
+identity, duplicate history and exact fee checks remain. No network, keys,
+journal writes, portfolio updates or coverage assertions added. ADR 0008 records
+the contract. Two tests added; test floor 2175 to 2177.
+
+Initial fault reapplication found that the equal-bound interval guard could be
+weakened without failing the tests: the intended empty-packet assertion had not
+been inserted after formatting changed its textual anchor. Add that actual
+boundary regression, restore production source, and rerun all fault checks.
+Full restored tests, scoped lint and conformance remain required before commit.
+No push, deployment or autonomous activation occurred.
+
+
+Restored adapter verification passed 210 signer tests (72 library, 45 issuer,
+51 issuer process, 31 signer process, 11 Privy signature), 33 conformance checks,
+Rust 1.99 scoped all-target Clippy and formatting. All 14 manual faults caught:
+interval/context equality, row lower/upper bounds, entry extent, coverage and
+completion guards, enumeration slot/signature/outcome, verified wire signature,
+metadata outcome and fee. Source restored byte-for-byte after the harness;
+subsequent changes only improved Clippy assertion diagnostics and documentation.
+No mutation exclusion or dependency added. Full collector/adapter CI is pending.
+
+Prior source 1438626 CI 37999235384 attempt 2 completed successfully, including
+all ordinary jobs, all four mutation shards and final aggregate. The rerun shard
+1 baseline passed in 90s build + 9s test; 296 mutants tested in 28m, 202 caught
+and 94 unviable. Combined with preserved shards 0/2/3, 1,181 mutants were tested:
+904 caught, 277 unviable, none missed. Ordinary evidence remains 2,564 Rust and
+352 web tests. Aggregate job 114069639327 logs shards: success. No workflow
+runtime/matrix/exclusion changed and no agent cancelled either attempt. Every
+job is now complete, permitting the next source push.
+
+Next: integrate this adapter locally with the collector, push both and read the
+new full CI. Then continue historical wallet-account coverage and durable,
+idempotent economic application; live risk inputs, execution/exits/recovery and
+owner activation requirements still remain. The most recent live wallet read
+returned zero SOL. Autonomous execution stays off; no deployment occurred.

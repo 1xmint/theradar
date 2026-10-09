@@ -121,14 +121,105 @@ fn transaction(value: &Value, wallet: Address) -> Result<Value, String> {
     )
 }
 
+// Collection completion is only about this address scan, never wallet coverage.
+fn collected(packet: &Value, native_slot: u64) -> Result<Value, String> {
+    let after = integer(packet, "after_slot_exclusive")?;
+    let through = integer(packet, "through_slot_inclusive")?;
+    if packet["coverage"] != "provider_reported_address_history"
+        || packet["signature_scan_finished"] != true
+        || packet["transaction_fetch_finished"] != true
+        || after >= through
+        || through > native_slot
+    {
+        return Err("collected activity is incomplete or outside the native observation".into());
+    }
+    let entries = packet["signatures"]
+        .as_array()
+        .ok_or("activity entries missing")?;
+    let rows = packet["transactions"]
+        .as_array()
+        .ok_or("activity transactions missing")?;
+    if entries.len() != rows.len() {
+        return Err("activity transactions do not cover enumerated entries".into());
+    }
+    let transactions = entries
+        .iter()
+        .zip(rows)
+        .map(|(entry, row)| {
+            let slot = integer(row, "slot")?;
+            let signature = row["signature"]
+                .as_str()
+                .ok_or("activity signature missing")?;
+            if slot <= after
+                || slot > through
+                || entry["slot"] != row["slot"]
+                || entry["signature"] != signature
+                || entry["outcome"] != row["outcome"]
+            {
+                return Err("activity row differs from interval or enumeration".into());
+            }
+            let meta = &row["raw_metadata"];
+            let succeeded = match meta.get("err") {
+                Some(Value::Null) => true,
+                Some(Value::Object(_) | Value::String(_)) => false,
+                _ => return Err("activity metadata outcome missing".into()),
+            };
+            if row["outcome"] != if succeeded { "succeeded" } else { "failed" }
+                || meta["fee"].as_u64().map(|fee| fee.to_string()).as_deref()
+                    != row["network_fee_lamports"].as_str()
+            {
+                return Err("activity metadata outcome or fee differs".into());
+            }
+            let mut normalized = row.clone();
+            for (raw, field) in [
+                ("preBalances", "pre_balances"),
+                ("postBalances", "post_balances"),
+            ] {
+                let balances = meta[raw]
+                    .as_array()
+                    .ok_or("activity native balances missing")?
+                    .iter()
+                    .map(|value| {
+                        value
+                            .as_u64()
+                            .map(|n| Value::String(n.to_string()))
+                            .ok_or("activity native balance is not an integer")
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+                normalized[field] = json!(balances);
+            }
+            normalized["pre_token_balances"] = meta["preTokenBalances"].clone();
+            normalized["post_token_balances"] = meta["postTokenBalances"].clone();
+            normalized["collected_signature"] = json!(signature);
+            Ok(normalized)
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+    let mut normalized = packet.clone();
+    normalized["transactions"] = json!(transactions);
+    Ok(normalized)
+}
+
 pub(super) fn review(
     current: &Value,
     history: &Value,
     config: &Config,
     now: u64,
 ) -> Result<Vec<Value>, String> {
-    let Some(packet) = current.get("native_transfers") else {
-        return Ok(vec![]);
+    let native_slot = integer(&current["native_sol"], "slot");
+    let normalized;
+    let packet = match (
+        current.get("native_transfers"),
+        current.get("wallet_activity"),
+    ) {
+        (Some(_), Some(_)) => {
+            return Err("choose supplied transfers or collected activity, not both".into());
+        }
+        (Some(packet), None) => packet,
+        (None, Some(packet)) => {
+            normalized = collected(packet, native_slot.clone()?)?;
+            &normalized
+        }
+        (None, None) => return Ok(vec![]),
     };
     if packet["version"] != 1
         || packet["authority"] != "read_only"
@@ -149,7 +240,7 @@ pub(super) fn review(
             );
         }
     }
-    let native_slot = integer(&current["native_sol"], "slot")?;
+    let native_slot = native_slot?;
     let rows = packet["transactions"]
         .as_array()
         .ok_or("native transfer transactions missing")?;
@@ -159,6 +250,12 @@ pub(super) fn review(
             let signature = reviewed["signature"]
                 .as_str()
                 .ok_or("native transfer signature missing")?;
+            if row
+                .get("collected_signature")
+                .is_some_and(|value| value != signature)
+            {
+                return Err("collected signature differs from verified wire signature".into());
+            }
             if !seen.insert(signature.to_owned())
                 || integer(&reviewed, "execution_slot")? > native_slot
             {
@@ -215,6 +312,154 @@ mod tests {
         let mut result = packet.clone();
         result["transaction_base64"] = json!(b64::encode(&bytes));
         result
+    }
+
+    fn config() -> Config {
+        Config {
+            active: false,
+            wallet: payer(),
+            app_id: String::new(),
+            wallet_id: String::new(),
+            policy: radar_risk::Policy::SHIPPED,
+            valid_until_unix_secs: 0,
+            snapshot_path: std::path::PathBuf::default(),
+            history_path: std::path::PathBuf::default(),
+            key_path: std::path::PathBuf::default(),
+            max_snapshot_age_secs: 10,
+            intent_lifetime_secs: 0,
+            fee_reserve_lamports: 0,
+            programs: vec![],
+        }
+    }
+
+    fn activity(succeeded: bool) -> Value {
+        let tx = packet(
+            &[(1, 7)],
+            &[100, 10, 1],
+            if succeeded {
+                &[91, 17, 1]
+            } else {
+                &[98, 10, 1]
+            },
+            succeeded,
+        );
+        let bytes = b64::decode(tx["transaction_base64"].as_str().unwrap()).unwrap();
+        let signature = Signature::new(bytes[1..65].try_into().unwrap()).to_string();
+        let balances = |field: &str| {
+            tx[field]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|v| v.as_str().unwrap().parse::<u64>().unwrap())
+                .collect::<Vec<_>>()
+        };
+        let row = json!({"signature":signature,"slot":"43","outcome":tx["outcome"],
+            "transaction_base64":tx["transaction_base64"],"network_fee_lamports":"2",
+            "raw_metadata":{"err":if succeeded {Value::Null} else {json!({"InstructionError":[0,1]})},
+            "fee":2,"preBalances":balances("pre_balances"),"postBalances":balances("post_balances"),
+            "preTokenBalances":[],"postTokenBalances":[]}});
+        json!({"native_sol":{"slot":"44"},"wallet_activity":{
+            "version":1,"authority":"read_only","commitment":"finalized","wallet":payer(),
+            "read_started_at_unix_secs":1,"read_completed_at_unix_secs":2,
+            "coverage":"provider_reported_address_history","signature_scan_finished":true,
+            "transaction_fetch_finished":true,"after_slot_exclusive":"42","through_slot_inclusive":"44",
+            "signatures":[{"signature":signature,"slot":"43","outcome":tx["outcome"]}],"transactions":[row]}})
+    }
+
+    #[test]
+    fn collected_activity_reuses_signed_transfer_checks_including_failed_fees() {
+        for succeeded in [true, false] {
+            let rows = review(&activity(succeeded), &json!({}), &config(), 11).unwrap();
+            assert_eq!(rows.len(), 1);
+            assert_eq!(
+                rows[0]["net_change_lamports"],
+                if succeeded { "-9" } else { "-2" }
+            );
+            assert_eq!(
+                rows[0]["wallet_transfer_change_lamports"],
+                if succeeded { "-7" } else { "0" }
+            );
+            assert_eq!(rows[0]["signature_verified_locally"], true);
+        }
+        let mut boundary = activity(true);
+        boundary["wallet_activity"]["through_slot_inclusive"] = json!("43");
+        boundary["native_sol"]["slot"] = json!("43");
+        assert_eq!(
+            review(&boundary, &json!({}), &config(), 11).unwrap().len(),
+            1
+        );
+        let mut empty = activity(true);
+        empty["wallet_activity"]["signatures"] = json!([]);
+        empty["wallet_activity"]["transactions"] = json!([]);
+        assert_eq!(
+            review(&empty, &json!({}), &config(), 11).unwrap(),
+            Vec::<Value>::new()
+        );
+        empty["wallet_activity"]["after_slot_exclusive"] = json!("44");
+        assert!(review(&empty, &json!({}), &config(), 11).is_err());
+    }
+
+    #[test]
+    fn collected_activity_refuses_incomplete_conflicting_or_unbound_evidence() {
+        let valid = activity(true);
+        for (path, bad) in [
+            ("/wallet_activity/coverage", json!("complete_wallet")),
+            ("/wallet_activity/signature_scan_finished", json!(false)),
+            ("/wallet_activity/transaction_fetch_finished", Value::Null),
+            ("/wallet_activity/after_slot_exclusive", json!("44")),
+            ("/wallet_activity/after_slot_exclusive", json!("43")),
+            ("/wallet_activity/through_slot_inclusive", json!("42")),
+            ("/wallet_activity/through_slot_inclusive", json!("45")),
+            ("/wallet_activity/signatures", json!([])),
+            ("/wallet_activity/transactions/0/slot", json!("44")),
+            (
+                "/wallet_activity/signatures/0/signature",
+                json!(Signature::new([5; 64])),
+            ),
+            ("/wallet_activity/signatures/0/outcome", json!("failed")),
+            ("/wallet_activity/transactions/0/raw_metadata/fee", json!(3)),
+            (
+                "/wallet_activity/transactions/0/raw_metadata/err",
+                json!(false),
+            ),
+            (
+                "/wallet_activity/transactions/0/raw_metadata/err",
+                json!({"error":1}),
+            ),
+            (
+                "/wallet_activity/transactions/0/raw_metadata/preBalances/0",
+                json!("100"),
+            ),
+            (
+                "/wallet_activity/transactions/0/raw_metadata/postBalances/0",
+                json!(92),
+            ),
+            (
+                "/wallet_activity/transactions/0/raw_metadata/preTokenBalances",
+                Value::Null,
+            ),
+            ("/wallet_activity/wallet", json!(Address::new([8; 32]))),
+            ("/wallet_activity/read_completed_at_unix_secs", json!(12)),
+        ] {
+            let mut bad_packet = valid.clone();
+            *bad_packet.pointer_mut(path).unwrap() = bad;
+            assert!(
+                review(&bad_packet, &json!({}), &config(), 11).is_err(),
+                "{path}"
+            );
+        }
+        let mut newer = valid.clone();
+        newer["wallet_activity"]["signatures"][0]["slot"] = json!("45");
+        newer["wallet_activity"]["transactions"][0]["slot"] = json!("45");
+        assert!(review(&newer, &json!({}), &config(), 11).is_err());
+        let mut conflict = valid.clone();
+        conflict["native_transfers"] = json!({});
+        assert!(review(&conflict, &json!({}), &config(), 11).is_err());
+        let mut changed_identity = valid.clone();
+        let signature = json!(Signature::new([5; 64]));
+        changed_identity["wallet_activity"]["signatures"][0]["signature"] = signature.clone();
+        changed_identity["wallet_activity"]["transactions"][0]["signature"] = signature;
+        assert!(review(&changed_identity, &json!({}), &config(), 11).is_err());
     }
 
     #[test]
@@ -416,21 +661,7 @@ mod tests {
 
     #[test]
     fn native_transfer_packet_requires_identity_current_reads_and_unique_unrecorded_signatures() {
-        let config = Config {
-            active: false,
-            wallet: payer(),
-            app_id: String::new(),
-            wallet_id: String::new(),
-            policy: radar_risk::Policy::SHIPPED,
-            valid_until_unix_secs: 0,
-            snapshot_path: std::path::PathBuf::default(),
-            history_path: std::path::PathBuf::default(),
-            key_path: std::path::PathBuf::default(),
-            max_snapshot_age_secs: 10,
-            intent_lifetime_secs: 0,
-            fee_reserve_lamports: 0,
-            programs: vec![],
-        };
+        let config = config();
         let tx = packet(&[(1, 7)], &[100, 10, 1], &[91, 17, 1], true);
         let current = json!({"native_sol":{"slot":"43"},"native_transfers":{
             "version":1,"authority":"read_only","commitment":"finalized","wallet":payer(),

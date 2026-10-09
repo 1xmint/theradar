@@ -2335,3 +2335,13 @@ size guard was weakened. Use a correctly signed, otherwise decodable 1249-byte
 message containing one extra complete zero transfer. The exact :32:28 mutant
 now fails the size regression; restore the production guard. This extends the
 same masked-guard failure, not a new production defect.
+
+
+The collected-activity adapter's first local fault check also exposed an interval
+boundary test gap. A nonempty equal-bound packet failed its row filter even with
+the interval equality guard weakened; the intended empty-packet assertion had
+not been inserted because a text replacement no longer matched formatted code.
+Use a complete empty packet with equal bounds to isolate that guard. Verify the
+edit exists, not just that the editing script exited successfully. Reapplying
+the greater-or-equal to greater-than fault now fails the boundary regression.
+Production behavior was restored; this was an offline test gap.
