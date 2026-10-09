@@ -2,7 +2,10 @@
 //! Direct wallet evidence, before any valuation or kernel portfolio is inferred.
 //! Three reads are not an atomic snapshot; their individual slots survive output.
 
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::{
+    collections::HashSet,
+    time::{Duration, SystemTime, UNIX_EPOCH},
+};
 
 use radar_onchain::rpc::{TOKEN_2022_PROGRAM_ID, TOKEN_PROGRAM_ID, TokenAccountsRead};
 use radar_onchain::{Budget, RpcClient};
@@ -15,8 +18,10 @@ fn token_read(value: TokenAccountsRead) -> Result<Value, String> {
         .accounts
         .into_iter()
         .map(|account| {
-            json!({"mint":account.mint.to_string(), "raw_amount":account.amount.to_string(),
-                "decimals":account.decimals})
+            json!({"address":account.address.to_string(), "program":account.program.to_string(),
+                "state":account.state, "mint":account.mint.to_string(),
+                "raw_amount":account.amount.to_string(), "decimals":account.decimals,
+                "spendable":null})
         })
         .collect();
     // Keep accounts separate: duplicated mints need verified common decimals
@@ -28,14 +33,20 @@ pub(super) fn read(rpc: &RpcClient, wallet: Address, budget: &mut Budget) -> Res
     let balance = rpc
         .balance(budget, &wallet)
         .map_err(|_| "native SOL read failed")?;
-    let tokens = token_read(
-        rpc.token_accounts_by_owner(budget, &wallet, TOKEN_PROGRAM_ID)
-            .map_err(|_| "SPL token read failed")?,
-    )?;
-    let extended = token_read(
-        rpc.token_accounts_by_owner(budget, &wallet, TOKEN_2022_PROGRAM_ID)
-            .map_err(|_| "Token-2022 read failed")?,
-    )?;
+    let tokens = rpc
+        .token_accounts_by_owner(budget, &wallet, TOKEN_PROGRAM_ID)
+        .map_err(|_| "SPL token read failed")?;
+    let extended = rpc
+        .token_accounts_by_owner(budget, &wallet, TOKEN_2022_PROGRAM_ID)
+        .map_err(|_| "Token-2022 read failed")?;
+    let mut seen = HashSet::new();
+    for account in tokens.accounts.iter().chain(&extended.accounts) {
+        if !seen.insert(account.address) {
+            return Err("token account repeated across program reads".into());
+        }
+    }
+    let tokens = token_read(tokens)?;
+    let extended = token_read(extended)?;
     let slot = balance.slot.get().to_string();
     let coherent = (tokens["slot"] == slot && extended["slot"] == slot).then_some(&slot);
     Ok(json!({
@@ -103,9 +114,10 @@ mod tests {
             serde_json::Map::from_iter([("context".into(), slot), ("value".into(), accounts)]);
         json!({"result":result}).to_string()
     }
-    fn account(amount: &str) -> Value {
-        json!({"account":{"data":{"parsed":{"info":{"mint":Address::new([0x22;32]).to_string(),
-            "owner":wallet().to_string(), "tokenAmount":{"amount":amount, "decimals":6}}}}}})
+    fn account(amount: &str, program: &str, identity: u8) -> Value {
+        json!({"pubkey":Address::new([identity;32]).to_string(),"account":{"owner":program,
+            "data":{"parsed":{"info":{"mint":Address::new([0x22;32]).to_string(),
+            "owner":wallet().to_string(), "state":"initialized", "tokenAmount":{"amount":amount, "decimals":6}}}}}})
     }
     fn client(answers: Vec<String>) -> (RpcClient, Arc<Mutex<Vec<Value>>>) {
         let calls = Arc::new(Mutex::new(Vec::new()));
@@ -133,9 +145,15 @@ mod tests {
             balance(),
             token(
                 json!({"slot":40}),
-                json!([account("18446744073709551615"), account("1")]),
+                json!([
+                    account("18446744073709551615", TOKEN_PROGRAM_ID, 1),
+                    account("1", TOKEN_PROGRAM_ID, 2)
+                ]),
             ),
-            token(json!({"slot":40}), json!([account("2")])),
+            token(
+                json!({"slot":40}),
+                json!([account("2", TOKEN_2022_PROGRAM_ID, 3)]),
+            ),
         ]);
         let output = read(&rpc, wallet(), &mut budget()).expect("complete");
         assert_eq!(output["native_sol"]["raw_amount"], u64::MAX.to_string());
@@ -156,6 +174,18 @@ mod tests {
             Address::new([0x22; 32]).to_string()
         );
         assert_eq!(output["token_program"]["accounts"][0]["decimals"], 6);
+        for (section, program, identity) in [
+            ("token_program", TOKEN_PROGRAM_ID, 1),
+            ("token_2022", TOKEN_2022_PROGRAM_ID, 3),
+        ] {
+            assert_eq!(
+                output[section]["accounts"][0]["address"],
+                Address::new([identity; 32]).to_string()
+            );
+            assert_eq!(output[section]["accounts"][0]["program"], program);
+            assert_eq!(output[section]["accounts"][0]["state"], "initialized");
+            assert!(output[section]["accounts"][0]["spendable"].is_null());
+        }
         assert_eq!(output["token_2022"]["accounts"][0]["raw_amount"], "2");
         assert_eq!(output["common_reported_slot"], "40");
         assert_eq!(output["wallet"], wallet().to_string());
@@ -177,6 +207,34 @@ mod tests {
                 json!([wallet().to_string(),{"programId":program},{"encoding":"jsonParsed","commitment":"finalized"}])
             );
         }
+    }
+
+    #[test]
+    fn repeated_identity_across_program_reads_refuses_and_frozen_balance_survives() {
+        let mut frozen = account("10", TOKEN_PROGRAM_ID, 1);
+        frozen["account"]["data"]["parsed"]["info"]["state"] = json!("frozen");
+        let (rpc, _) = client(vec![
+            balance(),
+            token(json!({"slot":40}), json!([frozen.clone()])),
+            token(
+                json!({"slot":41}),
+                json!([account("2", TOKEN_2022_PROGRAM_ID, 1)]),
+            ),
+        ]);
+        assert_eq!(
+            read(&rpc, wallet(), &mut budget()),
+            Err("token account repeated across program reads".into())
+        );
+        let (rpc, _) = client(vec![
+            balance(),
+            token(json!({"slot":40}), json!([frozen])),
+            token(json!({"slot":40}), json!([])),
+        ]);
+        let output =
+            read(&rpc, wallet(), &mut budget()).expect("frozen holding, no spendability claim");
+        assert_eq!(output["token_program"]["accounts"][0]["state"], "frozen");
+        assert_eq!(output["token_program"]["accounts"][0]["raw_amount"], "10");
+        assert!(output["token_program"]["accounts"][0]["spendable"].is_null());
     }
 
     #[test]
@@ -202,7 +260,10 @@ mod tests {
             json!({"error":{"message":"secret endpoint detail"}}).to_string(),
             token(Value::Null, json!([])),
             token(json!({"slot":40}), Value::Null),
-            token(json!({"slot":40}), json!([account("not-an-integer")])),
+            token(
+                json!({"slot":40}),
+                json!([account("not-an-integer", TOKEN_PROGRAM_ID, 1)]),
+            ),
         ] {
             for index in 0..3 {
                 let mut answers = vec![balance(), good.clone(), good.clone()];

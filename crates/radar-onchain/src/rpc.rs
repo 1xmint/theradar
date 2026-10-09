@@ -21,7 +21,7 @@
 //! that had to remember would eventually not, and the caller is a path a
 //! stranger triggers.
 
-use std::time::Duration;
+use std::{collections::HashSet, time::Duration};
 
 use radar_types::{Address, Slot};
 use serde::Deserialize;
@@ -281,6 +281,7 @@ struct TokenAmount {
 struct TokenAccountInfo {
     mint: String,
     owner: String,
+    state: String,
     #[serde(rename = "tokenAmount")]
     token_amount: TokenAmount,
 }
@@ -298,10 +299,12 @@ struct TokenAccountData {
 #[derive(Deserialize)]
 struct TokenAccountAccount {
     data: TokenAccountData,
+    owner: String,
 }
 
 #[derive(Deserialize)]
 struct TokenAccountEntry {
+    pubkey: String,
     account: TokenAccountAccount,
 }
 
@@ -319,6 +322,13 @@ struct TokenAccountsEnvelope {
 /// it.
 #[derive(Clone, Debug)]
 pub struct TokenAccount {
+    /// The account identity, distinct from its mint and wallet owner.
+    pub address: Address,
+    /// The actual account owner program, checked against the requested filter.
+    pub program: Address,
+    /// Reported account state; initialized does not establish spendability.
+    /// Mint/Token-2022 extension restrictions are not measured by this read.
+    pub state: String,
     /// The token this account holds.
     pub mint: Address,
     /// The raw base-unit balance. Never a wallet's *value* — that needs
@@ -694,8 +704,31 @@ impl RpcClient {
         let slot = result.context.map(|c| Slot(c.slot));
         let owner_string = owner.to_string();
         let mut accounts = Vec::new();
+        let mut seen = HashSet::new();
         for entry in result.value {
+            let address: Address = entry.pubkey.parse().map_err(|_| {
+                RpcError::Malformed("token account identity was not an address".into())
+            })?;
+            if !seen.insert(address) {
+                return Err(RpcError::Malformed(
+                    "duplicate token account identity".into(),
+                ));
+            }
+            if entry.account.owner != program_id {
+                return Err(RpcError::Malformed(
+                    "token account program differs from filter".into(),
+                ));
+            }
+            let program: Address = entry.account.owner.parse().map_err(|_| {
+                RpcError::Malformed("token account program was not an address".into())
+            })?;
             let info = entry.account.data.parsed.info;
+            if !matches!(
+                info.state.as_str(),
+                "initialized" | "frozen" | "uninitialized"
+            ) {
+                return Err(RpcError::Malformed("unknown token account state".into()));
+            }
             if info.owner != owner_string {
                 return Err(RpcError::Malformed(format!(
                     "a token account reported owner {:?}, not the wallet asked about",
@@ -715,6 +748,9 @@ impl RpcClient {
                 ))
             })?;
             accounts.push(TokenAccount {
+                address,
+                program,
+                state: info.state,
                 mint,
                 amount,
                 decimals: info.token_amount.decimals,
@@ -1355,9 +1391,11 @@ mod tests {
     }
 
     fn owned_token_account(mint: &str, owner: &str, amount: &str, decimals: u8) -> String {
-        format!(
-            r#"{{"account":{{"data":{{"parsed":{{"info":{{"mint":"{mint}","owner":"{owner}","tokenAmount":{{"amount":"{amount}","decimals":{decimals}}}}}}}}}}}}}"#
-        )
+        serde_json::json!({"pubkey":Address::new([7;32]).to_string(), "account":{
+            "owner":TOKEN_PROGRAM_ID,"data":{"parsed":{"info":{
+                "mint":mint,"owner":owner,"state":"initialized",
+                "tokenAmount":{"amount":amount,"decimals":decimals}}}}}})
+        .to_string()
     }
 
     #[test]
@@ -1366,7 +1404,14 @@ mod tests {
         let mint_one = Address::new([2u8; 32]);
         let mint_two = Address::new([3u8; 32]);
         let one = owned_token_account(&mint_one.to_string(), &wallet.to_string(), "1000", 6);
-        let two = owned_token_account(&mint_two.to_string(), &wallet.to_string(), "250", 9);
+        let mut two: serde_json::Value = serde_json::from_str(&owned_token_account(
+            &mint_two.to_string(),
+            &wallet.to_string(),
+            "250",
+            9,
+        ))
+        .expect("fixture");
+        two["pubkey"] = serde_json::json!(Address::new([8; 32]).to_string());
         let body = format!(
             r#"{{"jsonrpc":"2.0","id":1,"result":{{"context":{{"slot":5}},"value":[{one},{two}]}}}}"#
         );
@@ -1379,8 +1424,83 @@ mod tests {
         assert_eq!(got.accounts[0].mint, mint_one);
         assert_eq!(got.accounts[0].amount, 1000);
         assert_eq!(got.accounts[0].decimals, 6);
+        assert_eq!(got.accounts[0].address, Address::new([7; 32]));
+        assert_eq!(got.accounts[0].program.to_string(), TOKEN_PROGRAM_ID);
+        assert_eq!(got.accounts[0].state, "initialized");
         assert_eq!(got.accounts[1].mint, mint_two);
         assert_eq!(got.accounts[1].amount, 250);
+    }
+
+    #[test]
+    fn token_account_identity_program_and_state_are_required_and_duplicates_refuse() {
+        let wallet = Address::new([1; 32]);
+        let good: serde_json::Value = serde_json::from_str(&owned_token_account(
+            &Address::new([2; 32]).to_string(),
+            &wallet.to_string(),
+            "10",
+            6,
+        ))
+        .expect("fixture");
+        let read = |entries: serde_json::Value, program| {
+            let body =
+                serde_json::json!({"result":{"context":{"slot":5},"value":entries}}).to_string();
+            client(&[&body]).token_accounts_by_owner(&mut budget(), &wallet, program)
+        };
+        assert!(
+            read(
+                serde_json::json!([good.clone(), good.clone()]),
+                TOKEN_PROGRAM_ID
+            )
+            .is_err()
+        );
+        for pointer in [
+            "/pubkey",
+            "/account/owner",
+            "/account/data/parsed/info/state",
+        ] {
+            let mut missing = good.clone();
+            let (parent, field) = pointer.rsplit_once('/').expect("pointer");
+            missing
+                .pointer_mut(parent)
+                .expect("parent")
+                .as_object_mut()
+                .expect("object")
+                .remove(field);
+            assert!(
+                read(serde_json::json!([missing]), TOKEN_PROGRAM_ID).is_err(),
+                "missing {pointer}"
+            );
+            for replacement in [serde_json::Value::Null, serde_json::json!("unknown")] {
+                let mut bad = good.clone();
+                *bad.pointer_mut(pointer).expect("field") = replacement;
+                assert!(
+                    read(serde_json::json!([bad]), TOKEN_PROGRAM_ID).is_err(),
+                    "{pointer}"
+                );
+            }
+        }
+        assert!(read(serde_json::json!([good.clone()]), TOKEN_2022_PROGRAM_ID).is_err());
+        let mut bad_program = good.clone();
+        bad_program["account"]["owner"] = serde_json::json!("unknown");
+        assert!(read(serde_json::json!([bad_program]), "unknown").is_err());
+        for state in ["initialized", "frozen", "uninitialized"] {
+            let mut entry = good.clone();
+            entry["account"]["owner"] = serde_json::json!(TOKEN_2022_PROGRAM_ID);
+            entry["account"]["data"]["parsed"]["info"]["state"] = serde_json::json!(state);
+            let got =
+                read(serde_json::json!([entry]), TOKEN_2022_PROGRAM_ID).expect("reported balance");
+            assert_eq!(got.accounts[0].state, state);
+            assert_eq!(got.accounts[0].program.to_string(), TOKEN_2022_PROGRAM_ID);
+        }
+        let mut other = good.clone();
+        other["pubkey"] = serde_json::json!(Address::new([8; 32]).to_string());
+        assert_eq!(
+            read(serde_json::json!([good, other]), TOKEN_PROGRAM_ID)
+                .expect("same mint, distinct accounts")
+                .accounts
+                .len(),
+            2
+        );
     }
 
     #[test]

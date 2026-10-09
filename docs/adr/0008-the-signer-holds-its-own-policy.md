@@ -255,6 +255,19 @@ host observations; matching slot numbers do not prove an atomic common-bank
 snapshot. USD valuation and realised P&L remain null. Node-reported decimals
 and RPC truth still depend on the selected provider.
 
+The shared token reader requires each account's public address, actual owner
+program matching the requested filter, parsed wallet owner, and a known reported
+state (initialized, frozen or uninitialized). Malformed or duplicate account
+identities refuse a program read. The CLI also refuses an identity repeated
+across the two program reads, even at different slots; distinct accounts of the
+same mint remain separate. Account address/program/state survive its version 1
+output as additive fields. Frozen/uninitialized balances remain holdings rather
+than disappearing. Spendability is explicitly null: mint restrictions, account
+extensions, delegates and native wrapping semantics are not verified here.
+This report must not be treated as spendable inventory. The shape is checked
+against the [Solana RPC reference](https://solana.com/docs/rpc/http/gettokenaccountsbyowner),
+not a live capture of the configured wallet.
+
 This operator command is the first live wallet measurement piece, not an
 activated mandate, complete kernel state or trusted market adapter. Its output
 is not accepted as the issuer Snapshot. Protected endpoint/wallet provisioning,

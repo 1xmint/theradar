@@ -2306,3 +2306,49 @@ next source push, avoiding a redundant documentation-only full CI run.
 
 No local Cargo/rustc/Radar process remains. Target measured 33.1 GiB with
 59.4 GiB free. Previously rejected ignored-output cleanup was not retried.
+
+### Token-account evidence identity and state (2026-10-08)
+
+The actual wallet-read caller now retains each token account address, owner
+program and reported state. The shared RPC parser requires valid addresses,
+program equality to the requested filter and known account states, retaining
+its existing parsed wallet-owner check. Duplicate identities within a program
+refuse that read. Wallet-read refuses duplicates across the two program reads,
+even at different slots. Distinct accounts holding one mint remain separate.
+Frozen and uninitialized balances remain reported holdings; spendable is null.
+
+This closes account identity/program/state retention, not extension or
+spendability validation. It deliberately does not convert frozen balances into
+zero or initialized into safe. Mint restrictions, account extensions, delegates
+and wrapping semantics still need a protected inventory reader before any risk
+state is inferred. Individual finalized slots, host read windows and unknown
+USD/P&L remain. Matching slots do not establish an atomic snapshot. Version 1
+adds account metadata without changing existing quantity/slot fields.
+
+The response field shape was verified against Solana's getTokenAccountsByOwner
+reference, not a live wallet capture. Existing Serve wallet fixture metadata
+was updated because it calls the shared reader; its public response shape and
+pricing semantics are unchanged. No risk input, claim release, signing authority
+or deployment is added. Activation remains closed pending economic
+reconciliation, live risk inputs, execution/recovery/exits/scheduling, and owner
+limits/keys/Privy policy/delegation/funding/deployment/bounded validation.
+
+Local verification passed below; two regression tests added and MIN_TESTS raised
+by two. Tests cover same-mint distinct accounts, malformed/missing identity and
+metadata, wrong program, duplicate identity within/across reads, and retained
+frozen holdings with unknown spendability.
+
+Local verification: cargo +stable-x86_64-pc-windows-gnullvm test -p
+radar-onchain passed 78 unit and 18 integration tests; -p radar-cli wallet_read
+passed five unit tests; -p radar-cli --test wallet_read_process passed all 12
+actual-command tests; -p radar-serve --test
+a_wallets_positions_are_read_and_priced_by_radar passed all 12 site tests;
+-p repo-conformance passed 33 checks. Rust 1.99 scoped Clippy for onchain/CLI/
+Serve all targets with warnings denied, formatting and git diff --check passed.
+Individually disabling within-read duplicate validation, owner-program matching
+and state validation failed the running RPC regression. Disabling cross-program
+duplicate validation failed the CLI regression. All restored-source tests passed.
+An initial duplicate mutation removed HashSet type inference and was unviable;
+the reapplied guard-preserving variant failed the running test. No mutation
+exclusions, lint suppressions or dependencies added. Full CI is pending the
+source push; every awaited job must complete before any repair push or handback.
