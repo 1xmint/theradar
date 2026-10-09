@@ -814,11 +814,56 @@ separate from native cash. Exact unit equality cannot account for offsetting
 transfers or disposals, opening holdings, failed fees or current valuations.
 
 This command reports differences, not economic reconciliation. Opening inventory
-remains unknown; complete inventory, current exposure and daily loss remain
+remains unknown unless the genesis record below exists; its cost basis,
+complete inventory, current exposure and daily loss remain
 unknown even when every quantity matches. It writes no history or portfolio,
 closes no operation and releases no reservation. The signing path does not
 consume its report or gain authority. Live activation remains closed until the
 remaining economic coverage and protected live adapter are implemented.
+
+## Immutable opening inventory before operations
+
+`radar-issuer --record-opening-inventory` reads the configured private genesis
+snapshot once and reuses the protected inventory review with an empty journal
+checkpoint and no acquired lots. Native balance, wallet, read windows, context
+bounds and raw/listed account metadata are checked by the existing caller.
+Only normalized typed wallet/native/token quantities, programs/units, separate
+contexts and read times reach an OpeningInventoryRecord. Unrelated operator
+packet fields are omitted. No cost basis, valuation or spendability is inferred.
+
+OperationLog owns the write under its existing lock. A first record requires
+an empty checkpoint before every operation or other event. Exact repeats do
+not append, including after subsequent operations; conflicting records refuse.
+Persistence precedes the in-memory update and advances the journal checkpoint.
+Inventory-stage replay requires exactly one unmixed opening record at genesis,
+Outcome::Ok and no operation entry. Missing/duplicate/late/misstaged/mixed records
+refuse intact-chain replay rather than being ignored. Storage enforces these
+association rules; the protected caller establishes observation semantics.
+
+The optional correlation field is absent from older serialization/digests;
+older histories retain unknown opening inventory and are never backfilled.
+The new inventory stage requires this reader. Do not discard or recreate an
+existing history to make it eligible for genesis recording. Legacy accounting
+migration is not implemented. A protected host can still replace/rollback an
+entire journal; this is not off-host checkpoint authentication.
+
+The current inventory review consumes a retained opening record only for the
+configured wallet, coherent recorded read bounds and observations at least as
+recent as every opening context, including native context for empty token lists.
+Every retained acquisition must execute strictly after the opening read's
+highest slot. Duplicate opening mints refuse. Existing checked quantity
+aggregation and program/unit comparisons now include opening holdings.
+Rows retain opening_raw, retained_acquired_raw, expected_raw and observed_raw;
+excess/reduction compare observed units with opening plus buys. Historical
+acquisition lots and basis remain separate and are never doubled by the baseline.
+
+The baseline is a recorded observation, not a proof that all holdings or cash
+flows were captured. Empty or matching inventories still leave complete
+inventory, opening cost basis, current exposure and daily loss unknown.
+Transfers, disposals, failed fees and current valuation remain unfinished.
+Neither command updates a kernel portfolio, closes an operation, releases
+capital or grants authority. Ordinary issuance does not yet construct risk
+state from the opening record; live activation remains closed.
 
 ## What would reverse this
 

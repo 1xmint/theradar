@@ -30,6 +30,199 @@ const HELD: u64 = 10_000_000;
 const CLAIM: u64 = 4_000_000;
 const NOW: Slot = Slot(500);
 
+fn opening() -> radar_journal::OpeningInventoryRecord {
+    radar_journal::OpeningInventoryRecord {
+        wallet: WALLET,
+        native_lamports: HELD,
+        native_slot: NOW,
+        token_program_slot: NOW,
+        token_2022_slot: NOW,
+        raw_token_slot: None,
+        read_started_at_unix_secs: 1000,
+        read_completed_at_unix_secs: 1001,
+        holdings: vec![],
+    }
+}
+
+#[test]
+fn opening_inventory_is_immutable_genesis_and_survives_restart_without_operations() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("opening.jsonl");
+    let mut log = OperationLog::open(&path).expect("open");
+    assert!(log.opening_inventory().is_none());
+    assert_eq!(
+        log.record_opening_inventory(opening(), 1001)
+            .expect("record"),
+        Applied::Advanced
+    );
+    let checkpoint = log.checkpoint().to_owned();
+    assert_ne!(checkpoint, "");
+    assert_eq!(log.opening_inventory(), Some(&opening()));
+    assert_eq!(log.entries().count(), 0);
+    let saved = std::fs::read(&path).expect("recorded");
+    assert_eq!(
+        log.record_opening_inventory(opening(), 1002)
+            .expect("repeat"),
+        Applied::AlreadySeen
+    );
+    let mut changed = opening();
+    changed.native_lamports += 1;
+    assert!(log.record_opening_inventory(changed, 1002).is_err());
+    assert_eq!(std::fs::read(&path).expect("unchanged"), saved);
+    drop(log);
+    let mut log = OperationLog::open(&path).expect("restart");
+    assert_eq!(log.opening_inventory(), Some(&opening()));
+    assert_eq!(log.checkpoint(), checkpoint);
+    log.propose(intent(), 1002, about())
+        .expect("later operation");
+    assert_eq!(
+        log.record_opening_inventory(opening(), 1003)
+            .expect("same after trade"),
+        Applied::AlreadySeen
+    );
+    drop(log);
+    assert_eq!(
+        OperationLog::open(&path)
+            .expect("later replay")
+            .opening_inventory(),
+        Some(&opening())
+    );
+    let path = dir.path().join("old.jsonl");
+    let mut log = OperationLog::open(&path).expect("legacy");
+    log.propose(intent(), 1000, about())
+        .expect("existing trade");
+    let saved = std::fs::read(&path).expect("history");
+    assert!(log.record_opening_inventory(opening(), 1001).is_err());
+    assert!(log.opening_inventory().is_none());
+    assert_eq!(std::fs::read(&path).expect("unchanged"), saved);
+}
+
+#[test]
+fn failed_opening_write_never_updates_memory_or_checkpoint() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("opening.jsonl");
+    let mut log = OperationLog::open(&path).expect("open");
+    std::fs::create_dir(&path).expect("obstruct file");
+    assert!(log.record_opening_inventory(opening(), 1001).is_err());
+    assert!(log.opening_inventory().is_none());
+    assert_eq!(log.checkpoint(), "");
+}
+
+#[test]
+fn replay_refuses_duplicate_late_mixed_or_misstaged_opening_records() {
+    use radar_journal::{Journal, Outcome, Stage};
+    for case in [
+        "stage",
+        "outcome",
+        "mixed",
+        "missing",
+        "late",
+        "duplicate",
+        "operation",
+        "inventory_operation",
+    ] {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("opening.jsonl");
+        let mut journal = Journal::open(&path).expect("journal");
+        let mut correlation = Correlation {
+            opening_inventory: Some(opening()),
+            ..Correlation::default()
+        };
+        if case == "late" {
+            journal
+                .record(
+                    Stage::Received,
+                    Outcome::Ok,
+                    1000,
+                    about(),
+                    None,
+                    vec![],
+                    None,
+                    None,
+                )
+                .expect("earlier history");
+        }
+        if case == "mixed" {
+            correlation.mention = Some("unexpected".into());
+        }
+        if case == "missing" {
+            correlation = about();
+        }
+        if case == "operation" {
+            journal
+                .record_operation(
+                    Outcome::Ok,
+                    1001,
+                    correlation,
+                    radar_journal::OperationEntry {
+                        intent: intent(),
+                        reserved: None,
+                        state: OperationState::Proposed,
+                    },
+                    None,
+                    None,
+                )
+                .expect("mixed operation");
+        } else {
+            let stage = if case == "stage" {
+                Stage::Received
+            } else {
+                Stage::Inventory
+            };
+            let outcome = if case == "outcome" {
+                Outcome::Failed
+            } else {
+                Outcome::Ok
+            };
+            journal
+                .record(
+                    stage,
+                    outcome,
+                    1001,
+                    correlation.clone(),
+                    None,
+                    vec![],
+                    None,
+                    None,
+                )
+                .expect("event");
+            if case == "duplicate" {
+                journal
+                    .record(stage, outcome, 1002, correlation, None, vec![], None, None)
+                    .expect("duplicate");
+            }
+        }
+        assert!(matches!(
+            journal.verify().expect("chain"),
+            radar_journal::Verified::Intact { .. }
+        ));
+        if case == "inventory_operation" {
+            mix_opening_operation(&journal, &path);
+            assert!(matches!(
+                journal.verify().expect("valid hashes"),
+                radar_journal::Verified::Intact { .. }
+            ));
+        }
+        drop(journal);
+        assert!(OperationLog::open(&path).is_err(), "{case}");
+    }
+}
+
+fn mix_opening_operation(journal: &radar_journal::Journal, path: &std::path::Path) {
+    let mut event = journal.events().expect("event").remove(0);
+    event.operation = Some(radar_journal::OperationEntry {
+        intent: intent(),
+        reserved: None,
+        state: OperationState::Proposed,
+    });
+    event.id = event.digest();
+    std::fs::write(
+        path,
+        serde_json::to_string(&event).expect("event JSON") + "\n",
+    )
+    .expect("rehashed mixed event");
+}
+
 fn signed_operation(
     path: &std::path::Path,
 ) -> (

@@ -13,8 +13,8 @@ benefit of the doubt on everything else.
 
 ## Index
 
-**39 of these 51 name something mechanical that would catch a
-recurrence. 12 name only a habit, and say so** — which is this file's opening
+**39 of these 52 name something mechanical that would catch a
+recurrence. 13 name only a habit, and say so** — which is this file's opening
 standard rather than a gap in it. The habit-only rows are the ones worth reading
 twice; nothing will stop those repeating except somebody remembering.
 
@@ -76,6 +76,7 @@ quietly absent.
 | [49](#49-a-fee-rate-bound-did-not-bound-rounded-component-costs) | A fee rate bound did not bound rounded component costs | component-rounding and process quote regressions |
 | [50](#50-a-byte-check-left-the-encoded-request-unchanged) | A byte check left the encoded request unchanged | canonical Privy request process regression |
 | [51](#51-an-ordinary-supply-bound-refused-wrapped-sol) | An ordinary supply bound refused wrapped SOL | captured native mint and constrained wrapping regressions |
+| [52](#52-a-yielded-command-was-mistaken-for-a-completed-check) | A yielded command was mistaken for a completed check | habit only: confirm the parent command exit before the next Cargo |
 
 ---
 
@@ -2173,3 +2174,16 @@ the unconditional supply bound fails that regression. Disabling each wrapping
 identity, program, flag or canonical metadata check also fails its negative
 cases, including matching raw/listed decimals that incorrectly redefine native
 units. Source was restored and the scoped suites passed.
+
+## 52. A yielded command was mistaken for a completed check
+
+**Found:** 2026-10-09, local opening-inventory verification. A poll printed a
+completed test suite but still returned a running session for its following
+Clippy step. Another Cargo command was queued before that parent exit was
+confirmed, contrary to the workstation's one-Cargo rule. Both sessions later
+exited successfully; the affected CLI lint was repeated after source restoration.
+
+**What catches a recurrence:** habit only. Before starting another Cargo or
+mutating source under its check, require the previous shell session's final
+exit code. A finished child or yielded output does not establish parent completion.
+CI cannot enforce this local orchestration rule.

@@ -2596,3 +2596,59 @@ watch finished and no Cargo/rustc/Radar process remained at final inspection.
 Target measured 35.1 GiB with 57.3 GiB free; previously rejected ignored-output
 cleanup was not retried. This verified handback is committed locally for the
 next source push, avoiding a redundant documentation-only full CI run.
+
+### Immutable opening inventory baseline (2026-10-09)
+
+Add actual radar-issuer --record-opening-inventory over the configured private
+genesis snapshot. Reuse protected normalized wallet/raw evidence checks;
+retain typed wallet, native cash, grouped token quantities/programs/units,
+individual slots and read windows. Opening cost basis remains unknown, not zero.
+No raw operator extras, key, provider credential or model field is retained.
+
+The owned OperationLog records this only before all other history. Identical
+repeats are no-ops, conflicting replacements refuse, persistence precedes memory
+and the checkpoint advances. Replay rejects missing, duplicate, late, wrong
+stage/outcome or mixed opening records, even if their hash chain is intact.
+The optional correlation field preserves old digests; the new inventory stage
+requires the updated reader. Existing histories remain without a baseline;
+never discard/recreate history to provision one. Migration is unresolved.
+
+Inventory review consumes the retained baseline with configured wallet, sane
+read bounds, current token/native observations not preceding opening contexts,
+and acquisition execution slots strictly after the opening context. Duplicate
+opening mints refuse. Include native context in the highest opening slot even
+for empty token enumeration; a unit regression covers that pre-push correction.
+Existing checked arithmetic and program/units checks compare the union of
+opening quantities plus retained buys with current observations. Report opening,
+acquired, expected and observed units and exact excess/reduction; historical
+acquisition costs remain separate. Exact matches/empty quantities still cannot
+establish complete inventory, USD exposure/loss or cost basis for opening assets.
+No existing claim/portfolio/authority changes or live activation.
+
+Three journal persistence/replay regressions, one opening-bound unit regression
+and two protected process regressions were added; test floor increased by six.
+Tests cover immutable/idempotent genesis, restart and checkpoint retention,
+failed writes, intact but invalid replay, protected normalization, opening-plus-
+buy composition, unknown costs/coverage, unchanged history and blocked claims.
+Local verification passed as recorded below. Await full source CI before
+verified handback. Transfer/disposal/failed-fee coverage, current
+valuation/exposure/loss and idempotent economic reconciliation remain next.
+
+Manual proof: seven journal stage/genesis/immutability/replay mistakes, ten
+opening identity/window/context/order/duplicate mistakes and two actual
+opening-plus-buy composition mistakes each failed running tests. Moving the
+memory update ahead of the write and permitting mixed opening correlations also
+failed running persistence/replay tests (21 variants total). Original source
+restored; scoped opening tests and Rust 1.99 journal/signer Clippy passed.
+Nine actual CLI audit unit tests passed; its new inventory stage label is
+formatting plumbing, not new economic behavior. Final CLI all-target Clippy was
+repeated after confirming the earlier parent sessions had finished; LEARNINGS
+52 records the local scheduling mistake. Formatting passed. Final full scoped
+suites and conformance passed below; whole source CI remains pending.
+
+Final local proof: 49 journal and 172 signer tests passed after the last mixed
+replay case, followed by all 33 repository conformance checks. Scoped Rust 1.99
+all-target Clippy for journal/signer and CLI passed against restored source;
+formatting and nine CLI audit unit tests passed. All 21 deliberate behavior
+mutations were rejected by running regressions. Six new tests; no dependency,
+mutation exclusion or lint suppression. Full source CI is pending.

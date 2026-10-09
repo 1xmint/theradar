@@ -172,6 +172,7 @@ pub(super) fn review(
     config: &Config,
     history: &Value,
     now: u64,
+    opening: Option<&radar_journal::OpeningInventoryRecord>,
 ) -> Result<Value, String> {
     if snapshot.wallet != config.wallet
         || snapshot.accounting_checkpoint != history["accounting_checkpoint"]
@@ -193,13 +194,32 @@ pub(super) fn review(
         .min()
         .ok_or("inventory contexts missing")?;
     let observed = observations(value, snapshot.state.now.get())?;
-    let rows = compare(
-        observed,
-        history["lots"]
-            .as_array()
-            .ok_or("acquisition lots missing")?,
-        minimum,
-    )?;
+    let mut lots = history["lots"]
+        .as_array()
+        .ok_or("acquisition lots missing")?
+        .clone();
+    if let Some(opening) = opening {
+        lots.extend(super::opening::lots(opening, config.wallet, value, &lots)?);
+    }
+    let mut rows = compare(observed, &lots, minimum)?;
+    for row in &mut rows {
+        let baseline = opening
+            .and_then(|opening| {
+                opening
+                    .holdings
+                    .iter()
+                    .find(|h| row["mint"] == h.mint.to_string())
+            })
+            .map_or(0, |holding| holding.raw_amount);
+        let expected = evidence_integer(row, "retained_acquired_raw")?;
+        row["expected_raw"] = json!(expected.to_string());
+        row["opening_raw"] = if opening.is_some() {
+            json!(baseline.to_string())
+        } else {
+            Value::Null
+        };
+        row["retained_acquired_raw"] = json!((expected - baseline).to_string());
+    }
     Ok(
         json!({"version":1,"authority":"protected_operator_inventory_comparison",
         "wallet":config.wallet,"accounting_checkpoint":history["accounting_checkpoint"],
@@ -211,7 +231,7 @@ pub(super) fn review(
         "token_2022_slot":value["token_2022"]["slot"],
         "raw_token_slot":value["raw_token_verification"]["slot"],
         "acquisition_history":history,"tokens_by_mint":rows,
-        "opening_inventory":null,"wallet_inventory_complete":false,
+        "opening_inventory":opening,"opening_cost_basis_micro_usd":null,"wallet_inventory_complete":false,
         "current_exposure_micro_usd":null,"realised_loss_today_micro_usd":null,
         "portfolio_state_updated":false,"economic_reconciliation_complete":false,
         "reservation_released":false}),

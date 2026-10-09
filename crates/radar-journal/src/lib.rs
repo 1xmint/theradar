@@ -62,8 +62,9 @@ mod file;
 mod operation;
 
 pub use event::{
-    Correlation, Event, ExecutionBinding, MAX_REDACTED, Outcome, Recorded, SCHEMA_VERSION,
-    SettlementRecord, Stage, ValuationRecord,
+    Correlation, Event, ExecutionBinding, MAX_REDACTED, OpeningInventoryRecord,
+    OpeningTokenHolding, Outcome, Recorded, SCHEMA_VERSION, SettlementRecord, Stage,
+    ValuationRecord,
 };
 pub use file::{Journal, JournalError, Verified};
 pub use operation::{

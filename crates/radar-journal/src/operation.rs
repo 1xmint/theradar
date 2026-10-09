@@ -244,6 +244,9 @@ pub struct OperationEntry {
 /// What stopped an operation.
 #[derive(Debug, thiserror::Error)]
 pub enum OperationError {
+    /// An opening record conflicts, follows other history or has the wrong stage.
+    #[error("opening inventory must be immutable genesis history")]
+    OpeningInventory,
     /// Missing, changed or wrongly staged finalized evidence.
     #[error("settlement record is unbound, conflicting or not awaiting reconciliation")]
     SettlementBinding,
@@ -390,9 +393,54 @@ pub struct OperationLog {
     journal: Journal,
     operations: BTreeMap<OperationId, Live>,
     build: Option<String>,
+    opening_inventory: Option<crate::OpeningInventoryRecord>,
 }
 
 impl OperationLog {
+    /// The immutable genesis observation, if this history recorded one.
+    #[must_use]
+    pub const fn opening_inventory(&self) -> Option<&crate::OpeningInventoryRecord> {
+        self.opening_inventory.as_ref()
+    }
+
+    /// Records caller-reviewed opening holdings only before all other history.
+    /// Identical repeats do not append. Persistence precedes the memory update.
+    /// This does not establish coverage, cost basis, portfolio or authority.
+    ///
+    /// # Errors
+    /// Conflicting/non-genesis input or journal persistence failure.
+    pub fn record_opening_inventory(
+        &mut self,
+        opening: crate::OpeningInventoryRecord,
+        at: u64,
+    ) -> Result<Applied, OperationError> {
+        if let Some(prior) = &self.opening_inventory {
+            return if prior == &opening {
+                Ok(Applied::AlreadySeen)
+            } else {
+                Err(OperationError::OpeningInventory)
+            };
+        }
+        if !self.checkpoint().is_empty() {
+            return Err(OperationError::OpeningInventory);
+        }
+        self.journal.record(
+            crate::Stage::Inventory,
+            Outcome::Ok,
+            at,
+            Correlation {
+                opening_inventory: Some(opening.clone()),
+                ..Correlation::default()
+            },
+            self.build.clone(),
+            vec![],
+            None,
+            None,
+        )?;
+        self.opening_inventory = Some(opening);
+        Ok(Applied::Advanced)
+    }
+
     /// Opens the log at `path` and rebuilds every operation the file records.
     /// Acquires ownership before reading, then refuses non-intact history.
     ///
@@ -455,12 +503,14 @@ impl OperationLog {
             return Err(OperationError::HistoryNotIntact(integrity));
         }
         let events = journal.events()?;
+        let opening_inventory = replay_opening(&events)?;
         let operations = replay(&events)?;
         Ok(Self {
             _owner: owner,
             journal,
             operations,
             build: radar_types::build_sha().map(str::to_owned),
+            opening_inventory,
         })
     }
 
@@ -992,6 +1042,37 @@ impl OperationLog {
             live.claim = claim;
         }
     }
+}
+
+/// Opening inventory is one unmixed genesis event, never a later reset.
+fn replay_opening(
+    events: &[Event],
+) -> Result<Option<crate::OpeningInventoryRecord>, OperationError> {
+    let mut opening = None;
+    for (index, event) in events.iter().enumerate() {
+        if event.stage != crate::Stage::Inventory && event.correlation.opening_inventory.is_none() {
+            continue;
+        }
+        let record = event
+            .correlation
+            .opening_inventory
+            .as_ref()
+            .ok_or(OperationError::OpeningInventory)?;
+        if index != 0
+            || event.stage != crate::Stage::Inventory
+            || event.outcome != Outcome::Ok
+            || event.operation.is_some()
+            || event.correlation
+                != (Correlation {
+                    opening_inventory: Some(record.clone()),
+                    ..Correlation::default()
+                })
+        {
+            return Err(OperationError::OpeningInventory);
+        }
+        opening = Some(record.clone());
+    }
+    Ok(opening)
 }
 
 /// Rebuilds operations from the events a journal holds.

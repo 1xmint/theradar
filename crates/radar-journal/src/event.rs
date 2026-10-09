@@ -28,6 +28,8 @@ pub const MAX_REDACTED: usize = 512;
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Stage {
+    /// Immutable opening inventory, before any operation in the owned journal.
+    Inventory,
     /// A mention arrived.
     Received,
     /// It was parsed into something the loop understands, or was not.
@@ -92,6 +94,9 @@ pub enum Outcome {
 /// find that run from a mint, a week, or a transaction they are holding.
 #[derive(Clone, Default, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub struct Correlation {
+    /// Protected caller's normalized genesis holdings, not economic coverage.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub opening_inventory: Option<OpeningInventoryRecord>,
     /// Protected caller's normalized costs bound to previously retained facts.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub valuation: Option<ValuationRecord>,
@@ -140,7 +145,8 @@ impl Correlation {
     /// [`Journal::record`](crate::Journal::record) can say so.
     #[must_use]
     pub const fn is_empty(&self) -> bool {
-        self.valuation.is_none()
+        self.opening_inventory.is_none()
+            && self.valuation.is_none()
             && self.settlement.is_none()
             && self.execution.is_none()
             && self.mention.is_none()
@@ -188,6 +194,43 @@ pub struct ValuationRecord {
     pub settlement: SettlementRecord,
     /// Normalized valuation only, never raw operator input or credentials.
     pub review: serde_json::Value,
+}
+
+/// Immutable caller-reviewed opening observations. The caller validates the
+/// wallet, quantities and read evidence; storage enforces genesis and identity.
+#[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
+pub struct OpeningInventoryRecord {
+    /// Configured wallet, not authority to spend its funds.
+    pub wallet: radar_types::Address,
+    /// Measured native cash, not a token wrapping reserve.
+    pub native_lamports: u64,
+    /// Native balance read context.
+    pub native_slot: radar_types::Slot,
+    /// Classic token enumeration context.
+    pub token_program_slot: radar_types::Slot,
+    /// Token-2022 enumeration context.
+    pub token_2022_slot: radar_types::Slot,
+    /// Raw batch context; absent only for empty enumeration.
+    pub raw_token_slot: Option<radar_types::Slot>,
+    /// Host read start time, not execution time.
+    pub read_started_at_unix_secs: u64,
+    /// Host read completion time.
+    pub read_completed_at_unix_secs: u64,
+    /// Exact grouped quantities. Cost basis and spendability remain unknown.
+    pub holdings: Vec<OpeningTokenHolding>,
+}
+
+/// One mint's normalized opening quantity, not a valued position.
+#[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
+pub struct OpeningTokenHolding {
+    /// Observed mint identity.
+    pub mint: radar_types::Address,
+    /// Owning token program.
+    pub token_program: radar_types::Address,
+    /// Observed token units.
+    pub decimals: u8,
+    /// Checked sum across distinct observed token accounts.
+    pub raw_amount: u64,
 }
 
 /// One line of the journal.
