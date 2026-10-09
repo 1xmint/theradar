@@ -2859,3 +2859,26 @@ unverified. CI watches ended; no Cargo/rustc/Radar process remained at local
 inspection. Target measured 35.1 GiB with 58.3 GiB free; previously rejected
 ignored-output cleanup was not retried. This handback is committed locally for
 the next source push, avoiding redundant documentation-only full CI.
+
+
+### Protected net disposal measurement (2026-10-09)
+
+Settlement review/record now measures positive paired wallet/mint net decreases
+for successful reviewed SOL Reduce/Exit contexts. Shared acquisition aggregation
+preserves strict identity, units, complete pairs and checked totals. Internal
+transfers cancel; unknown disposal is omitted to preserve old review shapes.
+Immutable repeat/replay keeps claims outstanding. Synthetic process fixtures
+exercise the protected reader and retention, not live accepted exit transactions
+or exit issuance. Closed accounts with absent post metadata stay unknown.
+Sale proceeds, transfer attribution, basis allocation and realised PnL remain
+unknown. Acquisition/inventory coverage still refuses incomplete disposal economics.
+
+Local proof: 181 signer tests and 33 conformance checks passed; restored issuer
+unit/process tests, Rust 1.99 scoped all-target Clippy and formatting passed. Six
+manual faults (outcome/action/quote/direction/positive quantity/retention omission)
+failed the disposal regressions. A first synthetic fixture attempted a second
+250,005,000-lamport reservation against 49,995,000 free; corrected its fee-sized
+intent to 5,000. Production refusal was correct and unchanged. No live chain,
+key, delegation, trade, deployment or numeric owner limit change. Full CI is
+required before handback. Next: complete disposal/transfer cash-flow coverage,
+opening/failed-fee ordering, current valuation and idempotent economic closure.

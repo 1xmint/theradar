@@ -325,6 +325,97 @@ fn finalized_fixture() -> (Fixture, Vec<u8>, radar_journal::OperationId, Value) 
 }
 
 #[test]
+fn protected_disposal_measurement_survives_replay_without_releasing_capital() {
+    for action in ["reduce", "exit"] {
+        let (fixture, _, source, mut evidence) = finalized_fixture();
+        let history = fixture.dir.path().join("operations.jsonl");
+        let mut log = radar_journal::OperationLog::open(&history).expect("history");
+        let mut intent = log.entry(&source).expect("entry").intent;
+        intent.amount = radar_types::TokenQuantity::lamports(5000);
+        let mut binding = log.execution(&source).expect("binding").clone();
+        // Synthetic retained context exercises the reader, not live exit issuance.
+        binding.reviewed_proposal.as_mut().expect("proposal")["action"] = json!(action);
+        let (unsigned, signed) = another_fixture_transaction(&binding);
+        binding.transaction = unsigned;
+        binding.signed_transaction = None;
+        let id = log
+            .propose(
+                intent,
+                1011,
+                radar_journal::Correlation {
+                    execution: Some(binding),
+                    ..Default::default()
+                },
+            )
+            .expect("proposal");
+        let mut portfolio = native_portfolio(&fixture);
+        log.rehold(&mut portfolio).expect("existing claims");
+        log.reserve(&id, &mut portfolio, 1012).expect("reserve");
+        log.submit(&id, 1013, |_| Ok::<(), ()>(()))
+            .expect("submit")
+            .expect("effect");
+        log.record_signed(&id, signed.clone(), 1014)
+            .expect("signed");
+        drop(log);
+        evidence["transaction_base64"] = json!(signed);
+        evidence["signature"] = json!(fixture_signature(
+            evidence["transaction_base64"].as_str().expect("bytes")
+        ));
+        evidence["outcome"] = json!("succeeded");
+        let token = |amount: &str| {
+            json!({"account_index":1,"mint":address(0x22),
+            "owner":fixture.config["wallet"],"program_id":address(0x44),"decimals":6,"raw_amount":amount})
+        };
+        evidence["pre_token_balances"] = json!([token("10")]);
+        evidence["post_token_balances"] = json!([token("4")]);
+        let path = fixture.dir.path().join("disposal.json");
+        write(&path, &evidence);
+        let mut saved = None;
+        for _ in 0..2 {
+            let output = fixture
+                .command()
+                .args(["--record-settlement", id.as_str()])
+                .arg(&path)
+                .output()
+                .expect("record");
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            let bytes = std::fs::read(&history).expect("history bytes");
+            if let Some(previous) = &saved {
+                assert_eq!(&bytes, previous);
+            }
+            saved = Some(bytes);
+            let log = radar_journal::OperationLog::open(&history).expect("replay");
+            let review = &log.settlement(&id).expect("facts").review;
+            assert_eq!(review["wallet_token_disposal"]["net_disposed_raw"], "6");
+            assert_eq!(review["realised_pnl"], Value::Null);
+            assert_eq!(review["reservation_released"], false);
+            assert_eq!(log.outstanding().count(), 2);
+        }
+        evidence["post_token_balances"][0]["raw_amount"] = json!("3");
+        write(&path, &evidence);
+        assert!(
+            !fixture
+                .command()
+                .args(["--record-settlement", id.as_str()])
+                .arg(&path)
+                .output()
+                .expect("conflict")
+                .status
+                .success()
+        );
+        assert_eq!(
+            std::fs::read(&history).expect("unchanged"),
+            saved.expect("saved")
+        );
+        assert!(!acquisition_report(&fixture).status.success());
+    }
+}
+
+#[test]
 fn protected_failed_fee_costs_are_durable_without_releasing_or_closing_claims() {
     let (fixture, _, id, mut evidence) = finalized_fixture();
     let time = evidence["read_completed_at_unix_secs"]

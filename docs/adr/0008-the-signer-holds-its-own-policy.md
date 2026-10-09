@@ -631,6 +631,23 @@ command or live delegation is enabled.
 
 ## Protected historical native valuation review
 
+Settlement review also measures `wallet_token_disposal` for successful reviewed
+SOL Reduce/Exit operations. It shares acquisition's paired wallet/mint account
+aggregation: both sides must exist, retain owner/mint/program/decimals identity
+and consistent valid units, and checked totals must fit u64. Internal wallet
+transfers cancel. Only a strictly positive pre-minus-post quantity is measured;
+failed executions, buys, missing context, changed metadata or incomplete pairs
+leave disposal unknown. The field is omitted when unknown, preserving existing
+buy/failed review shapes. Recording retains the measured quantity immutably and
+repeats survive replay without releasing or closing claims.
+
+This is a net token decrease, not authenticated sale fill or proceeds. Closed
+accounts with absent post metadata remain unknown. No gross fill, transfer
+attribution, proceeds, cost-basis allocation or realised PnL is inferred.
+Acquisition-history/inventory coverage still refuses disposals lacking complete
+economic classification; this reader increment does not enable exit issuance,
+economic reconciliation, live signing or broadcast.
+
 `radar-issuer --review-valuation <operation-id> <private-price-file>` prices
 retained wallet net debit and network fee without updating the journal or
 portfolio. It requires an outstanding SOL operation, its retained normalized

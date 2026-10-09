@@ -69,6 +69,56 @@ fn acquisition(
     {
         return None;
     }
+    let (program, decimals, pre_total, post_total) =
+        paired_totals(binding, &proposal, before, after)?;
+    let acquired = post_total
+        .checked_sub(pre_total)
+        .filter(|amount| *amount > 0)?;
+    // Net acquisition is not gross venue fill, price, cost basis or attribution
+    // of each transfer. Token-2022 extensions are not interpreted here.
+    Some(
+        json!({"mint":proposal.mint,"owner":binding.wallet,"program_id":program,
+        "decimals":decimals,"pre_raw_amount":pre_total.to_string(),
+        "post_raw_amount":post_total.to_string(),"net_acquired_raw":acquired.to_string()}),
+    )
+}
+
+fn disposal(
+    binding: &ExecutionBinding,
+    outcome: &str,
+    before: &[TokenBalance],
+    after: &[TokenBalance],
+) -> Option<Value> {
+    let proposal: radar_risk::Proposal =
+        serde_json::from_value(binding.reviewed_proposal.clone()?).ok()?;
+    if outcome != "succeeded"
+        || !matches!(
+            proposal.action,
+            radar_risk::Action::Reduce | radar_risk::Action::Exit
+        )
+        || proposal.quote != Asset::Sol
+    {
+        return None;
+    }
+    let (program, decimals, pre_total, post_total) =
+        paired_totals(binding, &proposal, before, after)?;
+    let disposed = pre_total
+        .checked_sub(post_total)
+        .filter(|amount| *amount > 0)?;
+    // A net decrease is not proof of venue fill, sale proceeds or realised PnL.
+    Some(
+        json!({"mint":proposal.mint,"owner":binding.wallet,"program_id":program,
+        "decimals":decimals,"pre_raw_amount":pre_total.to_string(),
+        "post_raw_amount":post_total.to_string(),"net_disposed_raw":disposed.to_string()}),
+    )
+}
+
+fn paired_totals(
+    binding: &ExecutionBinding,
+    proposal: &radar_risk::Proposal,
+    before: &[TokenBalance],
+    after: &[TokenBalance],
+) -> Option<(Address, u8, u64, u64)> {
     let owned =
         |balance: &&TokenBalance| balance.mint == proposal.mint && balance.owner == binding.wallet;
     let indices: std::collections::BTreeSet<_> = before
@@ -104,16 +154,7 @@ fn acquisition(
         post_total = post_total.checked_add(post.raw_amount.parse::<u64>().ok()?)?;
     }
     let (program, decimals) = identity?;
-    let acquired = post_total
-        .checked_sub(pre_total)
-        .filter(|amount| *amount > 0)?;
-    // Net acquisition is not gross venue fill, price, cost basis or attribution
-    // of each transfer. Token-2022 extensions are not interpreted here.
-    Some(
-        json!({"mint":proposal.mint,"owner":binding.wallet,"program_id":program,
-        "decimals":decimals,"pre_raw_amount":pre_total.to_string(),
-        "post_raw_amount":post_total.to_string(),"net_acquired_raw":acquired.to_string()}),
-    )
+    Some((program, decimals, pre_total, post_total))
 }
 
 fn native_settlement(delta: i128, fee: u64) -> Option<radar_types::Settlement> {
@@ -125,6 +166,12 @@ fn native_settlement(delta: i128, fee: u64) -> Option<radar_types::Settlement> {
         .map(|spent| {
             radar_types::Settlement::Completed(radar_types::TokenQuantity::lamports(spent))
         })
+}
+
+fn native_effects(accounts: &[Address], pre: &[u64], post: &[u64]) -> Vec<Value> {
+    accounts.iter().zip(pre.iter().zip(post)).map(|(account, (pre, post))|
+        json!({"account":account.to_string(),"pre_lamports":pre.to_string(),"post_lamports":post.to_string(),
+            "net_change_lamports":(i128::from(*post)-i128::from(*pre)).to_string()})).collect()
 }
 
 fn block_time(value: &Value, completed: u64) -> Result<Option<u64>, String> {
@@ -229,14 +276,11 @@ pub(super) fn review(
     {
         return Err("settlement native effects exceed the recorded reservation".into());
     }
-    let effects: Vec<_> = accounts.iter().zip(pre.iter().zip(&post)).map(|(account, (pre, post))|
-        json!({"account":account.to_string(),"pre_lamports":pre.to_string(),"post_lamports":post.to_string(),
-            "net_change_lamports":(i128::from(*post)-i128::from(*pre)).to_string()})).collect();
+    let effects = native_effects(&accounts, &pre, &post);
     let native_settlement = native_settlement(delta, fee);
     let block_time = block_time(value, completed)?;
     let acquisition = acquisition(binding, outcome, &before, &after);
-    Ok(
-        json!({"version":1,"authority":"protected_file_review","outcome":outcome,
+    let mut report = json!({"version":1,"authority":"protected_file_review","outcome":outcome,
         "wallet":binding.wallet.to_string(),"signature":Signature::new(signature).to_string(),
         "slot":slot.to_string(),"native_account_effects":effects,"wallet_net_change_lamports":delta.to_string(),
         "minimum_slot":minimum.to_string(),"read_started_at_unix_secs":started,"read_completed_at_unix_secs":completed,
@@ -245,8 +289,12 @@ pub(super) fn review(
         "pre_token_balances":before,"post_token_balances":after,"wallet_token_acquisition":acquisition,
         "usd_value":null,"realised_pnl":null,
         "native_settlement_candidate":native_settlement,
-        "signature_verified_locally":true,"operation_reconciled":false,"reservation_released":false}),
-    )
+        "signature_verified_locally":true,"operation_reconciled":false,"reservation_released":false});
+    // Preserve the exact review shape of historical buy/failed/unknown records.
+    if let Some(disposal) = disposal(binding, outcome, &before, &after) {
+        report["wallet_token_disposal"] = disposal;
+    }
+    Ok(report)
 }
 
 #[cfg(test)]
@@ -273,6 +321,77 @@ mod tests {
             raw_amount: amount.to_string(),
             decimals: 6,
         }
+    }
+
+    #[test]
+    fn disposal_measures_only_successful_reviewed_sol_exits_or_reductions() {
+        let mut binding = acquisition_fixture();
+        let before = [token(&binding, 0, 10), token(&binding, 1, 20)];
+        let after = [token(&binding, 1, 25), token(&binding, 0, 0)];
+        for action in ["reduce", "exit"] {
+            binding.reviewed_proposal.as_mut().expect("proposal")["action"] = json!(action);
+            let result = disposal(&binding, "succeeded", &before, &after).expect("disposal");
+            assert_eq!(result["net_disposed_raw"], "5");
+            assert_eq!(result["pre_raw_amount"], "30");
+            assert_eq!(result["post_raw_amount"], "25");
+            assert!(disposal(&binding, "failed", &before, &after).is_none());
+            assert!(disposal(&binding, "succeeded", &before, &before).is_none());
+            assert!(disposal(&binding, "succeeded", &after, &before).is_none());
+            assert!(disposal(&binding, "succeeded", &before, &[]).is_none());
+            assert!(disposal(&binding, "succeeded", &[], &after).is_none());
+            assert_eq!(
+                disposal(
+                    &binding,
+                    "succeeded",
+                    &[token(&binding, 0, u64::MAX)],
+                    &[token(&binding, 0, 0)]
+                )
+                .expect("full range")["net_disposed_raw"],
+                u64::MAX.to_string()
+            );
+        }
+        for (field, value) in [
+            ("action", json!("buy")),
+            ("quote", json!("usdc")),
+            ("mint", json!(Address::SYSTEM_PROGRAM)),
+        ] {
+            let mut bad = binding.clone();
+            bad.reviewed_proposal.as_mut().expect("proposal")[field] = value;
+            assert!(disposal(&bad, "succeeded", &before, &after).is_none());
+        }
+        binding.reviewed_proposal = None;
+        assert!(disposal(&binding, "succeeded", &before, &after).is_none());
+    }
+
+    #[test]
+    fn settlement_disposal_is_measured_without_inventing_economics_or_changing_old_shape() {
+        let (mut binding, entry, mut value) = fixture();
+        binding.reviewed_proposal = acquisition_fixture().reviewed_proposal;
+        value["pre_token_balances"] = json!([token(&binding, 0, 10)]);
+        value["post_token_balances"] = json!([token(&binding, 0, 4)]);
+        assert!(
+            review(&binding, &entry, &value, 100, 20)
+                .expect("buy review")
+                .get("wallet_token_disposal")
+                .is_none()
+        );
+        for action in ["reduce", "exit"] {
+            binding.reviewed_proposal.as_mut().expect("proposal")["action"] = json!(action);
+            let report = review(&binding, &entry, &value, 100, 20).expect("review");
+            assert_eq!(report["wallet_token_disposal"]["net_disposed_raw"], "6");
+            assert_eq!(report["wallet_token_acquisition"], Value::Null);
+            assert_eq!(report["usd_value"], Value::Null);
+            assert_eq!(report["realised_pnl"], Value::Null);
+            assert_eq!(report["operation_reconciled"], false);
+            assert_eq!(report["reservation_released"], false);
+        }
+        value["outcome"] = json!("failed");
+        assert!(
+            review(&binding, &entry, &value, 100, 20)
+                .expect("failed review")
+                .get("wallet_token_disposal")
+                .is_none()
+        );
     }
 
     #[test]
