@@ -263,12 +263,39 @@ mod tests {
             let changed = edit(&value, |b| b[index] ^= 1, false);
             assert!(transaction(&changed, payer()).is_err(), "byte {index}");
         }
+        for (index, byte) in [(65, 0), (66, 1), (67, 0), (67, 2)] {
+            let changed = edit(&value, |b| b[index] = byte, true);
+            assert!(
+                transaction(&changed, payer()).is_err(),
+                "signed header {index}"
+            );
+        }
         for (index, byte) in [(198, 1), (199, 1), (200, 1), (201, 2), (202, 11), (203, 3)] {
             let changed = edit(&value, |b| b[index] = byte, true);
             assert!(
                 transaction(&changed, payer()).is_err(),
                 "instruction {index}"
             );
+        }
+        for changed in [
+            edit(
+                &value,
+                |b| {
+                    b[199] = 1;
+                    b.remove(201);
+                },
+                true,
+            ),
+            edit(
+                &value,
+                |b| {
+                    b[199] = 3;
+                    b.insert(202, 1);
+                },
+                true,
+            ),
+        ] {
+            assert!(transaction(&changed, payer()).is_err());
         }
         for changed in [
             edit(

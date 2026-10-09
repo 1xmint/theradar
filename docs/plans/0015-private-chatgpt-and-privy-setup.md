@@ -3378,3 +3378,12 @@ holder unknown. Restored 208 signer tests, 33 conformance checks, scoped
 Rust 1.99 all-target Clippy and formatting passed. Repaired full CI is pending.
 Await all initial jobs/final gate before repair push; do not cancel the run.
 No live change or autonomous activation.
+
+
+While initial CI continued, extend the native-transfer unit regression to sign
+unsupported signer/writable headers and correctly framed short/extra instruction
+account lists. All three additional exact logic faults fail these tests (33
+manual faults total); restore source. All five native-transfer unit tests,
+scoped Rust 1.99 all-target Clippy and formatting pass after the test extension.
+Production transfer logic is unchanged by this follow-up. Repaired full CI
+remains required; wait for every initial job before pushing.
