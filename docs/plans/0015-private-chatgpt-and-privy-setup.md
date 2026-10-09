@@ -3656,3 +3656,32 @@ new full CI. Then continue historical wallet-account coverage and durable,
 idempotent economic application; live risk inputs, execution/exits/recovery and
 owner activation requirements still remain. The most recent live wallet read
 returned zero SOL. Autonomous execution stays off; no deployment occurred.
+
+
+### Handback: collector and adapter published for CI (2026-10-09)
+
+Source 6d46e4e09a13789899a7b4ad45a5220e579d019d is integrated into
+fix/wallet-signin-diagnostics and pushed to PR 334 after every job/final gate of
+prior CI 37999235384 completed successfully. The PR description now describes
+the final combined implementation and separates old green evidence from new
+pending CI. New CI 38004462702 runs at that exact source: formatting, site,
+dependencies and licence checks have passed; remaining ordinary jobs and all
+mutation shards were running at the final inspection. No pass is claimed for
+the new full run. No further push until every job and final gate completes.
+Read exact failed baselines or survivor positions before repairing if needed.
+
+Local adapter evidence is 210 signer tests, 33 conformance checks, scoped Rust
+1.99 all-target Clippy/formatting and all 14 logic faults caught/restored. The
+collector's prior 345 scoped tests and 27 fault checks are unchanged. Both
+worktrees were clean after source publication. No local Cargo/rustc process was
+active. Target measured 37,800,603,438 bytes, C free 61,024,964,608 bytes; no
+cleanup attempted. The native sibling worktree remains available on its source
+branch. This handback is a local documentation commit for the next source push.
+
+Next integration is durable external-transfer retention and idempotent economic
+application alongside historical wallet-account coverage. These still cannot be
+inferred from an address-history scan or this protected operator comparison.
+Independent live risk inputs, execution/exits/recovery/scheduling and activated
+owner limits/isolated keys/verified Privy policy/delegation/funding/deployment
+validation remain required. No new live read, deployment, key, delegation,
+owner limit or trade in the adapter increment. Autonomous execution stays off.
