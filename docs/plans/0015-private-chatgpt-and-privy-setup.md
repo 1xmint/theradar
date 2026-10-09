@@ -3360,3 +3360,21 @@ trade, owner limit change, VPS access or deployment. Autonomous execution remain
 off. Next remains complete activity enumeration/coverage, durable reconciliation
 and current exposure/loss, independent live risk inputs, execution/recovery and
 owner limits/Privy policy/delegation/funding/deployment validation.
+
+
+### Native-transfer initial CI baseline lock failure (2026-10-09)
+
+CI 37993754272 for 6d62b4ba3948891756d01fc02adbd3d378629482 failed
+mutation shard 1's unmodified baseline before mutation results. The mixed
+invalid-fee history regression panicked opening the journal at
+issuer_process.rs:1482:60 with WouldBlock. The inventory fixture had released
+its known owner immediately before append_failed_history reopened it. Preserve
+that handle through shared owned-fixture and failed-history helpers for both
+mixed valid/invalid setups. The actual valuation subprocess still runs after
+releasing ownership and must finish before reacquiring it. Production locking,
+nonblocking refusal and all assertions remain unchanged. No retry, sleep, lock
+file deletion or test serialization. LEARNINGS 53 extended; actual contending
+holder unknown. Restored 208 signer tests, 33 conformance checks, scoped
+Rust 1.99 all-target Clippy and formatting passed. Repaired full CI is pending.
+Await all initial jobs/final gate before repair push; do not cancel the run.
+No live change or autonomous activation.

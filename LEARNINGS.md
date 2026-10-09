@@ -2214,7 +2214,17 @@ Return the known owner through a shared fixture helper and use that same handle
 for disposal construction. No lock retry or test serialization; Linux CI must
 verify this additional fixture repair. The lock holder was again not captured.
 
-No release/reacquire is needed for either transition; production locking remains
+Native-transfer source 6d62b4b CI 37993754272 later failed shard 1's unmodified
+baseline at issuer_process.rs:1482:60 in append_failed_history, called by the
+mixed invalid-fee history regression. The inventory fixture already owned the
+journal to set its checkpoint, then dropped it before this immediate reopen.
+Pass that owner through inventory_fixture_owned into append_failed_history_owned
+for both mixed-history setups. The actual valuation subprocess still requires
+a release; its completed output precedes the necessary later open. No retries,
+serialization or production lock changes. The contending holder was not captured;
+complete repaired Linux CI is required, not a local Windows pass alone.
+
+No release/reacquire is needed for these fixture transitions; production locking remains
 nonblocking with no retry, deletion or weaker refusal. Terminal consistency and
 facts signature/operation regressions still fail when their guards are disabled.
 The full fixture repair needs complete Linux CI; a Windows pass alone does not

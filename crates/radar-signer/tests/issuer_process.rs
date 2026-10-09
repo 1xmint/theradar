@@ -1479,7 +1479,16 @@ fn protected_fifo_history_keeps_nonzero_opening_basis_unknown() {
 
 fn append_failed_history(fixture: &Fixture, case: &str) -> radar_journal::OperationId {
     let path = fixture.dir.path().join("operations.jsonl");
-    let mut log = radar_journal::OperationLog::open(&path).expect("history");
+    let log = radar_journal::OperationLog::open(&path).expect("history");
+    append_failed_history_owned(fixture, case, log)
+}
+
+fn append_failed_history_owned(
+    fixture: &Fixture,
+    case: &str,
+    mut log: radar_journal::OperationLog,
+) -> radar_journal::OperationId {
+    let path = fixture.dir.path().join("operations.jsonl");
     let source = log.outstanding().next().expect("buy").0.clone();
     let mut intent = log.entry(&source).expect("entry").intent;
     intent.amount = radar_types::TokenQuantity::lamports(5000);
@@ -1665,8 +1674,8 @@ fn append_invalid_fee_copy(
 
 #[test]
 fn mixed_history_keeps_buy_and_failed_fee_once_across_restart_and_terminal_records() {
-    let mut fixture = inventory_fixture();
-    let fee = append_failed_history(&fixture, "valid");
+    let (mut fixture, log) = inventory_fixture_owned(None);
+    let fee = append_failed_history_owned(&fixture, "valid", log);
     let path = fixture.dir.path().join("operations.jsonl");
     let saved = std::fs::read(&path).expect("history");
     let first = acquisition_report(&fixture);
@@ -1762,8 +1771,8 @@ fn mixed_history_refuses_missing_changed_duplicate_or_misassociated_fee_evidence
         "facts_operation",
         "terminal",
     ] {
-        let fixture = inventory_fixture();
-        append_failed_history(&fixture, case);
+        let (fixture, log) = inventory_fixture_owned(None);
+        append_failed_history_owned(&fixture, case, log);
         let path = fixture.dir.path().join("operations.jsonl");
         let saved = std::fs::read(&path).expect("history");
         let output = acquisition_report(&fixture);
@@ -1778,6 +1787,12 @@ fn inventory_fixture() -> Fixture {
 }
 
 fn inventory_fixture_opening(opening: Option<u64>) -> Fixture {
+    let (fixture, log) = inventory_fixture_owned(opening);
+    drop(log);
+    fixture
+}
+
+fn inventory_fixture_owned(opening: Option<u64>) -> (Fixture, radar_journal::OperationLog) {
     let (mut fixture, id, price_path, _) = acquisition_cost_fixture_opening_amount(opening);
     assert!(
         fixture
@@ -1792,7 +1807,6 @@ fn inventory_fixture_opening(opening: Option<u64>) -> Fixture {
     let log = radar_journal::OperationLog::open(fixture.dir.path().join("operations.jsonl"))
         .expect("history");
     fixture.snapshot["accounting_checkpoint"] = json!(log.checkpoint());
-    drop(log);
     fixture.snapshot["state"]["now"] = json!(1003);
     let evidence = &mut fixture.snapshot["wallet_evidence"];
     evidence["native_sol"]["slot"] = json!("1002");
@@ -1807,7 +1821,7 @@ fn inventory_fixture_opening(opening: Option<u64>) -> Fixture {
     evidence["raw_token_verification"] = json!({"authority":"read_only","inventory_complete":false,
         "slot":"1003","accounts":[account,second]});
     fixture.save();
-    fixture
+    (fixture, log)
 }
 
 fn inventory_report(fixture: &Fixture) -> std::process::Output {
