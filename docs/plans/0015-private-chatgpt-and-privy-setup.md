@@ -3020,3 +3020,35 @@ remain unverified. CI watches completed; no Cargo/rustc/issuer/signer process
 remained at final inspection. Target measured 35.1 GiB; free disk 58.2 GiB.
 Previously rejected cleanup was not retried. This verified handback is committed
 locally for the next source push, avoiding redundant documentation-only full CI.
+
+
+### Revalidated mixed sale history (2026-10-09)
+
+The existing owned-journal acquisition-history caller now reconstructs and
+revalidates complete retained sale proceeds alongside buys and failed fees.
+The entire normalized review must match; shared signed-artifact deduplication
+spans all categories. Sales retain reviewed creator, exact proceeds and execution/
+price watermarks separately, without changing acquisition totals. Every sale
+terminal state refuses because native Completed spend does not reconcile sale
+credits or disposed basis. Nonempty sales explicitly refuse inventory comparison
+until disposal quantities and basis can be reconciled. No realised PnL or daily
+loss is inferred and outstanding claims remain held.
+
+Two synthetic process regressions cover durable mixed buy/sale history, repeat/
+replay without writes, exact disposal/proceeds, missing or changed classification,
+altered normalized amounts, duplicate signed artifacts and terminal sales.
+Fresh checkpoint and snapshot contexts prove the inventory refusal is the sale
+guard. Six manual logic faults failed these regressions: missing sale input,
+omitted sales output, terminal bypass, normalization bypass, artifact dedupe
+bypass and inventory-sale bypass. Source was restored. Plumbing-only factoring
+is not separately mutated. Restored-source 190 signer tests and 33 conformance
+checks passed, along with Rust 1.99 scoped all-target Clippy and formatting.
+Whole CI remains pending. Test floor raised by two.
+
+Next: allocate disposed token basis and reconcile chronological sale quantities,
+then complete cash-flow/transfer coverage, current valuation/exposure/loss and
+idempotent application. Four activation areas remain: economic reconciliation;
+independent live risk inputs; execution/exits/recovery/scheduling; owner limits,
+isolated keys, verified Privy policy/delegation, funding/deployment and validation.
+Autonomy remains off. No live chain read, credential, key, delegation, trade,
+owner-limit, VPS or deployment change. Current funding/policy remain unverified.

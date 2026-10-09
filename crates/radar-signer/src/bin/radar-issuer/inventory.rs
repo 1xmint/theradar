@@ -174,6 +174,12 @@ pub(super) fn review(
     now: u64,
     opening: Option<&radar_journal::OpeningInventoryRecord>,
 ) -> Result<Value, String> {
+    if history["sales"]
+        .as_array()
+        .is_some_and(|sales| !sales.is_empty())
+    {
+        return Err("sale inventory requires disposed basis and quantity reconciliation".into());
+    }
     if snapshot.wallet != config.wallet
         || snapshot.accounting_checkpoint != history["accounting_checkpoint"]
         || !snapshot_current(

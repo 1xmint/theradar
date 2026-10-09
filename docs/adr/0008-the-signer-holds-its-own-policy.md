@@ -822,7 +822,8 @@ and autonomous execution remain closed.
 
 `radar-issuer --review-acquisitions` reads every retained operation under the
 journal ownership lock, including completed entries. It reconstructs one
-historical acquisition lot or failed-fee record per submitted operation,
+historical acquisition lot, sale-proceeds record or failed-fee record per
+submitted operation,
 re-verifies its configured wallet signature/exact message, checks the retained
 facts name that signature and operation,
 and reruns the existing complete historical
@@ -833,9 +834,12 @@ storage or association rule.
 
 Proposed, Reserved and pre-submission Failed operations are listed separately,
 with no inferred acquisition or released claim. Every other operation needs
-complete successful native-SOL buy costs or classified failed-execution fees.
-SubmissionUnknown is supported;
-Confirmed/Reconciled are supported only with Completed native spend equal to
+complete successful native-SOL buy costs, sale proceeds or classified
+failed-execution fees.
+SubmissionUnknown is supported for all categories. Sales refuse every terminal
+state because Completed native spend cannot reconcile credits or disposed basis.
+For buys and failed fees, Confirmed/Reconciled are supported only with Completed
+native spend equal to
 the retained wallet debit. Missing costs, unsupported terminal outcomes or
 inconsistent retained reviews refuse the whole report. The same signed artifact
 under different operation identities also refuses rather than double-counting.
@@ -847,12 +851,19 @@ Failed fees are a separate array with operation, exact native and historical USD
 fee cost, execution time/slot and price watermarks. Checked native/USD totals
 cover only recorded failed fees; empty history has zero recorded fees, not zero
 wallet loss. Failed fees never become token lots, creator basis or rent. Artifact
-uniqueness and terminal debit consistency apply across both categories. Entire
+uniqueness applies across all categories; terminal debit consistency applies to
+buys and failed fees. Entire
 normalized valuation is recomputed before classification; missing or changed
 fee classification refuses even if a public total would be unchanged.
 A mint changing program or decimals refuses, including across creators. The
 report names the owned journal's current accounting checkpoint and is stable
 across replay/repeat; no history or portfolio state is written.
+
+Sales retain the complete revalidated sale-proceeds breakdown, reviewed creator,
+operation and execution/price watermarks in a separate `sales` array. Historical
+price reconstruction includes the exact retained disposal and all cash-flow
+components; changed amounts or classification refuse. Sales do not become buy
+lots or alter acquisition totals. Disposed basis and realised PnL remain unknown.
 
 This is protected operator acquisition history, not verified current wallet
 inventory. An empty report does not establish a flat wallet. Opening inventory,
@@ -868,7 +879,9 @@ rewritten to accommodate them.
 
 `radar-issuer --review-inventory` reads the configured private snapshot once
 under the owned journal lock and reuses `--review-acquisitions` validation over
-all retained lots. The snapshot must name the configured wallet and exact
+all retained lots. Nonempty sale history refuses inventory review until disposed
+quantity and basis reconciliation exist, rather than comparing buy-only totals.
+The snapshot must name the configured wallet and exact
 current accounting checkpoint and be current by the host clock. Existing
 wallet evidence checks bind its native balance, finalized read identity,
 context bounds and current read window. Stdin cannot replace these inputs.

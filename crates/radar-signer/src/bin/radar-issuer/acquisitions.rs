@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-//! Reviewed buys and failed fees from the owned journal, not wallet reconciliation.
+//! Reviewed buys, sales and failed fees from the owned journal, not wallet reconciliation.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -19,6 +19,7 @@ fn integer(value: &Value, field: &str) -> Result<u64, String> {
 enum HistoricalEffect {
     Acquisition(Value),
     FailedFee(Value),
+    Sale(Value),
 }
 
 fn effect(
@@ -45,22 +46,7 @@ fn effect(
         return Err("retained settlement names another transaction signature".into());
     }
     let value = &record.review;
-    let costs = &value["acquisition_costs"];
-    // Reconstruct only the previously normalized complete review. Equality with
-    // the rerun below verifies every retained price/cost output, not just basis.
-    let mut price = json!({"version":1,"asset":"sol",
-        "micro_usd_per_sol":value["micro_usd_per_sol"],
-        "as_of_slot":value["valuation_as_of_slot"],
-        "as_of_unix_secs":value["price_at_unix_secs"]});
-    if costs.is_object() {
-        price["acquisition_costs"] = json!({"version":1,"operation":id.as_str(),
-            "signed_transaction":record.settlement.signed_transaction,
-            "wallet":config.wallet,"mint":costs["mint"],
-            "token_program":costs["token_program"],"decimals":costs["decimals"],
-            "net_acquired_raw":costs["net_acquired_raw"],
-            "swap_lamports":costs["swap_lamports"],"rent_lamports":costs["rent_lamports"],
-            "tip_lamports":costs["tip_lamports"],"other_cash_flows_absent":true});
-    }
+    let price = historical_price(record, id, config);
     let mut historical = *entry;
     historical.state = OperationState::SubmissionUnknown;
     let mut checked = valuation::review(
@@ -74,6 +60,9 @@ fn effect(
     checked["operation"] = json!(id.as_str());
     if &checked != value {
         return Err("retained acquisition valuation does not match its reviewed inputs".into());
+    }
+    if checked["sale_proceeds"].is_object() {
+        return sale(entry, binding, id, &checked);
     }
     let debit = TokenQuantity::lamports(integer(value, "wallet_net_debit_lamports")?);
     match entry.state {
@@ -93,6 +82,65 @@ fn effect(
             "price_at_unix_secs":checked["price_at_unix_secs"]})));
     }
     acquisition_lot(binding, id, value)
+}
+
+fn historical_price(
+    record: &radar_journal::ValuationRecord,
+    id: &radar_journal::OperationId,
+    config: &Config,
+) -> Value {
+    let value = &record.review;
+    let costs = &value["acquisition_costs"];
+    // Reconstruct only the previously normalized complete review. Equality with
+    // the rerun below verifies every retained price/cost output, not just basis.
+    let mut price = json!({"version":1,"asset":"sol",
+        "micro_usd_per_sol":value["micro_usd_per_sol"],
+        "as_of_slot":value["valuation_as_of_slot"],
+        "as_of_unix_secs":value["price_at_unix_secs"]});
+    if costs.is_object() {
+        price["acquisition_costs"] = json!({"version":1,"operation":id.as_str(),
+            "signed_transaction":record.settlement.signed_transaction,
+            "wallet":config.wallet,"mint":costs["mint"],
+            "token_program":costs["token_program"],"decimals":costs["decimals"],
+            "net_acquired_raw":costs["net_acquired_raw"],
+            "swap_lamports":costs["swap_lamports"],"rent_lamports":costs["rent_lamports"],
+            "tip_lamports":costs["tip_lamports"],"other_cash_flows_absent":true});
+    }
+    let proceeds = &value["sale_proceeds"];
+    if proceeds.is_object() {
+        price["sale_proceeds"] = json!({"version":1,"operation":id.as_str(),
+            "signed_transaction":record.settlement.signed_transaction,"wallet":config.wallet,
+            "mint":proceeds["mint"],"token_program":proceeds["token_program"],"decimals":proceeds["decimals"],
+            "net_disposed_raw":proceeds["net_disposed_raw"],"gross_proceeds_lamports":proceeds["gross_proceeds_lamports"],
+            "tip_lamports":proceeds["tip_lamports"],"rent_paid_lamports":proceeds["rent_paid_lamports"],
+            "rent_refund_lamports":proceeds["rent_refund_lamports"],"other_cash_flows_absent":true});
+    }
+    price
+}
+
+fn sale(
+    entry: &OperationEntry,
+    binding: &radar_journal::ExecutionBinding,
+    id: &radar_journal::OperationId,
+    value: &Value,
+) -> Result<HistoricalEffect, String> {
+    // Completed native spend cannot represent sale credits or reconcile basis.
+    if entry.state != OperationState::SubmissionUnknown {
+        return Err("sale terminal state lacks economic reconciliation".into());
+    }
+    let proposal: radar_risk::Proposal = serde_json::from_value(
+        binding
+            .reviewed_proposal
+            .clone()
+            .ok_or("sale lacks reviewed attribution")?,
+    )
+    .map_err(|_| "invalid sale attribution")?;
+    Ok(HistoricalEffect::Sale(
+        json!({"operation":id.as_str(),"creator":proposal.creator,
+        "proceeds":value["sale_proceeds"],"execution_slot":value["execution_slot"],
+        "execution_at_unix_secs":value["execution_at_unix_secs"],
+        "valuation_as_of_slot":value["valuation_as_of_slot"],"price_at_unix_secs":value["price_at_unix_secs"]}),
+    ))
 }
 
 fn acquisition_lot(
@@ -185,6 +233,7 @@ pub(super) fn review(log: &OperationLog, config: &Config) -> Result<Value, Strin
     let mut artifacts = BTreeSet::new();
     let mut unsubmitted = Vec::new();
     let mut failed_fees = Vec::new();
+    let mut sales = Vec::new();
     for (id, entry) in log.entries() {
         if matches!(
             entry.state,
@@ -205,6 +254,7 @@ pub(super) fn review(log: &OperationLog, config: &Config) -> Result<Value, Strin
         match reviewed {
             HistoricalEffect::Acquisition(lot) => lots.push(lot),
             HistoricalEffect::FailedFee(fee) => failed_fees.push(fee),
+            HistoricalEffect::Sale(sale) => sales.push(sale),
         }
     }
     let groups = aggregate(&lots)?;
@@ -214,6 +264,7 @@ pub(super) fn review(log: &OperationLog, config: &Config) -> Result<Value, Strin
         "wallet":config.wallet,"accounting_checkpoint":log.checkpoint(),
         "lots":lots,"acquisitions_by_mint_and_creator":groups,
         "failed_execution_fees":failed_fees,"recorded_failed_fee_totals":fees,
+        "sales":sales,
         "unsubmitted_operations":unsubmitted,
         "wallet_inventory_complete":false,"current_exposure_micro_usd":null,
         "realised_loss_today_micro_usd":null,"portfolio_state_updated":false,

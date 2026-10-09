@@ -1020,6 +1020,183 @@ fn acquisition_report(fixture: &Fixture) -> std::process::Output {
         .expect("acquisition report")
 }
 
+fn append_sale_history(fixture: &Fixture, case: &str) -> radar_journal::OperationId {
+    let history = fixture.dir.path().join("operations.jsonl");
+    let mut log = radar_journal::OperationLog::open(&history).expect("history");
+    let source = log.outstanding().next().expect("buy").0.clone();
+    let mut intent = log.entry(&source).expect("entry").intent;
+    intent.amount = radar_types::TokenQuantity::lamports(5000);
+    let mut binding = log.execution(&source).expect("binding").clone();
+    binding.reviewed_proposal.as_mut().expect("proposal")["action"] = json!("reduce");
+    let signed = if case == "duplicate" {
+        binding.signed_transaction.take().expect("signed")
+    } else {
+        let (unsigned, signed) = another_fixture_transaction(&binding);
+        binding.transaction = unsigned;
+        binding.signed_transaction = None;
+        signed
+    };
+    let id = log
+        .propose(
+            intent,
+            1011,
+            radar_journal::Correlation {
+                execution: Some(binding),
+                ..Default::default()
+            },
+        )
+        .expect("sale");
+    let mut portfolio = native_portfolio(fixture);
+    log.rehold(&mut portfolio).expect("claims");
+    log.reserve(&id, &mut portfolio, 1012).expect("reserve");
+    log.submit(&id, 1013, |_| Ok::<(), ()>(()))
+        .expect("submit")
+        .expect("effect");
+    log.record_signed(&id, signed.clone(), 1014)
+        .expect("signed");
+    drop(log);
+    let time = unix_now();
+    let token = |amount: &str| {
+        json!({"account_index":1,"mint":address(0x22),"owner":fixture.config["wallet"],
+        "program_id":address(0x44),"decimals":6,"raw_amount":amount})
+    };
+    let evidence = json!({"version":1,"authority":"read_only","commitment":"finalized","wallet":fixture.config["wallet"],
+        "transaction_base64":signed,"signature":fixture_signature(&signed),"signature_verified_locally":false,
+        "operation_reconciled":false,"usd_value":null,"realised_pnl":null,"outcome":"succeeded","slot":"1003",
+        "minimum_slot":"1000","read_started_at_unix_secs":time,"read_completed_at_unix_secs":time,
+        "block_time_unix_secs":(time-1).to_string(),"account_keys":[fixture.config["wallet"],address(0x22),address(0x11)],
+        "pre_balances_lamports":["300000000","0","0"],"post_balances_lamports":["301000000","0","0"],
+        "network_fee_lamports":"5000","pre_token_balances":[token("15")],"post_token_balances":[token("9")]});
+    let effects_path = fixture.dir.path().join("sale-history-effects.json");
+    write(&effects_path, &evidence);
+    let output = fixture
+        .command()
+        .args(["--record-settlement", id.as_str()])
+        .arg(&effects_path)
+        .output()
+        .expect("facts");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    if case == "missing" {
+        return id;
+    }
+    let price = json!({"version":1,"asset":"sol","micro_usd_per_sol":"200000003","as_of_slot":"1000",
+        "as_of_unix_secs":(time-1).to_string(),"sale_proceeds":{"version":1,"operation":id.as_str(),
+        "signed_transaction":signed,"wallet":fixture.config["wallet"],"mint":address(0x22),"token_program":address(0x44),
+        "decimals":6,"net_disposed_raw":"6","gross_proceeds_lamports":"1005000","tip_lamports":"0",
+        "rent_paid_lamports":"0","rent_refund_lamports":"0","other_cash_flows_absent":true}});
+    let price_path = fixture.dir.path().join("sale-history-price.json");
+    write(&price_path, &price);
+    let output = fixture
+        .command()
+        .args(["--review-valuation", id.as_str()])
+        .arg(&price_path)
+        .output()
+        .expect("review");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let mut review: Value = serde_json::from_slice(&output.stdout).expect("review");
+    match case {
+        "normalized" => review["sale_proceeds"]["net_trade_proceeds_micro_usd"] = json!("200000"),
+        "category" => {
+            review
+                .as_object_mut()
+                .expect("report")
+                .remove("sale_proceeds");
+        }
+        _ => {}
+    }
+    retain_sale_history(fixture, &id, review, case);
+    id
+}
+
+fn retain_sale_history(
+    fixture: &Fixture,
+    id: &radar_journal::OperationId,
+    review: Value,
+    case: &str,
+) {
+    let history = fixture.dir.path().join("operations.jsonl");
+    let mut log = radar_journal::OperationLog::open(&history).expect("record");
+    let settlement = log.settlement(id).expect("settlement").clone();
+    log.record_valuation(
+        id,
+        radar_journal::ValuationRecord { settlement, review },
+        1015,
+    )
+    .expect("record");
+    if case == "terminal" {
+        mismatched_fee_completion(&mut log, id, fixture);
+    }
+}
+
+#[test]
+fn mixed_sale_history_is_exact_durable_and_cannot_be_used_as_buy_only_inventory() {
+    let mut fixture = inventory_fixture();
+    let sale = append_sale_history(&fixture, "valid");
+    let history = fixture.dir.path().join("operations.jsonl");
+    let saved = std::fs::read(&history).expect("saved");
+    let mut expected = None;
+    for _ in 0..2 {
+        let output = acquisition_report(&fixture);
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let report: Value = serde_json::from_slice(&output.stdout).expect("report");
+        assert_eq!(report["lots"].as_array().expect("buys").len(), 1);
+        assert_eq!(report["sales"].as_array().expect("sales").len(), 1);
+        assert_eq!(report["sales"][0]["operation"], sale.as_str());
+        assert_eq!(report["sales"][0]["proceeds"]["net_disposed_raw"], "6");
+        assert_eq!(
+            report["sales"][0]["proceeds"]["net_trade_proceeds_micro_usd"],
+            "199999"
+        );
+        assert_eq!(report["realised_loss_today_micro_usd"], Value::Null);
+        assert_eq!(report["economic_reconciliation_complete"], false);
+        if let Some(previous) = &expected {
+            assert_eq!(&report, previous);
+        }
+        expected = Some(report);
+        assert_eq!(std::fs::read(&history).expect("unchanged"), saved);
+    }
+    let log = radar_journal::OperationLog::open(&history).expect("replay");
+    assert_eq!(log.outstanding().count(), 2);
+    fixture.snapshot["accounting_checkpoint"] = json!(log.checkpoint());
+    drop(log);
+    fixture.snapshot["state"]["now"] = json!(1005);
+    fixture.snapshot["observed_at_unix_secs"] = json!(unix_now());
+    for read in ["native_sol", "token_program", "token_2022", "raw_tokens"] {
+        fixture.snapshot["wallet_evidence"][read]["slot"] = json!("1004");
+    }
+    fixture.save();
+    let output = inventory_report(&fixture);
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("sale inventory requires"));
+    assert_eq!(std::fs::read(&history).expect("unchanged"), saved);
+}
+
+#[test]
+fn mixed_sale_history_refuses_missing_changed_duplicate_or_terminal_sales() {
+    for case in ["missing", "normalized", "category", "duplicate", "terminal"] {
+        let fixture = inventory_fixture();
+        append_sale_history(&fixture, case);
+        let history = fixture.dir.path().join("operations.jsonl");
+        let saved = std::fs::read(&history).expect("saved");
+        let output = acquisition_report(&fixture);
+        assert!(!output.status.success(), "{case}");
+        assert_eq!(output.stdout, Vec::<u8>::new());
+        assert_eq!(std::fs::read(&history).expect("unchanged"), saved);
+    }
+}
+
 fn append_failed_history(fixture: &Fixture, case: &str) -> radar_journal::OperationId {
     let path = fixture.dir.path().join("operations.jsonl");
     let mut log = radar_journal::OperationLog::open(&path).expect("history");
