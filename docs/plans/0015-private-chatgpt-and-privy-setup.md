@@ -2801,3 +2801,16 @@ Repair local proof: all 178 signer tests, scoped Rust 1.99 all-target Clippy,
 formatting and all 33 conformance checks passed. Disabling terminal debit
 consistency still fails the terminal case after its fixture ownership repair.
 Production source is unchanged by this repair. Whole initial CI is still awaited.
+
+First fixture repair f24e968 CI 37951658678: ordinary tests and shard 1 baseline
+hit the same WouldBlock at issuer_process.rs:845:10 in the invalid-evidence copy
+helper. That repair was incomplete. Borrow the existing owned handle for the
+copy helper as well; no production change, retry or weaker refusal. LEARNINGS
+53 is corrected with the repeated failure. Await all repair-run jobs before the
+next push; verify full Linux CI rather than claiming Windows proves resolution.
+
+Full fixture repair local proof: 178 signer tests passed. Reapplying facts
+signature association, facts operation association and terminal consistency
+failures individually still fails the mixed-history regression. Restored source,
+scoped Rust 1.99 Clippy/formatting and 33 conformance checks passed. The same
+owner is borrowed through both transitions; no production change or retry.

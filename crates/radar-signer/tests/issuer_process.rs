@@ -786,8 +786,7 @@ fn append_failed_history(fixture: &Fixture, case: &str) -> radar_journal::Operat
             1016,
         )
         .expect("valid predecessor");
-        drop(log);
-        return append_invalid_fee_copy(fixture, &id, settlement, review);
+        return append_invalid_fee_copy(&mut log, fixture, &id, settlement, review);
     }
     let mut log = radar_journal::OperationLog::open(&path).expect("history");
     log.record_valuation(
@@ -835,14 +834,13 @@ fn set_failed_facts(facts: &mut Value, fixture: &Fixture) {
 }
 
 fn append_invalid_fee_copy(
+    log: &mut radar_journal::OperationLog,
     fixture: &Fixture,
     source: &radar_journal::OperationId,
     mut settlement: radar_journal::SettlementRecord,
     mut review: Value,
 ) -> radar_journal::OperationId {
     use ed25519_dalek::Signer as _;
-    let mut log = radar_journal::OperationLog::open(fixture.dir.path().join("operations.jsonl"))
-        .expect("history");
     let mut binding = log.execution(source).expect("binding").clone();
 
     let mut unsigned = radar_types::b64::decode(&binding.transaction).expect("unsigned");

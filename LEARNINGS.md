@@ -2198,11 +2198,17 @@ The fixture released its existing history handle and immediately reopened it
 to add its terminal record. Which process held the Unix lock was not captured;
 a fork/inherited-descriptor window is an inference, not an established cause.
 
-Move that terminal fixture transition under the existing owned OperationLog.
-No release/reacquire is needed; production locking remains nonblocking with no
-retry, deletion or weaker refusal. The terminal mismatch regression still fails
-when debit consistency is disabled. The fixture repair needs a complete Linux CI
-run; a Windows pass alone does not establish resolution of the observed failure.
+Keep the terminal fixture transition under the existing owned OperationLog.
+The first repair f24e968 still failed CI 37951658678: ordinary tests and shard 1
+hit WouldBlock at issuer_process.rs:845:10, where the invalid-evidence copy
+helper reopened the journal. Fix that helper to borrow the existing owner too.
+The first repair was incomplete; moving one reopen did not establish resolution.
+
+No release/reacquire is needed for either transition; production locking remains
+nonblocking with no retry, deletion or weaker refusal. Terminal consistency and
+facts signature/operation regressions still fail when their guards are disabled.
+The full fixture repair needs complete Linux CI; a Windows pass alone does not
+establish resolution of the observed failures.
 
 **What catches a recurrence:** habit only. Keep a fixture's known owner through
 one transition when it already has the handle. The baseline CI exposed contention
