@@ -3387,3 +3387,21 @@ manual faults total); restore source. All five native-transfer unit tests,
 scoped Rust 1.99 all-target Clippy and formatting pass after the test extension.
 Production transfer logic is unchanged by this follow-up. Repaired full CI
 remains required; wait for every initial job before pushing.
+
+
+### Native-transfer exact survivor follow-up (2026-10-09)
+
+Initial CI 37993754272 fully completed failure before any repair push.
+2,564 Rust tests and ordinary jobs passed. Shards 0/2 passed with 296 each,
+228/246 caught and 68/50 unviable. Shard 1 failed its unmodified baseline on the
+fixture lock described above, producing no mutation counts. Shard 3 tested 293,
+with 2 missed, 226 caught and 65 unviable. Exact survivors at native_transfers.rs:
+32:58 and 38:9 changed || to &&. Production guards were correct. The new signed
+unsupported-header cases added while CI ran catch the first. Make duplicate
+account metadata satisfy the later balance equation so the identity guard alone
+must refuse it. Both survivors were reapplied at their exact positions and failed
+native-transfer regressions; restore source. Manual fault total now 35.
+LEARNINGS 57 records the masked guards. No production logic, dependency, lint
+suppression or mutation exclusion changed. Restored 208 signer tests, 33
+conformance checks, scoped Rust 1.99 all-target Clippy and formatting passed.
+Repaired whole CI pending. No cancelled CI job or live change.

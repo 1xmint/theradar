@@ -318,7 +318,7 @@ mod tests {
         ] {
             assert!(transaction(&changed, payer()).is_err());
         }
-        let duplicate = edit(
+        let mut duplicate = edit(
             &value,
             |b| {
                 let key = b[69..101].to_vec();
@@ -326,6 +326,7 @@ mod tests {
             },
             true,
         );
+        duplicate["post_balances"] = json!(["98", "10", "1"]);
         assert!(transaction(&duplicate, payer()).is_err());
         let wrong_program = edit(&value, |b| b[133..165].fill(10), true);
         assert!(transaction(&wrong_program, payer()).is_err());

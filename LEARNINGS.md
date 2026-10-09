@@ -13,7 +13,7 @@ benefit of the doubt on everything else.
 
 ## Index
 
-**42 of these 56 name something mechanical that would catch a
+**43 of these 57 name something mechanical that would catch a
 recurrence. 14 name only a habit, and say so** — which is this file's opening
 standard rather than a gap in it. The habit-only rows are the ones worth reading
 twice; nothing will stop those repeating except somebody remembering.
@@ -81,6 +81,7 @@ quietly absent.
 | [54](#54-a-new-classification-returned-before-shared-reservation-checks) | A new classification returned before shared reservation checks | sale helper and valuation dispatcher boundary regressions |
 | [55](#55-observation-tests-skipped-the-accepted-equality-boundary) | Observation tests skipped the accepted equality boundary | exact-slot native and token inventory process regression |
 | [56](#56-a-self-transfer-hid-an-impossible-intermediate-debit) | A self-transfer hid an impossible intermediate debit | native transfer intermediate-balance regression |
+| [57](#57-malformed-packet-tests-failed-at-a-different-guard) | Malformed packet tests failed at a different guard | signed malformed-header and balance-consistent duplicate-account regressions |
 
 ---
 
@@ -2297,3 +2298,24 @@ post-fee self-transfer boundary and refuses excess before or after a preceding
 transfer. Reapplying the missing guard, ignoring prior effects or treating the
 boundary as exclusive must fail these tests. All-account final balance checks
 remain separate. This catches the concrete classification bug mechanically.
+
+
+## 57. Malformed packet tests failed at a different guard
+
+**Found:** 2026-10-09, native-transfer CI 37993754272 shard 3. Two || to &&
+mutations survived at native_transfers.rs:32:58 and :38:9. The production guards
+were correct, but malformed-header tests invalidated the message signature and
+the duplicate-account test retained balances that failed a separate equation.
+Those packets still refused when the intended guard was weakened.
+
+A follow-up review added correctly signed unsupported headers while initial CI
+was running. Give the duplicate-account packet balances that satisfy the later
+per-index equation, so duplicate identity is what must refuse it. The goal is
+not a malformed packet in general; it is reaching the guard being tested.
+
+**What catches a recurrence:** signed unsupported-header and balance-consistent
+duplicate-account cases in the native transfer unit regression in
+`crates/radar-signer/src/bin/radar-issuer/native_transfers.rs`. Both reported
+mutations were reapplied at their exact file:line:column and failed these
+regressions, then restored. Repaired whole CI remains required. No live chain
+transaction exhibited this test gap.
