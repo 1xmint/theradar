@@ -657,6 +657,32 @@ The private price JSON accepts `version: 1`, `asset: "sol"`, decimal strings
 `acquisition_costs` object described below. Missing required fields,
 unknown fields, a zero price or malformed/overflowing integers refuse.
 
+The price file can instead include `sale_proceeds`, handled by
+`crates/radar-signer/src/bin/radar-issuer/sale_proceeds.rs` through the same
+protected review and durable record modes. Its required fields are version 1,
+operation, exact signed_transaction, wallet, mint, token_program, decimals,
+net_disposed_raw, gross_proceeds_lamports, tip_lamports, rent_paid_lamports,
+rent_refund_lamports and other_cash_flows_absent. The latter must be true; all
+amounts are unsigned decimal strings. Acquisition and sale breakdowns cannot
+coexist. The same historical price identity, watermarks and staleness checks
+apply before either classification. Sale context must be a reviewed successful
+SOL Reduce/Exit and match the retained positive net disposal and exact artifact.
+
+Checked gross plus rent refund, minus network fee, tip and rent paid, must equal
+the exact signed wallet change. Gross proceeds must be positive; net credits,
+zero changes and fee-dominated debits can all balance. Gross proceeds plus refund
+and fee plus tip plus rent must individually fit u64. Credits round USD down;
+costs round up without floats. Net trade proceeds deduct network fee and tip,
+can be negative, and exclude rent paid/refunded, which remain separate.
+This is a protected operator cash-flow assertion, not independent venue fill
+provenance. Changed classifications/economics refuse immutable repeats.
+
+Sale review does not assign disposed-token cost basis, calculate realised PnL,
+update portfolio risk, release claims or establish complete wallet cash-flow
+coverage. Acquisition/inventory history still refuses incomplete sale economics.
+Rent refunds are not profits. Missing sale evidence never becomes zero proceeds
+or a debit valuation for a net credit. No exit issuance or live trade is enabled.
+
 Both price watermarks must precede or equal reported execution context. Age
 must fit the configured slot and seconds budgets; equality is accepted. Missing
 execution time refuses rather than using host read time. The output preserves

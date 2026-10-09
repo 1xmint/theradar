@@ -16,6 +16,7 @@ struct Price {
     as_of_slot: String,
     as_of_unix_secs: String,
     acquisition_costs: Option<AcquisitionCosts>,
+    sale_proceeds: Option<super::sale_proceeds::Breakdown>,
 }
 
 #[derive(Deserialize)]
@@ -208,6 +209,20 @@ pub(super) fn review(
         || seconds_old > max_age_secs
     {
         return Err("price is unpriced, foreign or stale for execution".into());
+    }
+    if let Some(input) = price.sale_proceeds {
+        if price.acquisition_costs.is_some() {
+            return Err("sale and acquisition breakdowns cannot be combined".into());
+        }
+        let proceeds = super::sale_proceeds::review(binding, value, &input, amount)?;
+        return Ok(
+            json!({"version":1,"authority":"protected_operator_valuation",
+            "wallet":binding.wallet,"execution_slot":slot.to_string(),
+            "execution_at_unix_secs":time.to_string(),"valuation_as_of_slot":price_slot.to_string(),
+            "price_at_unix_secs":price_time.to_string(),"micro_usd_per_sol":amount.to_string(),
+            "sale_proceeds":proceeds,"position_cost_basis_micro_usd":null,"realised_pnl_micro_usd":null,
+            "portfolio_state_updated":false,"operation_reconciled":false,"reservation_released":false}),
+        );
     }
     let delta = value["wallet_net_change_lamports"]
         .as_str()

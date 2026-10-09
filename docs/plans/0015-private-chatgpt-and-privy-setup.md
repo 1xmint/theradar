@@ -2921,3 +2921,34 @@ CI watch completed; no Cargo/rustc/Radar process remained at final inspection.
 Target measured 35.1 GiB and free disk 58.2 GiB. Previously rejected cleanup was
 not retried. This verified handback is committed locally for the next source
 push, avoiding a redundant documentation-only full CI run.
+
+
+### Protected sale proceeds breakdown (2026-10-09)
+
+The existing protected valuation review/record caller now accepts a typed sale
+cash-flow breakdown for successful reviewed SOL Reduce/Exit operations. Require
+exact operation, wallet, signed artifact, mint/program/units and measured positive
+net disposal, and an explicit absence-of-other-cash-flows assertion. Checked gross
+plus rent refund minus fee/tip/rent paid must balance the measured signed wallet
+effect; each side fits u64. Credits, zero effects and fee-dominated debits are
+supported without inventing proceeds from wallet credit alone. Credits round USD
+down, costs up; signed net trade proceeds exclude rent. Mixed acquisition/sale
+classification refuses. No token basis allocation, realised PnL, risk update,
+claim release or live issuance. Acquisition/inventory history still refuses
+incomplete sale economics. Operator attribution is not independent chain origin.
+
+Synthetic protected-process fixtures cover exact review, credits/zero/debits,
+normalization, immutable changed-economics refusal and repeat/replay retention.
+Shared historical price checks remain before classification. Existing disposal
+fixture is factored without changing production locking or adding reacquire
+windows while a child runs. Local proof: restored-source 186 signer tests (five added), 33 conformance
+checks, Rust 1.99 scoped all-target Clippy and formatting passed; 16 manual logic faults caught: operation/artifact,
+action/quote/units, disposed/gross zero, other flows, exact equation, credit/debit
+rounding, rent separation, three overflow paths and combined classification.
+No dependency, lint suppression or mutation exclusion. Full CI is required.
+
+No live chain read, credential/key/delegation change, trade, owner-limit change,
+VPS read or deployment. Next: basis allocation and disposal-history accounting,
+complete transfer/cash-flow coverage, opening/failed-fee ordering and idempotent
+economic reconciliation; then independent live inputs and execution/recovery.
+Autonomy remains off; current funding and Privy policy remain unverified.
