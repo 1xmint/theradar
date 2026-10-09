@@ -2718,3 +2718,39 @@ regressions; restored source passed. An initial duplicate-guard removal did
 not compile because it removed the set's type inference; the viable variant
 retained insertion and disabled only its refusal, and failed the regression.
 No dependency, mutation exclusion or lint suppression. Whole source CI pending.
+
+### Verified failed-execution fee handback (2026-10-09)
+
+Source 1b88f0b3dcd0f305121325b7d221ff0d65b81ec9 passed full CI 37936444798:
+https://github.com/1xmint/theradar/actions/runs/37936444798 . Every job completed
+successfully: 2,531 Rust and 352 web tests, build, lint, format, MSRV, dependency,
+licence and site checks, all four mutation shards and final gate. Each shard
+tested 240 mutants; shards 0/1/2/3 caught 175/163/197/190 with 65/77/43/50
+unviable and none missed. The last mutation step ran 25 minutes. No repair push
+or cancellation. All local scoped checks and 18 manual behavior variants passed
+as recorded above. No dependency, exclusion or lint suppression.
+
+The actual protected valuation review and record paths can retain historical
+failed-execution fee costs, only with fee-only native effects and unchanged
+paired token metadata. These records are durable, immutable and idempotent under
+the existing journal ownership rules. They do not close operations or release
+claims. Successful acquisition review shape remains compatible. The acquisition-
+only history reader still refuses submitted failed costs, rather than omitting
+them. Operator-provisioned evidence remains the trust boundary.
+
+Next: mixed acquisition/failed-fee history review with exact retained input
+revalidation and artifact uniqueness, followed by transfer/disposal coverage,
+current valuation, exposure/loss and idempotent economic reconciliation. All four
+activation areas remain: economic reconciliation; protected live risk inputs;
+execution/recovery/exits/scheduling; owner limits, isolated keys, verified Privy
+policy/delegation, funding, deployment and bounded validation. No percentage or
+launch date claimed. Autonomous trading stays off; site limits remain drafts.
+
+No live chain read, real credential/key/signature/delegation change, trade, VPS
+health read or Serve deployment occurred. Funding/current Privy policy remain
+unverified. CI watch transport timed out; direct run inspection subsequently
+verified every job and exact source SHA, and the old host cell is stale. No
+Cargo/rustc/Radar process remained at local inspection. Target measured 35.1 GiB
+with 57.1 GiB free; previously rejected ignored-output cleanup was not retried.
+This handback is committed locally for the next source push, avoiding redundant
+documentation-only full CI.
