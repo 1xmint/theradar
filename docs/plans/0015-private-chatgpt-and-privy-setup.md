@@ -2211,8 +2211,9 @@ failed fees, disposals and current pricing require later reconciliation.
 - [x] Final scoped checks pass: 46 journal, 164 signer and 33 conformance
   tests, Rust 1.99 scoped Clippy and formatting. Complete staged diff reviewed
   before committing; full CI follows below.
-- [ ] Push after prior CI completion; verify full CI tests, all four mutation
-  shards and final gate, then record source/counts in the handback.
+- [x] Repair source 6ca7507 passes full CI 37868617053: 2,509 Rust and
+  352 web tests, all four mutation shards and final gate. Initial CI completed
+  before pushing its narrowly verified test repair; no awaited run cancelled.
 
 Next reconcile these historical lots with protected opening/current wallet
 inventory and integrate coverage with economic risk state before claim closure.
@@ -2235,3 +2236,73 @@ its exact retained operation/state from entries even with no outstanding claims.
 Reapply that exact body replacement: the journal regression fails; restore the
 source and the regression passes. No new test function/floor change, exclusion
 or lint suppression. Wait for every initial CI job before pushing this repair.
+
+
+### Next wallet reconciliation input: inspected gap (2026-10-08)
+
+Source inspection of wallet_read.rs and radar-onchain RPC token-account parsing
+shows that wallet-read emits mint/raw amount/decimals under separate classic and
+Token-2022 bank contexts. The RPC parser checks the parsed token owner against
+the requested wallet, but its retained TokenAccount lacks the account address,
+actual account program owner and state/extension semantics. The CLI therefore
+cannot distinguish repeated copies of one account from multiple accounts for
+one mint. Identical reported slots still do not establish an atomic snapshot.
+
+Before using this packet for reconciled risk inventory, retain and validate
+account identity and program/state metadata, reject duplicate account identities
+and unsupported/unspendable semantics, and preserve separate slots/read windows.
+Then establish protected opening/current inventory coverage for acquisition lots;
+unexplained holdings or external changes must remain unknown or refuse. This is
+an inspected source gap and planned work, not a live wallet measurement or an
+implemented change. Acquisition-history output remains explicitly incomplete.
+
+
+### Handback: replay-derived acquisition history (2026-10-08)
+
+Source 6ca75076480636516f3740bd2544009128a97856 passes full CI
+37868617053 (https://github.com/1xmint/theradar/actions/runs/37868617053):
+2,509 Rust and 352 web tests, all four mutation shards and final gate. Initial
+CI 37866521416 passed every other shard but reported the exact journal iterator
+survivor; its full run completed before the repair push. The repaired shard now
+reports 142 caught and 54 unviable of 196 mutants, with none missed. No cancelled
+awaited run, mutation exclusion, lint suppression or dependency added.
+
+Local checks passed 46 journal, 164 signer and 33 conformance tests, Rust 1.99
+scoped Clippy and formatting. Final signature association cases and Clippy passed.
+Reapplied newest-price selection, duplicate artifact acceptance, changed valuation
+acceptance, dropping terminal entries and ignoring retained-fact signature each
+failed a running regression. Replacing entries at the exact reported
+operation.rs:484:9 with std::iter::empty() failed the extended journal terminal
+replay regression; restoring source passed that test, scoped journal Clippy and
+formatting. The CI-repair documentation passed all 33 conformance checks. Full
+staged diffs were read before source and repair commits.
+
+Actual caller --review-acquisitions now rebuilds one historical native-SOL buy
+lot per submitted operation from retained complete valuation. It re-verifies the
+wallet signature and exact message, checks the signature named by retained facts,
+and recomputes the entire historical valuation. Terminal lots need Completed
+spend equal to measured debit. Missing/changed/unsupported reviews or the same
+signed artifact under different operation IDs refuse the whole report. Every
+retained operation is visible once, including completed entries; unsubmitted
+operations are listed separately. Groups preserve mint/program/units/creator,
+checked acquired quantity, cost basis, separate rent and oldest price watermark.
+Repeat and restart do not rewrite history, release claims or update portfolio.
+
+Historical acquisition bookkeeping is implemented; complete wallet inventory,
+current USD exposure and daily loss are still unknown. The next inspected input
+gap above must close before reconciling opening/current wallet balances with
+these lots. External changes, failed fees, disposals/day/failure ordering and
+independent current pricing remain. Four major activation areas remain: economic
+reconciliation, protected live risk inputs, execution/recovery/exits/scheduling,
+and activation of owner limits, isolated keys, verified Privy policy/delegation,
+funding, deployment and bounded validation. No percentage or launch date claimed.
+
+Autonomous trading stays off and site limits remain drafts. No live provider or
+chain read, real wallet key/signature/credential/delegation change, trade, VPS
+health read or Serve deployment occurred. Current funding/Privy setup remains
+unverified; fixture signatures only. No local watcher remains. Verified source
+is pushed in PR 334. This handback is committed locally for inclusion with the
+next source push, avoiding a redundant documentation-only full CI run.
+
+No local Cargo/rustc/Radar process remains. Target measured 33.1 GiB with
+59.4 GiB free. Previously rejected ignored-output cleanup was not retried.
