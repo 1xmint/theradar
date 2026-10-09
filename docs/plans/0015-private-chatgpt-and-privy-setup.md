@@ -2222,3 +2222,16 @@ economic reconciliation, protected live risk inputs, execution/recovery/exits/
 scheduling and limits/isolated keys/verified Privy policy/delegation/funding/
 deployment/bounded validation. Autonomous trading stays off. No live provider or
 chain read, real key/signature/delegation/trade or Serve deployment occurs.
+
+
+### Acquisition-history CI repair (2026-10-08)
+
+Initial source 7c140e0 passes 2,509 Rust and 352 web tests, but CI 37866521416
+shard 0 reports the exact survivor at operation.rs:484:9: replace
+OperationLog.entries with std::iter::empty(). Its downstream issuer regression
+catches dropped history, but mutation testing of radar-journal runs that crate's
+own suite. Extend the existing terminal valuation replay regression to require
+its exact retained operation/state from entries even with no outstanding claims.
+Reapply that exact body replacement: the journal regression fails; restore the
+source and the regression passes. No new test function/floor change, exclusion
+or lint suppression. Wait for every initial CI job before pushing this repair.

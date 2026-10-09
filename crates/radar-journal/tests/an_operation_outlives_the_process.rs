@@ -137,6 +137,15 @@ fn cost_records_append_before_memory_and_survive_repeats_restart_and_completion(
     let log = OperationLog::open(&path).expect("terminal replay");
     assert_eq!(log.valuation(&id), Some(&value));
     assert_eq!(log.outstanding().count(), 0);
+    assert_eq!(
+        log.entries()
+            .map(|(id, entry)| (id.clone(), entry.state))
+            .collect::<Vec<_>>(),
+        vec![(
+            id,
+            OperationState::Reconciled(Settlement::Completed(TokenQuantity::lamports(5000)))
+        )]
+    );
 }
 
 #[test]
