@@ -2652,3 +2652,37 @@ all-target Clippy for journal/signer and CLI passed against restored source;
 formatting and nine CLI audit unit tests passed. All 21 deliberate behavior
 mutations were rejected by running regressions. Six new tests; no dependency,
 mutation exclusion or lint suppression. Full source CI is pending.
+
+### Verified opening inventory handback (2026-10-09)
+
+Source 941e5c13c5a2723ee7d3cbde5aefc26cbbd9c080 passed full CI 37888812914:
+https://github.com/1xmint/theradar/actions/runs/37888812914 . Every job completed
+successfully: 2,528 Rust and 352 web tests, build, lint, format, MSRV, dependency,
+licence and site checks, all four mutation shards and final gate. Shards
+0/1/2/3 tested 231/231/231/228 mutants, caught 167/153/191/179 with
+64/78/40/49 unviable; none missed. The last shard's mutation step ran 22 minutes.
+No repair push or cancellation. Local verification and all 21 manual behavior
+mutations passed as recorded above. No dependency, exclusion or suppression.
+
+The protected issuer can persist immutable normalized opening quantities before
+other history, and compare opening holdings plus retained buys with current
+protected observations. Opening cost basis, complete economic coverage,
+exposure and daily loss remain unknown. Existing outstanding claims still block
+issuance. Ordinary issuance does not consume the baseline or comparison report.
+The operator file remains the trust boundary; independent live inputs are absent.
+Existing histories cannot be reset to invent genesis; migration is unresolved.
+
+Next: protected transfer/disposal/failed-fee coverage, then current valuation,
+exposure/loss and idempotent economic reconciliation. Four major activation
+areas remain: economic reconciliation; protected live risk inputs; execution,
+recovery, exits and scheduling; owner limits, isolated keys, verified Privy
+policy/delegation, funding, deployment and bounded validation. No percentage or
+launch date claimed. Autonomous trading remains off; site limits remain drafts.
+
+No live chain read, real credential/key/signature/delegation change, trade,
+VPS health read or Serve deployment occurred. Funding/current Privy policy
+remain unverified. The CI watch finished; no Cargo/rustc/Radar process remained
+at local inspection. Target measured 35.1 GiB with 57.1 GiB free; previously
+rejected ignored-output cleanup was not retried. This verified handback is
+committed locally for the next source push, avoiding redundant documentation-only
+full CI.
