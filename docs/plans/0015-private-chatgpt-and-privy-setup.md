@@ -2101,8 +2101,9 @@ Outstanding claims continue to block issuance after restart.
 - [x] Final scoped tests pass: 46 journal, 158 signer and 33 conformance tests;
   Rust 1.99 scoped Clippy and formatting pass. Staged diff reviewed before
   committing; full CI verification remains below.
-- [ ] Push after prior CI completion and verify every full CI job, all four
-  mutation shards and final gate. Record actual counts and source below.
+- [x] Source 4c10b2b passed full CI 37863760052: 2,503 Rust and 352 web
+  tests, all four mutation shards and final gate. Prior CI 37860126670 completed
+  successfully before pushing; no awaited run was cancelled.
 
 Next implement idempotent economic reconciliation using the retained costs:
 inventory/cost basis, exposure and daily loss. Gross fill attribution,
@@ -2111,3 +2112,65 @@ inputs, execution/recovery/exits/scheduling and activation of owner limits,
 isolated keys, verified Privy policy/delegation, funding, deployment and bounded
 validation remain. All four activation gates remain open. Autonomous trading
 stays off; no live read, real key/signature/delegation/trade or deployment occurs.
+
+
+### Next economic reconciliation acceptance (planned)
+
+Keep the protected issuer as the caller. Consume complete retained operation
+history, including terminal records; replay-derived acquisition lots must apply
+an operation once and bind its wallet, mint/program/units and reviewed creator.
+Missing opening inventory, attribution, cost or history coverage must remain
+unknown or refuse, never become a flat book. Retained acquisition basis is
+historical bookkeeping cost, not current liquidation value.
+
+Before claim closure can permit repeated issuance, establish matching inventory
+and risk-state coverage. Failed execution fees and realised exit results require
+separate complete accounting, execution-day attribution and failure ordering;
+acquisition basis alone supplies no daily-loss result. Keep rent separate and
+avoid expensing a fee already capitalized into basis. The acceptance matrix must
+include duplicate/restart application, incomplete or conflicting records,
+external wallet changes, overflow, unsupported acquisition/disposal effects and
+disk failure. Reconciliation must not create capital or clear an uncertain claim.
+These are planned checks, not implemented or verified behavior in this increment.
+
+
+### Handback: durable reviewed acquisition valuation (2026-10-08)
+
+Source 4c10b2b8fd844fbad69d7fd049830cdff310a333 passed full CI
+37863760052 (https://github.com/1xmint/theradar/actions/runs/37863760052):
+2,503 Rust and 352 web tests, all four mutation shards and final gate. Local
+verification passed 46 journal, 158 signer and 33 conformance tests, Rust 1.99
+scoped Clippy and formatting. Reapplied memory-before-append, accepting changed
+runtime/replay valuations and cash-only recording each failed its regression;
+correct source restored. No dependency, mutation exclusion or lint suppression
+added. Complete staged diff read; prior CI 37860126670 passed before pushing.
+
+Protected --record-valuation now reads once through the existing strict wallet
+signature, authorized-message, historical-price and complete-cost review, then
+retains exact prior settlement plus normalized valuation. Cash-only input refuses.
+The journal requires unknown-submission stage and exact preceding facts. Append
+precedes memory; repeats are idempotent, changed normalized prices/costs refuse,
+including equal rounded basis, and replay rejects injected/misstaged/changed
+records. Terminal replay preserves retained valuations. The checkpoint covers
+new records; absent optional fields preserve older hashes without backfill.
+Generic callers establish economic correctness; protected operator provenance
+remains the actual trust boundary. Raw inputs/provider bodies are not retained.
+
+This closes durable cost retention, not economic reconciliation. Inventory,
+exposure and daily loss are not updated, PnL remains unknown, and the claim still
+blocks another issuance. Next implement idempotent economic reconciliation under
+the acceptance checks above. Gross-fill attribution, new-account evidence and
+independent live collection remain. Protected live risk inputs, execution/
+recovery/exits/scheduling and activation of owner limits, isolated keys, verified
+Privy policy/delegation, funding, deployment and bounded validation remain.
+All four major activation gates remain open; no launch percentage/date is claimed.
+
+Autonomous trading stays off and site limits remain drafts. No live provider or
+chain read, real wallet key/signature/credential/delegation change, trade, VPS
+health read or Serve deployment occurred. Current funding/Privy setup remains
+unverified; fixture signatures only. No local watcher remains. This verified
+handback is committed locally to include with the next source push, avoiding a
+redundant documentation-only CI run. Verified source is pushed in PR 334.
+
+No Cargo/rustc/Radar process remains locally. Target measured 33.1 GiB with
+59.5 GiB free. Previously rejected ignored-output cleanup was not retried.
