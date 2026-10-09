@@ -402,7 +402,10 @@ mod tests {
             transaction(&value, payer()).unwrap()["net_change_lamports"],
             "-2"
         );
-        let too_large = edit(&value, |b| b.push(0), true);
+        let too_large = packet(&[(1, 0); 43], &pre, &post, true);
+        let bytes = b64::decode(too_large["transaction_base64"].as_str().unwrap()).unwrap();
+        assert_eq!(bytes.len(), 1249);
+        assert!(radar_signer::tx::decode(&bytes).is_ok());
         assert!(transaction(&too_large, payer()).is_err());
         let value = packet(&[(0, 7)], &[100, 1], &[98, 1], true);
         assert_eq!(

@@ -3423,3 +3423,24 @@ manual logic faults remain the behavior evidence. Restored 208 signer tests,
 33 conformance checks and scoped Rust 1.99 all-target Clippy passed locally.
 Whole repaired Linux CI remains required. Await every current job and final gate
 before pushing this additional repair. No live change or autonomous activation.
+
+
+### Native-transfer wire-size survivor repair (2026-10-09)
+
+CI 37995345383 fully completed before the next repair push: all ordinary jobs
+and shards 0/2 passed (296 each; 228/246 caught and 68/50 unviable). Shard 1
+failed the unmodified fixture baseline described above. Shard 3 tested 293 with
+1 missed, 227 caught and 65 unviable. The new survivor at native_transfers.rs:
+32:28 changed the first OR to AND. The oversized test appended invalid trailing
+bytes, masking this guard through a later decoder refusal. Replace it with a
+correctly signed, decodable 1249-byte message containing another complete zero
+transfer. Reapplying the exact :32:28 mutation fails this strengthened regression;
+restore production source. Manual logic fault total is now 36. LEARNINGS 57
+extended; production behavior and mutation exclusions unchanged. Full repaired
+CI remains required. No live wallet, deployment or autonomous activation.
+
+Restored source passed all 208 signer tests and 33 conformance checks, scoped
+Rust 1.99 all-target Clippy, and formatting after normalizing the edited file's
+newline style. The expected manual mutant failure was at the oversized-message
+refusal assertion. No production guard changed. Both prepared repairs will be
+pushed together now that every job of CI 37995345383 has completed.

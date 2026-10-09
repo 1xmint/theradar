@@ -2328,3 +2328,10 @@ duplicate-account cases in the native transfer unit regression in
 mutations were reapplied at their exact file:line:column and failed these
 regressions, then restored. Repaired whole CI remains required. No live chain
 transaction exhibited this test gap.
+
+Repair CI 37995345383 exposed the other OR on the same line, :32:28. The
+oversize test appended trailing garbage, which the decoder rejected after the
+size guard was weakened. Use a correctly signed, otherwise decodable 1249-byte
+message containing one extra complete zero transfer. The exact :32:28 mutant
+now fails the size regression; restore the production guard. This extends the
+same masked-guard failure, not a new production defect.
