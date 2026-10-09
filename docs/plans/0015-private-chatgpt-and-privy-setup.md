@@ -3066,3 +3066,53 @@ with Rust 1.99 scoped all-target Clippy and formatting. Fixture-only ownership
 plumbing is not separately mutated; the six behavior faults already failed
 their regressions with restored production source. Await every initial job
 before repair push; whole repaired Linux CI remains required.
+
+
+### Verified mixed sale history handback (2026-10-09)
+
+Repaired source ba80fe2c8e28661cbd9970815bbe088e55ccea62 passed every job
+in CI 37976776508: https://github.com/1xmint/theradar/actions/runs/37976776508 .
+2,546 Rust and 352 web tests passed, along with build, lint, formatting, MSRV,
+dependency, licence/site checks, all four mutation shards and the final gate.
+Shards 0/1/2/3 tested 263/263/263/262 mutants (1,051 total), caught
+197/179/209/207 with 66/84/54/55 unviable (792 caught, 259 unviable),
+none missed. The last mutation step ran 25 minutes. Verified by gh run view
+and completed job logs through gh api.
+
+Initial source 3b99e8b74c7a915b971f5916f02e98c17f768eb4 completed CI
+37973753478: 2,546 Rust/352 web tests and all ordinary jobs passed, plus
+mutation shards 0/1/2 (263 each, 197/179/209 caught, 66/84/54 unviable).
+Shard 3 failed its unmodified baseline at issuer_process.rs:330:63 with
+WouldBlock in the existing disposal fixture's immediate journal reopen. Keep
+the known source owner through disposal construction. LEARNINGS 53 records
+the observed failure and the unknown lock-holder identity. Every initial job
+and final gate completed before the repair push; neither run was cancelled.
+
+The existing protected history caller now reconstructs complete normalized
+sale inputs and revalidates their exact signed binding and full valuation.
+Sales retain exact proceeds, attribution and execution/price watermarks in a
+separate array. Shared artifact deduplication spans buys, sales and failed fees.
+Changed/missing economics and every sale terminal state refuse. The inventory
+caller explicitly refuses nonempty sales until disposed quantity and basis
+reconciliation exist. Repeat/replay writes nothing and leaves both claims held.
+190 local signer tests, 33 conformance checks, Rust 1.99 scoped Clippy and
+formatting passed. Six manual logic faults failed the regressions; source was
+restored. No dependency, lint suppression or mutation exclusion was added.
+Synthetic transactions exercise the protected process, not network-accepted
+venue execution or independently authenticated cash-flow origin.
+
+Next: allocate disposed token basis and reconcile chronological sale quantities;
+then complete transfer/cash-flow coverage, opening/failed-fee ordering, current
+valuation/exposure/loss and idempotent economic application. Four activation
+areas remain: economic reconciliation; independent live risk inputs; execution/
+exits/recovery/scheduling; owner numeric limits, isolated keys, verified Privy
+policy/delegation, funding, deployment and bounded validation. No percentage
+or activation date is claimed. Autonomy remains off; site limits are drafts,
+current funding/policy remain unverified and outstanding claims block issuance.
+
+No live chain read, real credential/key/signature/delegation change, trade,
+owner-limit change, VPS read or deployment occurred. Final inspection found
+no Cargo/rustc/issuer/signer processes. Target measured 35.1 GiB, disk free
+60.1 GiB. No rejected cleanup was retried. Both CI watches completed. This
+verified handback is committed locally for the next source push, avoiding a
+redundant documentation-only full CI run.
