@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-//! Compare protected current observations with retained buys, not a reconciler.
+//! Compare protected current observations with recorded trade quantities, not a reconciler.
 
 use std::collections::BTreeMap;
 
@@ -167,6 +167,32 @@ fn compare(
     })).collect())
 }
 
+fn comparison_lots(history: &Value, minimum: u64, native: u64) -> Result<Vec<Value>, String> {
+    let accounting = &history["recorded_disposal_accounting"];
+    if !accounting.is_object() {
+        return history["lots"]
+            .as_array()
+            .cloned()
+            .ok_or_else(|| "acquisition lots missing".into());
+    }
+    for sale in history["sales"].as_array().ok_or("sales missing")? {
+        let slot = evidence_integer(sale, "execution_slot")?;
+        if slot > minimum || slot > native {
+            return Err("wallet observations precede a retained sale".into());
+        }
+    }
+    accounting["remaining_lots"]
+        .as_array()
+        .ok_or("remaining lots missing")?
+        .iter()
+        .map(|lot| {
+            let mut row = lot.clone();
+            row["net_acquired_raw"] = json!(evidence_integer(lot, "remaining_raw")?.to_string());
+            Ok(row)
+        })
+        .collect()
+}
+
 pub(super) fn review(
     snapshot: &Snapshot,
     config: &Config,
@@ -177,6 +203,7 @@ pub(super) fn review(
     if history["sales"]
         .as_array()
         .is_some_and(|sales| !sales.is_empty())
+        && !history["recorded_disposal_accounting"].is_object()
     {
         return Err("sale inventory requires disposed basis and quantity reconciliation".into());
     }
@@ -209,10 +236,11 @@ pub(super) fn review(
             }
         }
     }
-    let mut lots = history["lots"]
-        .as_array()
-        .ok_or("acquisition lots missing")?
-        .clone();
+    let mut lots = comparison_lots(
+        history,
+        minimum,
+        evidence_integer(&value["native_sol"], "slot")?,
+    )?;
     if let Some(opening) = opening {
         lots.extend(super::opening::lots(opening, config.wallet, value, &lots)?);
     }
@@ -233,7 +261,22 @@ pub(super) fn review(
         } else {
             Value::Null
         };
-        row["retained_acquired_raw"] = json!((expected - baseline).to_string());
+        let acquired = history["lots"]
+            .as_array()
+            .ok_or("acquisition lots missing")?
+            .iter()
+            .filter(|lot| lot["mint"] == row["mint"])
+            .try_fold(0_u64, |total, lot| {
+                total
+                    .checked_add(evidence_integer(lot, "net_acquired_raw")?)
+                    .ok_or_else(|| "acquisition quantity overflow".to_owned())
+            })?;
+        let disposed = acquired
+            .checked_add(baseline)
+            .and_then(|total| total.checked_sub(expected))
+            .ok_or("invalid disposed quantity")?;
+        row["retained_acquired_raw"] = json!(acquired.to_string());
+        row["retained_disposed_raw"] = json!(disposed.to_string());
     }
     Ok(
         json!({"version":1,"authority":"protected_operator_inventory_comparison",

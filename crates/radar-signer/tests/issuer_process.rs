@@ -810,11 +810,23 @@ fn finalized_fixture_owned(
     Value,
     radar_journal::OperationLog,
 ) {
+    finalized_fixture_owned_amount(with_opening.then_some(10))
+}
+
+fn finalized_fixture_owned_amount(
+    opening_amount: Option<u64>,
+) -> (
+    Fixture,
+    Vec<u8>,
+    radar_journal::OperationId,
+    Value,
+    radar_journal::OperationLog,
+) {
     use ed25519_dalek::Signer as _;
     let key = ed25519_dalek::SigningKey::from_bytes(&[0x42; 32]);
     let (mut fixture, mut signed) = fixture_for_wallet(&key);
-    if with_opening {
-        set_inventory(&mut fixture, 10, 1000);
+    if let Some(raw) = opening_amount {
+        set_inventory(&mut fixture, raw, 1000);
         assert!(record_opening(&fixture).status.success());
         let log = radar_journal::OperationLog::open(fixture.dir.path().join("operations.jsonl"))
             .expect("opening history");
@@ -859,7 +871,19 @@ fn acquisition_cost_fixture_with_opening(
     std::path::PathBuf,
     Value,
 ) {
-    let (fixture, signed, id, mut evidence) = finalized_fixture_with_opening(with_opening);
+    acquisition_cost_fixture_opening_amount(with_opening.then_some(10))
+}
+
+fn acquisition_cost_fixture_opening_amount(
+    opening_amount: Option<u64>,
+) -> (
+    Fixture,
+    radar_journal::OperationId,
+    std::path::PathBuf,
+    Value,
+) {
+    let (fixture, signed, id, mut evidence, log) = finalized_fixture_owned_amount(opening_amount);
+    drop(log);
     let time = evidence["read_completed_at_unix_secs"]
         .as_u64()
         .expect("read")
@@ -1208,6 +1232,88 @@ fn mixed_sale_history_refuses_missing_changed_duplicate_or_terminal_sales() {
     }
 }
 
+#[test]
+fn protected_fifo_history_compares_remaining_inventory_without_releasing_claims() {
+    let mut fixture = inventory_fixture_opening(Some(0));
+    append_sale_history(&fixture, "valid");
+    let history = fixture.dir.path().join("operations.jsonl");
+    let saved = std::fs::read(&history).expect("saved");
+    let output = acquisition_report(&fixture);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: Value = serde_json::from_slice(&output.stdout).expect("report");
+    let accounting = &report["recorded_disposal_accounting"];
+    assert_eq!(accounting["coverage"], "recorded_trades_only");
+    assert_eq!(
+        accounting["disposals"][0]["allocated_cost_basis_micro_usd"],
+        "1200480"
+    );
+    assert_eq!(
+        accounting["disposals"][0]["recorded_trade_pnl_micro_usd"],
+        "-1000481"
+    );
+    assert_eq!(accounting["remaining_lots"][0]["remaining_raw"], "9");
+    assert_eq!(
+        accounting["remaining_lots"][0]["remaining_cost_basis_micro_usd"],
+        "1800720"
+    );
+    assert_eq!(
+        serde_json::from_slice::<Value>(&acquisition_report(&fixture).stdout).expect("repeat"),
+        report
+    );
+    let log = radar_journal::OperationLog::open(&history).expect("owned");
+    fixture.snapshot["accounting_checkpoint"] = json!(log.checkpoint());
+    assert_eq!(log.outstanding().count(), 2);
+    drop(log);
+    set_inventory(&mut fixture, 9, 1004);
+    let output = inventory_report(&fixture);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let inventory: Value = serde_json::from_slice(&output.stdout).expect("inventory");
+    let row = &inventory["tokens_by_mint"][0];
+    assert_eq!(row["expected_raw"], "9");
+    assert_eq!(row["retained_acquired_raw"], "15");
+    assert_eq!(row["retained_disposed_raw"], "6");
+    assert_eq!(row["quantity_matches"], true);
+    assert_eq!(inventory["realised_loss_today_micro_usd"], Value::Null);
+    assert_eq!(inventory["economic_reconciliation_complete"], false);
+    for read in ["native_sol", "token_program", "token_2022"] {
+        let original = fixture.snapshot["wallet_evidence"][read]["slot"].clone();
+        fixture.snapshot["wallet_evidence"][read]["slot"] = json!("1002");
+        fixture.save();
+        let output = inventory_report(&fixture);
+        assert!(!output.status.success(), "{read}");
+        assert!(
+            String::from_utf8_lossy(&output.stderr).contains("precede a retained sale"),
+            "{read}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        fixture.snapshot["wallet_evidence"][read]["slot"] = original;
+    }
+    fixture.save();
+    assert_eq!(std::fs::read(&history).expect("unchanged"), saved);
+}
+
+#[test]
+fn protected_fifo_history_keeps_nonzero_opening_basis_unknown() {
+    let fixture = inventory_fixture_opening(Some(10));
+    append_sale_history(&fixture, "valid");
+    let history = fixture.dir.path().join("operations.jsonl");
+    let saved = std::fs::read(&history).expect("saved");
+    let output = acquisition_report(&fixture);
+    assert!(output.status.success());
+    let report: Value = serde_json::from_slice(&output.stdout).expect("report");
+    assert_eq!(report["recorded_disposal_accounting"], Value::Null);
+    assert!(!inventory_report(&fixture).status.success());
+    assert_eq!(std::fs::read(&history).expect("unchanged"), saved);
+}
+
 fn append_failed_history(fixture: &Fixture, case: &str) -> radar_journal::OperationId {
     let path = fixture.dir.path().join("operations.jsonl");
     let mut log = radar_journal::OperationLog::open(&path).expect("history");
@@ -1505,7 +1611,11 @@ fn mixed_history_refuses_missing_changed_duplicate_or_misassociated_fee_evidence
 }
 
 fn inventory_fixture() -> Fixture {
-    let (mut fixture, id, price_path, _) = acquisition_cost_fixture();
+    inventory_fixture_opening(None)
+}
+
+fn inventory_fixture_opening(opening: Option<u64>) -> Fixture {
+    let (mut fixture, id, price_path, _) = acquisition_cost_fixture_opening_amount(opening);
     assert!(
         fixture
             .command()

@@ -863,7 +863,8 @@ Sales retain the complete revalidated sale-proceeds breakdown, reviewed creator,
 operation and execution/price watermarks in a separate `sales` array. Historical
 price reconstruction includes the exact retained disposal and all cash-flow
 components; changed amounts or classification refuse. Sales do not become buy
-lots or alter acquisition totals. Disposed basis and realised PnL remain unknown.
+lots or alter acquisition totals. The optional FIFO report below allocates
+recorded buy basis; complete wallet realised PnL remains unknown.
 
 This is protected operator acquisition history, not verified current wallet
 inventory. An empty report does not establish a flat wallet. Opening inventory,
@@ -875,12 +876,45 @@ basis is bookkeeping acquisition cost, not current liquidation value. Changes
 to configured valuation age bounds can refuse older records; history is never
 rewritten to accommodate them.
 
+## Recorded FIFO disposal accounting
+
+The existing protected history reader calls the FIFO allocator after exact
+valuation replay, before emitting its report. `recorded_disposal_accounting`
+is null without a retained opening snapshot or when any sold mint had positive
+opening holdings whose purchase costs are unknown. Opening wallet, read bounds,
+raw context and unique mint checks are shared with inventory comparison. Program
+and decimals must agree with zero opening holdings as well as across trade events.
+This is operator-provisioned bookkeeping, with coverage `recorded_trades_only`;
+a zero or absent enumerated holding does not establish complete wallet coverage.
+
+Sort recorded buys and sales by execution slot. Every trade must follow the
+highest opening read context strictly. Same-mint trades in one slot refuse:
+there is no retained transaction index to establish their order. A sale consumes
+only preceding same-mint buy lots, oldest first; excess sales refuse instead of
+borrowing future buys. Each partial allocation charges basis times disposed units
+with upward micro-USD rounding using a wide integer product. Subtract the exact
+allocated basis and units from the lot; later sales use that remainder, conserving
+all original basis even when earlier partial allocations rounded upward. Allocation
+sums and signed net proceeds minus basis refuse overflow. Preserve acquisition
+operation and creator attribution for each consumed lot.
+
+Report each sale's allocated basis and signed `recorded_trade_pnl_micro_usd`,
+plus original lot metadata and exact remaining units/basis. Net sale proceeds
+already deduct fee/tip; rent remains separate and failed fees are not added to
+this per-trade PnL. There is no aggregate wallet PnL, daily loss, current exposure,
+portfolio update or economic completion. Unknown external transfers and cash-flow
+coverage still prevent applying these values to risk. Reading/replay writes
+nothing, closes no operation and releases no claim. This FIFO method is a risk
+bookkeeping convention, not a tax accounting claim.
+
 ## Protected current inventory comparison
 
 `radar-issuer --review-inventory` reads the configured private snapshot once
 under the owned journal lock and reuses `--review-acquisitions` validation over
-all retained lots. Nonempty sale history refuses inventory review until disposed
-quantity and basis reconciliation exist, rather than comparing buy-only totals.
+all retained lots. Nonempty sale history requires the known recorded FIFO
+report above; otherwise inventory comparison refuses. Use its remaining lot
+quantities plus opening holdings for comparison, while preserving original
+acquired and recorded disposed quantities in separate fields.
 The snapshot must name the configured wallet and exact
 current accounting checkpoint and be current by the host clock. Existing
 wallet evidence checks bind its native balance, finalized read identity,
@@ -895,12 +929,13 @@ reviewed slot. Empty listings require an empty raw set and unknown raw context;
 they do not establish a flat wallet. Both token listing contexts must be at
 least as recent as every retained acquisition execution slot.
 Both token listing contexts and the native read must also be at least as recent
-as every reviewed failed-fee execution. Preserve its history and separate fee
+as every reviewed failed-fee execution and recorded sale. Preserve its history
+and separate fee
 totals in the report without adding fees to token quantities or inferring native
 cash reconciliation. Ordering failed fees against an opening baseline, complete
 cash-flow coverage and idempotent fee application remain for economic reconciliation.
 
-Sum observed holdings and retained acquisitions by mint using checked u64
+Sum observed holdings and remaining recorded quantities by mint using checked u64
 arithmetic, including frozen/uninitialized quantities and separate accounts.
 Mint program/units must agree within and across the two totals. Report the
 union of observed and acquired mints with exact acquired/observed units,

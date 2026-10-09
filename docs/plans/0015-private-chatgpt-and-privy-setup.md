@@ -3116,3 +3116,46 @@ no Cargo/rustc/issuer/signer processes. Target measured 35.1 GiB, disk free
 60.1 GiB. No rejected cleanup was retried. Both CI watches completed. This
 verified handback is committed locally for the next source push, avoiding a
 redundant documentation-only full CI run.
+
+
+### Recorded FIFO disposal basis and inventory (2026-10-09)
+
+The existing owned-journal history reader now calls the FIFO basis allocator
+on revalidated buys/sales. Require a retained opening snapshot and zero opening
+quantity for every sold mint; absent/positive unknown opening purchase costs
+leave accounting null. Shared opening identity/read/unique-mint bounds apply.
+Every trade follows the highest opening context; same-mint slot ties refuse.
+Only older same-mint lots can supply a sale. Partial basis rounds micro-USD up
+and exact remaining basis/units stay with each lot; large products use u128,
+checked allocation sums and signed net proceeds minus basis refuse overflow.
+Preserve original acquisition/creator attribution for each sale allocation.
+
+The report describes recorded trades only, with remaining lots and per-sale
+recorded trade PnL. Rent and failed fees stay separate; complete external flows,
+current exposure and daily wallet loss remain unknown. Inventory comparison
+uses known remaining quantities and preserves acquired/disposed counts; native
+and both token observations must cover every sale. Without known FIFO basis,
+nonempty sales still refuse comparison. No journal/portfolio update or claim
+release; outstanding operations still block issuance.
+
+Six regressions added: four allocator tests and two actual issuer-process tests.
+They cover FIFO chronology, crossing lots, partial rounding conservation, full
+exit, zero/large basis, overflow, absent/positive opening quantity, baseline and
+trade units, ties, oversales, exact repeated history, remaining inventory and
+independent native/token observation floors. All 17 manual logic faults failed
+these regressions: missing/unknown opening, reverse FIFO, opening boundary,
+changed units, tied slots, zero acquisition, rounding, quantity/basis remainders,
+disposal decrement, oversale acceptance, PnL sign, token/native floors, original
+quantity substitution and altered disposed count. Source restored. Fixture
+parameter/module wiring is plumbing and not separately mutated. Test floor +6.
+Restored-source 196 signer tests and 33 conformance checks passed, with Rust
+1.99 scoped all-target Clippy and formatting. Whole CI remains pending.
+No dependencies, lint suppressions or mutation exclusions added.
+
+Next: complete transfer/cash-flow coverage and native cash reconciliation,
+opening/failed-fee ordering, current valuation/exposure/loss and idempotent
+application. Four activation areas remain: economic reconciliation; independent
+live risk inputs; execution/exits/recovery/scheduling; owner numeric limits,
+isolated keys, verified Privy policy/delegation, funding/deployment/validation.
+Autonomy remains off; no live chain read, credential/key/delegation change,
+trade, owner-limit change, VPS access or deployment. Funding/policy unverified.

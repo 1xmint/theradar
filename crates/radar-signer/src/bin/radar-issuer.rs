@@ -23,6 +23,9 @@ mod sale_proceeds;
 #[path = "radar-issuer/valuation.rs"]
 mod valuation;
 
+#[path = "radar-issuer/basis.rs"]
+mod basis;
+
 #[path = "radar-issuer/acquisitions.rs"]
 mod acquisitions;
 

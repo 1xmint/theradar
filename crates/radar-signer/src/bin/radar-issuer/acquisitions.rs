@@ -257,6 +257,11 @@ pub(super) fn review(log: &OperationLog, config: &Config) -> Result<Value, Strin
             HistoricalEffect::Sale(sale) => sales.push(sale),
         }
     }
+    let accounting = if sales.is_empty() {
+        None
+    } else {
+        super::basis::review(&lots, &sales, log.opening_inventory(), config.wallet)?
+    };
     let groups = aggregate(&lots)?;
     let fees = fee_totals(&failed_fees)?;
     Ok(
@@ -264,7 +269,7 @@ pub(super) fn review(log: &OperationLog, config: &Config) -> Result<Value, Strin
         "wallet":config.wallet,"accounting_checkpoint":log.checkpoint(),
         "lots":lots,"acquisitions_by_mint_and_creator":groups,
         "failed_execution_fees":failed_fees,"recorded_failed_fee_totals":fees,
-        "sales":sales,
+        "sales":sales,"recorded_disposal_accounting":accounting,
         "unsubmitted_operations":unsubmitted,
         "wallet_inventory_complete":false,"current_exposure_micro_usd":null,
         "realised_loss_today_micro_usd":null,"portfolio_state_updated":false,

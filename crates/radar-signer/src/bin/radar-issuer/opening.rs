@@ -64,29 +64,45 @@ pub(super) fn capture(
     })
 }
 
-pub(super) fn lots(
+pub(super) fn floor(
     opening: &OpeningInventoryRecord,
     wallet: radar_types::Address,
-    current: &Value,
-    acquisitions: &[Value],
-) -> Result<Vec<Value>, String> {
+) -> Result<Slot, String> {
     let floor = opening
         .native_slot
         .max(opening.token_program_slot)
         .max(opening.token_2022_slot);
     if opening.wallet != wallet
         || opening.read_completed_at_unix_secs < opening.read_started_at_unix_secs
-        || current["read_started_at_unix_secs"]
-            .as_u64()
-            .ok_or("current start missing")?
-            < opening.read_completed_at_unix_secs
-        || evidence_integer(&current["native_sol"], "slot")? < opening.native_slot.get()
         || opening.raw_token_slot.is_none() != opening.holdings.is_empty()
         || opening.raw_token_slot.is_some_and(|slot| slot < floor)
     {
         return Err("opening inventory identity or read bounds are inconsistent".into());
     }
-    let floor = floor.max(opening.raw_token_slot.unwrap_or(floor));
+    let mut seen = BTreeSet::new();
+    for holding in &opening.holdings {
+        if !seen.insert(holding.mint) {
+            return Err("duplicate opening mint".into());
+        }
+    }
+    Ok(floor.max(opening.raw_token_slot.unwrap_or(floor)))
+}
+
+pub(super) fn lots(
+    opening: &OpeningInventoryRecord,
+    wallet: radar_types::Address,
+    current: &Value,
+    acquisitions: &[Value],
+) -> Result<Vec<Value>, String> {
+    let floor = floor(opening, wallet)?;
+    if current["read_started_at_unix_secs"]
+        .as_u64()
+        .ok_or("current start missing")?
+        < opening.read_completed_at_unix_secs
+        || evidence_integer(&current["native_sol"], "slot")? < opening.native_slot.get()
+    {
+        return Err("current inventory precedes opening read".into());
+    }
     for read in ["token_program", "token_2022"] {
         if evidence_integer(&current[read], "slot")? < floor.get() {
             return Err("current token observation precedes opening inventory".into());
@@ -97,9 +113,7 @@ pub(super) fn lots(
             return Err("retained acquisition does not follow opening inventory".into());
         }
     }
-    let mut seen = BTreeSet::new();
     opening.holdings.iter().map(|holding| {
-        if !seen.insert(holding.mint) { return Err("duplicate opening mint".into()); }
         Ok(json!({"mint":holding.mint,"token_program":holding.token_program,"decimals":holding.decimals,
             "net_acquired_raw":holding.raw_amount.to_string(),"execution_slot":"0"}))
     }).collect()
