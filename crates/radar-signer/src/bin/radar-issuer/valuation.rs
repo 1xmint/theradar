@@ -214,7 +214,8 @@ pub(super) fn review(
         if price.acquisition_costs.is_some() {
             return Err("sale and acquisition breakdowns cannot be combined".into());
         }
-        let proceeds = super::sale_proceeds::review(binding, value, &input, amount)?;
+        let proceeds =
+            super::sale_proceeds::review(binding, value, &input, amount, reserved.raw())?;
         return Ok(
             json!({"version":1,"authority":"protected_operator_valuation",
             "wallet":binding.wallet,"execution_slot":slot.to_string(),
@@ -430,6 +431,38 @@ mod tests {
             "swap_lamports":"250000000","rent_lamports":"1000000","tip_lamports":"1000",
             "other_cash_flows_absent":true});
         (binding, entry, record, price, policy)
+    }
+
+    #[test]
+    fn sale_dispatch_passes_the_recorded_reservation_into_cash_flow_review() {
+        let (mut binding, mut entry, mut record, mut price, policy) = acquisition_fixture();
+        binding.reviewed_proposal.as_mut().expect("context")["action"] = json!("exit");
+        record.review["wallet_token_disposal"] = json!({"mint":Address::new([2;32]),"owner":binding.wallet,
+            "program_id":Address::new([3;32]),"decimals":6,"net_disposed_raw":"1000"});
+        price
+            .as_object_mut()
+            .expect("price")
+            .remove("acquisition_costs");
+        price["sale_proceeds"] = json!({"version":1,"operation":"operation","signed_transaction":"signed",
+            "wallet":binding.wallet,"mint":Address::new([2;32]),"token_program":Address::new([3;32]),
+            "decimals":6,"net_disposed_raw":"1000","gross_proceeds_lamports":"6000","tip_lamports":"0",
+            "rent_paid_lamports":"0","rent_refund_lamports":"0","other_cash_flows_absent":true});
+        for (reserved, delta, gross, tip, valid) in [
+            (5000, "1000", "6000", "0", true),
+            (4999, "1000", "6000", "0", false),
+            (5001, "-5001", "1", "2", true),
+            (5000, "-5001", "1", "2", false),
+        ] {
+            entry.reserved = Some(TokenQuantity::lamports(reserved));
+            record.review["reserved_lamports"] = json!(reserved.to_string());
+            record.review["wallet_net_change_lamports"] = json!(delta);
+            price["sale_proceeds"]["gross_proceeds_lamports"] = json!(gross);
+            price["sale_proceeds"]["tip_lamports"] = json!(tip);
+            assert_eq!(
+                review(&binding, &entry, &record, price.clone(), &policy, 20).is_ok(),
+                valid
+            );
+        }
     }
 
     #[test]

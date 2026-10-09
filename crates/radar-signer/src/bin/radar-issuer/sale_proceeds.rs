@@ -47,6 +47,7 @@ pub(super) fn review(
     value: &Value,
     input: &Breakdown,
     price: u64,
+    reserved: u64,
 ) -> Result<Value, String> {
     let proposal: Proposal = serde_json::from_value(
         binding
@@ -98,7 +99,11 @@ pub(super) fn review(
         .as_str()
         .and_then(|raw| raw.parse::<i128>().ok())
         .ok_or("invalid retained sale wallet effect")?;
-    if gross == 0 || delta != i128::from(credits) - i128::from(debits) {
+    if gross == 0
+        || delta != i128::from(credits) - i128::from(debits)
+        || fee > reserved
+        || delta < -i128::from(reserved)
+    {
         return Err("sale breakdown does not account for exact wallet effect".into());
     }
     let gross_usd = usd(gross, price, false)?;
@@ -167,7 +172,7 @@ mod tests {
             let mut changed = value.clone();
             changed["wallet_net_change_lamports"] = json!("0");
             assert_eq!(
-                review(&binding, &changed, &adjusted, 1).is_ok(),
+                review(&binding, &changed, &adjusted, 1, u64::MAX).is_ok(),
                 valid,
                 "range {gross}/{tip}/{rent}/{refund}"
             );
@@ -180,7 +185,7 @@ mod tests {
         let wallet = binding.wallet;
         let mint = &value["wallet_token_disposal"]["mint"];
         let breakdown: Breakdown = serde_json::from_value(input.clone()).expect("breakdown");
-        assert!(review(&binding, &value, &breakdown, 1).is_ok());
+        assert!(review(&binding, &value, &breakdown, 1, u64::MAX).is_ok());
         for decimals in [0, 18, u8::MAX] {
             let mut changed = value.clone();
             changed["wallet_token_disposal"]["decimals"] = json!(decimals);
@@ -188,7 +193,7 @@ mod tests {
             adjusted["decimals"] = json!(decimals);
             let adjusted: Breakdown = serde_json::from_value(adjusted).expect("units");
             assert_eq!(
-                review(&binding, &changed, &adjusted, 1).is_ok(),
+                review(&binding, &changed, &adjusted, 1, u64::MAX).is_ok(),
                 decimals != u8::MAX
             );
         }
@@ -202,7 +207,7 @@ mod tests {
                 changed["wallet_net_change_lamports"] = json!("-10");
             }
             let adjusted: Breakdown = serde_json::from_value(adjusted).expect("zero");
-            assert!(review(&binding, &changed, &adjusted, 1).is_err());
+            assert!(review(&binding, &changed, &adjusted, 1, u64::MAX).is_err());
         }
         for (field, bad) in [
             ("action", json!("buy")),
@@ -212,14 +217,14 @@ mod tests {
             let mut changed = binding.clone();
             changed.reviewed_proposal.as_mut().expect("proposal")[field] = bad;
             assert!(
-                review(&changed, &value, &breakdown, 1).is_err(),
+                review(&changed, &value, &breakdown, 1, u64::MAX).is_err(),
                 "context {field}"
             );
         }
         for context in [None, Some(Value::Null), Some(json!({}))] {
             let mut changed = binding.clone();
             changed.reviewed_proposal = context;
-            assert!(review(&changed, &value, &breakdown, 1).is_err());
+            assert!(review(&changed, &value, &breakdown, 1, u64::MAX).is_err());
         }
         for (field, bad) in [
             ("outcome", json!("failed")),
@@ -230,7 +235,7 @@ mod tests {
             let mut changed = value.clone();
             changed[field] = bad;
             assert!(
-                review(&binding, &changed, &breakdown, 1).is_err(),
+                review(&binding, &changed, &breakdown, 1, u64::MAX).is_err(),
                 "effect {field}"
             );
         }
@@ -245,12 +250,12 @@ mod tests {
             let mut changed = value.clone();
             changed["wallet_token_disposal"][field] = bad;
             assert!(
-                review(&binding, &changed, &breakdown, 1).is_err(),
+                review(&binding, &changed, &breakdown, 1, u64::MAX).is_err(),
                 "disposal {field}"
             );
         }
         binding.signed_transaction = None;
-        assert!(review(&binding, &value, &breakdown, 1).is_err());
+        assert!(review(&binding, &value, &breakdown, 1, u64::MAX).is_err());
     }
 
     #[test]
@@ -263,5 +268,18 @@ mod tests {
         for debit in [false, true] {
             assert!(usd(u64::MAX, u64::MAX, debit).is_err());
         }
+    }
+
+    #[test]
+    fn retained_sale_fee_and_net_debit_must_fit_the_reservation() {
+        let (binding, mut value, mut input) = fixture();
+        let breakdown: Breakdown = serde_json::from_value(input.clone()).expect("input");
+        assert!(review(&binding, &value, &breakdown, 1, 5).is_ok());
+        assert!(review(&binding, &value, &breakdown, 1, 4).is_err());
+        input["gross_proceeds_lamports"] = json!("1");
+        value["wallet_net_change_lamports"] = json!("-9");
+        let breakdown: Breakdown = serde_json::from_value(input).expect("input");
+        assert!(review(&binding, &value, &breakdown, 1, 9).is_ok());
+        assert!(review(&binding, &value, &breakdown, 1, 8).is_err());
     }
 }

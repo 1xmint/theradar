@@ -671,7 +671,9 @@ SOL Reduce/Exit and match the retained positive net disposal and exact artifact.
 Checked gross plus rent refund, minus network fee, tip and rent paid, must equal
 the exact signed wallet change. Gross proceeds must be positive; net credits,
 zero changes and fee-dominated debits can all balance. Gross proceeds plus refund
-and fee plus tip plus rent must individually fit u64. Credits round USD down;
+and fee plus tip plus rent must individually fit u64. Retained network fee and
+any net wallet debit must still fit the operation's recorded reservation.
+Credits round USD down;
 costs round up without floats. Net trade proceeds deduct network fee and tip,
 can be negative, and exclude rent paid/refunded, which remain separate.
 This is a protected operator cash-flow assertion, not independent venue fill

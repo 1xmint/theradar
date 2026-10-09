@@ -2952,3 +2952,21 @@ VPS read or deployment. Next: basis allocation and disposal-history accounting,
 complete transfer/cash-flow coverage, opening/failed-fee ordering and idempotent
 economic reconciliation; then independent live inputs and execution/recovery.
 Autonomy remains off; current funding and Privy policy remain unverified.
+
+
+Sale follow-up audit: the new classification branch returned before debit-only
+valuation's reservation bound checks. Protected settlement recording already
+checks these bounds, but sale valuation must also refuse inconsistent retained
+facts introduced through a generic journal caller. Explicitly pass recorded
+reservation to sale review and reject excessive network fee or net wallet debit.
+Credit/zero and valid fee-dominated cases remain supported. Direct and dispatcher
+regressions cover exact boundaries; reapply fee/debit/dispatcher faults before
+handback. Initial source 4595042 CI remains awaited in full before repair push.
+No live activation or production deployment. Two tests added for this repair.
+
+
+Reservation repair local proof: 188 signer tests, 33 conformance checks,
+Rust 1.99 scoped all-target Clippy and formatting passed. Three additional
+manual faults (fee bound, debit bound, reservation forwarding) failed their
+regressions; restored source passed. LEARNINGS 54 records the source review
+finding and the limits of its evidence. Initial CI is still awaited.

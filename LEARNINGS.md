@@ -13,7 +13,7 @@ benefit of the doubt on everything else.
 
 ## Index
 
-**39 of these 53 name something mechanical that would catch a
+**40 of these 54 name something mechanical that would catch a
 recurrence. 14 name only a habit, and say so** — which is this file's opening
 standard rather than a gap in it. The habit-only rows are the ones worth reading
 twice; nothing will stop those repeating except somebody remembering.
@@ -78,6 +78,7 @@ quietly absent.
 | [51](#51-an-ordinary-supply-bound-refused-wrapped-sol) | An ordinary supply bound refused wrapped SOL | captured native mint and constrained wrapping regressions |
 | [52](#52-a-yielded-command-was-mistaken-for-a-completed-check) | A yielded command was mistaken for a completed check | habit only: confirm the parent command exit before the next Cargo |
 | [53](#53-a-test-reacquired-journal-ownership-it-already-had) | A test reacquired journal ownership it already had | habit only: retain ownership through one fixture transition |
+| [54](#54-a-new-classification-returned-before-shared-reservation-checks) | A new classification returned before shared reservation checks | sale helper and valuation dispatcher boundary regressions |
 
 ---
 
@@ -2213,3 +2214,26 @@ establish resolution of the observed failures.
 **What catches a recurrence:** habit only. Keep a fixture's known owner through
 one transition when it already has the handle. The baseline CI exposed contention
 but no deterministic test reproduces this particular ownership window locally.
+
+
+## 54. A new classification returned before shared reservation checks
+
+**Found:** 2026-10-09, follow-up review of sale proceeds source 4595042 while
+its initial CI was running. The sale branch returned before debit-only valuation
+checked native reservation bounds. Protected settlement recording already
+checks them, but a generic journal caller can retain inconsistent facts; the
+valuation boundary must refuse those too. This was a source review finding,
+not a live trade or a failure observed on the network.
+
+Pass the recorded reservation to sale review. Require retained network fee and
+any net wallet debit to fit it, preserving valid credit/zero and fee-dominated
+sales. Test exact bounds in both the helper and the actual valuation dispatcher.
+Disabling each bound or forwarding u64::MAX makes the corresponding regression
+fail. No live authority is enabled. Await the initial CI fully before repair
+push, then require whole CI on the repaired source.
+
+**What catches a recurrence:** sale reservation boundary tests in
+`crates/radar-signer/src/bin/radar-issuer/sale_proceeds.rs` and the dispatcher
+regression in `crates/radar-signer/src/bin/radar-issuer/valuation.rs`. These catch
+this bypass mechanically; reviewing shared checks before introducing any new
+classification remains a habit, not a general static proof.
