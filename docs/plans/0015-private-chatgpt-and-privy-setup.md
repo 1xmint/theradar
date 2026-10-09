@@ -3583,3 +3583,30 @@ claims. Live risk inputs, execution/recovery/exits/scheduling and owner limits
 plus verified Privy authority/funding/deployment validation remain. Autonomous
 execution stays off. No local Cargo/rustc process was active at final inspection;
 C had 61,074,026,496 bytes free. No file cleanup was attempted.
+
+
+### Read-only mainnet measurement after collector integration (2026-10-09)
+
+At local source 780011b, run the compiled debug wallet-activity-read against
+https://api.mainnet-beta.solana.com for the configured owner wallet, after slot
+0 through finalized slot 455038266. The command succeeded at host Unix second
+1791587961: zero enumerated signatures and zero fetched transactions; scan stop
+provider_history_exhausted, scan/fetch finished true. Wallet coverage and economic
+reconciliation remain false. This measures the public provider's empty address
+history response; it does not validate classification of a real transaction or
+prove exhaustive historical token-account coverage.
+
+A separate wallet-read succeeded during host seconds 1791587973..1791587974.
+Native balance was exactly zero lamports at finalized reported slot 455038327;
+legacy Token and Token-2022 account lists were empty at reported slot 455038328.
+The reads had no common reported slot, inventory_complete remained false, and
+USD value/realized PnL were unknown. Do not relabel this as complete accounting.
+Both JSON outputs are saved in the workstation temporary directory with the
+radar-owner-wallet-activity-20261009 and radar-owner-wallet-balance-20261009 names.
+No paid RPC, model call, key access, signature, submission or deployment occurred.
+The measured wallet still needs funding before any bounded live validation.
+
+Prior source CI attempt 2 was still running at the most recent check. No push
+occurred. The next source publication still requires its completed jobs and final
+gate; collector CI remains pending. All four activation areas in the preceding
+handback remain open. Autonomous execution is off.
