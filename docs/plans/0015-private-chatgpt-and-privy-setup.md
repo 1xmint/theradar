@@ -2514,3 +2514,50 @@ watch finished and no local Cargo/rustc/Radar process remained at inspection.
 Target measured 35.1 GiB with 57.4 GiB free; previously rejected ignored-output
 cleanup was not retried. This verified handback is committed locally for the
 next source push, avoiding a redundant documentation-only full CI run.
+
+### Protected current holdings comparison (2026-10-09)
+
+Add the actual radar-issuer --review-inventory caller over its configured
+private Snapshot. Reuse existing wallet balance/context/time validation and
+replay-derived acquisition signature/cost validation under the journal lock.
+Require current snapshot wallet/time and the exact journal checkpoint, account
+set equality across listings and normalized raw verification, known states,
+wallet ownership, raw context within every enumeration/review bound, and token
+listings not preceding retained acquisitions. Unsupported/missing/changed
+inputs refuse the whole report. Stdin cannot supply the snapshot or history.
+
+Compare checked observed and acquired u64 totals over the union of mints; same
+mint program/units must agree across accounts and lots. Report exact units,
+unexplained excess and unaccounted reduction. Missing token observations do not
+silently discard acquired units; unrecorded observed mints remain unexplained.
+Frozen/uninitialized holdings remain quantities with unknown spendability.
+Native cash and wrapped token quantities remain separate. Historical basis and
+creator groups are retained as history, not current values. Only selected
+wallet read fields are reported; unrelated packet data is omitted.
+
+This is normalized protected operator evidence, not independent chain truth or
+a second raw binary verifier. Empty observations/history and exact matches
+still report incomplete inventory, unknown opening inventory/exposure/loss and
+no economic reconciliation. No journal write, portfolio update, operation
+closure, reservation release or signing-path integration. Autonomy remains off.
+
+Three unit regressions plus two actual process regressions exercise exact
+matches/excess/reductions, multiple accounts/lots, observed/acquired-only mints,
+zero/empty observations, checked overflow, mismatched identities/units/states,
+duplicates/missing arrays, raw context bounds, acquisition ordering, protected
+wallet/checkpoint/time, repeat/restart, no partial output and unchanged history.
+Test floor increased by five. Scoped local checks and manual behavior mutation
+verification passed below; await full source CI before verified handback.
+
+Local proof: cargo +stable-x86_64-pc-windows-gnullvm test -p radar-signer
+passed all 169 tests (72 library, 20 issuer unit, 35 issuer process, 31 signer
+process and 11 Privy oracle regressions). Rust 1.99 all-target signer Clippy with
+warnings denied and formatting passed. Individually reapplying 17 arithmetic,
+identity/state/set/context/comparison mistakes failed the running unit tests;
+five protected wallet/checkpoint/snapshot-age/read-validation/context-selection
+mistakes failed the actual process regression. Original source was restored,
+scoped inventory tests and Clippy/formatting passed again. No new dependency,
+mutation exclusion or lint suppression. Full CI remains pending. This review
+is not accepted as risk state by the signing path.
+
+All 33 repo-conformance checks passed after staging the new module and docs.

@@ -777,6 +777,49 @@ basis is bookkeeping acquisition cost, not current liquidation value. Changes
 to configured valuation age bounds can refuse older records; history is never
 rewritten to accommodate them.
 
+## Protected current inventory comparison
+
+`radar-issuer --review-inventory` reads the configured private snapshot once
+under the owned journal lock and reuses `--review-acquisitions` validation over
+all retained lots. The snapshot must name the configured wallet and exact
+current accounting checkpoint and be current by the host clock. Existing
+wallet evidence checks bind its native balance, finalized read identity,
+context bounds and current read window. Stdin cannot replace these inputs.
+
+Require the wallet-read raw verification section and compare its account set
+with both listings by address, mint, program, decimals, state and exact quantity.
+Raw account owners must match the wallet. Duplicate identities, unknown states,
+changed metadata or unavailable arrays refuse. A nonempty raw context must not
+precede native balance or either listing and cannot exceed the snapshot's
+reviewed slot. Empty listings require an empty raw set and unknown raw context;
+they do not establish a flat wallet. Both token listing contexts must be at
+least as recent as every retained acquisition execution slot.
+
+Sum observed holdings and retained acquisitions by mint using checked u64
+arithmetic, including frozen/uninitialized quantities and separate accounts.
+Mint program/units must agree within and across the two totals. Report the
+union of observed and acquired mints with exact acquired/observed units,
+unexplained excess and unaccounted reduction. Missing observed/acquired units
+are zero only within this comparison, after the corresponding inputs validated;
+neither implies complete wallet coverage. Preserve native balance and separate
+context/read times, the checked historical lots and their basis/creator groups.
+Do not forward unrelated wallet packet fields.
+
+The private file is still the trust boundary. This checks agreement of
+operator-provisioned normalized evidence; it does not rerun the raw binary
+decoder, authenticate chain truth or construct an independent live snapshot.
+Per-account restrictions remain in the original wallet-read evidence and no
+spendability is inferred from totals. Wrapped SOL remains a token quantity,
+separate from native cash. Exact unit equality cannot account for offsetting
+transfers or disposals, opening holdings, failed fees or current valuations.
+
+This command reports differences, not economic reconciliation. Opening inventory
+remains unknown; complete inventory, current exposure and daily loss remain
+unknown even when every quantity matches. It writes no history or portfolio,
+closes no operation and releases no reservation. The signing path does not
+consume its report or gain authority. Live activation remains closed until the
+remaining economic coverage and protected live adapter are implemented.
+
 ## What would reverse this
 
 Nothing foreseeable reverses holding a policy locally. The specific ceilings are

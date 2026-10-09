@@ -24,6 +24,9 @@ mod valuation;
 #[path = "radar-issuer/acquisitions.rs"]
 mod acquisitions;
 
+#[path = "radar-issuer/inventory.rs"]
+mod inventory;
+
 #[derive(Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 struct Config {
@@ -264,6 +267,13 @@ fn verified_signed(
 }
 
 impl Issuer {
+    fn review_inventory(&self) -> Result<serde_json::Value, String> {
+        let snapshot: Snapshot = serde_json::from_slice(&private_read(&self.config.snapshot_path)?)
+            .map_err(|_| "invalid trusted snapshot")?;
+        let history = acquisitions::review(&self.operations, &self.config)?;
+        inventory::review(&snapshot, &self.config, &history, unix_now()?)
+    }
+
     fn load(path: &Path) -> Result<Self, String> {
         let config: Config = serde_json::from_slice(&private_read(path)?)
             .map_err(|_| "invalid issuer configuration")?;
@@ -637,6 +647,10 @@ fn run() -> Result<(), String> {
     let path = std::env::var_os("RADAR_ISSUER_CONFIG").ok_or("issuer configuration missing")?;
     let mut issuer = Issuer::load(Path::new(&path))?;
     let args: Vec<_> = std::env::args().skip(1).collect();
+    if args == ["--review-inventory"] {
+        println!("{}", issuer.review_inventory()?);
+        return Ok(());
+    }
     if args == ["--review-acquisitions"] {
         println!(
             "{}",

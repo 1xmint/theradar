@@ -522,6 +522,209 @@ fn acquisition_report(fixture: &Fixture) -> std::process::Output {
         .expect("acquisition report")
 }
 
+fn inventory_fixture() -> Fixture {
+    let (mut fixture, id, price_path, _) = acquisition_cost_fixture();
+    assert!(
+        fixture
+            .command()
+            .args(["--record-valuation", id.as_str()])
+            .arg(price_path)
+            .output()
+            .expect("record costs")
+            .status
+            .success()
+    );
+    let log = radar_journal::OperationLog::open(fixture.dir.path().join("operations.jsonl"))
+        .expect("history");
+    fixture.snapshot["accounting_checkpoint"] = json!(log.checkpoint());
+    drop(log);
+    fixture.snapshot["state"]["now"] = json!(1003);
+    let evidence = &mut fixture.snapshot["wallet_evidence"];
+    evidence["native_sol"]["slot"] = json!("1002");
+    evidence["token_program"]["slot"] = json!("1002");
+    evidence["token_2022"]["slot"] = json!("1003");
+    let account = json!({"address":address(0x66),"mint":address(0x22),"program":address(0x44),
+        "decimals":6,"state":"frozen","raw_amount":"10","owner":fixture.config["wallet"],"spendable":null});
+    let mut second = account.clone();
+    second["address"] = json!(address(0x67));
+    second["raw_amount"] = json!("5");
+    evidence["token_program"]["accounts"] = json!([account, second]);
+    evidence["raw_token_verification"] = json!({"authority":"read_only","inventory_complete":false,
+        "slot":"1003","accounts":[account,second]});
+    fixture.save();
+    fixture
+}
+
+fn inventory_report(fixture: &Fixture) -> std::process::Output {
+    fixture
+        .command()
+        .arg("--review-inventory")
+        .output()
+        .expect("inventory report")
+}
+
+#[test]
+fn protected_inventory_comparison_reports_differences_without_releasing_or_flattening() {
+    let mut fixture = inventory_fixture();
+    let history = fixture.dir.path().join("operations.jsonl");
+    let saved = std::fs::read(&history).expect("history");
+    for amount in [5u64, 10, 15] {
+        for read in ["token_program", "raw_token_verification"] {
+            fixture.snapshot["wallet_evidence"][read]["accounts"][0]["raw_amount"] =
+                json!(amount.to_string());
+        }
+        fixture.snapshot["wallet_evidence"]["provider_detail"] = json!("MUST_NOT_APPEAR");
+        fixture.save();
+        let output = inventory_report(&fixture);
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(!String::from_utf8_lossy(&output.stdout).contains("MUST_NOT_APPEAR"));
+        let report: Value = serde_json::from_slice(&output.stdout).expect("report");
+        let row = &report["tokens_by_mint"][0];
+        assert_eq!(row["retained_acquired_raw"], "15");
+        assert_eq!(row["observed_raw"], (amount + 5).to_string());
+        assert_eq!(
+            row["unexplained_excess_raw"],
+            (amount + 5).saturating_sub(15).to_string()
+        );
+        assert_eq!(
+            row["unaccounted_reduction_raw"],
+            15u64.saturating_sub(amount + 5).to_string()
+        );
+        assert_eq!(row["quantity_matches"], amount == 10);
+        assert_eq!(report["native_sol"]["raw_amount"], "300000000");
+        assert_eq!(report["token_program_slot"], "1002");
+        assert_eq!(report["token_2022_slot"], "1003");
+        assert_eq!(report["raw_token_slot"], "1003");
+        assert_eq!(
+            report["accounting_checkpoint"],
+            fixture.snapshot["accounting_checkpoint"]
+        );
+        for field in [
+            "opening_inventory",
+            "current_exposure_micro_usd",
+            "realised_loss_today_micro_usd",
+        ] {
+            assert!(report[field].is_null(), "{field}");
+        }
+        for field in [
+            "wallet_inventory_complete",
+            "portfolio_state_updated",
+            "economic_reconciliation_complete",
+            "reservation_released",
+        ] {
+            assert_eq!(report[field], false, "{field}");
+        }
+        assert_eq!(
+            inventory_report(&fixture).stdout,
+            output.stdout,
+            "restart/repeat"
+        );
+        assert_eq!(std::fs::read(&history).expect("unchanged"), saved);
+    }
+    for read in ["token_program", "token_2022", "raw_token_verification"] {
+        fixture.snapshot["wallet_evidence"][read]["accounts"] = json!([]);
+    }
+    fixture.snapshot["wallet_evidence"]["raw_token_verification"]["slot"] = Value::Null;
+    fixture.save();
+    let output = inventory_report(&fixture);
+    assert!(output.status.success());
+    let report: Value = serde_json::from_slice(&output.stdout).expect("missing holdings");
+    assert_eq!(
+        report["tokens_by_mint"][0]["unaccounted_reduction_raw"],
+        "15"
+    );
+    assert_eq!(report["wallet_inventory_complete"], false);
+    let mut empty = Fixture::new();
+    empty.snapshot["wallet_evidence"]["raw_token_verification"] = json!({"authority":"read_only",
+        "inventory_complete":false,"slot":null,"accounts":[]});
+    empty.save();
+    let output = inventory_report(&empty);
+    assert!(output.status.success());
+    let report: Value = serde_json::from_slice(&output.stdout).expect("empty history/wallet");
+    assert_eq!(report["tokens_by_mint"], json!([]));
+    assert_eq!(report["wallet_inventory_complete"], false);
+    assert_eq!(
+        fixture.start().ask(&fixture.candidate)["reason"],
+        "outstanding operation requires reconciliation"
+    );
+}
+
+#[test]
+fn inventory_review_refuses_stale_foreign_unbound_or_changed_protected_evidence() {
+    let mut fixture = inventory_fixture();
+    let original = fixture.snapshot.clone();
+    let history = fixture.dir.path().join("operations.jsonl");
+    let saved = std::fs::read(&history).expect("history");
+    for case in [
+        "checkpoint",
+        "wallet",
+        "snapshot_age",
+        "snapshot_future",
+        "read_age",
+        "read_future",
+        "raw_missing",
+        "raw_old",
+        "raw_future",
+        "raw_owner",
+        "before_acquisition",
+        "quantity",
+        "native",
+    ] {
+        fixture.snapshot = original.clone();
+        match case {
+            "checkpoint" => fixture.snapshot["accounting_checkpoint"] = json!(""),
+            "wallet" => fixture.snapshot["wallet"] = json!(address(9)),
+            "snapshot_age" => fixture.snapshot["observed_at_unix_secs"] = json!(unix_now() - 121),
+            "snapshot_future" => {
+                fixture.snapshot["observed_at_unix_secs"] = json!(unix_now() + 120);
+            }
+            "read_age" => {
+                fixture.snapshot["wallet_evidence"]["read_started_at_unix_secs"] =
+                    json!(unix_now() - 121);
+            }
+            "read_future" => {
+                fixture.snapshot["wallet_evidence"]["read_completed_at_unix_secs"] =
+                    json!(unix_now() + 120);
+            }
+            "raw_missing" => {
+                fixture.snapshot["wallet_evidence"]["raw_token_verification"] = Value::Null;
+            }
+            "raw_old" => {
+                fixture.snapshot["wallet_evidence"]["raw_token_verification"]["slot"] =
+                    json!("1002");
+            }
+            "raw_future" => {
+                fixture.snapshot["wallet_evidence"]["raw_token_verification"]["slot"] =
+                    json!("1004");
+            }
+            "raw_owner" => {
+                fixture.snapshot["wallet_evidence"]["raw_token_verification"]["accounts"][0]["owner"] =
+                    json!(address(9));
+            }
+            "before_acquisition" => {
+                fixture.snapshot["wallet_evidence"]["token_program"]["slot"] = json!("1000");
+            }
+            "quantity" => {
+                fixture.snapshot["wallet_evidence"]["raw_token_verification"]["accounts"][0]["raw_amount"] =
+                    json!("11");
+            }
+            "native" => {
+                fixture.snapshot["wallet_evidence"]["native_sol"]["raw_amount"] = json!("1");
+            }
+            _ => unreachable!("case"),
+        }
+        fixture.save();
+        let output = inventory_report(&fixture);
+        assert!(!output.status.success(), "{case}");
+        assert_eq!(output.stdout, Vec::<u8>::new(), "{case}");
+        assert_eq!(std::fs::read(&history).expect("unchanged"), saved);
+    }
+}
+
 fn native_portfolio(fixture: &Fixture) -> radar_types::Portfolio {
     use radar_types::{
         Asset, AssetRole, Balance, Holding, Portfolio, Slot, TokenQuantity, Unvaluable, Valuation,
