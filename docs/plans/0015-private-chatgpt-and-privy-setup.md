@@ -3554,3 +3554,32 @@ fault is retained. Normalize newline style with rustfmt after restoration.
 No mutation exclusion, dependency or lint suppression added. Full CI for this
 collector remains required after the pending run completes. No live read, key,
 signing, delegation, owner-limit change, trade or deployment. Autonomy stays off.
+
+
+### Handback: collector locally integrated, prior CI still running (2026-10-09)
+
+Collector source 025b6c286c53cc8815cab2ad53b4fb87dc60074a is committed on
+feat/wallet-activity-read and fast-forwarded locally into
+fix/wallet-signin-diagnostics after its isolated checks completed. The sibling
+radar-wallet-activity worktree remains clean on its source branch. Local source
+is now available in the primary checkout; no remote push or deployment occurred.
+At that source, 345 scoped tests (238 CLI + 107 on-chain), 33 conformance checks,
+Rust 1.99 scoped all-target Clippy and formatting passed. All 27 manual faults
+were caught and restored. The collector itself has not run in GitHub CI.
+
+Prior signer-source CI 37999235384 attempt 2 still runs shard-1 job
+114061977905 at handback. It verifies 1438626, not the new collector source.
+Wait for its completed shard/final gate before the next push. If it passes,
+record exact totals, then push the integrated collector and inspect all of its
+CI jobs. If it also exceeds 30 minutes, inspect its annotation/log and resolve
+the CI runtime/sharding trade-off instead of repeated blind reruns or dropping
+coverage. The repository requires discussion when CI cannot complete the check.
+No timeout, matrix, exclusions or checks changed in this increment.
+
+After collector CI, next is local message classification plus historical account
+coverage and durable transfer retention/idempotent economic application. Address
+collection alone does not establish wallet coverage, loss/exposure or release
+claims. Live risk inputs, execution/recovery/exits/scheduling and owner limits
+plus verified Privy authority/funding/deployment validation remain. Autonomous
+execution stays off. No local Cargo/rustc process was active at final inspection;
+C had 61,074,026,496 bytes free. No file cleanup was attempted.
