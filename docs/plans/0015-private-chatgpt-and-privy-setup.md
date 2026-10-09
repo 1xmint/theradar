@@ -3444,3 +3444,24 @@ Rust 1.99 all-target Clippy, and formatting after normalizing the edited file's
 newline style. The expected manual mutant failure was at the oversized-message
 refusal assertion. No production guard changed. Both prepared repairs will be
 pushed together now that every job of CI 37995345383 has completed.
+
+
+### Handback: native-transfer repairs submitted (2026-10-09)
+
+Source 1438626dda4422372e83ca5dcf85c913f9e28219 includes the prepared
+journal-ownership fixture repair 55c42fd and the wire-size regression repair.
+Both were pushed only after every job/final gate of CI 37995345383 completed.
+CI 37999235384 is queued at handback; full repaired Linux evidence is pending,
+not a claimed pass. PR 334 records that status. Local restored evidence remains
+208 signer tests, 33 conformance checks, scoped Rust 1.99 all-target Clippy and
+formatting; all 36 manual behavior faults caught, source restored. Working tree
+was clean after source push. No active local Cargo/rustc process was found at
+prior inspection. No production deployment, owner limit, key, delegation or real
+trade changed. Autonomous execution remains off.
+
+Next: inspect every job and final gate of CI 37999235384 before any further
+push. Read failed baselines or exact mutation positions if present; do not cancel
+or bypass the run. On green, close this increment's verification record, then
+continue complete wallet activity coverage/durable economic reconciliation. Live
+risk inputs, execution/recovery/exits/scheduling, and activated owner limits plus
+verified Privy policy/delegation/funding/deployment validation still remain.
