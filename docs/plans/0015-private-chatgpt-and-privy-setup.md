@@ -3321,3 +3321,42 @@ change, VPS access or deployment occurred. No local Cargo/rustc/issuer/signer
 process remained at inspection. Target measured 35.1 GiB; disk free 57.2 GiB.
 No rejected cleanup was retried. CI watches ended. This verified handback is
 committed locally for the next source push, avoiding redundant doc-only CI.
+
+
+### Supplied external native transfer increment (2026-10-09)
+
+Continue from verified native cash handback 35dbc4c / source 8c78814. There is
+no independent wallet-activity enumeration yet. Add optional protected snapshot
+native-transfer evidence to the existing inventory reader: exact signed legacy
+plain System transfers, verified sender signature, supported writable accounts,
+empty token effects and exact all-account balance/fee equations. Include deposits,
+withdrawals, self-transfers, multiple instructions and fee-only failures. Require
+current read metadata, finalized/configured identity, unique signatures both
+within supplied evidence and against retained operations, and slots not beyond
+the current native observation. Unsupported activity refuses, never skips.
+
+Combine normalized supplied transfer effects with retained native operation
+flows in the existing opening cash comparison. Preserve signature/source in
+anchors, exact equality, opening ordering, ambiguous-slot refusal, signed gaps
+and intermediate range checks. A supplied deposit can explain a retained-buy
+cash gap, but even exact final/anchor matches leave external coverage incomplete.
+This is protected operator snapshot input, not independent chain provenance or
+a durable transfer journal. No risk-state application, claim release or trading
+authority. Seven new tests raise floor to 2167.
+
+Local review caught self-transfer cancellation hiding an impossible intermediate
+debit. Require successful amounts to fit the post-fee payer balance after earlier
+instructions. LEARNINGS 56 records the correction. All 30 manual logic faults
+failed their regressions, including signature bypass, historical/local duplicate
+counting, metadata identity, readonly target, unknown programs/opcodes, extra
+instruction bytes, signed balance/fee math, intermediate self-transfer bounds
+and omission from the inventory cash projection. Restore all source after each.
+Initial 208 signer tests passed before that additional debit guard; restored
+208 signer tests, 33 conformance checks and formatting passed after restoration.
+Whole CI is pending. Scoped Rust 1.99 all-target Clippy passed after
+using explicit PathBuf defaults in the unit fixture. No dependency, lint
+suppression or mutation exclusion. No live read, real signature/key/delegation/
+trade, owner limit change, VPS access or deployment. Autonomous execution remains
+off. Next remains complete activity enumeration/coverage, durable reconciliation
+and current exposure/loss, independent live risk inputs, execution/recovery and
+owner limits/Privy policy/delegation/funding/deployment validation.

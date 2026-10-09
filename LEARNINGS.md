@@ -13,7 +13,7 @@ benefit of the doubt on everything else.
 
 ## Index
 
-**41 of these 55 name something mechanical that would catch a
+**42 of these 56 name something mechanical that would catch a
 recurrence. 14 name only a habit, and say so** — which is this file's opening
 standard rather than a gap in it. The habit-only rows are the ones worth reading
 twice; nothing will stop those repeating except somebody remembering.
@@ -80,6 +80,7 @@ quietly absent.
 | [53](#53-a-test-reacquired-journal-ownership-it-already-had) | A test reacquired journal ownership it already had | habit only: retain ownership through one fixture transition |
 | [54](#54-a-new-classification-returned-before-shared-reservation-checks) | A new classification returned before shared reservation checks | sale helper and valuation dispatcher boundary regressions |
 | [55](#55-observation-tests-skipped-the-accepted-equality-boundary) | Observation tests skipped the accepted equality boundary | exact-slot native and token inventory process regression |
+| [56](#56-a-self-transfer-hid-an-impossible-intermediate-debit) | A self-transfer hid an impossible intermediate debit | native transfer intermediate-balance regression |
 
 ---
 
@@ -2264,3 +2265,25 @@ then independently refuses older native/classic/Token-2022 observations. Both
 reported mutations were reapplied at those exact file:line:column positions and
 each failed that regression; source restored. Whole repaired CI remains required.
 No live snapshot or trade exhibited this test gap.
+
+
+## 56. A self-transfer hid an impossible intermediate debit
+
+**Found:** 2026-10-09, local source review before the first native-transfer
+push. The new classifier compared signed transfer totals plus fee against every
+final native balance. A successful self-transfer cancelled its own debit and
+credit, so an amount exceeding the payer balance after fees could pass that
+final equation. Supplied success metadata must not rescue an impossible debit.
+This was an unfinished local classifier, not an observed network execution.
+
+Require every successful transfer amount to fit the payer's intermediate
+balance after the fee and preceding transfers, before applying its debit and
+credit. Preserve exact equality and fee-only failed execution. Keep external
+coverage incomplete and signing authority closed.
+
+**What catches a recurrence:** the native transfer balance regression in
+`crates/radar-signer/src/bin/radar-issuer/native_transfers.rs` accepts the exact
+post-fee self-transfer boundary and refuses excess before or after a preceding
+transfer. Reapplying the missing guard, ignoring prior effects or treating the
+boundary as exclusive must fail these tests. All-account final balance checks
+remain separate. This catches the concrete classification bug mechanically.

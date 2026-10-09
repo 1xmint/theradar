@@ -1357,6 +1357,112 @@ fn protected_native_cash_comparison_keeps_buy_and_failed_fee_gaps_without_mutati
     }
 }
 
+fn external_native_packet(fixture: &Fixture) -> Value {
+    use ed25519_dalek::{Signer as _, SigningKey};
+    let key = SigningKey::from_bytes(&[43; 32]);
+    let wallet: radar_types::Address =
+        serde_json::from_value(fixture.config["wallet"].clone()).unwrap();
+    let mut bytes = vec![1];
+    bytes.extend([0; 64]);
+    bytes.extend([1, 0, 1, 3]);
+    bytes.extend(key.verifying_key().to_bytes());
+    bytes.extend(wallet.as_bytes());
+    bytes.extend([0; 32]);
+    bytes.extend([9; 32]);
+    bytes.extend([1, 2, 2, 0, 1, 12]);
+    bytes.extend(2_u32.to_le_bytes());
+    bytes.extend(15_156_000_u64.to_le_bytes());
+    let signature = key.sign(&bytes[65..]);
+    bytes[1..65].copy_from_slice(&signature.to_bytes());
+    json!({"version":1,"authority":"read_only","commitment":"finalized","wallet":wallet,
+        "read_started_at_unix_secs":unix_now(),"read_completed_at_unix_secs":unix_now(),
+        "transactions":[{"transaction_base64":radar_types::b64::encode(&bytes),"slot":"1002",
+            "network_fee_lamports":"5000","outcome":"succeeded",
+            "pre_balances":["500000000","284844000","1"],
+            "post_balances":["484839000","300000000","1"],
+            "pre_token_balances":[],"post_token_balances":[],"provider_body":"MUST_NOT_PERSIST"}]})
+}
+
+#[test]
+fn protected_native_deposit_explains_cash_gap_without_completing_coverage_or_releasing_claims() {
+    let mut fixture = inventory_fixture_opening(Some(0));
+    let packet = external_native_packet(&fixture);
+    fixture.snapshot["wallet_evidence"]["native_transfers"] = packet;
+    fixture.save();
+    let path = fixture.dir.path().join("operations.jsonl");
+    let saved = std::fs::read(&path).unwrap();
+    let output = inventory_report(&fixture);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(!String::from_utf8_lossy(&output.stdout).contains("MUST_NOT_PERSIST"));
+    let report: Value = serde_json::from_slice(&output.stdout).unwrap();
+    let transfer = &report["reviewed_external_native_transfers"][0];
+    assert_eq!(transfer["net_change_lamports"], "15156000");
+    assert_eq!(transfer["wallet_network_fee_lamports"], "0");
+    assert_eq!(transfer["signature_verified_locally"], true);
+    let cash = &report["recorded_native_cash_comparison"];
+    assert_eq!(cash["expected_lamports"], "300000000");
+    assert_eq!(cash["unexplained_change_lamports"], "0");
+    assert_eq!(cash["balance_matches"], true);
+    assert_eq!(cash["transaction_anchors_match"], true);
+    assert_eq!(
+        cash["coverage"],
+        "recorded_operations_and_supplied_native_transfers"
+    );
+    assert_eq!(
+        cash["transaction_anchors"][0]["source"],
+        "recorded_operation"
+    );
+    assert_eq!(
+        cash["transaction_anchors"][1]["source"],
+        "protected_native_transfer"
+    );
+    assert_eq!(
+        cash["transaction_anchors"][1]["signature"],
+        transfer["signature"]
+    );
+    assert_eq!(cash["external_cash_flows_complete"], false);
+    assert_eq!(report["portfolio_state_updated"], false);
+    assert_eq!(report["reservation_released"], false);
+    assert_eq!(report["economic_reconciliation_complete"], false);
+    assert_eq!(
+        serde_json::from_slice::<Value>(&inventory_report(&fixture).stdout).unwrap(),
+        report
+    );
+    assert_eq!(std::fs::read(&path).unwrap(), saved);
+    assert_eq!(
+        fixture.start().ask(&fixture.candidate)["reason"],
+        "outstanding operation requires reconciliation"
+    );
+}
+
+#[test]
+fn protected_native_transfer_comparison_refuses_older_tied_future_or_duplicate_effects() {
+    let mut fixture = inventory_fixture_opening(Some(0));
+    let packet = external_native_packet(&fixture);
+    let path = fixture.dir.path().join("operations.jsonl");
+    let saved = std::fs::read(&path).unwrap();
+    for slot in ["1000", "1001", "1003"] {
+        let mut changed = packet.clone();
+        changed["transactions"][0]["slot"] = json!(slot);
+        fixture.snapshot["wallet_evidence"]["native_transfers"] = changed;
+        fixture.save();
+        assert!(!inventory_report(&fixture).status.success(), "slot {slot}");
+    }
+    let mut duplicate = packet.clone();
+    duplicate["transactions"] = json!([packet["transactions"][0], packet["transactions"][0]]);
+    fixture.snapshot["wallet_evidence"]["native_transfers"] = duplicate;
+    fixture.save();
+    assert!(!inventory_report(&fixture).status.success());
+    fixture.snapshot["wallet_evidence"]["native_transfers"] = packet;
+    set_inventory(&mut fixture, 15, 1003);
+    assert!(inventory_report(&fixture).status.success());
+    assert_eq!(std::fs::read(&path).unwrap(), saved);
+}
+
 #[test]
 fn protected_fifo_history_keeps_nonzero_opening_basis_unknown() {
     let fixture = inventory_fixture_opening(Some(10));

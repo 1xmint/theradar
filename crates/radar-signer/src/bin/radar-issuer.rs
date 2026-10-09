@@ -29,6 +29,9 @@ mod basis;
 #[path = "radar-issuer/acquisitions.rs"]
 mod acquisitions;
 
+#[path = "radar-issuer/native_transfers.rs"]
+mod native_transfers;
+
 #[path = "radar-issuer/cash.rs"]
 mod cash;
 

@@ -28,7 +28,7 @@ pub(super) fn flow(value: &Value, operation: &str, wallet: Address) -> Result<Va
         return Err("native cash effect is inconsistent".into());
     }
     Ok(
-        json!({"operation":operation,"execution_slot":integer(value,"slot")?.to_string(),
+        json!({"operation":operation,"signature":value["signature"],"source":"recorded_operation","execution_slot":integer(value,"slot")?.to_string(),
         "pre_lamports":pre.to_string(),"post_lamports":post.to_string(),
         "net_change_lamports":delta.to_string()}),
     )
@@ -39,6 +39,7 @@ pub(super) fn review(
     wallet: Address,
     history: &Value,
     current: &Value,
+    external: &[Value],
 ) -> Result<Option<Value>, String> {
     let Some(opening) = opening else {
         return Ok(None);
@@ -52,6 +53,7 @@ pub(super) fn review(
         .as_array()
         .ok_or("recorded native cash flows missing")?
         .iter()
+        .chain(external)
         .map(|row| Ok((integer(row, "execution_slot")?, row)))
         .collect::<Result<Vec<_>, String>>()?;
     flows.sort_by_key(|(slot, _)| *slot);
@@ -65,7 +67,7 @@ pub(super) fn review(
         let pre = integer(row, "pre_lamports")?;
         let post = integer(row, "post_lamports")?;
         let difference = i128::from(pre) - i128::from(expected);
-        anchors.push(json!({"operation":row["operation"],"execution_slot":slot.to_string(),
+        anchors.push(json!({"operation":row["operation"],"signature":row["signature"],"source":row["source"],"execution_slot":slot.to_string(),
             "expected_pre_lamports":expected.to_string(),"recorded_pre_lamports":pre.to_string(),
             "unexplained_change_lamports":difference.to_string(),"balance_matches":pre == expected}));
         // Do not reset to recorded pre: that would absorb an unexplained transfer.
@@ -74,14 +76,16 @@ pub(super) fn review(
     }
     let observed = integer(&current["native_sol"], "raw_amount")?;
     let anchors_match = anchors.iter().all(|row| row["balance_matches"] == true);
-    Ok(Some(json!({"coverage":"recorded_operations_only",
+    Ok(Some(
+        json!({"coverage":if external.is_empty() {"recorded_operations_only"} else {"recorded_operations_and_supplied_native_transfers"},
         "opening_lamports":opening.native_lamports.to_string(),
         "expected_lamports":expected.to_string(),"observed_lamports":observed.to_string(),
         "unexplained_change_lamports":(i128::from(observed)-i128::from(expected)).to_string(),
         "balance_matches":observed == expected,"transaction_anchors_match":anchors_match,
         "transaction_anchors":anchors,"external_cash_flows_complete":false,
         "economic_reconciliation_complete":false,"portfolio_state_updated":false,
-        "reservation_released":false})))
+        "reservation_released":false}),
+    ))
 }
 
 #[cfg(test)]
@@ -113,6 +117,7 @@ mod tests {
             opening.wallet,
             &json!({"recorded_native_cash_flows":flows}),
             &json!({"native_sol":{"slot":slot.to_string(),"raw_amount":observed.to_string()}}),
+            &[],
         )?
         .ok_or("comparison missing".into())
     }
@@ -207,17 +212,27 @@ mod tests {
         }
         let o = opening(100);
         assert!(
-            review(None, o.wallet, &Value::Null, &Value::Null)
+            review(None, o.wallet, &Value::Null, &Value::Null, &[])
                 .unwrap()
                 .is_none()
         );
-        assert!(review(Some(&o), Address::new([5; 32]), &Value::Null, &Value::Null).is_err());
+        assert!(
+            review(
+                Some(&o),
+                Address::new([5; 32]),
+                &Value::Null,
+                &Value::Null,
+                &[]
+            )
+            .is_err()
+        );
         assert!(
             review(
                 Some(&o),
                 o.wallet,
                 &json!({}),
-                &json!({"native_sol":{"slot":"42"}})
+                &json!({"native_sol":{"slot":"42"}}),
+                &[],
             )
             .is_err()
         );
@@ -233,7 +248,7 @@ mod tests {
         let report = flow(&packet, "op", wallet).unwrap();
         assert_eq!(
             report,
-            json!({"operation":"op","execution_slot":"43","pre_lamports":"100",
+            json!({"operation":"op","signature":null,"source":"recorded_operation","execution_slot":"43","pre_lamports":"100",
             "post_lamports":"80","net_change_lamports":"-20"})
         );
         for bad in [

@@ -278,7 +278,8 @@ pub(super) fn review(
         row["retained_acquired_raw"] = json!(acquired.to_string());
         row["retained_disposed_raw"] = json!(disposed.to_string());
     }
-    let cash = super::cash::review(opening, config.wallet, history, value)?;
+    let transfers = super::native_transfers::review(value, history, config, now)?;
+    let cash = super::cash::review(opening, config.wallet, history, value, &transfers)?;
     Ok(
         json!({"version":1,"authority":"protected_operator_inventory_comparison",
         "wallet":config.wallet,"accounting_checkpoint":history["accounting_checkpoint"],
@@ -290,7 +291,7 @@ pub(super) fn review(
         "token_2022_slot":value["token_2022"]["slot"],
         "raw_token_slot":value["raw_token_verification"]["slot"],
         "acquisition_history":history,"tokens_by_mint":rows,
-        "recorded_native_cash_comparison":cash,
+        "recorded_native_cash_comparison":cash,"reviewed_external_native_transfers":transfers,
         "opening_inventory":opening,"opening_cost_basis_micro_usd":null,"wallet_inventory_complete":false,
         "current_exposure_micro_usd":null,"realised_loss_today_micro_usd":null,
         "portfolio_state_updated":false,"economic_reconciliation_complete":false,

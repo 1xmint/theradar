@@ -985,11 +985,54 @@ against the final projection. Never reset the projection to an unexplained
 pre-balance. Report final `balance_matches` separately from
 `transaction_anchors_match`: offsetting missing flows can leave a final match
 while transaction anchors differ. These are discrepancy observations, not
-proven transfer classifications. Coverage remains `recorded_operations_only`;
+proven transfer classifications. Without supplied native transfers, coverage
+remains `recorded_operations_only`;
 even both matches do not prove external cash-flow completeness, independently
 sourced evidence, realised wallet PnL, current exposure or daily loss. Complete
 transfer enumeration and idempotent application remain absent. Review writes
 nothing, releases no claims and enables no execution.
+
+## Supplied external native transfers
+
+The protected wallet snapshot may additionally contain `native_transfers`, with
+version 1, `read_only` authority, finalized commitment, configured wallet,
+current host read start/completion times and a `transactions` array. The existing
+inventory reader validates this optional packet using the same read-window
+checks and exposes only `reviewed_external_native_transfers`. Missing packet
+means no supplied evidence, never proof that no external activity occurred.
+This is operator-provisioned snapshot evidence, not an independent RPC adapter
+or a durable transfer journal. Unreviewed provider fields are not copied.
+
+Each transaction supplies exact base64 signed bytes, string slot/fee, explicit
+succeeded/failed outcome, string native pre/post balance arrays and empty pre/
+post token balance arrays. Support only legacy, one writable signer/fee payer,
+one readonly unsigned System Program account last, unique static accounts and
+plain System Program Transfer instructions from that signer to writable static
+accounts. The configured wallet may be payer or recipient. Reject unsupported
+programs, token effects, envelopes, missing evidence or extra instruction bytes;
+no partial interpretation. Reuse the local transaction decoder and strictly
+verify the sender's Ed25519 signature over the exact message. Check every native
+account against signed transfers plus the supplied network fee. Successful
+transfers must also fund each intermediate payer debit after fees and preceding
+transfers, including self-transfers. Failed execution changes only the fee.
+Protocol references: the [Foundation transaction guide](https://github.com/solana-foundation/developer-content/blob/main/docs/core/transactions.md)
+and [System transfer constructor](https://docs.rs/solana-system-interface/latest/solana_system_interface/instruction/fn.transfer.html).
+
+Normalize signature, slot, wallet native pre/post/delta, transfer delta excluding
+its fee, wallet-paid fee, outcome and local signature verification. Deduplicate
+signatures both inside the packet and against retained Radar operations; require
+execution at or before the native observation, accepting equality. Combine
+verified supplied transfers with recorded operations in the existing opening-
+cash projection. All executions must still follow the opening context and have
+unambiguous slot order; no same-slot transaction indices are available. Preserve
+signature/source in transaction anchors. With supplied rows, label coverage
+`recorded_operations_and_supplied_native_transfers`. Even a matching final
+balance and all anchors leave `external_cash_flows_complete` false. Signatures
+prove message authorship, not finalized inclusion or truth/completeness of
+operator-provisioned balances, fee and outcome. Unsupported wallet activity,
+pagination/coverage, token transfers, independent provenance and durable
+idempotent application remain unfinished. No risk update, claim release or
+execution authority follows from this review.
 
 ## Immutable opening inventory before operations
 
