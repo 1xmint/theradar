@@ -432,10 +432,10 @@ impl Issuer {
             .map_err(|_| "invalid issuer configuration")?;
         if !config.active
             || config.policy.is_closed()
-            || !config
+            || config
                 .policy
                 .max_native_spend_lamports
-                .is_some_and(|limit| limit > 0)
+                .is_none_or(|limit| limit == 0)
             || config.max_snapshot_age_secs == 0
             || config.intent_lifetime_secs == 0
             || config.fee_reserve_lamports == 0

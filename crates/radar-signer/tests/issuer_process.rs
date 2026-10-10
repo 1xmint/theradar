@@ -4260,6 +4260,10 @@ fn conversion_rounds_down_and_fee_and_time_evidence_bound_the_proof() {
         let mut fixture = Fixture::new();
         fixture.snapshot["sol_upper_micro_usd"] = json!(price);
         fixture.config["fee_reserve_lamports"] = json!(fee);
+        // Isolate wallet reservation refusal from the new policy clamp. At a
+        // deliberately tiny price the converted amount exceeds available SOL;
+        // the default native cap would correctly narrow it to affordable size.
+        fixture.config["policy"]["max_native_spend_lamports"] = json!(u64::MAX);
         fixture.save();
         assert_eq!(fixture.start().ask(&fixture.candidate)["reason"], reason);
     }

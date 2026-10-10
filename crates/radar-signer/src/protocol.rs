@@ -98,10 +98,12 @@ pub struct Request {
     /// The most lamports the caller intended this transaction to spend.
     ///
     /// The authorization is in micro-USD and the transaction in lamports, and
-    /// this process has no price feed; the caller has one, so it converts and
-    /// says so here. It can only **narrow**: the authorization's own ceiling and
-    /// the signer's policy both still apply, so a caller that sets this to
-    /// `u64::MAX` gains nothing. See [`verify::CallerBounds`](crate::verify::CallerBounds).
+    /// this process has no price feed. The isolated issuer binds its protected
+    /// conversion into the Privy proof. This can only narrow the signer's own
+    /// native-spend policy; USD authorization limits are checked separately.
+    /// Old policy files retain their legacy restrictive bound. The library and
+    /// local lane cannot authenticate a caller's price conversion. See
+    /// [`verify::CallerBounds`](crate::verify::CallerBounds).
     ///
     /// Required, with no `serde` default. An optional bound whose absence means
     /// "no limit" is rule 8 broken in the one process that must not break it, so

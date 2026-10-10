@@ -4884,3 +4884,16 @@ its separate test). GitHub verification required; no local jobs or live changes.
 Still open: live complete portfolio/evidence adapter, token-bounded exits and
 mint/account roles, routing, adaptive supervisor/chat, isolated deployment and
 end-to-end recovery/canary evidence. Goal remains fully autonomous trading.
+
+### Native policy regression correction (2026-10-10)
+
+Run 38079356230 at 7a8fe94 found an old reservation test whose deliberately tiny
+SOL price now hits the native cap before reaching its intended insufficient-cash
+guard. In that test only, set the native ceiling above available cash so wallet
+reservation remains the isolated guard. New exact-cap and converted-amount
+regressions remain unchanged. Lint also requires simplifying the startup guard
+to is_none_or(limit == 0). New curve-buy and native signer cases passed in the
+completed mutation baseline log, but that baseline failed at the old test; do
+not count any mutation verification from this failed run. Preserve the current
+run until terminal before publishing the correction. Protocol comments now
+state separate USD/native checks and the authenticated Privy conversion exactly.
