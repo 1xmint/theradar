@@ -4037,3 +4037,16 @@ All 33 repo-conformance checks passed after staging, and git diff --cached
 --check passed. The full signer suite is 72 library + 52 issuer unit + 55 issuer
 process + 31 signer process + 11 Privy boundary tests = 221. Earlier collector
 proof remains 352 CLI/on-chain tests; these sources were unchanged here.
+
+### Integration handback: account review 0a17265 (2026-10-10)
+
+Fast-forwarded fix/wallet-signin-diagnostics locally to source 0a17265 after
+reading the entire staged diff and passing 221 signer tests, 33 conformance
+checks, scoped all-target Clippy, formatting and 35 restored manual faults.
+Both checkouts were clean at integration; no Cargo/rustc process remained.
+C: had 59,418,595,328 bytes free; no cleanup was needed or performed.
+At 04:43 UTC, prior CI 38023346308 remained in progress on shard 1; no source
+push or deployment. Collector 51ff9b9 and review 0a17265 still need fresh full CI.
+Read every prior shard baseline/result and the final gate before pushing these
+completed commits. Autonomous execution remains off; next work and outstanding
+activation requirements are in the source handback above.
