@@ -308,71 +308,63 @@ pub(super) fn capture(
     let rows = packet["transactions"]
         .as_array()
         .ok_or("native transfer transactions missing")?;
-    rows.iter()
-        .filter_map(|row| {
-            match recorded(row, history) {
-                Ok(true) => {
-                    let signature = row["collected_signature"].as_str().unwrap_or("");
-                    if !owned.contains(signature) || !seen.insert(signature.to_owned()) {
-                        return Some(Err(
-                            "recorded activity is duplicated or lacks cash history".into()
-                        ));
-                    }
-                    return None;
-                }
-                Ok(false) => {}
-                Err(error) => return Some(Err(error)),
+    let mut result = Vec::new();
+    for row in rows {
+        if recorded(row, history)? {
+            let signature = row["collected_signature"]
+                .as_str()
+                .ok_or("recorded signature missing")?;
+            if !owned.contains(signature) || !seen.insert(signature.to_owned()) {
+                return Err("recorded activity is duplicated or lacks cash history".into());
             }
-            Some((|| {
-                let reviewed = transaction(row, config.wallet)?;
-                let signature = reviewed["signature"]
+            continue;
+        }
+        let reviewed = transaction(row, config.wallet)?;
+        let signature = reviewed["signature"]
+            .as_str()
+            .ok_or("native transfer signature missing")?;
+        if row
+            .get("collected_signature")
+            .is_some_and(|value| value != signature)
+        {
+            return Err("collected signature differs from verified wire signature".into());
+        }
+        if owned.contains(signature)
+            || !seen.insert(signature.to_owned())
+            || integer(&reviewed, "execution_slot")? > native_slot
+        {
+            return Err("native transfer is duplicated or newer than native observation".into());
+        }
+        let mut evidence = json!({});
+        for field in [
+            "transaction_base64",
+            "slot",
+            "outcome",
+            "network_fee_lamports",
+            "pre_balances",
+            "post_balances",
+            "pre_token_balances",
+            "post_token_balances",
+        ] {
+            evidence[field] = row[field].clone();
+        }
+        let signed = b64::encode(
+            &b64::decode(
+                row["transaction_base64"]
                     .as_str()
-                    .ok_or("native transfer signature missing")?;
-                if row
-                    .get("collected_signature")
-                    .is_some_and(|value| value != signature)
-                {
-                    return Err("collected signature differs from verified wire signature".into());
-                }
-                if owned.contains(signature)
-                    || !seen.insert(signature.to_owned())
-                    || integer(&reviewed, "execution_slot")? > native_slot
-                {
-                    return Err(
-                        "native transfer is duplicated or newer than native observation".into(),
-                    );
-                }
-                let mut evidence = json!({});
-                for field in [
-                    "transaction_base64",
-                    "slot",
-                    "outcome",
-                    "network_fee_lamports",
-                    "pre_balances",
-                    "post_balances",
-                    "pre_token_balances",
-                    "post_token_balances",
-                ] {
-                    evidence[field] = row[field].clone();
-                }
-                let signed = b64::encode(
-                    &b64::decode(
-                        row["transaction_base64"]
-                            .as_str()
-                            .ok_or("native transaction missing")?,
-                    )
-                    .ok_or("native transaction base64 invalid")?,
-                );
-                evidence["transaction_base64"] = json!(signed);
-                Ok(radar_journal::NativeTransferRecord {
-                    wallet: config.wallet,
-                    signed_transaction: signed,
-                    evidence,
-                    review: reviewed,
-                })
-            })())
-        })
-        .collect()
+                    .ok_or("native transaction missing")?,
+            )
+            .ok_or("native transaction base64 invalid")?,
+        );
+        evidence["transaction_base64"] = json!(signed);
+        result.push(radar_journal::NativeTransferRecord {
+            wallet: config.wallet,
+            signed_transaction: signed,
+            evidence,
+            review: reviewed,
+        });
+    }
+    Ok(result)
 }
 
 #[cfg(test)]
@@ -542,11 +534,7 @@ mod tests {
             "pre_token_balances":[],"post_token_balances":[]}}]});
         current["wallet_activity"]["signatures"][0]["signature"] = signature;
         assert!(capture(&current, &json!({}), &config(), 11).is_err());
-        assert!(
-            capture(&current, &history, &config(), 11)
-                .unwrap()
-                .is_empty()
-        );
+        assert_eq!(capture(&current, &history, &config(), 11).unwrap().len(), 0);
         let mut missing = history.clone();
         missing["recorded_native_cash_flows"] = json!([]);
         assert!(capture(&current, &missing, &config(), 11).is_err());

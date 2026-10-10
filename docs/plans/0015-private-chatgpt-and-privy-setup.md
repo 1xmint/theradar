@@ -4534,3 +4534,13 @@ a real replayed recorded swap with repeated reads and conflicting token data.
 Unit floor 2217. Publish on an independent branch based on verified per-option
 controls while primary run 38065819742 finishes; all test/build/lint/mutation
 verification stays on GitHub. No production deployment, signing grant or trade.
+
+PR 341 first run 38067543478 at b1f0d12 is terminal: every ordinary job except
+lint passed, as did all four mutation baselines and final gate. Twenty-five
+mutants tested (twenty caught, five unviable), none missed. Lint found capture
+over its line limit and an empty assertion style issue. Simplified capture to a
+direct loop with normal error propagation and changed the assertion to show the
+actual length. No lint suppression or mutation exclusion; publish for fresh
+GitHub proof now that the prior run finished. Primary run 38065819742 remains
+live. Separate PR 342 includes the issuer in release hashes/artifacts; release
+run 38067699398 is live and has not installed anything on the VPS.
