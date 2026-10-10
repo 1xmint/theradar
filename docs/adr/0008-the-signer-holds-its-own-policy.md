@@ -1174,6 +1174,12 @@ current input packet. Coverage, daily loss/exposure, economic reconciliation and
 risk-state updates remain incomplete. This is durable evidence and comparison,
 not live idempotent portfolio application or authority to trade.
 
+Issuer startup reports stable history refusal categories for an owned journal,
+I/O failure, other journal errors, failed integrity and invalid operation replay.
+It omits file paths and underlying OS details. This changes diagnostics only:
+there is no retry, lock relaxation or change to authority. Process regressions
+exercise actual lock, malformed-history and invalid-replay refusals.
+
 ## What would reverse this
 
 Nothing foreseeable reverses holding a policy locally. The specific ceilings are

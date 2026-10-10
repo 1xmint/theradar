@@ -3,7 +3,8 @@
 
 **Date:** 2026-10-09.
 **Status:** source and protocol inspection; bounded address collector implemented
-on an isolated branch, local tests/lint/format passed; full CI pending, no live measurement.
+with full CI passed at 6d46e4e; live empty-wallet reads measured, without
+real-transaction coverage proof. Durable retention implemented locally; its full CI pending.
 **Bears on:** [private setup plan](../plans/0015-private-chatgpt-and-privy-setup.md)
 and [issuer policy](../adr/0008-the-signer-holds-its-own-policy.md).
 
@@ -75,4 +76,5 @@ The bounded collector now has local regressions for these boundaries, including
 an unresolved transaction whose wire bytes omit the queried owner. This checks
 that collection never claims local membership or complete wallet coverage; it
 is not a live token-account transfer measurement. Durable transfer retention
-and idempotent application remain unimplemented.
+is implemented locally with replay and conflict checks; its full CI is pending.
+Idempotent portfolio application remains unimplemented.

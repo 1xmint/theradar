@@ -280,6 +280,21 @@ fn verified_signed(
     Ok(radar_types::b64::encode(signed))
 }
 
+// Report a stable category without the journal path or underlying OS detail.
+fn history_refusal(error: &radar_journal::OperationError) -> &'static str {
+    match error {
+        radar_journal::OperationError::Journal(radar_journal::JournalError::Io {
+            source, ..
+        }) if source.kind() == std::io::ErrorKind::WouldBlock => "history already owned",
+        radar_journal::OperationError::Journal(radar_journal::JournalError::Io { .. }) => {
+            "history I/O unavailable"
+        }
+        radar_journal::OperationError::Journal(_) => "history journal refused",
+        radar_journal::OperationError::HistoryNotIntact(_) => "history integrity refused",
+        _ => "history replay refused",
+    }
+}
+
 impl Issuer {
     fn inventory_mode(&mut self, args: &[String]) -> Result<bool, String> {
         if args == ["--record-opening-inventory"] {
@@ -379,7 +394,7 @@ impl Issuer {
         // Never create missing capital history as an empty account.
         private_read(&config.history_path)?;
         let operations =
-            OperationLog::open(&config.history_path).map_err(|_| "history unavailable")?;
+            OperationLog::open(&config.history_path).map_err(|error| history_refusal(&error))?;
         let seed: [u8; 32] = serde_json::from_slice(&private_read(&config.key_path)?)
             .map_err(|_| "invalid issuer key")?;
         Ok(Self {
@@ -844,6 +859,38 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn history_diagnostics_distinguish_ownership_io_integrity_and_replay_without_details() {
+        use radar_journal::{JournalError, OperationError, Verified};
+        for (kind, expected) in [
+            (std::io::ErrorKind::WouldBlock, "history already owned"),
+            (
+                std::io::ErrorKind::PermissionDenied,
+                "history I/O unavailable",
+            ),
+        ] {
+            let error = OperationError::Journal(JournalError::Io {
+                path: "PRIVATE_HISTORY_PATH".into(),
+                source: std::io::Error::new(kind, "PRIVATE_OS_DETAIL"),
+            });
+            assert_eq!(super::history_refusal(&error), expected);
+        }
+        assert_eq!(
+            super::history_refusal(&OperationError::HistoryNotIntact(Verified::Torn {
+                events: 1
+            })),
+            "history integrity refused"
+        );
+        assert_eq!(
+            super::history_refusal(&OperationError::OpeningInventory),
+            "history replay refused"
+        );
+        assert_eq!(
+            super::history_refusal(&OperationError::Journal(JournalError::NoCorrelation)),
+            "history journal refused"
+        );
+    }
+
     #[test]
     fn exact_message_and_wallet_signature_are_required_at_packet_boundaries() {
         use ed25519_dalek::Signer as _;

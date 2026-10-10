@@ -3890,3 +3890,65 @@ fn protected_native_transfer_record_is_durable_and_comparison_counts_it_once() {
     assert_eq!(log.outstanding().count(), 1);
     assert_eq!(std::fs::read(&path).unwrap(), saved);
 }
+
+#[test]
+fn issuer_history_refusals_identify_lock_integrity_and_replay_without_exposing_details() {
+    let fixture = Fixture::new();
+    let path = fixture.dir.path().join("operations.jsonl");
+    let owner = radar_journal::OperationLog::open(&path).unwrap();
+    let output = fixture
+        .command()
+        .arg("--review-inventory")
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert_eq!(
+        String::from_utf8(output.stderr).unwrap().trim(),
+        "radar-issuer refused: history already owned"
+    );
+    drop(owner);
+    std::fs::write(&path, b"malformed history\n").unwrap();
+    let output = fixture
+        .command()
+        .arg("--review-inventory")
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert_eq!(
+        String::from_utf8(output.stderr).unwrap().trim(),
+        "radar-issuer refused: history integrity refused"
+    );
+    std::fs::write(&path, b"").unwrap();
+    let mut journal = radar_journal::Journal::open(&path).unwrap();
+    journal
+        .record_operation(
+            radar_journal::Outcome::Ok,
+            unix_now(),
+            radar_journal::Correlation {
+                operation: Some("missing operation".into()),
+                ..Default::default()
+            },
+            radar_journal::OperationEntry {
+                intent: radar_journal::Intent {
+                    asset: radar_types::Asset::Sol,
+                    amount: radar_types::TokenQuantity::lamports(1),
+                    at: radar_types::Slot(1000),
+                },
+                reserved: Some(radar_types::TokenQuantity::lamports(1)),
+                state: radar_journal::OperationState::Reserved,
+            },
+            None,
+            None,
+        )
+        .unwrap();
+    let output = fixture
+        .command()
+        .arg("--review-inventory")
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert_eq!(
+        String::from_utf8(output.stderr).unwrap().trim(),
+        "radar-issuer refused: history replay refused"
+    );
+}

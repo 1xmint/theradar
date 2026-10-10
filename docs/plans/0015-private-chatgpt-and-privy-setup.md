@@ -3783,3 +3783,26 @@ complete economic reconciliation/idempotent portfolio application, followed by
 independently constructed live risk inputs, execution/exits/recovery/scheduling,
 and owner limits plus isolated keys/verified Privy policy/delegation/funding/
 deployment validation. Retention does not authorize spending or release claims.
+
+
+### History diagnostics and completed prior CI (2026-10-09)
+
+CI 38004462702 attempt 2 completed successfully at source 6d46e4e: all
+ordinary jobs, four mutation shards and final gate passed. The rerun tests job
+114108474129 reports 2,574 passing Rust tests; web passed 352. Mutation totals
+remain 1,257 tested, 972 caught and 285 unviable, none missed. Only the failed
+tests job was rerun once on unchanged source. The original generic history
+failure did not repeat; its underlying cause remains unknown, not repaired.
+
+The isolated fix/issuer-history-diagnostics follow-up replaces the generic
+history-open refusal with stable ownership, I/O, journal, integrity and replay
+categories without paths or OS details. It does not retry, relax locking or
+change authority. Two regressions cover safe category mapping and actual child
+process refusals for held locks, malformed history and invalid operation replay.
+All 214 signer tests passed, scoped Rust 1.99 all-target Clippy passed, and five
+manual logic faults caught/restored the ownership guard and I/O/journal/
+integrity/replay categories. An initial harness assertion stopped before the
+I/O fault because formatting split the match arm; scope to the category literal
+and completed all four remaining faults. No fault is retained. Formatting and
+all 33 conformance checks passed before commit. Retention source 6ad039f and this
+follow-up still require new-source full CI. No deployment or live authority.
