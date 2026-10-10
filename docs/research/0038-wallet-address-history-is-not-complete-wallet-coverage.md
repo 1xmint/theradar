@@ -105,3 +105,13 @@ without verifying that the provider supplied a complete enumeration. Reported
 slots/outcomes remain provider facts; raw metadata is not promoted to independently
 verified effects. This local review is implemented, not yet full-CI verified.
 Lookup-table messages and financial-effect classification remain unresolved.
+
+The account-activity review also extracts canonical legacy SPL Token
+TransferChecked top-level instruction intents from signature-verified messages.
+It requires the exact program/opcode/data/account shape and a required-signing
+single authority. Requested amount/decimals and account roles come from signed
+bytes; they establish neither execution nor ownership. Other instruction forms
+remain explicit unresolved rows in original order. Token-2022, CPI, multisig,
+account writability, mint truth, balances and economic effects are not inferred.
+The whole transaction classification stays unresolved and all existing authority
+and portfolio flags remain false.

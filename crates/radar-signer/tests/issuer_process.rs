@@ -4016,14 +4016,21 @@ fn account_activity_fixture() -> Fixture {
         SigningKey::from_bytes(&[43; 32]),
         SigningKey::from_bytes(&[44; 32]),
     ];
-    let mut message = vec![2, 0, 0, 4];
+    let mut message = vec![2, 0, 0, 6];
     for key in &keys {
         message.extend(key.verifying_key().to_bytes());
     }
     message.extend(wallet.as_bytes());
     message.extend(token.as_bytes());
+    message.extend([7; 32]);
+    let program: radar_types::Address = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        .parse()
+        .unwrap();
+    message.extend(program.as_bytes());
     message.extend([9; 32]);
-    message.push(0);
+    message.extend([1, 5, 4, 3, 4, 2, 1, 10, 12]);
+    message.extend(7_u64.to_le_bytes());
+    message.push(6);
     let mut bytes = vec![2];
     for key in &keys {
         bytes.extend(key.sign(&message).to_bytes());
@@ -4197,6 +4204,12 @@ fn account_activity_review_verifies_all_signers_without_writing_or_claiming_exec
         assert_eq!(report[flag], false);
     }
     assert_eq!(report["transactions"][0]["classification"], "unresolved");
+    let intent = &report["transactions"][0]["top_level_instruction_intents"][0];
+    assert_eq!(intent["kind"], "spl_token_transfer_checked_intent");
+    assert_eq!(intent["requested_raw_amount"], "7");
+    assert_eq!(intent["requested_decimals"], 6);
+    assert_eq!(intent["source_account"], json!(address(0x66)));
+    assert_eq!(intent["execution_effects_verified"], false);
     assert!(!String::from_utf8_lossy(&output.stdout).contains("MUST_NOT_FORWARD_METADATA"));
     assert_eq!(std::fs::read(&path).unwrap(), saved);
     account_activity_target_bounds_and_future_opening_refuse();

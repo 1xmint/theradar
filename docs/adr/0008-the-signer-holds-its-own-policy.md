@@ -1246,6 +1246,14 @@ unverified, token/native effects unresolved and every economic/portfolio/release
 flag false. The command performs no journal write or authorization. It does not
 relabel the packet for the native-transfer accounting adapter.
 
+The signature-verified review includes ordered top-level instruction intents.
+Only canonical legacy SPL Token TransferChecked with a required-signing single
+authority is decoded: exact program, opcode 12, ten bytes and four account roles.
+Requested amount and decimals remain signed intent, even for reported failed
+execution. Token-2022, multisig, CPI and other forms stay explicit unresolved
+rows. This does not establish writability, mint/account truth, ownership or
+executed economic effects; the transaction classification remains unresolved.
+
 ## What would reverse this
 
 Nothing foreseeable reverses holding a policy locally. The specific ceilings are

@@ -53,7 +53,8 @@ fn transaction(row: &Value, reported: &[Address]) -> Result<Value, String> {
         json!({"signature":signature,"reported_slot":row["slot"],"reported_outcome":row["outcome"],
         "reported_for_addresses":reported,"signature_verified_locally":true,"address_membership_verified_locally":true,
         "message_decoded_locally":true,"versioned_message":message.versioned,
-        "classification":"unresolved","execution_effects_verified":false}),
+        "classification":"unresolved","execution_effects_verified":false,
+        "top_level_instruction_intents":super::token_intents::review(&message)}),
     )
 }
 

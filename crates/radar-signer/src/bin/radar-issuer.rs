@@ -38,6 +38,9 @@ mod cash;
 #[path = "radar-issuer/account_activity.rs"]
 mod account_activity;
 
+#[path = "radar-issuer/token_intents.rs"]
+mod token_intents;
+
 #[path = "radar-issuer/account_inventory.rs"]
 mod account_inventory;
 

@@ -4050,3 +4050,67 @@ push or deployment. Collector 51ff9b9 and review 0a17265 still need fresh full C
 Read every prior shard baseline/result and the final gate before pushing these
 completed commits. Autonomous execution remains off; next work and outstanding
 activation requirements are in the source handback above.
+
+### CI timeout diagnosis and unchanged rerun (2026-10-10)
+
+CI 38023346308 attempt 1 at 255337c completed cancelled, not green. The shard 1
+check annotation explicitly says it exceeded 30m0s; its log printed a passing
+unmutated baseline and 339 tested / 243 caught / 96 unviable before cancellation.
+The final gate failed with shards: cancelled. No newer push caused this stop.
+Other shards passed: 0 = 339 / 258 caught / 81 unviable; 2 = 339 / 284 / 55;
+3 = 338 / 264 / 74. These are observed summaries, not a substitute for a passing
+gate. Ordinary checks passed, including 2588 Rust tests, 8 private-setup Python
+tests and 352 web tests. No survivor was reported in the inspected summaries.
+
+Requested one unchanged job rerun with gh run rerun 38023346308 --job
+114128872692. Attempt 2 is in progress; shard 1 job is 114134402505. No timeout,
+workflow, exclusion, source or assertion changed to make CI pass. Keep the
+completed unpublished commits local while this run is active. If this timeout
+recurs, report it and agree the CI tradeoff before changing the gate.
+
+### Signed top-level token transfer intents (2026-10-10)
+
+Independent work on feat/signed-token-intents in the sibling checkout is based
+on primary 6f36d94. The caller is the protected account-activity review after
+all wire signatures and static reporting membership have passed. Add ordered
+instruction intent rows for exact canonical legacy SPL Token TransferChecked:
+program identity, opcode 12, ten bytes, four accounts and a required-signing
+single authority. Extract source/mint/destination/authority, unsigned little-endian
+raw requested amount and requested decimals. These are signed requests, not
+executed effects or authenticated mint/account ownership. Root classification
+stays unresolved. Other programs, Token-2022, multisig forms, unsupported extents
+and instructions remain explicit ordered unresolved rows, never disappear.
+
+Reference checked: the official SPL Token interface packing and account-order
+implementation at https://github.com/solana-program/token/blob/main/interface/src/instruction.rs.
+No new dependency. Two unit regressions and the existing actual protected issuer
+process cover exact extraction, unsupported forms, mixed instruction ordering,
+maximum integer precision and reported-failed transactions without history writes.
+Final restored checks and manual faults follow.
+
+Restored proof: 223 signer tests passed, scoped all-target Rust 1.99 Clippy and
+workspace formatting passed. Sixteen deliberate faults were caught/restored:
+five program/extent/opcode/signer guards, amount endianness, four account roles,
+decimals, recognized instruction order, execution/ownership flags, unknown-form
+classification and actual protected issuer dispatch. The recognized-order fault
+initially survived because only one recognized row was tested; added a second
+recognized row, then re-applied that exact fault and confirmed failure. Fixed two
+initial test-style Clippy findings without suppressions. Printing and iterator
+plumbing were not separately mutated. No dependency or exclusion changes.
+
+### Handback: signed token intent decoding complete locally (2026-10-10)
+
+This source commit on feat/signed-token-intents includes the handback; find its
+hash in git log. After staged conformance and full diff review, integrate locally
+into fix/wallet-signin-diagnostics. Prior CI 38023346308 attempt 2 remains in
+progress at last inspection; no push while it runs. The completed collector,
+signature review and this intent decoder all still need fresh full CI. On repeated
+CI timeout, agree the tradeoff with the owner before changing the check.
+
+No live read, keys, funding, delegation, deployment or trade. Autonomous remains
+off. Next is binding supported token intents to exact historical balance effects,
+with unsupported programs/CPI and ownership provenance remaining unknown; then
+complete coverage/reconciliation and idempotent risk-state application. Live risk
+inputs, execution/exits/recovery and owner limits/Privy deployment are still open.
+
+All 33 staged repo-conformance checks and git diff --cached --check passed.
