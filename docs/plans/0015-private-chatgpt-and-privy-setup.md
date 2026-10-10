@@ -4326,7 +4326,8 @@ requires 2209. No deployment or trade; autonomous execution remains off.
 PR 335 run 38063799478 completed: all mutation baselines and final gate passed;
 50 mutants tested (42 caught, 8 unviable), no missed. All ordinary jobs passed
 except tests, which failed AGENTS line-count conformance (415 versus 410).
-PR 336 run 38064184192 passed its mutation gate and all four baselines, but lint
+PR 336 run 38064184192 passed its mutation gate and three nonempty shard
+baselines (the fourth had zero mutants), but lint
 refused the regression's access to the underscored owner field; ordinary jobs
 were still running. Neither run establishes full success. Primary run
 38063256175 remains live; do not cancel or push onto its branch.
@@ -4340,3 +4341,38 @@ review and source formatting only locally; no local test/build/lint/mutation
 job. Publish the combined PR 335 head for fresh full GitHub CI, because its
 previous run is terminal, leaving PR 334 and PR 336 live jobs untouched. Neither
 economic coverage nor live signing is complete; autonomous execution stays off.
+
+### Combined GitHub proof and live readiness handback (2026-10-10)
+
+Previous goal turn made progress by publishing the owner repair. This turn
+resolved its lint issue, combined it with token reconciliation and obtained
+GitHub proof at 76fdf8ed34d2a7ac1d34407038f4e8b20b61d3cb. Run 38064406463
+passed every job: 2606 tests, build, lint, formatting, MSRV, web, site, licence,
+dependency checks and required final mutation gate. All four mutation baselines
+passed; shard summaries total 54 (43 caught, 11 unviable), none missed. The
+duplicated-descriptor owner regression and original valuation idempotency test
+passed in the ordinary test job. This establishes these tested outcomes, not
+the identity of the original contending lock holder. PR 335 description records
+the proof; PR 336 is closed because its sources and correction are included.
+Fast-forwarded local primary to 76fdf8e. No primary push over live CI.
+
+Read-only SSH inspection shows radar-serve, radar-codex, radar-follow and
+radar-market-tape active. Serve runs as guardian with ProtectHome read-only,
+NoNewPrivileges yes, WorkingDirectory /home/guardian/radar and writable path
+/home/guardian/radar/data. radar-signer.socket is inactive; executable tests for
+/usr/local/bin/radar-signer and /usr/local/bin/radar-issuer failed. This does not
+inspect every custom install path or prove configuration/funding. No secrets
+were read, no service restarted and no authority/delegation/trade changed.
+
+Primary run 38063256175 at cea2e21 remains in progress: mutation shard 0 passed,
+shards 1, 2 and 3 still running at last inspection. Ordinary tests already failed
+on old source, including valuation idempotency. Leave this exact run intact;
+once terminal, inspect all baselines, summaries and failure annotations, then
+publish integrated primary for fresh full-branch CI at its actual head. The
+stacked PR mutation scope covers new changes, not the full unpublished base
+delta against main. Do not use its green check to claim that broader scope.
+All test/build/lint/mutation jobs remain on GitHub. Next required work remains
+economic coverage and durable idempotent portfolio/risk application, independent
+live risk inputs, execution/exits/recovery/scheduling, and owner limits,
+isolated issuer/signer deployment, Privy policy/delegation and funding validation.
+Autonomous execution remains off; keep the full goal active.
