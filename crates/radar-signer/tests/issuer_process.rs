@@ -3976,7 +3976,14 @@ fn collected_recorded_swap_is_matched_without_creating_an_external_transfer() {
         "after_slot_exclusive":"1000","through_slot_inclusive":"1002",
         "signatures":[{"signature":review["signature"],"slot":review["slot"],"outcome":review["outcome"]}],"transactions":[row]});
     fixture.save();
-    for _ in 0..2 {
+    for known_addresses in [false, true, true] {
+        if known_addresses {
+            let packet = &mut fixture.snapshot["wallet_evidence"]["wallet_activity"];
+            packet["coverage"] = json!("provider_reported_known_address_history");
+            packet["queried_addresses"] = json!([fixture.config["wallet"]]);
+            packet["signatures"][0]["reported_for_addresses"] = json!([fixture.config["wallet"]]);
+            fixture.save();
+        }
         let output = record_native(&fixture);
         assert!(
             output.status.success(),

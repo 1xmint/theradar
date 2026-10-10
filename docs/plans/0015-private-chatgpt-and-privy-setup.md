@@ -4675,3 +4675,39 @@ Collector/issuer bridge PR 343 at 2031e2e passed every job in GitHub run
 38068950676, including all four baselines and final mutation gate. Logs show
 twelve mutants, nine caught and three unviable, none missed. Its verified source
 is ready for integration after the primary's current full run finishes.
+
+### Combined known-address history ingestion (2026-10-10)
+
+The actual wallet-activity-read --inventory-review collector emits
+provider_reported_known_address_history. Native transfer capture previously
+accepted only the wallet-only history variant, preventing the combined packet
+from reaching --record-native-transfers even for an exact retained swap or
+plain native transfer. Accept both collection variants. Combined-query packets
+must have unique, bounded targets including the wallet; reuse account activity
+row verification to bind each enumerated reporting address to a queried target
+and to the signed message before recognizing retained operations or classifying
+external native transfers. These targets describe queries, not verified account
+ownership. No complete wallet-coverage assertion or economic state release is
+introduced, and unsupported token/opaque external activity still refuses.
+
+Added a unit regression for recipient-account queries, exact sixteen-target
+boundary, forged membership, malformed targets, incomplete collection and
+changed native effects. Extended the actual issuer process's retained-swap
+regression through both packet variants and repeated combined reads without
+journal mutation. Unit floor 2218. Run all verification on GitHub in an
+independent stacked PR based on published primary ac2f87a, leaving full primary
+CI 38068474113 intact. No deployment, signing authority or live trade performed.
+The owner's adaptive-risk-panel discussion remains unsettled and independent
+of this collector/issuer integration fix.
+
+### Local integration of verified wallet controls (2026-10-10)
+
+Fast-forwarded local primary to PR 344 source 2b80d25, fully verified by
+GitHub run 38069237983, and merged PR 343 source 2031e2e, fully verified by
+38068950676. Only appended plan history conflicted; retained both sections.
+The adaptive-risk discussion is settled as recorded in design 0017 and plan
+0011. Combined unit floor 2219 includes both new regressions. Do not publish
+over still-live primary run 38068474113. Corrected kernel PR 345 run
+38069809249 has passed lint and all four mutation shards but other jobs remain
+live; do not call it fully verified or integrate until terminal inspection.
+No deployment or autonomous activation occurred.
