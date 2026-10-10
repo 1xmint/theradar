@@ -2244,6 +2244,21 @@ establish resolution of the observed failures.
 one transition when it already has the handle. The baseline CI exposed contention
 but no deterministic test reproduces this particular ownership window locally.
 
+Follow-up 2026-10-10: CI 38063256175 failed the repeated valuation subprocess
+assertion, without its stderr. The actual holder is still unknown. Rust's File
+documentation and Linux flock semantics establish that duplicated/inherited
+descriptors retain the lock until all close unless explicitly unlocked. The
+fix/journal-owner-release branch adds a private owner guard that explicitly
+unlocks when dropped in its acquiring process, including on replay failure.
+An inherited wrapper dropped in another PID must not unlock its parent's lock.
+A Unix regression keeps a duplicate alive across log drop, simulates the foreign
+PID destructor and checks that closing a stale duplicate cannot unlock a new
+owner. This deterministically models descriptor lifetime, not the unknown CI
+holder. GitHub must verify it and the existing idempotency tests. No retry,
+serialization, lock-file deletion or weaker acquisition refusal is introduced.
+References: https://doc.rust-lang.org/std/fs/struct.File.html#method.lock and
+https://man7.org/linux/man-pages/man2/flock.2.html.
+
 
 ## 54. A new classification returned before shared reservation checks
 

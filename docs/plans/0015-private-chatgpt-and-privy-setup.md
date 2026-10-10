@@ -4259,3 +4259,31 @@ all job results, each shard's baseline and mutation summary, and the final gate
 before treating these sources as verified or deploying. Do not push over the
 new run. Autonomous execution remains off pending the previously recorded
 economic coverage, risk-state, live input, execution and owner setup work.
+
+### Journal owner lifetime repair handback (2026-10-10)
+
+Previous goal turn made progress: PR 335 at aaf69ab added known token endpoint
+comparison; GitHub run 38063799478 is live. Primary run 38063256175 also remains
+live. Primary tests failed a repeated valuation assertion with no child stderr.
+Follow-up tests failed repo-conformance because the added owner preference made
+AGENTS 415 lines against its 410-line ceiling. Removed obsolete local-job
+guidance, keeping the GitHub preference and the existing ceiling intact.
+
+Separate fix/journal-owner-release branch at cea2e21 addresses the documented
+descriptor-lifetime mechanism: a private guard explicitly unlocks on drop in the
+acquiring process, including failed replay. A different PID's inherited wrapper
+does not explicitly unlock its parent. The new Unix test holds a cloned file
+descriptor across log drop and verifies refusal while live, release on drop,
+foreign-PID destructor behavior and continued ownership after a stale duplicate
+closes. Add child stderr to the exact repeated valuation assertion so recurrence
+reports its reason. No lock retry, serialization or owner-check bypass added.
+The actual holder in the original CI failure remains unknown; this is not a
+claim that the failure's cause has been captured or that CI is now green.
+
+No local test, build, lint or mutation job run. Source formatting and staged
+diff review only; fresh GitHub CI must verify the repair and exercise mutations.
+Publish separately over primary so neither existing live run is cancelled.
+After all runs finish, inspect actual test failures, every mutation baseline,
+summary and final gate, fix any survivors, and combine independently verified
+branches. Unit floor here is 2206; combining PR 335's three additional tests
+requires 2209. No deployment or trade; autonomous execution remains off.

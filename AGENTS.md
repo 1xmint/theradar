@@ -327,28 +327,17 @@ decisions about a trade-off that belongs to the owner. LEARNINGS 26.
 is using that machine while you work on it. `target/` reached **127GB** on
 2026-09-03 and froze it hard enough to need a forced power-off.
 
-**Do not run locally:** `cargo mutants` over anything wider than a single file,
-`cargo build --release`, repeated full-workspace rebuilds, `--jobs` above the
-default, or long-running background cargo. The edit-compile loop is fine.
-`just check` on a crate is fine. `cargo mutants -f one/file.rs` is fine.
+**Run tests, builds, lint and mutation jobs on GitHub**, as the owner requests
+in §6. Do not substitute workstation jobs for the GitHub checks.
 
 **Move it, do not skip it.** CI runs the mutation check sharded across four
-runners. Push the branch and read the result. **A local `cargo mutants -f` is for
-diagnosing a survivor CI has already reported** — one file, once. It is not the
-way to verify a fix: it costs about nine minutes of the whole machine per file,
-and four runners in parallel are both faster and free. Three serial runs on
-2026-09-03 cost an hour and told CI nothing it would not have said itself.
+runners. Push the branch and read the result.
 **And if CI cannot run it, say so and ask** — silently skipping a check and
 silently burning somebody's computer are the same mistake, acting on a trade-off
 that was not yours to make. LEARNINGS 26.
 
-**Spend the machine sparingly otherwise:** one cargo process at a time, never a
-background build alongside a foreground one. Scope to what you are editing
-(`-p <crate>`); the workspace-wide gate is for once, before committing. Prefer
-`just check` to ad-hoc flag combinations, which give each invocation a different
-fingerprint so every run invalidates the last. Kill background jobs and remove
-`mutants.out/` when you finish, and check `target/` after a session that built a
-lot.
+Keep workstation source inspection and editing lightweight; leave no background
+builds or local mutation output behind.
 
 **Never block on something you are not required to watch.** A poll loop, a
 `sleep`, a background waiter — all of it holds the turn open, keeps processes
