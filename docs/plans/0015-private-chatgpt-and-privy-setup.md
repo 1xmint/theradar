@@ -3749,3 +3749,37 @@ or cancellation caused it. Do not treat a rerun as an established root-cause
 repair. If it repeats, improve evidence and diagnose the exact failure before
 another attempt. New retention code still needs its own full CI after this run
 completes; no source publication or deployment in this increment.
+
+
+### Handback: transfer retention locally integrated; old test rerun pending (2026-10-09)
+
+Source 6ad039ff0f69bf447e05a6cdebce5044754a8b33 is committed on
+feat/native-transfer-retention and fast-forwarded locally into
+fix/wallet-signin-diagnostics. Both worktrees were clean after integration. The
+remote remains 6d46e4e. This new retention source has not been pushed or run in
+GitHub CI. Local proof: 504 scoped tests, 33 conformance checks, scoped all-target
+Rust 1.99 Clippy/formatting and 26 manual faults caught/restored. One previously
+ignored journal test is unchanged. Fixture helper refactoring passed affected
+native-transfer tests after the full scoped run.
+
+Prior source 6d46e4e CI 38004462702 attempt 2 still runs only tests job
+114108474129; all preserved checks including mutation shards/final gate are
+successful. Initial ordinary disposal-process failure was history unavailable,
+not an established root cause. PR 334 records exact initial mutation totals,
+the single rerun and that local retention is unpublished. Do not push over this
+run. On green, record its completed full-source result before publishing retention
+and inspecting new full CI. On repeat failure, diagnose the concrete underlying
+history error before another rerun or repair. No retries/locking relaxations,
+CI workflow changes or exclusions added.
+
+No local Cargo/rustc process remained at inspection. Target measured
+38,461,382,283 bytes; C free 59,374,178,304 bytes. Measurement process finished.
+No cleanup was attempted. No live read, key, limit, delegation, deployment or
+trade in this increment. Autonomous execution remains off.
+
+Durable transfer evidence/comparison now exists locally; historical account
+coverage and independent metadata provenance still do not. Next is verified
+complete economic reconciliation/idempotent portfolio application, followed by
+independently constructed live risk inputs, execution/exits/recovery/scheduling,
+and owner limits plus isolated keys/verified Privy policy/delegation/funding/
+deployment validation. Retention does not authorize spending or release claims.
