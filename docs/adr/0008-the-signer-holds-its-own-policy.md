@@ -1353,6 +1353,22 @@ provenance. Per-instruction mint/account roles and other-program semantics remai
 unresolved, so this quantity check alone cannot activate a live exit. It prepares
 the required enforceable bound, not a complete sell pipeline or ownership proof.
 
+## Execution routes by authorized trade direction
+
+radar_exec::execute requests a buy route only for Action::Buy. Reduce and Exit
+require positive max_token_debit_raw and request a sell route for that raw-token
+quantity. Missing or zero authority refuses before routing, signing or sending.
+Attempt.size_lamports remains a separate outgoing-native instruction ceiling;
+no USD or lamport count is substituted for a sale's tokens. The existing economics,
+signer-refusal and send ordering remains in force. This does not implement forced
+emergency exits or waive their costs; those need an explicit policy and tests.
+
+Routing::build_sell expresses sales into native SOL. The production Jupiter
+router still refuses both directions because it cannot build signer-readable
+transactions. This change does not turn a quote into execution support or derive
+sale authority from holdings. Live exit issuance, supported builders, independent
+signer semantics and sale accounting remain required before activation.
+
 ## What would reverse this
 
 Nothing foreseeable reverses holding a policy locally. The specific ceilings are

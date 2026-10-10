@@ -815,6 +815,10 @@ impl crate::pipeline::Routing for Router {
     fn build_buy(&self, _: &Address, _: &Address, _: u64) -> Result<Route, RouteError> {
         Err(RouteError::Unverifiable(CANNOT_BUILD.to_owned()))
     }
+
+    fn build_sell(&self, _: &Address, _: &Address, _: u64) -> Result<Route, RouteError> {
+        Err(RouteError::Unverifiable(CANNOT_BUILD.to_owned()))
+    }
 }
 
 #[cfg(test)]
@@ -976,17 +980,18 @@ mod tests {
         // operator reading a journal line learns what to fix rather than
         // concluding the market is thin.
         let router = Router::new(credentials());
-        let err = Routing::build_buy(
-            &router,
-            &Address::new([0x22; 32]),
-            &Address::new([0x33; 32]),
-            1_000_000,
-        )
-        .expect_err("the Router API cannot supply a signable transaction");
-        assert!(
-            matches!(err, RouteError::Unverifiable(ref m) if m.contains("lookup tables")),
-            "the refusal must name the reason, got {err}"
-        );
+        let mint = Address::new([0x22; 32]);
+        let wallet = Address::new([0x33; 32]);
+        for result in [
+            Routing::build_buy(&router, &mint, &wallet, 1_000_000),
+            Routing::build_sell(&router, &mint, &wallet, 1_000_000),
+        ] {
+            let err = result.expect_err("the Router API cannot supply a signable transaction");
+            assert!(
+                matches!(err, RouteError::Unverifiable(ref m) if m.contains("lookup tables")),
+                "the refusal must name the reason, got {err}"
+            );
+        }
     }
 
     #[test]

@@ -164,6 +164,10 @@ impl Routing for FixedRoute {
     fn build_buy(&self, _: &Address, _: &Address, _: u64) -> Result<Route, RouteError> {
         self.0.clone()
     }
+
+    fn build_sell(&self, _: &Address, _: &Address, _: u64) -> Result<Route, RouteError> {
+        self.0.clone()
+    }
 }
 
 fn a_route() -> Route {

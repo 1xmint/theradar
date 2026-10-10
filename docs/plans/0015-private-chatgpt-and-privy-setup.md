@@ -4998,3 +4998,26 @@ Merged verified native-unit source aa1ea1c (all GitHub checks green in
 physical-unit and token-quantity checks and all three actual-process regressions.
 Combined minimum test floor 2225. Fresh combined GitHub verification is required;
 separate native verification does not prove this new token-bound behavior.
+
+### Executor direction and handback (2026-10-10)
+
+Started feat/executor-trade-direction from verified token/native/direction
+source a6d1a9d while role-binding PR 351 runs GitHub CI 38081131378. This routing
+change is independent of the new signer-role implementation; neither run is
+cancelled or treated as verification of the other.
+
+Actual caller: radar_exec::execute. It previously always called build_buy even
+for Reduce/Exit. Add required Routing::build_sell and dispatch by authorization
+action. Sales require positive explicit raw-token authority and use that amount;
+missing/zero authority refuses before routing, signing or sending. Native bounds
+stay separate. Production Jupiter router continues to refuse in both directions.
+Updated every Routing implementation and added two executor regressions proving
+exact side/asset/wallet/amount, preserved native bound, and early refusal without
+any routing/key/send calls. Extended the router refusal regression to both sides.
+Unit test floor 2227 on this independent branch. No local jobs or live changes.
+
+Publish this branch for GitHub tests/build/lint/mutation verification. Integrate
+with role binding only after both actual runs pass; combined floor will be 2228.
+This does not implement sell construction, protected holdings/exit authority,
+portfolio evidence, sale reconciliation/recovery or adaptive supervision/chat.
+Goal remains fully autonomous trading; production authority remains closed.
