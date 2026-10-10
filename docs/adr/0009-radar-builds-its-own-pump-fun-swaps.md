@@ -255,6 +255,16 @@ choice to record. And `radar-signer`'s `verify::check` has not yet been run over
 a transaction this crate built, which is the next step and the one that matters
 for rule 1.
 
+## Exact-SOL argument correction, 2026-10-10
+
+The builder's inferred slippage_bps argument was wrong: it is min_tokens_out,
+in raw token units. [Research 0039](../research/0039-exact-sol-buys-have-a-token-floor-not-a-basis-point-argument.md)
+records the first-party interface, successful capture, old failed-capture caveat
+and corrected construction API. A separately verified fee-inclusive quote and
+tolerance now produce the raw token floor; quote provenance and issuer output
+authority remain separate requirements. GitHub verification is required before
+using this update; it does not establish live execution support.
+
 ## What would reverse this
 
 Jupiter routing pump.fun pre-graduation liquidity as legacy. It is one HTTP call

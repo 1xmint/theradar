@@ -2367,3 +2367,13 @@ signature was already recorded, so the immutability refusal masked the wire-to-
 evidence identity guard. Add malformed first-insert cases in an otherwise empty
 journal. Reapplying the artifact and signature guard removals now fails those
 cases. Identical-repeat and conflicting-repeat tests remain separate.
+
+## 58. A small captured amount was misnamed as a tolerance
+
+Trade::BuyExactSolIn inferred slippage_bps from a captured value of 500. The
+first-party interface names that argument min_tokens_out, and a successful
+capture carries 2202113837114 there. The old packet failed before the trade ran.
+Byte equality proved encoding, not the inferred unit or runtime acceptance.
+Rename the field, derive a token floor from a separately verified quote, and
+keep captured bytes, interface meaning and acceptance claims separate. Research
+0039 records the evidence and remaining limits. No live trade used this change.

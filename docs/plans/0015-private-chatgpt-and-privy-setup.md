@@ -5073,3 +5073,26 @@ separately and then another merge run, publish this combined source after the
 existing executor run is terminal. Role behavior is already verified; executor
 behavior and the combined result still require the fresh full GitHub run. This
 supersedes the earlier sequencing note, not any activation gate. No live change.
+
+### Exact-SOL output units and handback (2026-10-10)
+
+Previous goal turn made source progress by combining verified role checks and the
+executor correction. This turn verified CI 38081547094 at f90b058 fully green:
+17 mutants, nine caught and eight unviable, none missed; tests/build/lint and all
+other jobs passed. PR 352 now records those results. Nothing new was deployed.
+
+Started fix/curve-minimum-output-units from that verified combined source.
+Source inspection found the direct builder mislabeled min_tokens_out as
+slippage_bps. First-party pump interface at 2293f9a and successful captured
+transaction 3Dk1fn5... confirm native input then raw-token floor. Research 0039
+records the evidence, including the old failed-packet caveat. Rename the field
+and add Trade::exact_sol_buy, used by the existing builder-to-signer integration,
+to calculate a nonzero raw floor from a fee-inclusive quote and tolerance.
+Added capture-backed arguments and boundary/encoding regressions. Floor 2230.
+No local tests/build/lint/mutation jobs or live signing/deployment occurred.
+
+Publish for fresh GitHub verification. This corrects construction units, not
+quote freshness/provenance or independent authorized minimum-output enforcement.
+Those, live holdings/exit authority, supported sell construction and reconciliation,
+portfolio accounting/recovery, adaptive supervisor/research chat and protected
+site handover/deployment still remain. Goal stays fully autonomous trading.

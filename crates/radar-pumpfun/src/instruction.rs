@@ -56,9 +56,11 @@ pub enum Trade {
     BuyExactSolIn {
         /// Lamports to spend.
         lamports: u64,
-        /// The slippage allowance. **Name inferred**: the captured value was
-        /// 500, which reads as basis points beside a 3.5 SOL order.
-        slippage_bps: u64,
+        /// Minimum tokens received, in token base units, not basis points.
+        /// The earlier `slippage_bps` name was an incorrect inference from a
+        /// capture carrying 500. Use [`Trade::exact_sol_buy`] to apply a
+        /// basis-point tolerance to a separately verified token quote.
+        min_tokens_out: u64,
         /// See [`Trade::Buy::track_volume`].
         track_volume: bool,
     },
@@ -78,6 +80,33 @@ pub enum Trade {
 }
 
 impl Trade {
+    /// Builds an exact-SOL buy with a minimum token output from a quote.
+    ///
+    /// The quote must already account for venue fees; its provenance and
+    /// freshness are the caller's responsibility. This pure calculation does
+    /// not obtain or authenticate a quote. The floor rounds down in raw token
+    /// units. Zero spend, a zero resulting floor, or tolerance of 100% or more
+    /// returns `None`; such a buy would have no meaningful output protection.
+    #[must_use]
+    pub fn exact_sol_buy(
+        lamports: u64,
+        quoted_tokens: u64,
+        slippage_bps: u16,
+        track_volume: bool,
+    ) -> Option<Self> {
+        let retained_bps = 10_000_u16.checked_sub(slippage_bps)?;
+        let minimum = u128::from(quoted_tokens) * u128::from(retained_bps) / 10_000;
+        let min_tokens_out = u64::try_from(minimum).ok()?;
+        if lamports == 0 || min_tokens_out == 0 {
+            return None;
+        }
+        Some(Self::BuyExactSolIn {
+            lamports,
+            min_tokens_out,
+            track_volume,
+        })
+    }
+
     /// Which decoded instruction this builds.
     #[must_use]
     pub const fn instruction(&self) -> Instruction {
@@ -123,11 +152,11 @@ impl Trade {
             }
             Self::BuyExactSolIn {
                 lamports,
-                slippage_bps,
+                min_tokens_out,
                 track_volume,
             } => {
                 out.extend_from_slice(&lamports.to_le_bytes());
-                out.extend_from_slice(&slippage_bps.to_le_bytes());
+                out.extend_from_slice(&min_tokens_out.to_le_bytes());
                 out.push(u8::from(track_volume));
             }
             Self::Sell {
@@ -290,14 +319,78 @@ mod tests {
 
     #[test]
     fn a_buy_of_an_exact_sol_amount_encodes_to_the_bytes_mainnet_carried() {
+        // This older packet was in a failed transaction before the trade ran.
+        // It pins observed bytes, not acceptance or the argument's meaning.
         let built = Trade::BuyExactSolIn {
             lamports: 3_500_000_000,
-            slippage_bps: 500,
+            min_tokens_out: 500,
             track_volume: false,
         }
         .data()
         .expect("a discriminator");
         assert_eq!(hex(&built), OBSERVED_BUY_EXACT);
+    }
+
+    #[test]
+    fn captured_exact_sol_buy_arguments_are_spend_and_token_floor() {
+        let captures: serde_json::Value = serde_json::from_str(include_str!(
+            "../../radar-signer/tests/fixtures/pumpfun_trade_roles.json"
+        ))
+        .unwrap();
+        let row = captures["trades"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|row| row["name"] == "buy_exact_sol_in")
+            .unwrap();
+        assert!(row["execution_error"].is_null());
+        let captured = radar_types::b64::decode(row["data_base64"].as_str().unwrap()).unwrap();
+        let built = Trade::BuyExactSolIn {
+            lamports: 654_301_622,
+            min_tokens_out: 2_202_113_837_114,
+            track_volume: false,
+        }
+        .data()
+        .unwrap();
+        // This accepted capture omits trailing flags. Only its discriminator
+        // and two quantity arguments are an execution-backed layout anchor.
+        assert_eq!(captured.len(), 24);
+        assert_eq!(&built[..24], captured);
+    }
+
+    #[test]
+    fn exact_sol_buy_converts_tolerance_to_raw_tokens_and_refuses_unbounded_output() {
+        for (spend, quote, bps, expected) in [
+            (10, 1_000_000, 500, Some(950_000)),
+            (10, 101, 1, Some(100)),
+            (10, u64::MAX, 0, Some(u64::MAX)),
+            (10, 10_000, 9_999, Some(1)),
+            (0, 1_000_000, 500, None),
+            (10, 0, 500, None),
+            (10, 1, 1, None),
+            (10, 10_000, 10_000, None),
+            (10, 10_000, u16::MAX, None),
+        ] {
+            let actual = Trade::exact_sol_buy(spend, quote, bps, true);
+            assert_eq!(
+                actual,
+                expected.map(|min_tokens_out| Trade::BuyExactSolIn {
+                    lamports: spend,
+                    min_tokens_out,
+                    track_volume: true,
+                })
+            );
+        }
+        let trade = Trade::exact_sol_buy(10, 1_000, 500, false).unwrap();
+        assert_eq!(
+            trade,
+            Trade::BuyExactSolIn {
+                lamports: 10,
+                min_tokens_out: 950,
+                track_volume: false,
+            }
+        );
+        assert_eq!(&trade.data().unwrap()[16..24], &950_u64.to_le_bytes());
     }
 
     #[test]
@@ -331,7 +424,7 @@ mod tests {
             (
                 Trade::BuyExactSolIn {
                     lamports: 1,
-                    slippage_bps: 1,
+                    min_tokens_out: 1,
                     track_volume: false,
                 },
                 "buy_exact_sol_in",
@@ -380,7 +473,7 @@ mod tests {
         };
         let b = Trade::BuyExactSolIn {
             lamports: 100,
-            slippage_bps: 200,
+            min_tokens_out: 200,
             track_volume: true,
         };
         assert_ne!(a.discriminator(), b.discriminator());
