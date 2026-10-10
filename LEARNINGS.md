@@ -13,7 +13,7 @@ benefit of the doubt on everything else.
 
 ## Index
 
-**43 of these 57 name something mechanical that would catch a
+**44 of these 58 name something mechanical that would catch a
 recurrence. 14 name only a habit, and say so** — which is this file's opening
 standard rather than a gap in it. The habit-only rows are the ones worth reading
 twice; nothing will stop those repeating except somebody remembering.
@@ -82,6 +82,7 @@ quietly absent.
 | [55](#55-observation-tests-skipped-the-accepted-equality-boundary) | Observation tests skipped the accepted equality boundary | exact-slot native and token inventory process regression |
 | [56](#56-a-self-transfer-hid-an-impossible-intermediate-debit) | A self-transfer hid an impossible intermediate debit | native transfer intermediate-balance regression |
 | [57](#57-malformed-packet-tests-failed-at-a-different-guard) | Malformed packet tests failed at a different guard | signed malformed-header and balance-consistent duplicate-account regressions |
+| [58](#58-a-small-captured-amount-was-misnamed-as-a-tolerance) | A small captured amount was misnamed as a tolerance | raw-token floor conversion and successful-capture argument regressions |
 
 ---
 
@@ -2377,3 +2378,5 @@ Byte equality proved encoding, not the inferred unit or runtime acceptance.
 Rename the field, derive a token floor from a separately verified quote, and
 keep captured bytes, interface meaning and acceptance claims separate. Research
 0039 records the evidence and remaining limits. No live trade used this change.
+
+**What catches a recurrence:** the raw-token floor conversion and successful-capture argument regressions in crates/radar-pumpfun/src/instruction.rs; the quote provenance still needs independent verification.
