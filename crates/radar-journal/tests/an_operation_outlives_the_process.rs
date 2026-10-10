@@ -40,6 +40,7 @@ fn opening() -> radar_journal::OpeningInventoryRecord {
         raw_token_slot: None,
         read_started_at_unix_secs: 1000,
         read_completed_at_unix_secs: 1001,
+        accounts: None,
         holdings: vec![],
     }
 }
@@ -1911,4 +1912,26 @@ fn native_transfer_storage_checks_exact_wire_extent_and_canonical_identity() {
         }
         assert!(log.record_native_transfer(record, 1).is_err(), "{case}");
     }
+}
+
+#[test]
+fn opening_account_extension_preserves_legacy_serialization_and_replays_known_empty() {
+    let old = opening();
+    let value = serde_json::to_value(&old).unwrap();
+    assert!(value.get("accounts").is_none());
+    let roundtrip: radar_journal::OpeningInventoryRecord =
+        serde_json::from_value(value.clone()).unwrap();
+    assert_eq!(serde_json::to_value(roundtrip).unwrap(), value);
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("known-empty.jsonl");
+    let mut log = OperationLog::open(&path).unwrap();
+    let mut known = old.clone();
+    known.accounts = Some(vec![]);
+    log.record_opening_inventory(known.clone(), 1001).unwrap();
+    let checkpoint = log.checkpoint().to_owned();
+    drop(log);
+    let mut log = OperationLog::open(&path).unwrap();
+    assert_eq!(log.opening_inventory(), Some(&known));
+    assert_eq!(log.checkpoint(), checkpoint);
+    assert!(log.record_opening_inventory(old, 1002).is_err());
 }

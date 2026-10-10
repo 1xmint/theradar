@@ -61,6 +61,10 @@ pub(super) fn capture(
             .as_u64()
             .ok_or("opening completion missing")?,
         holdings,
+        accounts: Some(inventory::capture_accounts(
+            value,
+            snapshot.state.now.get(),
+        )?),
     })
 }
 
@@ -85,6 +89,7 @@ pub(super) fn floor(
             return Err("duplicate opening mint".into());
         }
     }
+    super::account_inventory::validate(opening)?;
     Ok(floor.max(opening.raw_token_slot.unwrap_or(floor)))
 }
 
@@ -134,6 +139,7 @@ mod tests {
             raw_token_slot: Some(Slot(43)),
             read_started_at_unix_secs: 1,
             read_completed_at_unix_secs: 2,
+            accounts: None,
             holdings: vec![OpeningTokenHolding {
                 mint: Address::new([2; 32]),
                 token_program: Address::new([3; 32]),
@@ -181,6 +187,7 @@ mod tests {
             "raw_old",
             "duplicate",
             "holdings_absent",
+            "accounts_mismatch",
         ] {
             let mut bad = record.clone();
             match case {
@@ -190,6 +197,7 @@ mod tests {
                 "raw_old" => bad.raw_token_slot = Some(Slot(41)),
                 "duplicate" => bad.holdings.push(bad.holdings[0].clone()),
                 "holdings_absent" => bad.holdings.clear(),
+                "accounts_mismatch" => bad.accounts = Some(vec![]),
                 _ => unreachable!(),
             }
             assert!(

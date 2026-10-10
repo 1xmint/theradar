@@ -3832,3 +3832,47 @@ then complete economic reconciliation and idempotent portfolio application;
 independent live risk inputs and execution/exits/recovery/scheduling remain.
 Activation also requires owner money limits, isolated keys, verified Privy
 policy/delegation, funding and bounded deployment validation.
+
+
+### Opening account identity retention and comparison (2026-10-10)
+
+Prior source f3e7f59 passed every job and final gate in CI 38017286781:
+2,583 Rust tests and 352 web tests. All four mutation baselines passed;
+shards 0/1/2/3 tested 333/333/333/332, caught 253/241/276/264 and marked
+80/92/57/68 unviable. Total 1,331 tested, 1,034 caught, 297 unviable, none
+missed. Final gate reports shards: success. No rerun or workflow change.
+
+Inspection found opening inventory retains mint totals but drops the account
+identities needed to keep historical scan targets. New opening records now
+persist normalized account address/mint/program/units/state/quantity rows from
+validated raw/listed observations. Older records omit this optional field and
+report unknown account history; they are not silently upgraded. Protected
+review validates opening uniqueness/state/grouping and exact mint totals, then
+reports the deterministic union of opening/current accounts. Missing rows keep
+null quantities; changed identity/units refuse. Equal mint totals no longer hide
+migration between known accounts. Arbitrary provider fields do not persist.
+
+This is known endpoint account evidence only. It does not identify accounts
+created and closed between observations, prove complete history or update risk
+state, release claims or grant authority. No network/delegation/deployment/trade.
+Five new regressions cover old serialization/known-empty durable replay,
+account migration/unknowns/conflicts/group corruption and actual protected
+opening/review process replay without writing during comparison. Verification
+and manual logic faults are recorded below before publication.
+
+
+Local restored proof: 273 scoped tests (55 journal, 218 signer), with the one
+pre-existing ignored journal test unchanged. Rust 1.99 scoped all-target Clippy
+and formatting passed after collapsing a conditional and extracting the
+observed-inventory helper to satisfy the existing length check. No suppression.
+Sixteen manual logic faults caught/restored: account/state uniqueness, grouped
+program/units/sums/mint uniqueness/totals, both sides of the address union,
+reused mint/program/units, unknown-opening presence, retained-history flag,
+opening validation caller and account capture caller. JSON formatting and
+unchanged transport plumbing are not separately mutated. Initial duplicate-
+check removal was unviable due to inferred BTreeSet type; preserve insertion
+while bypassing its result and catch the semantic fault. An opening-file
+harness newline conversion and a multiline-pattern assertion stopped before
+valid fault execution; byte-preserving writes and scoped pattern fixed the
+harness. All production sources restored. All 33 conformance checks passed
+after staging the new module. New-source full CI still required.

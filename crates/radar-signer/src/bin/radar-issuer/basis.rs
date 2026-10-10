@@ -165,6 +165,7 @@ mod tests {
             raw_token_slot: None,
             read_started_at_unix_secs: 1,
             read_completed_at_unix_secs: 1,
+            accounts: None,
             holdings: vec![],
         }
     }

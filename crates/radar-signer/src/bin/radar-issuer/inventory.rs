@@ -48,7 +48,7 @@ fn add(
     Ok(())
 }
 
-fn observations(value: &Value, maximum: u64) -> Result<BTreeMap<Address, Quantity>, String> {
+fn accounts(value: &Value, maximum: u64) -> Result<BTreeMap<Address, Account>, String> {
     let raw = &value["raw_token_verification"];
     if raw["authority"] != "read_only" || raw["inventory_complete"] != false {
         return Err("raw inventory evidence missing or unsupported".into());
@@ -99,8 +99,12 @@ fn observations(value: &Value, maximum: u64) -> Result<BTreeMap<Address, Quantit
             return Err("raw inventory context is outside reviewed bounds".into());
         }
     }
+    Ok(listed)
+}
+
+fn observations(value: &Value, maximum: u64) -> Result<BTreeMap<Address, Quantity>, String> {
     let mut totals = BTreeMap::new();
-    for account in listed.into_values() {
+    for account in accounts(value, maximum)?.into_values() {
         add(
             &mut totals,
             account.mint,
@@ -113,6 +117,30 @@ fn observations(value: &Value, maximum: u64) -> Result<BTreeMap<Address, Quantit
         )?;
     }
     Ok(totals)
+}
+
+pub(super) fn capture_accounts(
+    value: &Value,
+    maximum: u64,
+) -> Result<Vec<radar_journal::OpeningTokenAccount>, String> {
+    accounts(value, maximum)?
+        .into_values()
+        .map(|account| {
+            Ok(radar_journal::OpeningTokenAccount {
+                address: account.address,
+                holding: radar_journal::OpeningTokenHolding {
+                    mint: account.mint,
+                    token_program: account.program,
+                    decimals: account.decimals,
+                    raw_amount: account
+                        .raw_amount
+                        .parse()
+                        .map_err(|_| "invalid inventory quantity")?,
+                },
+                state: account.state,
+            })
+        })
+        .collect()
 }
 
 fn compare(
@@ -193,6 +221,16 @@ fn comparison_lots(history: &Value, minimum: u64, native: u64) -> Result<Vec<Val
         .collect()
 }
 
+fn observed_inventory(
+    value: &Value,
+    maximum: u64,
+    opening: Option<&radar_journal::OpeningInventoryRecord>,
+) -> Result<(BTreeMap<Address, Quantity>, Value), String> {
+    let observed = observations(value, maximum)?;
+    let rows = super::account_inventory::review(opening, &capture_accounts(value, maximum)?)?;
+    Ok((observed, rows))
+}
+
 pub(super) fn review(
     snapshot: &Snapshot,
     config: &Config,
@@ -227,7 +265,7 @@ pub(super) fn review(
         .into_iter()
         .min()
         .ok_or("inventory contexts missing")?;
-    let observed = observations(value, snapshot.state.now.get())?;
+    let (observed, account_rows) = observed_inventory(value, snapshot.state.now.get(), opening)?;
     if let Some(fees) = history["failed_execution_fees"].as_array() {
         let native = evidence_integer(&value["native_sol"], "slot")?;
         for fee in fees {
@@ -291,7 +329,7 @@ pub(super) fn review(
         "token_program_slot":value["token_program"]["slot"],
         "token_2022_slot":value["token_2022"]["slot"],
         "raw_token_slot":value["raw_token_verification"]["slot"],
-        "acquisition_history":history,"tokens_by_mint":rows,
+        "acquisition_history":history,"tokens_by_mint":rows,"token_account_comparison":account_rows,
         "recorded_native_cash_comparison":cash,"reviewed_external_native_transfers":transfers,
         "opening_inventory":opening,"opening_cost_basis_micro_usd":null,"wallet_inventory_complete":false,
         "current_exposure_micro_usd":null,"realised_loss_today_micro_usd":null,

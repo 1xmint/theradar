@@ -35,6 +35,9 @@ mod native_transfers;
 #[path = "radar-issuer/cash.rs"]
 mod cash;
 
+#[path = "radar-issuer/account_inventory.rs"]
+mod account_inventory;
+
 #[path = "radar-issuer/inventory.rs"]
 mod inventory;
 

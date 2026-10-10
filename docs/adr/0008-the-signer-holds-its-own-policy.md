@@ -1180,6 +1180,24 @@ It omits file paths and underlying OS details. This changes diagnostics only:
 there is no retry, lock relaxation or change to authority. Process regressions
 exercise actual lock, malformed-history and invalid-replay refusals.
 
+New protected opening inventories also retain normalized token-account rows:
+address, mint, program, decimals, exact raw quantity and observed state. The
+optional accounts field is omitted for older records so their historical
+serialization remains unchanged; absent history is unknown, distinct from a
+new known-empty enumeration. Accounts are normalized from the same validated
+raw/listed observation, without retaining arbitrary provider fields.
+
+Protected inventory comparison validates unique opening addresses, allowed
+states, consistent units/programs, checked quantity sums and exact agreement
+with retained mint totals. It reports the deterministic union of opening and
+current addresses, retaining missing current rows with null quantities rather
+than asserting a zero balance or account closure. Conflicting reuse of an
+address for another mint, program or units refuses. These rows expose migration
+that aggregate mint totals cannot show, but do not discover transient accounts
+created and closed between reads. Historical coverage, economics, spendability,
+portfolio updates and authority remain incomplete. The caller is inventory
+review; the journal retains data without claiming independent chain provenance.
+
 ## What would reverse this
 
 Nothing foreseeable reverses holding a policy locally. The specific ceilings are

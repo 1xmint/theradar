@@ -3952,3 +3952,55 @@ fn issuer_history_refusals_identify_lock_integrity_and_replay_without_exposing_d
         "radar-issuer refused: history replay refused"
     );
 }
+
+#[test]
+fn opening_account_rows_survive_replay_and_current_account_migration() {
+    let mut fixture = Fixture::new();
+    set_inventory(&mut fixture, 10, 1000);
+    fixture.snapshot["wallet_evidence"]["raw_token_verification"]["accounts"][0]["private_extra"] =
+        json!("MUST_NOT_RETAIN_ACCOUNT_EXTRA");
+    fixture.save();
+    let output = record_opening(&fixture);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let path = fixture.dir.path().join("operations.jsonl");
+    let saved = std::fs::read(&path).unwrap();
+    assert!(!String::from_utf8_lossy(&saved).contains("MUST_NOT_RETAIN_ACCOUNT_EXTRA"));
+    let log = radar_journal::OperationLog::open(&path).unwrap();
+    let rows = log.opening_inventory().unwrap().accounts.as_ref().unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].address.to_string(), address(0x66));
+    assert_eq!(rows[0].holding.raw_amount, 10);
+    fixture.snapshot["accounting_checkpoint"] = json!(log.checkpoint());
+    drop(log);
+    set_inventory(&mut fixture, 10, 1001);
+    for read in ["token_program", "raw_token_verification"] {
+        fixture.snapshot["wallet_evidence"][read]["accounts"][0]["address"] = json!(address(0x67));
+    }
+    fixture.save();
+    let output = inventory_report(&fixture);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["tokens_by_mint"][0]["quantity_matches"], true);
+    let accounts = &report["token_account_comparison"];
+    assert_eq!(accounts["accounts"].as_array().unwrap().len(), 2);
+    let old = accounts["accounts"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["address"] == address(0x66))
+        .unwrap();
+    assert_eq!(old["opening_raw"], "10");
+    assert_eq!(old["current_present"], false);
+    assert!(old["current_raw"].is_null());
+    assert_eq!(accounts["historical_account_coverage_complete"], false);
+    assert_eq!(report["portfolio_state_updated"], false);
+    assert_eq!(std::fs::read(&path).unwrap(), saved);
+}

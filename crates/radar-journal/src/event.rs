@@ -224,6 +224,9 @@ pub struct OpeningInventoryRecord {
     pub read_completed_at_unix_secs: u64,
     /// Exact grouped quantities. Cost basis and spendability remain unknown.
     pub holdings: Vec<OpeningTokenHolding>,
+    /// Verified opening account rows; absent in older records means unknown.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub accounts: Option<Vec<OpeningTokenAccount>>,
 }
 
 /// One mint's normalized opening quantity, not a valued position.
@@ -237,6 +240,17 @@ pub struct OpeningTokenHolding {
     pub decimals: u8,
     /// Checked sum across distinct observed token accounts.
     pub raw_amount: u64,
+}
+
+/// One verified opening token account, retained even after it disappears.
+#[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
+pub struct OpeningTokenAccount {
+    /// Token account address, distinct from wallet and mint.
+    pub address: radar_types::Address,
+    /// Group identity and exact raw quantity.
+    pub holding: OpeningTokenHolding,
+    /// Observed state; this alone never establishes spendability.
+    pub state: String,
 }
 
 /// One line of the journal.
