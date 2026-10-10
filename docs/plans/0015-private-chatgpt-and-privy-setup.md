@@ -4609,3 +4609,22 @@ predates mixed-activity integration 164d334 and must not be represented as its
 release. Primary run 38065819742 shard 1 remains confirmed live at inspection;
 wait for its terminal output before publishing the integrated source and
 requesting its full CI/release build. Nothing was installed or activated.
+
+### Full primary run completion and publication (2026-10-10)
+
+Run 38065819742 at 62cfeb8 is terminal, with no cancellation or timeout. Every
+ordinary job passed, including 2610 Rust tests. All four mutation baselines
+passed; 1617 mutants tested: 1274 caught, 340 unviable and the three known
+risk-floor survivors in shard 3. Shard 1 finished successfully after 37 minutes
+with 405 mutants (280 caught, 125 unviable). Inspected both failed job logs and
+annotations; the final gate correctly reports shard failure. The exact three
+survivors were corrected and verified in f39d8d7, already integrated locally.
+
+Publish the combined primary now: per-option controls, corrected retained risk,
+recorded activity recognition and issuer release packaging all have their scoped
+GitHub proof. Request fresh full-scope CI against main and a release build of
+this integrated commit. Leave both intact to terminal results. Do not deploy
+the older 9e43e11 artifact as this source or enable autonomous execution: live
+risk construction, complete economic reconciliation/durable application,
+execution/exits/recovery, isolated service installation, Privy delegation and
+funding verification remain. Owner choices stay on the website per option.
