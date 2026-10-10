@@ -4897,3 +4897,70 @@ completed mutation baseline log, but that baseline failed at the old test; do
 not count any mutation verification from this failed run. Preserve the current
 run until terminal before publishing the correction. Protocol comments now
 state separate USD/native checks and the authenticated Privy conversion exactly.
+
+### Signer verifies known curve trade direction (2026-10-10)
+
+Native completion PR 347 at 8acc176 passed all jobs in GitHub run
+38077732628, with four baselines and thirty-three mutants: twenty-seven caught,
+six unviable, none missed. Fast-forwarded combined source and published handoff
+63e66e6; combined CI 38078028706 and release 38078025956 are live. Leave those
+runs intact. This branch is based independently on verified controls 57c2757.
+
+Actual caller: radar_signer::check, used by both local and isolated Privy signing
+processes. It decoded buy sizes but skipped all sales and never checked a known
+venue trade's side against Authorization.action. Decode every known curve trade,
+including sell argument extents. Require Buy for acquisitions and Reduce/Exit
+for sales; refuse mixed directions within one message. Keep every native spend,
+policy, expiry, ownership and nonce check. A trusted issuer proof cannot waive
+the decoded direction. Update the previous large-sale regression to use actual
+Exit authority; its minimum incoming SOL still does not count as outgoing spend.
+
+Added one unit matrix across all six trade variants and all three actions,
+mixed messages and every truncated sale argument extent, plus an actual Privy
+process regression with valid re-attested proofs. A verified issuer attempt
+consumes its nonce even on refusal; corrected direction needs fresh authority
+and duplicate success refuses.
+Unit floor 2221. Verify on GitHub; no local jobs or live signing.
+
+This closes only a concrete side mismatch after verification. Sale token bounds,
+per-instruction mint/account roles, routing, live snapshot accounting and exit
+completion remain open, alongside the adaptive supervisor/chat and delegation.
+It does not claim a generic arbitrary-program semantic check or enable exits.
+The goal remains fully autonomous trading.
+
+
+Direction PR 348 initially had no CI run because GitHub reported conflicting
+appended ADR/plan sections against integrated 63e66e6. Merged that verified
+base and retained both accounting and direction sections; no production-source
+conflict. Combined CI 38078028706 and release 38078025956 at 63e66e6 are now
+fully green; downloaded all six binaries and matched every release SHA256.
+The root-owned issuer still needs protected installation/configuration; fixed
+radar-deploy updates only Serve, so no issuer installation was implied.
+Publish the conflict resolution to allow PR 348's actual GitHub checks to run.
+
+Also re-inspected verify.rs lamport_ceiling: it still reads the USD notional as
+lamports and takes the minimum with the actual lamport conversion. The source
+explicitly documents this as blocking real sizing. A separate physical spend
+ceiling with explicit native units, independently enforced in the signer and
+bound to issuer proof, must replace that unit substitution before activation.
+Do not fix it by widening an untrusted caller bound or silently trusting a price
+inside the signer. Preserve the owner's USD-facing choices and closed defaults.
+This is an implementation requirement to resolve next, not new authority.
+
+### Direction process regression correction (2026-10-10)
+
+Run 38078622823 at 7073f4e completed with a failing new process regression,
+including mutation baselines. Build, lint, format and unit direction checks
+passed. The regression incorrectly expected a refused, issuer-verified attempt
+to leave its nonce reusable. Actual handle_privy deliberately claims before
+key use/checks and never rolls back: even interrupted or rejected attempts need
+fresh issuer authority. Preserve that protection. Assert corrected bytes with
+the old nonce refuse for reuse, then re-attest a fresh nonce and require success.
+No production behavior changed in this correction. Verify on GitHub before
+integrating direction enforcement; autonomous signing remains closed.
+
+Merged verified trade-direction source 5dc2cbe into the native-unit branch while
+its original run finishes. Preserve both process regressions and ADR/plan
+sections. Combined unit floor 2222. The merge requires a fresh GitHub run with
+the reservation/lint correction; do not infer combined verification from the
+separate direction run. No production configuration or service was changed.
