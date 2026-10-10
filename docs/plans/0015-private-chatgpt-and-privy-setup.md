@@ -4762,6 +4762,100 @@ and a fresh release are still needed before deployment. Primary run 38068474113
 remains live; do not overwrite it. Autonomous execution remains off.
 
 
+### Protected native-operation completion (2026-10-10)
+
+Previous goal turn made concrete progress: integrated verified PR 343/344/345
+source on 57c2757 and dispatched GitHub integration/release. Those runs are now
+terminal green: CI 38070118800 passed every job and the final mutation gate;
+release 38070117408 built all six binaries. Downloaded artifacts and independently
+matched every SHA256 against BUILD-INFO.txt at exactly 57c2757. Primary full-scope
+CI 38068474113 remains live at inspection; leave it intact.
+
+Actual next caller: radar-issuer --reconcile-operation <operation-id>. Recheck
+retained exact signed transaction/normalized economic facts, one unknown
+operation, zero-token opening basis, fresh wallet/journal checkpoint, raw token
+quantities, native balance and transaction anchors. Also compare each retained
+buy's pre/post wallet mint totals with preceding retained quantities. Current
+net quantities alone can conceal an unexplained earlier token change; a new
+process regression demonstrates that refusal. Existing zero-opening fixtures
+now use consistent zero pre-token balances and fifteen acquired units. Unknown
+opening basis and unsupported sales remain refused.
+
+Every external native effect used for cash comparison must already be durable.
+Rehold the original claim against verified pre-execution native cash, then use
+OperationLog::reconcile to validate and write completion before releasing the
+unused reservation. Retained lots/basis/rent/failed fees replay on restart; a
+response-loss retry performs no second write, and subsequent issuance still
+requires a new protected checkpoint and risk state covering those effects.
+
+Added six actual-process regressions covering success, retries, next-issuance
+risk floors, failed network fees, stale/foreign/mismatched inputs, missing or
+nonzero opening basis, multiple unknown operations, external-flow retention and
+hidden token gaps. Unit floor remains 2220 (new integration tests only).
+Verification must run on GitHub in an independent branch based on integrated
+controls. No local jobs or live signing. This does not close complete live wallet
+coverage, sale completion, dropped-transaction recovery, delegation, adaptive
+reasoning, research chat or live supervision. Goal remains fully autonomous
+trading, not this offline milestone.
+
+
+### Verified controls deployment and reconciliation corrections (2026-10-10)
+
+Full-scope primary CI 38068474113 at ac2f87a is now terminal green, with
+1,633 mutants tested: 1,288 caught, 345 unviable, none missed. All ordinary jobs
+and the final mutation gate passed. Integrated controls CI 38070118800 at
+57c2757 is also fully green. All six release 38070117408 hashes matched.
+Copied only verified radar-serve to /tmp/radar-serve.new and used the fixed
+sudo radar-deploy procedure. Health on 8402 now reports exact build 57c2757,
+ok, policyClosed=true, configured Codex with last_call=never; signer socket
+remains inactive. This deployment exposes optional daily-cap drafts; it grants
+no signing authority and does not deploy the pending reconciliation command.
+
+PR 347 source 90d3d37 run 38077204642 completed with failures. Every mutation
+baseline and the actual process tests passed, but three mutations survived:
+reconciliation.rs:43:63 &&->|| in owner/mint filtering, 84:43 ||->&& in the
+sale/asset guard, and 91:61 ||->&& in state/count checking. Lint also reported
+the new CLI run body exceeding 100 lines and one empty-vector assertion.
+Move the CLI dispatch into its existing mode handler and use a diagnostic array
+comparison. Add same-mint counterparty rows to consistent zero-opening fixtures
+so foreign ownership cannot satisfy a wallet anchor. Make the concurrent
+unknown-operation fixture's snapshot and sequential cash effects consistent;
+its refusal must depend on the intended count gate, not an earlier stale
+checkpoint/cash mismatch. Remove the redundant asset guard: the only supplied
+portfolio holding is native SOL, and rehold already refuses any other asset.
+The sale guard remains explicit. No mutation exclusions or check weakening.
+Reverify the corrections on GitHub after the previous run is terminal.
+
+
+Corrected-source run 38077523601 at ed85334 found a test compilation error,
+not a new behavioral result: serde_json::Value's multiple PartialEq types make
+the suggested empty array RHS ambiguous (E0282, issuer_process.rs:237). Compare
+the JSON array directly to json!([]). Mutation baselines could not build, so
+none of this run's mutation outcomes count as verification. Preserve the run
+until terminal, then publish this test-only correction and reverify all checks.
+
+
+### Verified native completion integration (2026-10-10)
+
+Previous goal turn made source and deployment progress. Current turn verified
+corrected PR 347 at 8acc176: GitHub run 38077732628 passed every job, all four
+baselines and the final mutation gate. Thirty-three mutants tested, twenty-seven
+caught and six unviable, none missed. The six actual-process regressions passed
+and the first run's ownership/count survivors are now caught without exclusions.
+Fast-forwarded the combined local branch to that verified source. Publish its
+combined CI and fresh six-binary Linux release without changing any live signing
+configuration. Deployed server remains verified 57c2757 with closed policy and
+inactive signer.
+
+Next execution work must distinguish actual acquisition from reduction in the
+signer and bound what an exit spends. Existing pipeline always requests build_buy;
+signer checks native outgoing spend but does not bind a known venue trade's side
+to Authorization.action, and its sale token quantity is explicitly unbounded.
+Inspect and close that concrete mismatch before enabling live exits. This is
+required execution work, not a replacement objective or readiness claim. Live
+snapshot/reconciliation coverage, adaptive supervisor/chat, isolated delegation
+and canary/recovery verification remain open.
+
 ### Signer verifies known curve trade direction (2026-10-10)
 
 Native completion PR 347 at 8acc176 passed all jobs in GitHub run
@@ -4790,3 +4884,22 @@ per-instruction mint/account roles, routing, live snapshot accounting and exit
 completion remain open, alongside the adaptive supervisor/chat and delegation.
 It does not claim a generic arbitrary-program semantic check or enable exits.
 The goal remains fully autonomous trading.
+
+
+Direction PR 348 initially had no CI run because GitHub reported conflicting
+appended ADR/plan sections against integrated 63e66e6. Merged that verified
+base and retained both accounting and direction sections; no production-source
+conflict. Combined CI 38078028706 and release 38078025956 at 63e66e6 are now
+fully green; downloaded all six binaries and matched every release SHA256.
+The root-owned issuer still needs protected installation/configuration; fixed
+radar-deploy updates only Serve, so no issuer installation was implied.
+Publish the conflict resolution to allow PR 348's actual GitHub checks to run.
+
+Also re-inspected verify.rs lamport_ceiling: it still reads the USD notional as
+lamports and takes the minimum with the actual lamport conversion. The source
+explicitly documents this as blocking real sizing. A separate physical spend
+ceiling with explicit native units, independently enforced in the signer and
+bound to issuer proof, must replace that unit substitution before activation.
+Do not fix it by widening an untrusted caller bound or silently trusting a price
+inside the signer. Preserve the owner's USD-facing choices and closed defaults.
+This is an implementation requirement to resolve next, not new authority.
