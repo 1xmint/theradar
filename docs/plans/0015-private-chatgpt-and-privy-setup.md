@@ -5236,3 +5236,27 @@ Holdings-derived token authority, sale completion/credits and durable recovery
 must be connected before autonomous position management. Actual supported route
 construction, live marked portfolio/evidence, adaptive supervisor/chat and
 protected website handover remain. Goal active; autonomous trading stays off.
+
+### Output protections verified and integrated (2026-10-10)
+
+Combined source 67c3e9e passed every job in GitHub CI 38083298087, including
+45 mutations: 30 caught, 15 unviable, none missed. Downloaded the four diagnostic
+artifacts and inspected outcomes plus the exact original guard's diff and log.
+execution_output.rs:8:13 AND-to-OR is CaughtMutant: its build succeeded and the
+issuer_distinguishes_nontrades_and_foreign_program_trade_bytes process test
+failed at its intended refusal-versus-issued assertion. The earlier all-unviable
+shard summary did not establish this; the current exact evidence does. Other
+unviable cases are not mislabeled caught. No exclusions or local jobs were used.
+
+Fast-forwarded feat/integrated-autonomous-controls from 33cbe0f to this verified
+combined source, keeping builder and protected output authority together. Test
+floor 2235. Publish this handback and request fresh broad integrated GitHub CI
+and release before any installation. No production or authority change occurred.
+
+Next implementation: complete sales with retained exact native credits and
+outgoing costs, FIFO token/basis anchors, atomic durable completion and restart
+idempotence, then protected holdings-derived exit issuance. A native debit-only
+Settlement cannot by itself represent returned sale cash; do not disguise a
+credit as an unsigned negative debit or erase the fee. Actual routing, live
+portfolio/evidence, supervisor/research chat and protected site handover remain.
+Goal remains active and autonomous trading is off.
