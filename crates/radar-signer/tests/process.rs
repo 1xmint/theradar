@@ -13,6 +13,8 @@
 use std::io::{BufRead as _, BufReader, Write as _};
 use std::process::{Child, Command, Stdio};
 
+use serde_json::json;
+
 /// The programs the test signer will accept.
 const DEX: [u8; 32] = [0x11; 32];
 const MINT: [u8; 32] = [0x22; 32];
@@ -20,6 +22,589 @@ const SYSTEM: [u8; 32] = [0u8; 32];
 
 /// The secret half of the test wallet. Deterministic; not a real key.
 const SEED: [u8; 32] = [0x5A; 32];
+
+#[test]
+fn output_authority_refuses_unreviewed_optional_trade_arguments() {
+    use radar_decode::pumpfun::Instruction;
+    let scratch = Scratch::new("privy-output-options");
+    let path = policy_file(&scratch.0, &open_policy());
+    let pump = *radar_decode::pumpfun::PROGRAM_ID.as_bytes();
+    let mut command = privy_only_command(&path);
+    command.env("RADAR_SIGNER_PROGRAMS", b58(&pump));
+    let mut signer = Signer::from_command(command);
+    for known in [
+        Instruction::Buy,
+        Instruction::BuyV2,
+        Instruction::BuyExactSolIn,
+        Instruction::BuyExactQuoteInV2,
+        Instruction::Sell,
+        Instruction::SellV2,
+    ] {
+        for (case, suffix) in [vec![], vec![0], vec![1], vec![2], vec![0, 0], vec![0, 1]]
+            .into_iter()
+            .enumerate()
+        {
+            let mut data = known.discriminator().as_bytes().to_vec();
+            data.extend(10_u64.to_le_bytes());
+            data.extend(20_u64.to_le_bytes());
+            let allowed = suffix.is_empty()
+                || (matches!(known, Instruction::Buy | Instruction::BuyExactSolIn)
+                    && suffix.len() == 1
+                    && suffix[0] <= 1);
+            data.extend(suffix);
+            let bytes = transaction(&venue_keys(pump), &[(2, venue_roles(known), data)]);
+            let mut input = privy_request(&bytes);
+            input["authorization"]["action"] = json!(if known.is_buy() { "buy" } else { "exit" });
+            input["authorization"]["max_token_debit_raw"] = json!(u64::MAX);
+            input["authorization"]["min_output_raw"] = json!(1);
+            input["authorization"]["nonce"] =
+                json!(format!("{}-suffix-{case}", known.anchor_name()));
+            attest(&mut input);
+            let answer = signer.ask(&input);
+            assert_eq!(
+                answer["outcome"],
+                if allowed { "authorised" } else { "refused" },
+                "{answer}"
+            );
+            if !allowed {
+                assert!(
+                    answer["reasons"]
+                        .to_string()
+                        .contains("unsupported arguments"),
+                    "{answer}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn output_authority_cannot_be_satisfied_by_foreign_program_or_nontrade_bytes() {
+    let scratch = Scratch::new("privy-output-origin");
+    let path = policy_file(&scratch.0, &open_policy());
+    let pump = *radar_decode::pumpfun::PROGRAM_ID.as_bytes();
+    let mut command = privy_only_command(&path);
+    command.env(
+        "RADAR_SIGNER_PROGRAMS",
+        format!("{},{}", b58(&pump), b58(&DEX)),
+    );
+    let mut signer = Signer::from_command(command);
+    let mut keys = venue_keys(pump).to_vec();
+    keys.push(DEX);
+    let mut spoofed = radar_decode::pumpfun::Instruction::Buy
+        .discriminator()
+        .as_bytes()
+        .to_vec();
+    spoofed.extend(10_u64.to_le_bytes());
+    spoofed.extend(20_u64.to_le_bytes());
+    for (case, instruction) in [
+        (5, vec![0, 1], spoofed),
+        (
+            2,
+            Vec::new(),
+            radar_decode::pumpfun::Instruction::CollectCreatorFee
+                .discriminator()
+                .as_bytes()
+                .to_vec(),
+        ),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let bytes = transaction(&keys, &[instruction]);
+        let mut input = privy_request(&bytes);
+        input["authorization"]["min_output_raw"] = json!(1);
+        input["authorization"]["nonce"] = json!(format!("output-origin-{case}"));
+        attest(&mut input);
+        let answer = signer.ask(&input);
+        assert_eq!(answer["outcome"], "refused", "{answer}");
+        assert!(
+            answer["reasons"]
+                .to_string()
+                .contains("guarantees 0 output"),
+            "{answer}"
+        );
+    }
+}
+
+#[test]
+fn privy_process_enforces_output_floors_in_trade_units_and_aggregates_splits() {
+    use radar_decode::pumpfun::Instruction;
+    let scratch = Scratch::new("privy-output-floor");
+    let mut policy = open_policy();
+    policy.max_native_spend_lamports = Some(u64::MAX);
+    let path = policy_file(&scratch.0, &policy);
+    let pump = *radar_decode::pumpfun::PROGRAM_ID.as_bytes();
+    let mut command = privy_only_command(&path);
+    command.env("RADAR_SIGNER_PROGRAMS", b58(&pump));
+    let mut signer = Signer::from_command(command);
+    for known in [
+        Instruction::Buy,
+        Instruction::BuyV2,
+        Instruction::BuyExactSolIn,
+        Instruction::BuyExactQuoteInV2,
+        Instruction::Sell,
+        Instruction::SellV2,
+    ] {
+        let token_exact_buy = matches!(known, Instruction::Buy | Instruction::BuyV2);
+        let output = if token_exact_buy { 10 } else { 20 };
+        for (case, (count, floor, overflow, allowed)) in [
+            (1, None, false, true), // Legacy optional wire form.
+            (1, Some(0), false, false),
+            (1, Some(output), false, true),
+            (1, Some(output + 1), false, false),
+            (2, Some(output * 2), false, true),
+            (2, Some(output * 2 + 1), false, false),
+            (2, Some(u64::MAX), true, false),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let mut data = known.discriminator().as_bytes().to_vec();
+            let first = if overflow && token_exact_buy {
+                u64::MAX
+            } else {
+                10
+            };
+            let second = if overflow && !token_exact_buy {
+                u64::MAX
+            } else {
+                20
+            };
+            data.extend(first.to_le_bytes());
+            data.extend(second.to_le_bytes());
+            let instructions = vec![(2, venue_roles(known), data); count];
+            let bytes = transaction(&venue_keys(pump), &instructions);
+            let mut input = privy_request(&bytes);
+            input["authorization"]["action"] = json!(if known.is_buy() { "buy" } else { "exit" });
+            input["authorization"]["max_token_debit_raw"] = json!(u64::MAX);
+            input["authorization"]["min_output_raw"] = json!(floor);
+            input["authorization"]["nonce"] = json!(format!("{}-{case}", known.anchor_name()));
+            attest(&mut input);
+            let answer = signer.ask(&input);
+            assert_eq!(
+                answer["outcome"],
+                if allowed { "authorised" } else { "refused" },
+                "{} case {case}: {answer}",
+                known.anchor_name()
+            );
+            if !allowed {
+                assert!(answer["reasons"].to_string().contains("output"), "{answer}");
+            }
+            if floor == Some(output) {
+                input["authorization"]["nonce"] = json!(format!("{}-tamper", known.anchor_name()));
+                attest(&mut input);
+                input["authorization"]["min_output_raw"] = json!(output + 1);
+                let answer = signer.ask(&input);
+                assert_eq!(answer["outcome"], "refused", "{answer}");
+                assert!(
+                    answer["reasons"].to_string().contains("signature"),
+                    "{answer}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn privy_process_binds_each_captured_trade_mint_trader_and_native_quote() {
+    let captures: serde_json::Value =
+        serde_json::from_str(include_str!("fixtures/pumpfun_trade_roles.json")).unwrap();
+    let scratch = Scratch::new("privy-trade-roles");
+    let mut policy = open_policy();
+    policy.max_native_spend_lamports = Some(u64::MAX);
+    let path = policy_file(&scratch.0, &policy);
+    let pump = *radar_decode::pumpfun::PROGRAM_ID.as_bytes();
+    let mut command = privy_only_command(&path);
+    command.env("RADAR_SIGNER_PROGRAMS", b58(&pump));
+    let mut signer = Signer::from_command(command);
+    let rows = captures["trades"].as_array().unwrap();
+    assert_eq!(rows.len(), 6);
+    for row in rows {
+        assert!(row["execution_error"].is_null());
+        assert!(
+            row["trader_transaction_index"].as_u64().unwrap()
+                < row["required_signatures"].as_u64().unwrap()
+        );
+        let mint = *row["mint"]
+            .as_str()
+            .unwrap()
+            .parse::<radar_types::Address>()
+            .unwrap()
+            .as_bytes();
+        let trader = row["trader"].as_str().unwrap();
+        assert!(
+            row["reported_token_anchors"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|anchor| anchor["mint"] == row["mint"] && anchor["owner"] == trader)
+        );
+        let data = radar_types::b64::decode(row["data_base64"].as_str().unwrap()).unwrap();
+        let known = radar_decode::decode(radar_decode::Program::PumpFun, &data)
+            .known()
+            .copied()
+            .unwrap()
+            .pumpfun()
+            .unwrap();
+        assert_eq!(known.anchor_name(), row["name"].as_str().unwrap());
+        let accounts = captured_accounts(row, trader);
+        let cases = captured_role_cases(&accounts, mint, known);
+        for (index, (damaged, reason)) in cases.into_iter().enumerate() {
+            for mixed in [false, true] {
+                let bytes = captured_message(pump, mint, &accounts, &damaged, &data, mixed);
+                let mut input = privy_request(&bytes);
+                input["authorization"]["mint"] = row["mint"].clone();
+                input["authorization"]["action"] =
+                    serde_json::json!(if known.is_buy() { "buy" } else { "exit" });
+                input["authorization"]["max_token_debit_raw"] = serde_json::json!(u64::MAX);
+                input["authorization"]["nonce"] =
+                    serde_json::json!(format!("{}-{index}-{mixed}", known.anchor_name()));
+                attest(&mut input);
+                let answer = signer.ask(&input);
+                assert_eq!(
+                    answer["outcome"],
+                    if reason.is_none() {
+                        "authorised"
+                    } else {
+                        "refused"
+                    },
+                    "{} case {index} mixed={mixed}: {answer}",
+                    known.anchor_name()
+                );
+                if let Some(reason) = reason {
+                    assert!(answer["reasons"].to_string().contains(reason), "{answer}");
+                }
+            }
+        }
+        let bytes = captured_message(pump, mint, &accounts, &accounts, &data, false);
+        let mut unsigned = radar_types::b64::decode(&bytes).unwrap();
+        unsigned[65] = 0; // Legacy message header after one signature slot.
+        let mut input = privy_request(&radar_types::b64::encode(&unsigned));
+        input["authorization"]["mint"] = row["mint"].clone();
+        input["authorization"]["nonce"] = serde_json::json!(known.anchor_name());
+        attest(&mut input);
+        let answer = signer.ask(&input);
+        assert_eq!(answer["outcome"], "refused", "{answer}");
+        assert!(
+            answer["reasons"]
+                .to_string()
+                .contains("signing wallet role")
+        );
+    }
+}
+
+type RoleCase = (Vec<[u8; 32]>, Option<&'static str>);
+
+fn captured_role_cases(
+    accounts: &[[u8; 32]],
+    mint: [u8; 32],
+    known: radar_decode::pumpfun::Instruction,
+) -> Vec<RoleCase> {
+    let mint_role = accounts.iter().position(|key| key == &mint).unwrap();
+    let trader_role = accounts.iter().position(|key| key == &wallet()).unwrap();
+    let mut cases = vec![(accounts.to_vec(), None), (Vec::new(), Some("mint role"))];
+    let mut wrong_mint = accounts.to_vec();
+    wrong_mint[mint_role] = [0x99; 32];
+    cases.push((wrong_mint, Some("mint role")));
+    let mut wrong_trader = accounts.to_vec();
+    wrong_trader[trader_role] = [0x98; 32];
+    cases.push((wrong_trader, Some("signing wallet role")));
+    cases.push((
+        accounts[..trader_role].to_vec(),
+        Some("signing wallet role"),
+    ));
+    if matches!(
+        known,
+        radar_decode::pumpfun::Instruction::BuyV2
+            | radar_decode::pumpfun::Instruction::BuyExactQuoteInV2
+            | radar_decode::pumpfun::Instruction::SellV2
+    ) {
+        let mut wrong_quote = accounts.to_vec();
+        wrong_quote[2] = *radar_types::Asset::USDC_MINT.as_bytes();
+        cases.push((wrong_quote, Some("native quote mint role")));
+    }
+    cases
+}
+
+fn captured_accounts(row: &serde_json::Value, trader: &str) -> Vec<[u8; 32]> {
+    row["accounts"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|key| {
+            if key.as_str().unwrap() == trader {
+                wallet()
+            } else {
+                *key.as_str()
+                    .unwrap()
+                    .parse::<radar_types::Address>()
+                    .unwrap()
+                    .as_bytes()
+            }
+        })
+        .collect()
+}
+
+fn captured_message(
+    pump: [u8; 32],
+    mint: [u8; 32],
+    original: &[[u8; 32]],
+    damaged: &[[u8; 32]],
+    data: &[u8],
+    mixed: bool,
+) -> String {
+    // Keep the authorized mint and wallet in the static account list even when
+    // their instruction roles are substituted: membership cannot mask binding.
+    let mut keys = vec![wallet(), pump, mint];
+    for key in original.iter().chain(damaged) {
+        if !keys.contains(key) {
+            keys.push(*key);
+        }
+    }
+    let indices = |accounts: &[[u8; 32]]| {
+        accounts
+            .iter()
+            .map(|key| {
+                u8::try_from(keys.iter().position(|candidate| candidate == key).unwrap()).unwrap()
+            })
+            .collect()
+    };
+    let mut instructions = Vec::new();
+    if mixed {
+        instructions.push((1, indices(original), data.to_vec()));
+    }
+    instructions.push((1, indices(damaged), data.to_vec()));
+    transaction(&keys, &instructions)
+}
+
+fn venue_keys(pump: [u8; 32]) -> [[u8; 32]; 5] {
+    [
+        wallet(),
+        MINT,
+        pump,
+        SYSTEM,
+        *radar_types::Asset::WRAPPED_SOL_MINT.as_bytes(),
+    ]
+}
+
+fn venue_roles(ix: radar_decode::pumpfun::Instruction) -> Vec<u8> {
+    use radar_decode::pumpfun::Instruction;
+    if matches!(
+        ix,
+        Instruction::BuyV2 | Instruction::BuyExactQuoteInV2 | Instruction::SellV2
+    ) {
+        let mut roles = vec![3; 14];
+        roles[1] = 1;
+        roles[2] = 4;
+        roles[13] = 0;
+        roles
+    } else {
+        vec![3, 3, 1, 3, 3, 3, 0]
+    }
+}
+
+#[test]
+fn privy_process_checks_aggregate_sale_tokens_and_proof_binds_the_bound() {
+    let scratch = Scratch::new("privy-token-debit");
+    let policy = policy_file(&scratch.0, &open_policy());
+    let pump = *radar_decode::pumpfun::PROGRAM_ID.as_bytes();
+    let mut command = privy_only_command(&policy);
+    command.env(
+        "RADAR_SIGNER_PROGRAMS",
+        format!("{},{}", b58(&pump), b58(&SYSTEM)),
+    );
+    let mut signer = Signer::from_command(command);
+    for ix in [
+        radar_decode::pumpfun::Instruction::Sell,
+        radar_decode::pumpfun::Instruction::SellV2,
+    ] {
+        for action in ["reduce", "exit"] {
+            for (index, (amounts, bound, allowed)) in [
+                (vec![10], None, false),
+                (vec![1], Some(0), false),
+                (vec![10], Some(10), true),
+                (vec![4, 6], Some(10), true),
+                (vec![5, 6], Some(10), false),
+                (vec![u64::MAX], Some(u64::MAX), true),
+                (vec![u64::MAX, 1], Some(u64::MAX), false),
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                let instructions: Vec<_> = amounts
+                    .iter()
+                    .map(|amount| {
+                        let mut data = ix.discriminator().as_bytes().to_vec();
+                        data.extend(amount.to_le_bytes());
+                        data.extend(900_000_000_u64.to_le_bytes());
+                        (2, venue_roles(ix), data)
+                    })
+                    .collect();
+                let bytes = transaction(&venue_keys(pump), &instructions);
+                let mut input = privy_request(&bytes);
+                input["authorization"]["action"] = serde_json::json!(action);
+                input["authorization"]["nonce"] =
+                    serde_json::json!(format!("{}-{action}-{index}", ix.anchor_name()));
+                input["authorization"]["max_token_debit_raw"] = serde_json::json!(bound);
+                attest(&mut input);
+                let answer = signer.ask(&input);
+                assert_eq!(
+                    answer["outcome"],
+                    if allowed { "authorised" } else { "refused" },
+                    "{ix:?}/{action} {amounts:?}/{bound:?}: {answer}"
+                );
+                if !allowed {
+                    assert!(answer["reasons"].to_string().contains("token"), "{answer}");
+                }
+                input["authorization"]["nonce"] =
+                    serde_json::json!(format!("{}-{action}-{index}-tampered", ix.anchor_name()));
+                attest(&mut input);
+                input["authorization"]["max_token_debit_raw"] =
+                    serde_json::json!(if bound == Some(u64::MAX) { 0 } else { u64::MAX });
+                let tampered = signer.ask(&input);
+                assert_eq!(tampered["outcome"], "refused", "{tampered}");
+                assert!(
+                    tampered["reasons"].to_string().contains("issuer"),
+                    "{tampered}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn privy_process_enforces_native_policy_and_proven_conversion_in_separate_units() {
+    // At $200/SOL, a $50 authorization permits 250m lamports, not 50m.
+    // The protected native ceiling and issuer-proven conversion both bind.
+    for (native_limit, spend, conversion, usd, allowed) in [
+        (
+            Some(250_000_000),
+            250_000_000_u64,
+            250_000_000,
+            50_000_000,
+            true,
+        ),
+        (Some(250_000_000), 250_000_001, u64::MAX, 50_000_000, false),
+        (
+            Some(300_000_000),
+            250_000_001,
+            250_000_000,
+            50_000_000,
+            false,
+        ),
+        (
+            Some(250_000_000),
+            250_000_000,
+            u64::MAX,
+            1_000_000_001,
+            false,
+        ),
+        (Some(0), 1, u64::MAX, 50_000_000, false),
+        (None, 250_000_000, 250_000_000, 50_000_000, false),
+    ] {
+        let scratch = Scratch::new("native-spend-units");
+        let mut policy = open_policy();
+        policy.max_native_spend_lamports = native_limit;
+        let path = policy_file(&scratch.0, &policy);
+        let mut signer = Signer::from_command(privy_only_command(&path));
+        let mut data = 2u32.to_le_bytes().to_vec();
+        data.extend_from_slice(&spend.to_le_bytes());
+        let bytes = transaction(&[wallet(), MINT, SYSTEM], &[(2, vec![0, 1], data)]);
+        let mut input = privy_request(&bytes);
+        input["authorization"]["max_notional"] = serde_json::json!(usd);
+        input["max_lamports"] = serde_json::json!(conversion);
+        attest(&mut input);
+        let answer = signer.ask(&input);
+        assert_eq!(
+            answer["outcome"],
+            if allowed { "authorised" } else { "refused" },
+            "limit={native_limit:?} spend={spend} conversion={conversion} usd={usd}: {answer}"
+        );
+        // The proof binds the conversion: changing it after attestation refuses.
+        input["authorization"]["nonce"] = serde_json::json!("tampered");
+        attest(&mut input);
+        input["max_lamports"] = serde_json::json!(conversion - 1);
+        let tampered = signer.ask(&input);
+        assert_eq!(tampered["outcome"], "refused", "{tampered}");
+        assert!(
+            tampered["reasons"].to_string().contains("issuer"),
+            "{tampered}"
+        );
+    }
+}
+
+#[test]
+fn privy_process_rechecks_venue_trade_direction_after_a_valid_issuer_proof() {
+    let scratch = Scratch::new("privy-trade-direction");
+    let policy = policy_file(&scratch.0, &open_policy());
+    let pump = *radar_decode::pumpfun::PROGRAM_ID.as_bytes();
+    let mut command = privy_only_command(&policy);
+    command.env(
+        "RADAR_SIGNER_PROGRAMS",
+        format!("{},{}", b58(&pump), b58(&SYSTEM)),
+    );
+    let mut signer = Signer::from_command(command);
+    for (instruction, _, _) in radar_decode::pumpfun::KNOWN
+        .iter()
+        .filter(|(ix, _, _)| ix.is_trade())
+    {
+        let mut data = instruction.discriminator().as_bytes().to_vec();
+        data.extend(10_u64.to_le_bytes());
+        data.extend(20_u64.to_le_bytes());
+        let bytes = transaction(&venue_keys(pump), &[(2, venue_roles(*instruction), data)]);
+        for (action, buying) in [("buy", true), ("reduce", false), ("exit", false)] {
+            let mut input = privy_request(&bytes);
+            input["authorization"]["action"] = serde_json::json!(action);
+            input["authorization"]["max_token_debit_raw"] = serde_json::json!(10);
+            input["authorization"]["nonce"] =
+                serde_json::json!(format!("{}-{action}", instruction.anchor_name()));
+            attest(&mut input);
+            let answer = signer.ask(&input);
+            if instruction.is_buy() == buying {
+                assert_eq!(
+                    answer["outcome"], "authorised",
+                    "{instruction:?}/{action}: {answer}"
+                );
+                assert_eq!(
+                    signer.ask(&input)["outcome"],
+                    "refused",
+                    "one-time authority"
+                );
+            } else {
+                assert_eq!(
+                    answer["outcome"], "refused",
+                    "{instruction:?}/{action}: {answer}"
+                );
+                assert!(
+                    answer["reasons"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .any(|reason| reason
+                            .as_str()
+                            .unwrap_or_default()
+                            .contains("contradicts the authorized action")),
+                    "{answer}"
+                );
+                // A proof from a trusted issuer cannot override transaction
+                // direction. Even a refused attempt consumes its durable nonce;
+                // correcting the action requires fresh issuer authority.
+                input["authorization"]["action"] =
+                    serde_json::json!(if instruction.is_buy() { "buy" } else { "exit" });
+                attest(&mut input);
+                let retry = signer.ask(&input);
+                assert_eq!(retry["outcome"], "refused", "{retry}");
+                assert!(retry["reasons"].to_string().contains("nonce is reused"));
+                input["authorization"]["nonce"] =
+                    serde_json::json!(format!("{}-{action}-corrected", instruction.anchor_name()));
+                attest(&mut input);
+                let corrected = signer.ask(&input);
+                assert_eq!(corrected["outcome"], "authorised", "{corrected}");
+            }
+        }
+    }
+}
 
 /// A signer process with a pipe to it.
 struct Signer {

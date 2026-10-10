@@ -4628,3 +4628,688 @@ the older 9e43e11 artifact as this source or enable autonomous execution: live
 risk construction, complete economic reconciliation/durable application,
 execution/exits/recovery, isolated service installation, Privy delegation and
 funding verification remain. Owner choices stay on the website per option.
+
+### Integrated release verification and design discussion (2026-10-10)
+
+Release run 38068470125 succeeded at
+ac2f87a821a507d6b05f2665c6c78c796d6bfa23. Downloaded radar-linux-x86_64 with
+gh run download into sibling radar-release-38068470125. BUILD-INFO names that
+exact commit; Get-FileHash SHA256 verified all six binaries. radar-issuer is
+1,950,624 bytes, hash
+8d22b49509d446a3d8254a6493c4edabd23f62ecde14d29b52a7e99aaf9cdd71.
+Full CI 38068474113 has passed every ordinary job; all four mutation shards
+remain live at inspection. Do not publish over that run or claim its final
+gate passed. The artifact has not been deployed. Radar health on port 8402
+still reports build 3f38ee0, policyClosed true and no Codex calls;
+radar-signer.socket remains inactive.
+
+Owner raised a direction question: adaptive risk management instead of a
+mandatory daily loss stop, plus conversational research assistance. Stopped
+implementation and discussed the recommendation in chat: optional daily cap,
+adaptive allocation and sizing, independent operational controls, measured
+performance and researched user tips under an existing mandate. This is a
+recommendation awaiting the owner's response, not a settled product decision;
+no policy, UI or trading behavior was changed to implement it. Continue
+artifact/CI verification independently, and settle the discussion before
+recording new product doctrine or implementing the risk-panel redesign.
+
+### Approved adaptive-risk direction and optional cap drafts (2026-10-10)
+
+Josh accepted the recommendation and requested it in the checklist. Recorded
+the decision in design 0017 and the executable-work checklist in plan 0011:
+adaptive risk by default, optional daily cap, current portfolio/risk explanations,
+conversational research leads, measured results and reviewed tool improvements.
+The prior discussion is settled; implementation resumed with optional cap
+preferences. New site drafts disable the daily cap explicitly. Older persisted
+preferences missing daily_loss_enabled keep their existing cap enabled. The
+separate Agent decides choice and saved manual value survive disabling,
+re-enabling and refresh. Enabled manual caps retain numeric validation;
+disabling the cap does not bypass capital/per-trade validation. These settings
+remain drafts; live Policy construction and adaptive behavior remain open.
+
+Added Rust legacy/validation/restart and web toggle/save/refresh regressions;
+unit floor 2218. Verify on GitHub in an independent branch while primary full
+CI 38068474113 remains live. No local jobs, deployment or signing activation.
+
+Collector/issuer bridge PR 343 at 2031e2e passed every job in GitHub run
+38068950676, including all four baselines and final mutation gate. Logs show
+twelve mutants, nine caught and three unviable, none missed. Its verified source
+is ready for integration after the primary's current full run finishes.
+
+### Combined known-address history ingestion (2026-10-10)
+
+The actual wallet-activity-read --inventory-review collector emits
+provider_reported_known_address_history. Native transfer capture previously
+accepted only the wallet-only history variant, preventing the combined packet
+from reaching --record-native-transfers even for an exact retained swap or
+plain native transfer. Accept both collection variants. Combined-query packets
+must have unique, bounded targets including the wallet; reuse account activity
+row verification to bind each enumerated reporting address to a queried target
+and to the signed message before recognizing retained operations or classifying
+external native transfers. These targets describe queries, not verified account
+ownership. No complete wallet-coverage assertion or economic state release is
+introduced, and unsupported token/opaque external activity still refuses.
+
+Added a unit regression for recipient-account queries, exact sixteen-target
+boundary, forged membership, malformed targets, incomplete collection and
+changed native effects. Extended the actual issuer process's retained-swap
+regression through both packet variants and repeated combined reads without
+journal mutation. Unit floor 2218. Run all verification on GitHub in an
+independent stacked PR based on published primary ac2f87a, leaving full primary
+CI 38068474113 intact. No deployment, signing authority or live trade performed.
+The owner's adaptive-risk-panel discussion remains unsettled and independent
+of this collector/issuer integration fix.
+
+### Local integration of verified wallet controls (2026-10-10)
+
+Fast-forwarded local primary to PR 344 source 2b80d25, fully verified by
+GitHub run 38069237983, and merged PR 343 source 2031e2e, fully verified by
+38068950676. Only appended plan history conflicted; retained both sections.
+The adaptive-risk discussion is settled as recorded in design 0017 and plan
+0011. Combined unit floor 2219 includes both new regressions. Do not publish
+over still-live primary run 38068474113. Corrected kernel PR 345 run
+38069809249 has passed lint and all four mutation shards but other jobs remain
+live; do not call it fully verified or integrate until terminal inspection.
+No deployment or autonomous activation occurred.
+
+### Optional daily cap at the actual risk consumer (2026-10-10)
+
+PR 344 at 2b80d25 passed every GitHub job in run 38069237983, including web,
+Rust tests, all four mutation shards and the final gate. Draft preferences now
+represent whether the owner enabled a cap, but the actual kernel still required
+a number. Policy.max_daily_loss now uses Option<MicroUsd>: existing serialized
+numeric caps remain numerically identical, explicit null disables only that
+check, and an omitted field defaults to Some(0), preserving refusal rather than
+silently disabling protection. Policy::CLOSED remains closed. No enormous-dollar
+sentinel or model-dependent exception is used.
+
+The private offline issuer consumes this Policy directly. Added actual issuer
+process cases for explicit null, numeric and omitted caps, plus halt with no cap;
+refused cases retain no outstanding reservation. Kernel regression covers the
+exact loss boundary and enabled zero cap, and verifies that no-cap policies still
+enforce halt, failures, position sizing, stale inputs and measurable exits.
+Property generators now exercise both enabled and disabled caps. Updated typed
+test fixtures/doc example without changing their serialized numeric caps. Unit
+floor 2219. Verify on GitHub in a separate stacked PR; do not publish over primary
+CI 38068474113 while it remains live.
+
+This closes the Policy representation gap only after verification. Converting
+the owner's draft choices and adaptive proposals into an authorized live policy
+still requires the independent mandate and verified wallet inputs. Existing
+action-aware reduction work, accounting, execution/recovery and delegation
+remain necessary; no live service, policy file, authority or funds changed.
+
+PR 345 first run 38069556295 at d7d506c exposed a serde-default helper lint
+and one equivalent survivor. Lint rejected a function always returning Some;
+read the value from Policy::CLOSED instead, keeping a single default source.
+Shard 3 applied policy.rs:139:5's exact Some(Default::default()) replacement
+and passed its baseline and mutated tests. MicroUsd derives Default over u64,
+so this equals Some(MicroUsd::ZERO). Added only that exact replacement to the
+documented equivalence list; None replacements and the daily-loss boundary
+remain tested. All four baselines passed: four mutants, two caught, one unviable
+and the equivalent survivor. Other jobs passed except lint; tests remain live
+at inspection. Do not push this correction until the current run is terminal.
+
+### Verified kernel integration (2026-10-10)
+
+Corrected PR 345 source e5bc317 passed every job in run 38069809249. Three
+nonempty mutation baselines passed; three mutants tested, two caught and one
+unviable. Shard 3 correctly had no mutants after excluding only the identical
+Some(Default::default()) replacement; the final gate passed. Integrated this
+source locally with PR 343/344. Only appended plan history conflicted; retained
+all sections. Combined unit floor 2220. Complete integrated GitHub verification
+and a fresh release are still needed before deployment. Primary run 38068474113
+remains live; do not overwrite it. Autonomous execution remains off.
+
+
+### Protected native-operation completion (2026-10-10)
+
+Previous goal turn made concrete progress: integrated verified PR 343/344/345
+source on 57c2757 and dispatched GitHub integration/release. Those runs are now
+terminal green: CI 38070118800 passed every job and the final mutation gate;
+release 38070117408 built all six binaries. Downloaded artifacts and independently
+matched every SHA256 against BUILD-INFO.txt at exactly 57c2757. Primary full-scope
+CI 38068474113 remains live at inspection; leave it intact.
+
+Actual next caller: radar-issuer --reconcile-operation <operation-id>. Recheck
+retained exact signed transaction/normalized economic facts, one unknown
+operation, zero-token opening basis, fresh wallet/journal checkpoint, raw token
+quantities, native balance and transaction anchors. Also compare each retained
+buy's pre/post wallet mint totals with preceding retained quantities. Current
+net quantities alone can conceal an unexplained earlier token change; a new
+process regression demonstrates that refusal. Existing zero-opening fixtures
+now use consistent zero pre-token balances and fifteen acquired units. Unknown
+opening basis and unsupported sales remain refused.
+
+Every external native effect used for cash comparison must already be durable.
+Rehold the original claim against verified pre-execution native cash, then use
+OperationLog::reconcile to validate and write completion before releasing the
+unused reservation. Retained lots/basis/rent/failed fees replay on restart; a
+response-loss retry performs no second write, and subsequent issuance still
+requires a new protected checkpoint and risk state covering those effects.
+
+Added six actual-process regressions covering success, retries, next-issuance
+risk floors, failed network fees, stale/foreign/mismatched inputs, missing or
+nonzero opening basis, multiple unknown operations, external-flow retention and
+hidden token gaps. Unit floor remains 2220 (new integration tests only).
+Verification must run on GitHub in an independent branch based on integrated
+controls. No local jobs or live signing. This does not close complete live wallet
+coverage, sale completion, dropped-transaction recovery, delegation, adaptive
+reasoning, research chat or live supervision. Goal remains fully autonomous
+trading, not this offline milestone.
+
+
+### Verified controls deployment and reconciliation corrections (2026-10-10)
+
+Full-scope primary CI 38068474113 at ac2f87a is now terminal green, with
+1,633 mutants tested: 1,288 caught, 345 unviable, none missed. All ordinary jobs
+and the final mutation gate passed. Integrated controls CI 38070118800 at
+57c2757 is also fully green. All six release 38070117408 hashes matched.
+Copied only verified radar-serve to /tmp/radar-serve.new and used the fixed
+sudo radar-deploy procedure. Health on 8402 now reports exact build 57c2757,
+ok, policyClosed=true, configured Codex with last_call=never; signer socket
+remains inactive. This deployment exposes optional daily-cap drafts; it grants
+no signing authority and does not deploy the pending reconciliation command.
+
+PR 347 source 90d3d37 run 38077204642 completed with failures. Every mutation
+baseline and the actual process tests passed, but three mutations survived:
+reconciliation.rs:43:63 &&->|| in owner/mint filtering, 84:43 ||->&& in the
+sale/asset guard, and 91:61 ||->&& in state/count checking. Lint also reported
+the new CLI run body exceeding 100 lines and one empty-vector assertion.
+Move the CLI dispatch into its existing mode handler and use a diagnostic array
+comparison. Add same-mint counterparty rows to consistent zero-opening fixtures
+so foreign ownership cannot satisfy a wallet anchor. Make the concurrent
+unknown-operation fixture's snapshot and sequential cash effects consistent;
+its refusal must depend on the intended count gate, not an earlier stale
+checkpoint/cash mismatch. Remove the redundant asset guard: the only supplied
+portfolio holding is native SOL, and rehold already refuses any other asset.
+The sale guard remains explicit. No mutation exclusions or check weakening.
+Reverify the corrections on GitHub after the previous run is terminal.
+
+
+Corrected-source run 38077523601 at ed85334 found a test compilation error,
+not a new behavioral result: serde_json::Value's multiple PartialEq types make
+the suggested empty array RHS ambiguous (E0282, issuer_process.rs:237). Compare
+the JSON array directly to json!([]). Mutation baselines could not build, so
+none of this run's mutation outcomes count as verification. Preserve the run
+until terminal, then publish this test-only correction and reverify all checks.
+
+
+### Verified native completion integration (2026-10-10)
+
+Previous goal turn made source and deployment progress. Current turn verified
+corrected PR 347 at 8acc176: GitHub run 38077732628 passed every job, all four
+baselines and the final mutation gate. Thirty-three mutants tested, twenty-seven
+caught and six unviable, none missed. The six actual-process regressions passed
+and the first run's ownership/count survivors are now caught without exclusions.
+Fast-forwarded the combined local branch to that verified source. Publish its
+combined CI and fresh six-binary Linux release without changing any live signing
+configuration. Deployed server remains verified 57c2757 with closed policy and
+inactive signer.
+
+Next execution work must distinguish actual acquisition from reduction in the
+signer and bound what an exit spends. Existing pipeline always requests build_buy;
+signer checks native outgoing spend but does not bind a known venue trade's side
+to Authorization.action, and its sale token quantity is explicitly unbounded.
+Inspect and close that concrete mismatch before enabling live exits. This is
+required execution work, not a replacement objective or readiness claim. Live
+snapshot/reconciliation coverage, adaptive supervisor/chat, isolated delegation
+and canary/recovery verification remain open.
+
+### Native spend units implementation (2026-10-10)
+
+Previous goal turn made progress correcting an erroneous process-test nonce
+expectation and publishing GitHub verification. Current turn observed direction
+run 38078931338 at 5dc2cbe fully green. Work continues on a separate branch from
+verified integrated 63e66e6 so physical-unit work cannot cancel or depend on the
+direction test run. Preserve and integrate that verified direction separately.
+
+Actual callers are radar_signer::check and radar-issuer::prepare. Explicit
+protected native policy separates chain units from USD exposure. Issuer refuses
+missing/zero native configuration, converts the authorized USD amount with the
+protected SOL upper price, clamps to its native cap and proves the resulting
+max_lamports. Signer independently clamps in native units; missing old fields
+retain the prior restriction and do not silently gain authority. The model
+cannot write either protected policy. Fee reservation stays additional.
+
+Added actual Privy process cases for a $50 / $200-per-SOL conversion, exact native
+boundary, independent signer/caller limits, USD overauthorization, zero and
+legacy fallback, and proof tampering. An actual issuer-process curve buy verifies
+250m lamports under $50 authorization, smaller protected cap, refusals beyond
+either cap, retained proof and absence of reservations after refusal. Startup
+refuses null/zero caps. A wire regression covers explicit native units and old
+policy compatibility. Unit floor 2221 on this branch (direction integration adds
+its separate test). GitHub verification required; no local jobs or live changes.
+
+Still open: live complete portfolio/evidence adapter, token-bounded exits and
+mint/account roles, routing, adaptive supervisor/chat, isolated deployment and
+end-to-end recovery/canary evidence. Goal remains fully autonomous trading.
+
+### Native policy regression correction (2026-10-10)
+
+Run 38079356230 at 7a8fe94 found an old reservation test whose deliberately tiny
+SOL price now hits the native cap before reaching its intended insufficient-cash
+guard. In that test only, set the native ceiling above available cash so wallet
+reservation remains the isolated guard. New exact-cap and converted-amount
+regressions remain unchanged. Lint also requires simplifying the startup guard
+to is_none_or(limit == 0). New curve-buy and native signer cases passed in the
+completed mutation baseline log, but that baseline failed at the old test; do
+not count any mutation verification from this failed run. Preserve the current
+run until terminal before publishing the correction. Protocol comments now
+state separate USD/native checks and the authenticated Privy conversion exactly.
+
+### Signer verifies known curve trade direction (2026-10-10)
+
+Native completion PR 347 at 8acc176 passed all jobs in GitHub run
+38077732628, with four baselines and thirty-three mutants: twenty-seven caught,
+six unviable, none missed. Fast-forwarded combined source and published handoff
+63e66e6; combined CI 38078028706 and release 38078025956 are live. Leave those
+runs intact. This branch is based independently on verified controls 57c2757.
+
+Actual caller: radar_signer::check, used by both local and isolated Privy signing
+processes. It decoded buy sizes but skipped all sales and never checked a known
+venue trade's side against Authorization.action. Decode every known curve trade,
+including sell argument extents. Require Buy for acquisitions and Reduce/Exit
+for sales; refuse mixed directions within one message. Keep every native spend,
+policy, expiry, ownership and nonce check. A trusted issuer proof cannot waive
+the decoded direction. Update the previous large-sale regression to use actual
+Exit authority; its minimum incoming SOL still does not count as outgoing spend.
+
+Added one unit matrix across all six trade variants and all three actions,
+mixed messages and every truncated sale argument extent, plus an actual Privy
+process regression with valid re-attested proofs. A verified issuer attempt
+consumes its nonce even on refusal; corrected direction needs fresh authority
+and duplicate success refuses.
+Unit floor 2221. Verify on GitHub; no local jobs or live signing.
+
+This closes only a concrete side mismatch after verification. Sale token bounds,
+per-instruction mint/account roles, routing, live snapshot accounting and exit
+completion remain open, alongside the adaptive supervisor/chat and delegation.
+It does not claim a generic arbitrary-program semantic check or enable exits.
+The goal remains fully autonomous trading.
+
+
+Direction PR 348 initially had no CI run because GitHub reported conflicting
+appended ADR/plan sections against integrated 63e66e6. Merged that verified
+base and retained both accounting and direction sections; no production-source
+conflict. Combined CI 38078028706 and release 38078025956 at 63e66e6 are now
+fully green; downloaded all six binaries and matched every release SHA256.
+The root-owned issuer still needs protected installation/configuration; fixed
+radar-deploy updates only Serve, so no issuer installation was implied.
+Publish the conflict resolution to allow PR 348's actual GitHub checks to run.
+
+Also re-inspected verify.rs lamport_ceiling: it still reads the USD notional as
+lamports and takes the minimum with the actual lamport conversion. The source
+explicitly documents this as blocking real sizing. A separate physical spend
+ceiling with explicit native units, independently enforced in the signer and
+bound to issuer proof, must replace that unit substitution before activation.
+Do not fix it by widening an untrusted caller bound or silently trusting a price
+inside the signer. Preserve the owner's USD-facing choices and closed defaults.
+This is an implementation requirement to resolve next, not new authority.
+
+### Direction process regression correction (2026-10-10)
+
+Run 38078622823 at 7073f4e completed with a failing new process regression,
+including mutation baselines. Build, lint, format and unit direction checks
+passed. The regression incorrectly expected a refused, issuer-verified attempt
+to leave its nonce reusable. Actual handle_privy deliberately claims before
+key use/checks and never rolls back: even interrupted or rejected attempts need
+fresh issuer authority. Preserve that protection. Assert corrected bytes with
+the old nonce refuse for reuse, then re-attest a fresh nonce and require success.
+No production behavior changed in this correction. Verify on GitHub before
+integrating direction enforcement; autonomous signing remains closed.
+
+Merged verified trade-direction source 5dc2cbe into the native-unit branch while
+its original run finishes. Preserve both process regressions and ADR/plan
+sections. Combined unit floor 2222. The merge requires a fresh GitHub run with
+the reservation/lint correction; do not infer combined verification from the
+separate direction run. No production configuration or service was changed.
+
+### Enforceable token-debit bound for exits (2026-10-10)
+
+Previous goal turn corrected native-policy regression/lint failures and combined
+verified direction enforcement. Current turn observed combined run 38079626824
+at aa1ea1c fully green. This branch began independently at verified direction
+5dc2cbe so source work did not cancel that run.
+
+Actual caller: radar_signer::check in the key-holding local and Privy processes.
+Authorization now carries optional max_token_debit_raw. All known curve sales
+share that single explicit bound; checked aggregate arithmetic refuses overflow,
+missing bound or excess quantity. Incoming SOL is never treated as outgoing
+tokens. The existing direction regression supplies a valid quantity so it still
+isolates side enforcement; large-exit regression explicitly bounds its tokens.
+
+Added unit coverage for both sale variants and Reduce/Exit, zero/exact/missing
+bounds, individually-small but collectively-excess sales and u64 overflow. The
+actual Privy process checks the same cases with valid proofs and detects tampered
+token authority. A risk wire regression shows old kernel output retains its wire
+shape and invents no raw-token authority. No local jobs or live changes. GitHub
+verification required; do not claim that token/account roles or live exits work.
+
+Next: merge the now-verified native-unit source before combined verification;
+then derive exit authority from protected holdings and reviewed execution data,
+bind mint/account roles and route reductions correctly. Current kernel and issuer
+leave token authority unset and issuer stays buy-only. Complete live portfolio
+coverage, recovery, adaptive supervisor/chat and isolated deployment still remain.
+Goal remains fully autonomous trading; no live activation is claimed.
+
+Merged verified native-unit source aa1ea1c (all GitHub checks green in
+38079626824) into the token-bound branch before publication. Retained both
+physical-unit and token-quantity checks and all three actual-process regressions.
+Combined minimum test floor 2225. Fresh combined GitHub verification is required;
+separate native verification does not prove this new token-bound behavior.
+
+### Executor direction and handback (2026-10-10)
+
+Started feat/executor-trade-direction from verified token/native/direction
+source a6d1a9d while role-binding PR 351 runs GitHub CI 38081131378. This routing
+change is independent of the new signer-role implementation; neither run is
+cancelled or treated as verification of the other.
+
+Actual caller: radar_exec::execute. It previously always called build_buy even
+for Reduce/Exit. Add required Routing::build_sell and dispatch by authorization
+action. Sales require positive explicit raw-token authority and use that amount;
+missing/zero authority refuses before routing, signing or sending. Native bounds
+stay separate. Production Jupiter router continues to refuse in both directions.
+Updated every Routing implementation and added two executor regressions proving
+exact side/asset/wallet/amount, preserved native bound, and early refusal without
+any routing/key/send calls. Extended the router refusal regression to both sides.
+Unit test floor 2227 on this independent branch. No local jobs or live changes.
+
+Publish this branch for GitHub tests/build/lint/mutation verification. Integrate
+with role binding only after both actual runs pass; combined floor will be 2228.
+This does not implement sell construction, protected holdings/exit authority,
+portfolio evidence, sale reconciliation/recovery or adaptive supervision/chat.
+Goal remains fully autonomous trading; production authority remains closed.
+
+Role-binding run 38081131378 at 2768670 completed fully green, including the
+actual-process capture regression and all mutation shards/final gate. Twelve
+mutants: eight caught, four unviable, none missed. No live changes followed.
+Executor run 38081286620 at e5d6fe1 reported a lint failure: the local name routed
+is too similar to router. Rename it built without changing behavior. Let all
+remaining jobs finish before publishing the correction; require a fresh full run.
+
+### Captured curve trade roles and handback (2026-10-10)
+
+Verified token-bound source a6d1a9d: GitHub CI 38080077978 completed successfully,
+including tests/build/lint and all mutation shards/final gate. Thirteen mutants:
+eight caught and five unviable, none missed. No local verification jobs ran.
+
+Current branch feat/signer-trade-account-roles began from that verified source.
+Actual caller remains radar_signer::check in the key-holding processes. Added
+independent per-instruction mint/trader binding for all six known curve trade
+variants and explicit wrapped-SOL quote binding for v2. Test fixtures retain six
+successful public mainnet RPC captures with signatures, slots, source versions,
+argument bytes, instruction accounts and reported mint/owner token anchors.
+The old and v2 layouts differ; a global mint-membership check did not bind roles.
+The actual Privy process regression re-attests substituted/missing roles, mixed
+messages and a wallet that is not a required signer. Existing synthetic trade
+fixtures now supply the correct mint/trader roles rather than masking new checks.
+
+Capture investigation also found the old buy_exact_sol_in fixture transaction
+failed before invoking the trade. A different successful transaction anchors the
+new role fixture; old fixture provenance is not silently rewritten. RPC metadata
+is provider-reported layout evidence, not an independent historical ownership
+proof. Reconstructed legacy tests are not claimed as executed mainnet messages.
+
+GitHub verification is required for this new branch. No jobs ran locally and no
+production service, protected policy or signing authority changed. The smart-panel
+checklist remains in plan 0011 and design 0017: adaptive risk, optional daily cap,
+each option independently agent-selected, live portfolio/reasons, research chat,
+independent pause/revoke and measured net outcomes. These remain activation work.
+
+Next: inspect the fresh GitHub results, then integrate verified source. Protected
+exit authority/holdings, token-account and curve derivations, bidirectional routing,
+live wallet/portfolio evidence, sale completion and recovery, supervisor/chat,
+protected deployment and owner site handover still block autonomous activation.
+The goal remains fully autonomous trading; it is not enabled yet.
+
+### Verified role source integrated before corrected executor run
+
+Merged verified role-binding source 2768670 into the executor correction locally.
+Only appended ADR/plan text and the test floor conflicted; retained both sections
+and set the combined floor to 2228. Rather than running the lint-only correction
+separately and then another merge run, publish this combined source after the
+existing executor run is terminal. Role behavior is already verified; executor
+behavior and the combined result still require the fresh full GitHub run. This
+supersedes the earlier sequencing note, not any activation gate. No live change.
+
+
+### Exact-SOL output units and handback (2026-10-10)
+
+Previous goal turn made source progress by combining verified role checks and the
+executor correction. This turn verified CI 38081547094 at f90b058 fully green:
+17 mutants, nine caught and eight unviable, none missed; tests/build/lint and all
+other jobs passed. PR 352 now records those results. Nothing new was deployed.
+
+Started fix/curve-minimum-output-units from that verified combined source.
+Source inspection found the direct builder mislabeled min_tokens_out as
+slippage_bps. First-party pump interface at 2293f9a and successful captured
+transaction 3Dk1fn5... confirm native input then raw-token floor. Research 0039
+records the evidence, including the old failed-packet caveat. Rename the field
+and add Trade::exact_sol_buy, used by the existing builder-to-signer integration,
+to calculate a nonzero raw floor from a fee-inclusive quote and tolerance.
+Added capture-backed arguments and boundary/encoding regressions. Floor 2230.
+No local tests/build/lint/mutation jobs or live signing/deployment occurred.
+
+Publish for fresh GitHub verification. This corrects construction units, not
+quote freshness/provenance or independent authorized minimum-output enforcement.
+Those, live holdings/exit authority, supported sell construction and reconciliation,
+portfolio accounting/recovery, adaptive supervisor/research chat and protected
+site handover/deployment still remain. Goal stays fully autonomous trading.
+
+Exact-SOL run 38081913177 at fe1da36 found a lint naming collision in the new
+capture test (captures/captured). Rename the payload packet. All mutation shards
+passed; let remaining jobs finish before publishing the correction. Require a
+fresh full GitHub run rather than treating a naming-only fix as already verified.
+
+The same initial output-unit run also found the new LEARNINGS entry lacked the
+required recurrence-check line and index row. Added both, naming its actual
+argument/conversion regressions; adjusted the index count. The trading tests
+passed in that run, but repository conformance is a required test and the run
+remains failed. Publish this documentation fix with the naming correction only
+after the old run finishes. No production behavior changed in either correction.
+
+### Integrated verified signer and executor source (2026-10-10)
+
+Fast-forwarded feat/integrated-autonomous-controls from 63e66e6 to verified
+f90b058. This includes direction, explicit native units, aggregate token-debit
+bounds, captured mint/trader/quote roles and correct executor buy/sell dispatch.
+Their combined CI 38081547094 passed every job, with 17 mutants (nine caught,
+eight unviable). Earlier accounting and optional-cap controls remain included.
+No production authority or service was changed. Test floor 2228.
+
+Request fresh broad integrated GitHub CI and a release-linux artifact before
+protected installation work. Fixed radar-deploy updates Serve only; do not imply
+that downloading an issuer/signer binary installs or activates those services.
+Exact-SOL builder correction is separate PR 353; initial run 38081913177 has a
+naming-only lint correction committed as 72f296a, awaiting terminal old run before
+publication. Do not integrate it as verified yet. Authorized output floors, live
+holdings/exit issuance and reconciliation, portfolio inputs, adaptive supervisor/
+research chat, recovery and protected site handover remain goal work.
+
+
+### Issuer-bound output protection and handback (2026-10-10)
+
+Previous goal turn made source progress on the builder-unit correction and
+verified-source integration. This turn inspected initial PR 353 failures, fixed
+its LEARNINGS metadata and published the correction. GitHub retargeted PR 353
+after its executor base was integrated: it now conflicts only in appended plan
+text against integrated 33cbe0f, so it has no fresh run until resolved. Do not
+mistake missing checks for a running verification handle.
+
+Started feat/signer-output-floor from verified f90b058 and fast-forwarded its
+base to integrated 33cbe0f (documentation-only difference). Integrated CI
+38082045246 and release 38082041644 have both now passed. No live change.
+
+Actual caller: radar_signer::check and the protected issuer prepare path. Added
+optional min_output_raw authority, checked aggregate encoded trade-output floors
+and refusal for zero/insufficient/overflow guarantees and unsupported suffixes.
+Current first-party IDL includes partial-fill options, so do not assume the first
+two u64 fields alone guarantee the named output with arbitrary trailing arguments.
+The protected issuer requires a positive floor for known curve trades, drawn from
+its private snapshot rather than stdin. Legacy absent library/wire authority
+retains no output guarantee; kernel decisions invent no quote. Existing native
+issuer regression now supplies a protected floor and still isolates native units.
+
+Four actual-process regressions cover all variants/units, split floors/overflow,
+proof tampering, foreign/nontrade discriminators, optional suffixes, and issuer
+refusal before reservation. Extended wire compatibility; floor 2232 on this branch
+(and 2234 once the two builder regressions are integrated). No local jobs or live
+signing/deployment. Publish for GitHub tests/build/lint/mutation verification.
+
+Next: resolve PR 353's retargeted-base conflict, inspect both fresh runs, then
+combine verified source. Download/check the verified integrated release for later
+protected installation. Live quote provenance/slippage policy, holdings/exit
+issuance/construction/reconciliation, portfolio accounting/recovery, adaptive
+supervisor/chat and protected website handover remain before goal completion.
+
+Output-bound initial CI 38082644735 at 6df0d00 found two issuer-helper lint
+findings (boolean spelling and method closure), corrected without changing its
+meaning. Shard 0 reported the exact execution_output.rs:8:13 && to || mutant
+survived: existing issuer tests had no foreign-program trade payload or known
+curve nontrade. Added both accepted legacy no-output-promise cases in the actual
+issuer process; that mutant wrongly requires a curve floor for them. This is
+classification coverage, not proof of arbitrary program execution semantics.
+Floor now 2233; combined builder floor will be 2235. Let the old run finish before
+publishing; require the fresh GitHub mutation run to prove the exact guard.
+Integrated CI/release 38082045246/38082041644 passed, and every one of the six
+downloaded binary SHA256 hashes matched BUILD-INFO.txt at 33cbe0f. No live change.
+
+### Verified builder and output-regression publication handback (2026-10-10)
+
+This goal turn progressed verification and publication, not live activation.
+Builder PR 353 at f18f368 passed full GitHub CI 38082687122: every job green,
+including 13 mutants (11 caught, two unviable, none missed). Its PR description
+now records exact evidence. It is ready to integrate once the parallel output
+branch has finished against its existing base.
+
+Output initial CI 38082644735 completed: tests/build/MSRV passed, with only the
+previously identified lint and classification-mutation failures. Published the
+committed f2fa79e correction after that run was terminal. Fresh GitHub CI
+38082995334 is in progress; lint and the formerly failing shard 0 now pass.
+Do not claim full success or push over this run. PR 354 records the pending run.
+No local tests/build/lint/mutation jobs, live service or wallet changes occurred.
+
+Next: inspect terminal CI 38082995334 and its exact mutation results; integrate
+verified builder/output source, resolving appended plan/test-floor differences,
+then require full combined GitHub CI/release. Continue protected holdings-derived
+exit authority and actual bidirectional construction/reconciliation, live marked
+portfolio/evidence, adaptive supervisor/research chat, recovery and protected
+site handover. Existing checklist decisions remain settled; do not ask for chat
+limits again. Autonomous trading remains off and the goal remains active.
+
+
+### Corrected builder verification after base retarget
+
+GitHub marked executor/role/token PRs integrated when their exact source reached
+the integration branch, and retargeted PR 353 to that branch. Its correction
+push c963b24 had no CI run because appended plan notes conflicted with 33cbe0f.
+Merged that verified documentation base, preserving both handbacks; no source
+conflict or trading behavior change. Fresh GitHub verification is required.
+Issuer-output enforcement is independently published as PR 354 at 6df0d00 and
+not yet integrated or verified. Integrated 33cbe0f CI/release both passed; no
+production authority or service changed. Goal remains fully autonomous trading.
+
+
+### Combined output protections and diagnostic gate (2026-10-10)
+
+Prior turn made progress publishing the output correction and verifying the
+builder. This turn observed CI 38082995334 at f2fa79e fully green: 32 mutants,
+19 caught and 13 unviable, none missed. However shard 0 had eight unviable and
+zero caught, with an explicit cargo-mutants warning. Therefore the exact original
+execution_output.rs:8:13 guard regression is not yet proven caught; a green
+summary alone does not meet that acceptance criterion. The workflow retained no
+mutation logs, so the compiler cause is presently unknown.
+
+Merged verified builder f18f368 into the output branch, retaining both appended
+plan histories and setting the combined test floor to 2235. Added per-shard
+GitHub diagnostic artifacts (outcomes, logs and diffs) using the already-pinned
+upload action, without changing mutation selection or weakening any check.
+Publish this combined source for full GitHub CI and inspect the exact guard's
+outcome/compiler log before treating output protection verification as complete.
+No local verification jobs or live wallet/service/authority changes occurred.
+
+Next actionable execution gap confirmed by source: issuer issue remains buy-only
+and reconciliation apply rejects sales, while the executor dispatches sells.
+Holdings-derived token authority, sale completion/credits and durable recovery
+must be connected before autonomous position management. Actual supported route
+construction, live marked portfolio/evidence, adaptive supervisor/chat and
+protected website handover remain. Goal active; autonomous trading stays off.
+
+### Output protections verified and integrated (2026-10-10)
+
+Combined source 67c3e9e passed every job in GitHub CI 38083298087, including
+45 mutations: 30 caught, 15 unviable, none missed. Downloaded the four diagnostic
+artifacts and inspected outcomes plus the exact original guard's diff and log.
+execution_output.rs:8:13 AND-to-OR is CaughtMutant: its build succeeded and the
+issuer_distinguishes_nontrades_and_foreign_program_trade_bytes process test
+failed at its intended refusal-versus-issued assertion. The earlier all-unviable
+shard summary did not establish this; the current exact evidence does. Other
+unviable cases are not mislabeled caught. No exclusions or local jobs were used.
+
+Fast-forwarded feat/integrated-autonomous-controls from 33cbe0f to this verified
+combined source, keeping builder and protected output authority together. Test
+floor 2235. Publish this handback and request fresh broad integrated GitHub CI
+and release before any installation. No production or authority change occurred.
+
+Next implementation: complete sales with retained exact native credits and
+outgoing costs, FIFO token/basis anchors, atomic durable completion and restart
+idempotence, then protected holdings-derived exit issuance. A native debit-only
+Settlement cannot by itself represent returned sale cash; do not disguise a
+credit as an unsigned negative debit or erase the fee. Actual routing, live
+portfolio/evidence, supervisor/research chat and protected site handover remain.
+Goal remains active and autonomous trading is off.
+
+### Sale cash completion implementation and handback (2026-10-10)
+
+Previous goal turn progressed by proving the exact output guard caught and
+integrating the verified builder/signer source. This turn observed broad
+integrated CI 38083559773 and release 38083555818 at 896009c fully green.
+Release download/hash verification remains to do; nothing new was deployed.
+
+Started feat/sale-cash-completion from 896009c. Actual callers are Portfolio::settle,
+OperationLog reconciliation/replay and the protected issuer reconcile-operation
+consumer. Added CompletedCashFlow with separate same-asset spent/received units;
+credits cannot hide spending beyond the claim. Both balance sides and range are
+validated before mutation; the journal persists before applying the copy. Replay
+checks the original intent/reservation and both units. Existing wire variants
+retain their meaning.
+
+The issuer derives the exact cash sides from reverified retained sale valuation,
+checks pre/post cash, chronological buy/sale token anchors and FIFO/current
+inventory before completion, and replays matching terminal sales exactly once.
+New process regressions cover buy then partial sale, fees/proceeds, remaining
+basis, restart/retry idempotence and next-issuance risk/checkpoint refusal. Hidden
+sale token gaps and incoming-credit-funded overspending remain refused with the
+claim and journal unchanged. Added portfolio atomicity/other-claim/unit/overflow
+regressions and extended journal tampered-terminal replay cases. Test floor 2239.
+
+Publish for GitHub tests/build/lint/mutation verification; no local jobs ran.
+This closes an offline economic completion gap, not holdings-derived exit
+issuance, actual route construction, live evidence/portfolio, dropped recovery,
+adaptive supervisor/research chat or protected site handover/deployment. Keep
+those goal items open and live signing closed. Inspect this branch's exact CI
+results next, then continue the protected exit path. Goal remains active.
+
+Initial sale CI 38084015922 at 2be1777 found journal replay exceeded the lint
+function-length threshold. Extracted its unchanged completed-record validation
+into a focused helper. Mutation shard 1 found reconciliation.rs:63:50 OR-to-AND
+survived: checking both token endpoints duplicated the already reverified exact
+delta. Removed the redundant end check instead of adding a test for an impossible
+single-endpoint inconsistency. Chronological starting quantities plus the retained
+verified delta still anchor both ends, and the balanced hidden-gap regression
+remains. No exclusion or relaxed check. Shortened the enlarged sale fixture helper.
+
+Integrated 896009c release 38083555818 has now been downloaded; all six SHA256
+hashes matched BUILD-INFO.txt. Its CI 38083559773 also passed. Nothing deployed.
+Let the initial sale run finish, inspect remaining results, then publish this
+correction and require a fresh full GitHub run. Goal active; live signing closed.
+
+Sale correction CI 38084228108 at 94f3a01 passed every mutation shard: 30
+mutants, 16 caught and 14 unviable, none missed. Downloaded diagnostics confirm
+the real issuer completion paths and credit-unit check are caught, while compiler
+refusals remain labeled unviable. Lint then reached two new test assignments and
+required their trailing semicolons; corrected both. Wait for the remaining test
+job before publication, then require a fresh complete run. No local jobs or live
+changes. Protected exit issuance remains the next feature after this gate.

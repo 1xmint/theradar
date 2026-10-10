@@ -100,13 +100,12 @@ fn buy_accounts(mint: &Address) -> Vec<AccountMeta> {
 const SPEND_LAMPORTS: u64 = 20_000_000;
 
 fn buy_instruction(mint: &Address, lamports: u64) -> Instruction {
-    let data = Trade::BuyExactSolIn {
-        lamports,
-        slippage_bps: 500,
-        track_volume: false,
-    }
-    .data()
-    .expect("a discriminator");
+    // A synthetic fee-inclusive quote: this test exercises signer sizing,
+    // not a live price. The output floor is tokens, never basis points.
+    let data = Trade::exact_sol_buy(lamports, 1_000_000, 500, false)
+        .expect("positive synthetic quote")
+        .data()
+        .expect("a discriminator");
     Instruction {
         program_id: addr(PUMP_PROGRAM),
         accounts: buy_accounts(mint),
@@ -146,6 +145,8 @@ fn authorisation_for(mint: &Address) -> Authorization {
         action: Action::Buy,
         max_notional: MicroUsd(SPEND_LAMPORTS),
         expires_after: Slot(1_100),
+        max_token_debit_raw: None,
+        min_output_raw: None,
         needs_operator_signature: false,
     }
 }

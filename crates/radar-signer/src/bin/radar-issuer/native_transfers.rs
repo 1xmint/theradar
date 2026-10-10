@@ -121,12 +121,31 @@ fn transaction(value: &Value, wallet: Address) -> Result<Value, String> {
     )
 }
 
-// Collection completion is only about this address scan, never wallet coverage.
+// Query targets describe collection, not ownership or complete wallet coverage.
+// Reuse the account-history verifier before recognizing any retained operation.
+fn known_queries(packet: &Value, after: u64, through: u64) -> Result<(), String> {
+    let wallet: Address =
+        serde_json::from_value(packet["wallet"].clone()).map_err(|_| "invalid activity wallet")?;
+    let targets: Vec<Address> = serde_json::from_value(packet["queried_addresses"].clone())
+        .map_err(|_| "activity query targets missing")?;
+    let known: BTreeSet<_> = targets.iter().copied().collect();
+    if targets.len() > 16 || targets.len() != known.len() || !known.contains(&wallet) {
+        return Err("activity query targets must be unique and include wallet".into());
+    }
+    super::account_activity::rows(packet, &known, after, through)?;
+    Ok(())
+}
+
+// Collection completion is only about supplied address scans, never wallet coverage.
 fn collected(packet: &Value, native_slot: u64) -> Result<Value, String> {
     let after = integer(packet, "after_slot_exclusive")?;
     let through = integer(packet, "through_slot_inclusive")?;
-    if packet["coverage"] != "provider_reported_address_history"
-        || packet["signature_scan_finished"] != true
+    match packet["coverage"].as_str() {
+        Some("provider_reported_address_history") => {}
+        Some("provider_reported_known_address_history") => known_queries(packet, after, through)?,
+        _ => return Err("unsupported collected activity coverage".into()),
+    }
+    if packet["signature_scan_finished"] != true
         || packet["transaction_fetch_finished"] != true
         || after >= through
         || through > native_slot
@@ -515,6 +534,81 @@ mod tests {
             "coverage":"provider_reported_address_history","signature_scan_finished":true,
             "transaction_fetch_finished":true,"after_slot_exclusive":"42","through_slot_inclusive":"44",
             "signatures":[{"signature":signature,"slot":"43","outcome":tx["outcome"]}],"transactions":[row]}})
+    }
+
+    #[test]
+    fn known_address_history_retains_native_checks_and_signed_query_membership() {
+        let mut current = activity(true);
+        let packet = &mut current["wallet_activity"];
+        packet["coverage"] = json!("provider_reported_known_address_history");
+        packet["queried_addresses"] = json!([payer(), Address::new([8; 32])]);
+        packet["signatures"][0]["reported_for_addresses"] = json!([Address::new([8; 32])]);
+        let expected = review(&activity(true), &json!({}), &config(), 11).unwrap();
+        assert_eq!(
+            review(&current, &json!({}), &config(), 11).unwrap(),
+            expected
+        );
+        for (path, bad) in [
+            ("/wallet_activity/queried_addresses", Value::Null),
+            ("/wallet_activity/queried_addresses", json!([])),
+            (
+                "/wallet_activity/queried_addresses",
+                json!([Address::new([8; 32])]),
+            ),
+            (
+                "/wallet_activity/queried_addresses",
+                json!([payer(), payer()]),
+            ),
+            ("/wallet_activity/wallet", json!("invalid")),
+            (
+                "/wallet_activity/signatures/0/reported_for_addresses",
+                Value::Null,
+            ),
+            (
+                "/wallet_activity/signatures/0/reported_for_addresses",
+                json!([]),
+            ),
+            (
+                "/wallet_activity/signatures/0/reported_for_addresses",
+                json!([payer(), payer()]),
+            ),
+            (
+                "/wallet_activity/signatures/0/reported_for_addresses",
+                json!([Address::new([9; 32])]),
+            ),
+            ("/wallet_activity/signature_scan_finished", json!(false)),
+            ("/wallet_activity/transaction_fetch_finished", json!(false)),
+            (
+                "/wallet_activity/transactions/0/raw_metadata/postBalances/0",
+                json!(92),
+            ),
+        ] {
+            let mut changed = current.clone();
+            *changed.pointer_mut(path).unwrap() = bad;
+            assert!(
+                review(&changed, &json!({}), &config(), 11).is_err(),
+                "{path}"
+            );
+        }
+        // A queried address must actually occur in the signed message, even
+        // when the outer enumeration and claimed targets agree with each other.
+        let mut forged = current.clone();
+        forged["wallet_activity"]["queried_addresses"] = json!([payer(), Address::new([9; 32])]);
+        forged["wallet_activity"]["signatures"][0]["reported_for_addresses"] =
+            json!([Address::new([9; 32])]);
+        assert!(review(&forged, &json!({}), &config(), 11).is_err());
+        // Query count has the same exact bound as the collector. Extra empty
+        // scans grant no ownership, coverage, or transaction classification.
+        let mut targets = vec![payer()];
+        targets.extend((8..23).map(|n| Address::new([n; 32])));
+        current["wallet_activity"]["queried_addresses"] = json!(targets);
+        assert_eq!(
+            review(&current, &json!({}), &config(), 11).unwrap(),
+            expected
+        );
+        targets.push(Address::new([23; 32]));
+        current["wallet_activity"]["queried_addresses"] = json!(targets);
+        assert!(review(&current, &json!({}), &config(), 11).is_err());
     }
 
     #[test]

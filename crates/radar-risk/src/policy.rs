@@ -23,7 +23,7 @@ pub enum Autonomy {
     Approve,
     /// Dust round trips authorise themselves; nothing larger does.
     Canary,
-    /// Authorises within hard notional and daily-loss bounds.
+    /// Authorises within hard notional and any enabled daily-loss bounds.
     Capped,
     /// Capped, with no per-trade ceiling below the portfolio limits.
     Auto,
@@ -48,6 +48,12 @@ pub struct Policy {
     pub autonomy: Autonomy,
     /// The most that may be committed to one position.
     pub max_position: MicroUsd,
+    /// Independent outgoing native-SOL instruction ceiling, in lamports.
+    /// The signer owns this limit; caller conversions may only narrow it.
+    /// `None` preserves the legacy restrictive USD-as-lamports bound for old
+    /// configurations. The issuer requires an explicit positive native limit.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_native_spend_lamports: Option<u64>,
     /// The most that may be deployed across all positions at once.
     pub max_deployed: MicroUsd,
     /// The most that may be committed to a single creator's tokens, across all
@@ -57,8 +63,11 @@ pub struct Policy {
     /// in half an hour can otherwise be held forty-two times over while every
     /// individual position looks small.
     pub max_per_creator: MicroUsd,
-    /// Realised loss in a day beyond which nothing is authorised.
-    pub max_daily_loss: MicroUsd,
+    /// Optional realised daily-loss cap. `None` explicitly disables this cap;
+    /// other policy checks still apply. A missing serialized field retains the
+    /// legacy zero cap, rather than silently removing a restriction.
+    #[serde(default = "zero_daily_loss_cap")]
+    pub max_daily_loss: Option<MicroUsd>,
     /// The most a round trip may cost in fees, tips and slippage, per ten
     /// thousand of the position.
     ///
@@ -89,9 +98,10 @@ impl Policy {
     pub const CLOSED: Self = Self {
         autonomy: Autonomy::Observe,
         max_position: MicroUsd::ZERO,
+        max_native_spend_lamports: None,
         max_deployed: MicroUsd::ZERO,
         max_per_creator: MicroUsd::ZERO,
-        max_daily_loss: MicroUsd::ZERO,
+        max_daily_loss: Some(MicroUsd::ZERO),
         max_round_trip_cost_bps: 0,
         max_canary: MicroUsd::ZERO,
         max_input_staleness: SlotDelta(0),
@@ -132,6 +142,10 @@ impl Policy {
     }
 }
 
+fn zero_daily_loss_cap() -> Option<MicroUsd> {
+    Policy::CLOSED.max_daily_loss
+}
+
 impl Default for Policy {
     fn default() -> Self {
         Self::CLOSED
@@ -141,6 +155,55 @@ impl Default for Policy {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn native_spend_policy_requires_explicit_units_and_preserves_old_files() {
+        let legacy = serde_json::to_value(Policy::CLOSED).unwrap();
+        assert!(legacy.get("max_native_spend_lamports").is_none());
+        let old: Policy = serde_json::from_value(legacy.clone()).unwrap();
+        assert_eq!(old.max_native_spend_lamports, None);
+        for limit in [0, 250_000_000, u64::MAX] {
+            let mut wire = legacy.clone();
+            wire["max_native_spend_lamports"] = serde_json::json!(limit);
+            let policy: Policy = serde_json::from_value(wire.clone()).unwrap();
+            assert_eq!(policy.max_native_spend_lamports, Some(limit));
+            assert_eq!(serde_json::to_value(policy).unwrap(), wire);
+        }
+        for bad in [
+            serde_json::json!(-1),
+            serde_json::json!(1.5),
+            serde_json::json!("250000000"),
+        ] {
+            let mut wire = legacy.clone();
+            wire["max_native_spend_lamports"] = bad;
+            assert!(serde_json::from_value::<Policy>(wire).is_err());
+        }
+    }
+
+    #[test]
+    fn daily_cap_wire_format_preserves_numeric_history_and_requires_explicit_disable() {
+        let mut wire = serde_json::to_value(Policy::CLOSED).unwrap();
+        assert_eq!(wire["max_daily_loss"], 0);
+        wire["max_daily_loss"] = serde_json::json!(25_000_000);
+        let legacy: Policy = serde_json::from_value(wire.clone()).unwrap();
+        assert_eq!(legacy.max_daily_loss, Some(MicroUsd(25_000_000)));
+        assert_eq!(serde_json::to_value(legacy).unwrap(), wire);
+        wire.as_object_mut().unwrap().remove("max_daily_loss");
+        let missing: Policy = serde_json::from_value(wire.clone()).unwrap();
+        assert_eq!(missing.max_daily_loss, Some(MicroUsd::ZERO));
+        wire["max_daily_loss"] = serde_json::Value::Null;
+        let disabled: Policy = serde_json::from_value(wire.clone()).unwrap();
+        assert_eq!(disabled.max_daily_loss, None);
+        assert_eq!(serde_json::to_value(disabled).unwrap(), wire);
+        for bad in [
+            serde_json::json!(-1),
+            serde_json::json!(false),
+            serde_json::json!("none"),
+        ] {
+            wire["max_daily_loss"] = bad;
+            assert!(serde_json::from_value::<Policy>(wire.clone()).is_err());
+        }
+    }
 
     #[test]
     fn the_default_policy_refuses_everything() {

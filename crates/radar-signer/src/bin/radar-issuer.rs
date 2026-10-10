@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 //! Offline operator-provisioned kernel issuer. It holds no wallet or Privy key.
 //! Configured private files are the trust boundary; stdin carries no authority.
-//! This is not yet a live snapshot adapter or a settlement reconciler.
+//! Reconciles retained native-SOL buys, sales and failed fees against protected reads.
+//! This is not yet a live snapshot adapter, exit issuer or execution/recovery loop.
 
 use std::io::{BufRead as _, Read as _, Write as _};
 use std::path::{Path, PathBuf};
@@ -28,6 +29,15 @@ mod basis;
 
 #[path = "radar-issuer/acquisitions.rs"]
 mod acquisitions;
+
+#[path = "radar-issuer/reconciliation.rs"]
+mod reconciliation;
+
+#[path = "radar-issuer/cash_completion.rs"]
+mod cash_completion;
+
+#[path = "radar-issuer/execution_output.rs"]
+mod execution_output;
 
 #[path = "radar-issuer/native_transfers.rs"]
 mod native_transfers;
@@ -80,6 +90,10 @@ struct Config {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Snapshot {
+    // Protected operator-reviewed raw output floor; never accepted from stdin.
+    // Required for known curve trades. This is not independently live-quoted.
+    #[serde(default)]
+    min_output_raw: Option<u64>,
     wallet: Address,
     observed_at_unix_secs: u64,
     sol_lamports: u64,
@@ -315,7 +329,21 @@ fn history_refusal(error: &radar_journal::OperationError) -> &'static str {
 
 impl Issuer {
     fn inventory_mode(&mut self, args: &[String]) -> Result<bool, String> {
-        if args == ["--record-opening-inventory"] {
+        if args.len() == 2 && args[0] == "--reconcile-operation" {
+            let snapshot: Snapshot =
+                serde_json::from_slice(&private_read(&self.config.snapshot_path)?)
+                    .map_err(|_| "invalid trusted snapshot")?;
+            println!(
+                "{}",
+                reconciliation::apply(
+                    &mut self.operations,
+                    &self.config,
+                    &snapshot,
+                    &args[1],
+                    unix_now()?
+                )?
+            );
+        } else if args == ["--record-opening-inventory"] {
             self.record_opening_inventory()?;
             println!(
                 "{}",
@@ -414,6 +442,10 @@ impl Issuer {
             .map_err(|_| "invalid issuer configuration")?;
         if !config.active
             || config.policy.is_closed()
+            || config
+                .policy
+                .max_native_spend_lamports
+                .is_none_or(|limit| limit == 0)
             || config.max_snapshot_age_secs == 0
             || config.intent_lifetime_secs == 0
             || config.fee_reserve_lamports == 0
@@ -472,7 +504,8 @@ impl Issuer {
             u128::from(authorization.max_notional.get()) * 1_000_000_000
                 / u128::from(snapshot.sol_upper_micro_usd),
         )
-        .map_err(|_| "lamport ceiling overflow")?;
+        .map_err(|_| "lamport ceiling overflow")?
+        .min(self.config.policy.max_native_spend_lamports.unwrap_or(0));
         if max_lamports == 0 {
             return Err("lamport ceiling is zero".into());
         }
@@ -481,6 +514,7 @@ impl Issuer {
             .ok_or("fee reservation overflow")?;
         let bytes = radar_types::b64::decode(&candidate.transaction)
             .ok_or("invalid transaction encoding")?;
+        authorization.min_output_raw = execution_output::review(&bytes, snapshot.min_output_raw)?;
         let allowlist = radar_signer::Allowlist {
             programs: self.config.programs.iter().map(|a| *a.as_bytes()).collect(),
         };
@@ -550,8 +584,7 @@ impl Issuer {
         if expired(now, self.config.valid_until_unix_secs) {
             return Err("mandate expired".into());
         }
-        // Without settlement reconciliation, no second decision may assume
-        // the first one's exposure, loss or unknown submission vanished.
+        // Only verified durable reconciliation may release the previous claim.
         if self.operations.outstanding().next().is_some() {
             return Err("outstanding operation requires reconciliation".into());
         }

@@ -57,6 +57,10 @@
 //! debits that amount and frees the unused ceiling because the operation is
 //! established as over. Its caller must establish completion; this vocabulary
 //! neither observes a transaction nor values its economic outcome.
+//!
+//! [`Settlement::CompletedCashFlow`] additionally retains same-asset proceeds.
+//! The outgoing amount still fits the original claim independently of credit.
+//! Both sides apply atomically; incoming cash cannot erase an overspend refusal.
 
 use std::collections::BTreeMap;
 
@@ -534,6 +538,15 @@ pub enum Settlement {
     /// Debit the measured amount and release the unused remainder. This is not
     /// a partial operation, nor a statement about USD loss or exposure.
     Completed(TokenQuantity),
+    /// Complete a same-asset cash flow, retaining both outgoing costs and
+    /// incoming proceeds. Spend must fit the claim; credit cannot hide an
+    /// overspend. Apply both atomically and release the unused claim.
+    CompletedCashFlow {
+        /// Measured outgoing units of the reserved asset.
+        spent: TokenQuantity,
+        /// Measured incoming units of that same asset.
+        received: TokenQuantity,
+    },
     /// Nothing further was spent. The claim closes and its outstanding units
     /// become free again.
     Abandoned,
@@ -573,6 +586,9 @@ pub enum PortfolioError {
     /// Claims against this asset exceed its balance.
     #[error("claims against {0:?} exceed the balance held")]
     Overdrawn(Asset),
+    /// A measured credit would exceed the balance's representable range.
+    #[error("credited balance of {0:?} exceeds the quantity range")]
+    BalanceOverflow(Asset),
     /// No such claim.
     #[error("no reservation {0:?}")]
     NoSuchReservation(ReservationId),
@@ -848,7 +864,9 @@ impl Portfolio {
 
         let spent = match outcome {
             Settlement::Filled => claim.outstanding,
-            Settlement::PartiallyFilled(filled) | Settlement::Completed(filled) => {
+            Settlement::PartiallyFilled(filled)
+            | Settlement::Completed(filled)
+            | Settlement::CompletedCashFlow { spent: filled, .. } => {
                 match claim.outstanding.checked_cmp(filled) {
                     None => return Err(PortfolioError::UnitMismatch { asset: claim.asset }),
                     Some(core::cmp::Ordering::Less) => {
@@ -869,6 +887,11 @@ impl Portfolio {
             }
         };
 
+        if let Settlement::CompletedCashFlow { received, .. } = outcome {
+            self.complete_cash_flow(claim.asset, spent, received)?;
+            self.reservations.remove(&id);
+            return Ok(());
+        }
         self.debit(claim.asset, spent)?;
 
         let remaining = claim
@@ -893,6 +916,36 @@ impl Portfolio {
             .filled
             .checked_add(spent)
             .ok_or(PortfolioError::UnitMismatch { asset: claim.asset })?;
+        Ok(())
+    }
+
+    /// Apply both sides only after validating the final same-asset balance.
+    fn complete_cash_flow(
+        &mut self,
+        asset: Asset,
+        spent: TokenQuantity,
+        received: TokenQuantity,
+    ) -> Result<(), PortfolioError> {
+        let holding = self
+            .holdings
+            .get_mut(&asset)
+            .ok_or(PortfolioError::NotHeld(asset))?;
+        let counted = match holding.balance {
+            Balance::Counted(quantity) => quantity,
+            Balance::Uncounted(why) => return Err(PortfolioError::Uncounted { asset, why }),
+        };
+        if counted.decimals() != received.decimals() {
+            return Err(PortfolioError::UnitMismatch { asset });
+        }
+        let remaining = counted
+            .checked_sub(spent)
+            .ok_or(PortfolioError::Overdrawn(asset))?;
+        let balance = remaining
+            .checked_add(received)
+            .ok_or(PortfolioError::BalanceOverflow(asset))?;
+        // No mutation precedes validation of both sides. A refused credit must
+        // leave the original cash and reservation available for reconciliation.
+        holding.balance = Balance::Counted(balance);
         Ok(())
     }
 
@@ -1377,6 +1430,77 @@ mod tests {
             portfolio.settle(filled, Settlement::Abandoned),
             Err(PortfolioError::NoSuchReservation(_)),
         ));
+    }
+
+    #[test]
+    fn completed_cash_flows_keep_costs_and_credits_separate_and_preserve_other_claims() {
+        for spent in [0, 10, 60] {
+            for received in [0, 5, 100] {
+                let mut portfolio = with_cash(100);
+                let claim = portfolio.reserve(Asset::Usdc, usdc(60), NOW).unwrap();
+                let other = portfolio.reserve(Asset::Usdc, usdc(20), NOW).unwrap();
+                portfolio
+                    .settle(
+                        claim,
+                        Settlement::CompletedCashFlow {
+                            spent: usdc(spent),
+                            received: usdc(received),
+                        },
+                    )
+                    .unwrap();
+                assert_eq!(
+                    portfolio.free(Asset::Usdc).unwrap(),
+                    usdc(80 - spent + received)
+                );
+                assert_eq!(
+                    portfolio.holdings().next().unwrap().1.balance,
+                    Balance::Counted(usdc(100 - spent + received))
+                );
+                assert_eq!(
+                    portfolio
+                        .reservations()
+                        .map(super::Reservation::id)
+                        .collect::<Vec<_>>(),
+                    vec![other]
+                );
+                assert!(matches!(
+                    portfolio.settle(claim, Settlement::Abandoned),
+                    Err(PortfolioError::NoSuchReservation(_))
+                ));
+            }
+        }
+    }
+
+    #[test]
+    fn cash_flow_refusal_is_atomic_and_credit_never_hides_overspend() {
+        for (balance, spent, received) in [
+            (100, usdc(61), usdc(1_000)),
+            (100, TokenQuantity::lamports(1), usdc(1)),
+            (100, usdc(1), TokenQuantity::lamports(1)),
+            (u64::MAX, usdc(0), usdc(1)),
+        ] {
+            let mut portfolio = with_cash(balance);
+            let claim = portfolio.reserve(Asset::Usdc, usdc(60), NOW).unwrap();
+            let before = portfolio.clone();
+            assert!(
+                portfolio
+                    .settle(claim, Settlement::CompletedCashFlow { spent, received })
+                    .is_err()
+            );
+            assert_eq!(portfolio, before);
+        }
+        let mut portfolio = with_cash(u64::MAX);
+        let claim = portfolio.reserve(Asset::Usdc, usdc(u64::MAX), NOW).unwrap();
+        portfolio
+            .settle(
+                claim,
+                Settlement::CompletedCashFlow {
+                    spent: usdc(u64::MAX),
+                    received: usdc(u64::MAX),
+                },
+            )
+            .unwrap();
+        assert_eq!(portfolio.free(Asset::Usdc).unwrap(), usdc(u64::MAX));
     }
 
     #[test]

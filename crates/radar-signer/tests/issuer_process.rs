@@ -8,6 +8,650 @@ use std::process::{Child, Command, Stdio};
 const SEED: [u8; 32] = [0x6B; 32];
 
 #[test]
+fn issuer_converts_usd_to_native_units_then_clamps_and_proves_the_native_policy() {
+    for (limit, spend, expected, ceiling) in [
+        (250_000_000, 250_000_000_u64, "issued", 250_000_000),
+        (100_000_000, 100_000_000, "issued", 100_000_000),
+        (100_000_000, 100_000_001, "refused", 100_000_000),
+        (300_000_000, 250_000_001, "refused", 250_000_000),
+    ] {
+        let mut fixture = Fixture::new();
+        fixture.config["policy"]["max_native_spend_lamports"] = json!(limit);
+        set_curve_buy(&mut fixture, spend);
+        fixture.save();
+        let answer = fixture.start().ask(&fixture.candidate);
+        assert_eq!(
+            answer["outcome"], expected,
+            "limit={limit} spend={spend}: {answer}"
+        );
+        let log =
+            radar_journal::OperationLog::open(fixture.dir.path().join("operations.jsonl")).unwrap();
+        assert_eq!(log.outstanding().count(), usize::from(expected == "issued"));
+        if expected == "issued" {
+            assert_eq!(answer["intent"]["max_lamports"], ceiling);
+            assert_eq!(
+                answer["intent"]["authorization"]["max_notional"],
+                50_000_000
+            );
+            let intent: radar_signer::protocol::PrivyAuthorization =
+                serde_json::from_value(answer["intent"].clone()).unwrap();
+            let key = ed25519_dalek::SigningKey::from_bytes(&SEED);
+            let issuer = radar_signer::attestation::Issuer::new(
+                &radar_types::Address::new(key.verifying_key().to_bytes()),
+                60,
+            )
+            .unwrap();
+            assert!(issuer.check(&intent, unix_now()).is_ok());
+        } else {
+            assert_eq!(answer["reason"], "transaction refused");
+        }
+    }
+}
+
+fn set_curve_buy(fixture: &mut Fixture, spend: u64) {
+    let pump = radar_decode::pumpfun::PROGRAM_ID;
+    fixture.config["programs"] = json!([pump]);
+    let mut bytes =
+        radar_types::b64::decode(fixture.candidate["transaction"].as_str().unwrap()).unwrap();
+    // Three static accounts, then blockhash; replace the synthetic venue
+    // with a real curve-buy discriminator and a readable native size.
+    bytes[133..165].copy_from_slice(pump.as_bytes());
+    bytes.truncate(197);
+    let mut data = radar_decode::pumpfun::Instruction::BuyExactSolIn
+        .discriminator()
+        .as_bytes()
+        .to_vec();
+    data.extend(spend.to_le_bytes());
+    data.extend(1_u64.to_le_bytes());
+    bytes.extend([1, 2, 7, 1, 1, 1, 1, 1, 1, 0, 24]);
+    bytes.extend(data);
+    let encoded = radar_types::b64::encode(&bytes);
+    fixture.candidate["transaction"] = json!(encoded);
+    fixture.snapshot["transaction"] = json!(encoded);
+    fixture.snapshot["transaction_evidence"]["transaction_base64"] = json!(encoded);
+    fixture.snapshot["transaction_evidence"]["message_base64"] =
+        json!(radar_types::b64::encode(&bytes[65..]));
+    fixture.snapshot["min_output_raw"] = json!(1);
+}
+
+#[test]
+fn issuer_requires_protected_curve_output_floor_before_reserving_or_attesting() {
+    for floor in [None, Some(0), Some(1), Some(2)] {
+        let mut fixture = Fixture::new();
+        set_curve_buy(&mut fixture, 1_000_000);
+        fixture.snapshot["min_output_raw"] = json!(floor);
+        fixture.save();
+        let answer = fixture.start().ask(&fixture.candidate);
+        let allowed = floor == Some(1);
+        assert_eq!(
+            answer["outcome"],
+            if allowed { "issued" } else { "refused" }
+        );
+        let log =
+            radar_journal::OperationLog::open(fixture.dir.path().join("operations.jsonl")).unwrap();
+        assert_eq!(log.outstanding().count(), usize::from(allowed));
+        if allowed {
+            assert_eq!(answer["intent"]["authorization"]["min_output_raw"], 1);
+            let mut intent: radar_signer::protocol::PrivyAuthorization =
+                serde_json::from_value(answer["intent"].clone()).unwrap();
+            let key = ed25519_dalek::SigningKey::from_bytes(&SEED);
+            let issuer = radar_signer::attestation::Issuer::new(
+                &radar_types::Address::new(key.verifying_key().to_bytes()),
+                60,
+            )
+            .unwrap();
+            assert!(issuer.check(&intent, unix_now()).is_ok());
+            intent.authorization.min_output_raw = Some(2);
+            assert!(issuer.check(&intent, unix_now()).is_err());
+        } else if floor == Some(2) {
+            assert_eq!(answer["reason"], "transaction refused");
+        } else {
+            assert_eq!(
+                answer["reason"],
+                "curve trade requires a positive protected output floor"
+            );
+        }
+    }
+}
+
+#[test]
+fn issuer_distinguishes_nontrades_and_foreign_program_trade_bytes() {
+    for foreign in [false, true] {
+        let mut fixture = Fixture::new();
+        set_curve_buy(&mut fixture, 1_000_000);
+        let mut bytes =
+            radar_types::b64::decode(fixture.candidate["transaction"].as_str().unwrap()).unwrap();
+        if foreign {
+            let program = radar_types::Address::new([0x11; 32]);
+            bytes[133..165].copy_from_slice(program.as_bytes());
+            fixture.config["programs"] = json!([program]);
+        } else {
+            // The helper's seven instruction accounts end at 207; next are
+            // its data length and payload. A nontrade has just a discriminator.
+            bytes[207] = 8;
+            bytes.truncate(216);
+            bytes[208..216].copy_from_slice(
+                radar_decode::pumpfun::Instruction::CollectCreatorFee
+                    .discriminator()
+                    .as_bytes(),
+            );
+        }
+        let encoded = radar_types::b64::encode(&bytes);
+        fixture.candidate["transaction"] = json!(encoded);
+        fixture.snapshot["transaction"] = json!(encoded);
+        fixture.snapshot["transaction_evidence"]["transaction_base64"] = json!(encoded);
+        fixture.snapshot["transaction_evidence"]["message_base64"] =
+            json!(radar_types::b64::encode(&bytes[65..]));
+        fixture.snapshot["min_output_raw"] = Value::Null;
+        fixture.save();
+        let answer = fixture.start().ask(&fixture.candidate);
+        assert_eq!(answer["outcome"], "issued", "foreign={foreign}: {answer}");
+        assert!(
+            answer["intent"]["authorization"]
+                .get("min_output_raw")
+                .is_none()
+        );
+    }
+}
+
+fn reconciliation_fixture() -> (Fixture, radar_journal::OperationId) {
+    let mut fixture = inventory_fixture_opening(Some(0));
+    let log =
+        radar_journal::OperationLog::open(fixture.dir.path().join("operations.jsonl")).unwrap();
+    let id = log.outstanding().next().unwrap().0.clone();
+    drop(log);
+    fixture.snapshot["sol_lamports"] = json!(284_844_000);
+    fixture.snapshot["wallet_evidence"]["native_sol"]["raw_amount"] = json!("284844000");
+    set_inventory(&mut fixture, 15, 1003);
+    (fixture, id)
+}
+
+fn reconcile_operation(fixture: &Fixture, id: &str) -> std::process::Output {
+    fixture
+        .command()
+        .args(["--reconcile-operation", id])
+        .output()
+        .unwrap()
+}
+
+fn sale_reconciliation_fixture(case: &str) -> (Fixture, radar_journal::OperationId) {
+    let (mut fixture, buy) = reconciliation_fixture();
+    let result = reconcile_operation(&fixture, buy.as_str());
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    let path = fixture.dir.path().join("operations.jsonl");
+    let log = radar_journal::OperationLog::open(&path).unwrap();
+    let sale = append_sale_history(&fixture, case, log);
+    let log = radar_journal::OperationLog::open(&path).unwrap();
+    fixture.snapshot["accounting_checkpoint"] = json!(log.checkpoint());
+    fixture.snapshot["sol_lamports"] = json!(285_844_000);
+    fixture.snapshot["wallet_evidence"]["native_sol"]["raw_amount"] = json!("285844000");
+    set_inventory(&mut fixture, 9, 1004);
+    (fixture, sale)
+}
+
+#[test]
+fn issuer_completes_sale_cash_and_basis_once_across_restarts() {
+    let (mut fixture, sale) = sale_reconciliation_fixture("contiguous");
+    let path = fixture.dir.path().join("operations.jsonl");
+    let before: Value = serde_json::from_slice(&acquisition_report(&fixture).stdout).unwrap();
+    let result = reconcile_operation(&fixture, sale.as_str());
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    let result: Value = serde_json::from_slice(&result.stdout).unwrap();
+    assert_eq!(result["outcome"], "reconciled");
+    assert_eq!(result["reservation_released"], true);
+    assert_eq!(result["wallet_inventory_complete"], false);
+    let log = radar_journal::OperationLog::open(&path).unwrap();
+    assert_eq!(log.outstanding().count(), 0);
+    assert_eq!(
+        log.entry(&sale).unwrap().state,
+        radar_journal::OperationState::Reconciled(radar_types::Settlement::CompletedCashFlow {
+            spent: radar_types::TokenQuantity::lamports(5000),
+            received: radar_types::TokenQuantity::lamports(1_005_000),
+        })
+    );
+    let checkpoint = log.checkpoint().to_owned();
+    assert_eq!(result["accounting_checkpoint"], checkpoint);
+    drop(log);
+    let saved = std::fs::read(&path).unwrap();
+    for _ in 0..2 {
+        let retry = reconcile_operation(&fixture, sale.as_str());
+        assert!(
+            retry.status.success(),
+            "{}",
+            String::from_utf8_lossy(&retry.stderr)
+        );
+        let retry: Value = serde_json::from_slice(&retry.stdout).unwrap();
+        assert_eq!(retry["outcome"], "already_reconciled");
+        assert_eq!(std::fs::read(&path).unwrap(), saved);
+        let after: Value = serde_json::from_slice(&acquisition_report(&fixture).stdout).unwrap();
+        for field in [
+            "lots",
+            "sales",
+            "recorded_native_cash_flows",
+            "recorded_disposal_accounting",
+        ] {
+            assert_eq!(before[field], after[field], "{field}");
+        }
+        assert_eq!(
+            after["recorded_disposal_accounting"]["remaining_lots"][0]["remaining_raw"],
+            "9"
+        );
+        assert_eq!(
+            after["recorded_disposal_accounting"]["disposals"][0]["recorded_trade_pnl_micro_usd"],
+            "-1000481"
+        );
+    }
+    assert_eq!(
+        fixture.start().ask(&fixture.candidate)["reason"],
+        "snapshot accounting does not cover current journal history"
+    );
+    fixture.snapshot["accounting_checkpoint"] = json!(checkpoint);
+    fixture.save();
+    assert_eq!(
+        fixture.start().ask(&fixture.candidate)["reason"],
+        "snapshot risk state understates retained history"
+    );
+}
+
+#[test]
+fn sale_completion_refuses_hidden_inventory_gaps_and_credit_funded_overspending() {
+    for case in ["cash", "quantity", "age", "gross_overspend", "token_gap"] {
+        let (mut fixture, sale) =
+            sale_reconciliation_fixture(if matches!(case, "gross_overspend" | "token_gap") {
+                case
+            } else {
+                "contiguous"
+            });
+        match case {
+            "cash" => {
+                fixture.snapshot["sol_lamports"] = json!(285_844_001);
+                fixture.snapshot["wallet_evidence"]["native_sol"]["raw_amount"] =
+                    json!("285844001");
+            }
+            "quantity" => set_inventory(&mut fixture, 10, 1004),
+            "age" => fixture.snapshot["observed_at_unix_secs"] = json!(unix_now() - 121),
+            _ => {}
+        }
+        fixture.save();
+        let path = fixture.dir.path().join("operations.jsonl");
+        let saved = std::fs::read(&path).unwrap();
+        let output = reconcile_operation(&fixture, sale.as_str());
+        assert!(!output.status.success(), "{case}");
+        assert!(output.stdout.is_empty(), "{case}");
+        assert_eq!(std::fs::read(&path).unwrap(), saved, "{case}");
+        let log = radar_journal::OperationLog::open(&path).unwrap();
+        assert_eq!(log.outstanding().count(), 1, "{case}");
+    }
+}
+
+#[test]
+fn issuer_reconciles_buy_once_retains_basis_and_requires_new_risk_state_before_next_trade() {
+    let (mut fixture, id) = reconciliation_fixture();
+    let path = fixture.dir.path().join("operations.jsonl");
+    let before: Value = serde_json::from_slice(&acquisition_report(&fixture).stdout).unwrap();
+    let output = reconcile_operation(&fixture, id.as_str());
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let output: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(output["outcome"], "reconciled");
+    assert_eq!(output["operation_reconciled"], true);
+    assert_eq!(output["reservation_released"], true);
+    assert_eq!(output["recorded_economic_effects_retained"], true);
+    assert_eq!(output["wallet_inventory_complete"], false);
+    let log = radar_journal::OperationLog::open(&path).unwrap();
+    assert_eq!(log.outstanding().count(), 0);
+    assert_eq!(
+        log.entry(&id).unwrap().state,
+        radar_journal::OperationState::Reconciled(radar_types::Settlement::Completed(
+            radar_types::TokenQuantity::lamports(15_156_000)
+        ))
+    );
+    assert_eq!(output["accounting_checkpoint"], log.checkpoint());
+    let checkpoint = log.checkpoint().to_owned();
+    drop(log);
+    let saved = std::fs::read(&path).unwrap();
+    // Simulate a response lost after persistence: retry with the old snapshot.
+    for _ in 0..2 {
+        let retry = reconcile_operation(&fixture, id.as_str());
+        assert!(retry.status.success());
+        let retry: Value = serde_json::from_slice(&retry.stdout).unwrap();
+        assert_eq!(retry["outcome"], "already_reconciled");
+        assert_eq!(std::fs::read(&path).unwrap(), saved);
+        let after: Value = serde_json::from_slice(&acquisition_report(&fixture).stdout).unwrap();
+        for field in [
+            "lots",
+            "recorded_native_cash_flows",
+            "recorded_failed_fee_totals",
+        ] {
+            assert_eq!(before[field], after[field], "{field}");
+        }
+    }
+    assert_eq!(
+        fixture.start().ask(&fixture.candidate)["reason"],
+        "snapshot accounting does not cover current journal history"
+    );
+    fixture.snapshot["accounting_checkpoint"] = json!(checkpoint);
+    fixture.save();
+    assert_eq!(
+        fixture.start().ask(&fixture.candidate)["reason"],
+        "snapshot risk state understates retained history"
+    );
+    fixture.snapshot["state"]["deployed"] = json!(3_001_200);
+    let creator = fixture.snapshot["proposal"]["creator"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    fixture.snapshot["state"]["per_creator"][creator] = json!(3_001_200);
+    fixture.save();
+    assert_eq!(fixture.start().ask(&fixture.candidate)["outcome"], "issued");
+}
+
+#[test]
+fn issuer_reconciliation_refuses_unmatched_or_stale_balances_without_freeing_claim() {
+    let (mut fixture, id) = reconciliation_fixture();
+    let original = fixture.snapshot.clone();
+    let path = fixture.dir.path().join("operations.jsonl");
+    let saved = std::fs::read(&path).unwrap();
+    for case in [
+        "unknown",
+        "checkpoint",
+        "wallet",
+        "age",
+        "future",
+        "quantity",
+        "cash",
+        "anchor",
+    ] {
+        fixture.snapshot = original.clone();
+        match case {
+            "checkpoint" => fixture.snapshot["accounting_checkpoint"] = json!("old"),
+            "wallet" => fixture.snapshot["wallet"] = json!(address(9)),
+            "age" => fixture.snapshot["observed_at_unix_secs"] = json!(unix_now() - 121),
+            "future" => fixture.snapshot["observed_at_unix_secs"] = json!(unix_now() + 120),
+            "quantity" => set_inventory(&mut fixture, 14, 1003),
+            "cash" => {
+                fixture.snapshot["sol_lamports"] = json!(284_844_001);
+                fixture.snapshot["wallet_evidence"]["native_sol"]["raw_amount"] =
+                    json!("284844001");
+            }
+            "anchor" => {
+                let mut packet = external_native_packet(&fixture);
+                packet["transactions"][0]["pre_balances"][1] = json!("284844001");
+                packet["transactions"][0]["post_balances"][1] = json!("300000001");
+                fixture.snapshot["wallet_evidence"]["native_transfers"] = packet;
+                fixture.snapshot["sol_lamports"] = json!(300_000_000);
+                fixture.snapshot["wallet_evidence"]["native_sol"]["raw_amount"] =
+                    json!("300000000");
+            }
+            _ => {}
+        }
+        fixture.save();
+        let output = reconcile_operation(
+            &fixture,
+            if case == "unknown" {
+                "foreign"
+            } else {
+                id.as_str()
+            },
+        );
+        assert!(!output.status.success(), "{case}");
+        assert!(output.stdout.is_empty(), "{case}");
+        assert_eq!(std::fs::read(&path).unwrap(), saved, "{case}");
+        let log = radar_journal::OperationLog::open(&path).unwrap();
+        assert_eq!(log.outstanding().count(), 1, "{case}");
+    }
+}
+
+#[test]
+fn issuer_reconciliation_requires_known_opening_basis_and_one_submitted_operation() {
+    for opening in [None, Some(10)] {
+        let fixture = inventory_fixture_opening(opening);
+        let path = fixture.dir.path().join("operations.jsonl");
+        let log = radar_journal::OperationLog::open(&path).unwrap();
+        let id = log.outstanding().next().unwrap().0.clone();
+        drop(log);
+        let saved = std::fs::read(&path).unwrap();
+        assert!(!reconcile_operation(&fixture, id.as_str()).status.success());
+        assert_eq!(std::fs::read(&path).unwrap(), saved);
+    }
+    let (mut fixture, id) = reconciliation_fixture();
+    let (_, log) = append_failed_history(&fixture, "valid_after_buy");
+    fixture.snapshot["accounting_checkpoint"] = json!(log.checkpoint());
+    fixture.snapshot["sol_lamports"] = json!(284_839_000);
+    fixture.snapshot["wallet_evidence"]["native_sol"]["raw_amount"] = json!("284839000");
+    fixture.save();
+    let path = fixture.dir.path().join("operations.jsonl");
+    drop(log);
+    let saved = std::fs::read(&path).unwrap();
+    assert!(!reconcile_operation(&fixture, id.as_str()).status.success());
+    assert_eq!(std::fs::read(&path).unwrap(), saved);
+}
+
+#[test]
+fn issuer_reconciles_failed_network_fee_once_and_keeps_loss_and_failure_history() {
+    let (mut fixture, _, id, mut evidence, log) = finalized_fixture_owned_amount(Some(0));
+    drop(log);
+    let time = unix_now() - 1;
+    evidence["block_time_unix_secs"] = json!(time.to_string());
+    let effects = fixture.dir.path().join("effects.json");
+    write(&effects, &evidence);
+    assert!(
+        fixture
+            .command()
+            .args(["--record-settlement", id.as_str()])
+            .arg(effects)
+            .output()
+            .unwrap()
+            .status
+            .success()
+    );
+    let price = fixture.dir.path().join("price.json");
+    write(
+        &price,
+        &json!({"version":1,"asset":"sol","micro_usd_per_sol":"200000003",
+        "as_of_slot":"1000","as_of_unix_secs":time.to_string()}),
+    );
+    assert!(
+        fixture
+            .command()
+            .args(["--record-valuation", id.as_str()])
+            .arg(price)
+            .output()
+            .unwrap()
+            .status
+            .success()
+    );
+    let path = fixture.dir.path().join("operations.jsonl");
+    let log = radar_journal::OperationLog::open(&path).unwrap();
+    fixture.snapshot["accounting_checkpoint"] = json!(log.checkpoint());
+    drop(log);
+    fixture.snapshot["sol_lamports"] = json!(299_995_000);
+    fixture.snapshot["wallet_evidence"]["native_sol"]["raw_amount"] = json!("299995000");
+    set_inventory(&mut fixture, 0, 1002);
+    let output = reconcile_operation(&fixture, id.as_str());
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let log = radar_journal::OperationLog::open(&path).unwrap();
+    assert_eq!(log.outstanding().count(), 0);
+    assert_eq!(
+        log.entry(&id).unwrap().state,
+        radar_journal::OperationState::Reconciled(radar_types::Settlement::Completed(
+            radar_types::TokenQuantity::lamports(5000)
+        ))
+    );
+    fixture.snapshot["accounting_checkpoint"] = json!(log.checkpoint());
+    drop(log);
+    let saved = std::fs::read(&path).unwrap();
+    assert!(reconcile_operation(&fixture, id.as_str()).status.success());
+    assert_eq!(std::fs::read(&path).unwrap(), saved);
+    let report: Value = serde_json::from_slice(&acquisition_report(&fixture).stdout).unwrap();
+    assert_eq!(report["lots"], json!([]));
+    assert_eq!(report["failed_execution_fees"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        report["recorded_failed_fee_totals"]["network_fee_micro_usd"],
+        "1001"
+    );
+    fixture.save();
+    assert_eq!(
+        fixture.start().ask(&fixture.candidate)["reason"],
+        "snapshot risk state understates retained history"
+    );
+}
+
+#[test]
+fn issuer_reconciliation_requires_external_cash_effects_durable_before_releasing_trade() {
+    let (mut fixture, id) = reconciliation_fixture();
+    fixture.snapshot["wallet_evidence"]["native_transfers"] = external_native_packet(&fixture);
+    fixture.snapshot["sol_lamports"] = json!(300_000_000);
+    fixture.snapshot["wallet_evidence"]["native_sol"]["raw_amount"] = json!("300000000");
+    fixture.save();
+    let path = fixture.dir.path().join("operations.jsonl");
+    let saved = std::fs::read(&path).unwrap();
+    let output = reconcile_operation(&fixture, id.as_str());
+    assert!(!output.status.success());
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("external cash effects must be retained")
+    );
+    assert_eq!(std::fs::read(&path).unwrap(), saved);
+    let output = fixture
+        .command()
+        .arg("--record-native-transfers")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let log = radar_journal::OperationLog::open(&path).unwrap();
+    fixture.snapshot["accounting_checkpoint"] = json!(log.checkpoint());
+    assert_eq!(log.native_transfers().count(), 1);
+    drop(log);
+    fixture.save();
+    let output = reconcile_operation(&fixture, id.as_str());
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let log = radar_journal::OperationLog::open(&path).unwrap();
+    assert_eq!(log.outstanding().count(), 0);
+    assert_eq!(log.native_transfers().count(), 1);
+}
+
+#[test]
+fn issuer_reconciliation_refuses_hidden_token_gap_despite_matching_current_net_quantity() {
+    let (mut fixture, signed, id, mut evidence, log) = finalized_fixture_owned_amount(Some(0));
+    drop(log);
+    let time = unix_now() - 1;
+    evidence["block_time_unix_secs"] = json!(time.to_string());
+    evidence["outcome"] = json!("succeeded");
+    evidence["post_balances_lamports"] = json!(["284844000", "150000", "15001000"]);
+    let row = json!({"account_index":1,"mint":fixture.snapshot["proposal"]["mint"],
+        "owner":fixture.config["wallet"],"program_id":address(0x44),"decimals":6,"raw_amount":"10"});
+    let mut after = row.clone();
+    after["raw_amount"] = json!("25");
+    evidence["pre_token_balances"] = json!([row]);
+    evidence["post_token_balances"] = json!([after]);
+    let effects = fixture.dir.path().join("effects.json");
+    write(&effects, &evidence);
+    assert!(
+        fixture
+            .command()
+            .args(["--record-settlement", id.as_str()])
+            .arg(effects)
+            .output()
+            .unwrap()
+            .status
+            .success()
+    );
+    let price = fixture.dir.path().join("price.json");
+    write(
+        &price,
+        &json!({"version":1,"asset":"sol","micro_usd_per_sol":"200000000",
+        "as_of_slot":"1000","as_of_unix_secs":time.to_string(),"acquisition_costs":{
+            "version":1,"operation":id.as_str(),"signed_transaction":radar_types::b64::encode(&signed),
+            "wallet":fixture.config["wallet"],"mint":fixture.snapshot["proposal"]["mint"],
+            "token_program":address(0x44),"decimals":6,"net_acquired_raw":"15",
+            "swap_lamports":"15000000","rent_lamports":"150000","tip_lamports":"1000",
+            "other_cash_flows_absent":true}}),
+    );
+    assert!(
+        fixture
+            .command()
+            .args(["--record-valuation", id.as_str()])
+            .arg(price)
+            .output()
+            .unwrap()
+            .status
+            .success()
+    );
+    let path = fixture.dir.path().join("operations.jsonl");
+    let log = radar_journal::OperationLog::open(&path).unwrap();
+    fixture.snapshot["accounting_checkpoint"] = json!(log.checkpoint());
+    drop(log);
+    fixture.snapshot["sol_lamports"] = json!(284_844_000);
+    fixture.snapshot["wallet_evidence"]["native_sol"]["raw_amount"] = json!("284844000");
+    set_inventory(&mut fixture, 15, 1003);
+    let saved = std::fs::read(&path).unwrap();
+    let output = reconcile_operation(&fixture, id.as_str());
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("token transaction anchors"));
+    assert_eq!(std::fs::read(&path).unwrap(), saved);
+    assert_eq!(
+        radar_journal::OperationLog::open(&path)
+            .unwrap()
+            .outstanding()
+            .count(),
+        1
+    );
+}
+
+#[test]
+fn issuer_uses_explicit_optional_daily_cap_without_bypassing_halt() {
+    for (cap, halted, expected) in [
+        (Some(json!(null)), false, "issued"),
+        (Some(json!(10_000_000)), false, "refused"),
+        (None, false, "refused"),
+        (Some(json!(null)), true, "refused"),
+    ] {
+        let mut fixture = Fixture::new();
+        match cap {
+            Some(value) => fixture.config["policy"]["max_daily_loss"] = value,
+            None => {
+                fixture.config["policy"]
+                    .as_object_mut()
+                    .unwrap()
+                    .remove("max_daily_loss");
+            }
+        }
+        fixture.snapshot["state"]["realised_loss_today"] = json!(100_000_000);
+        fixture.snapshot["state"]["halted"] = json!(halted);
+        fixture.save();
+        let mut issuer = fixture.start();
+        assert_eq!(issuer.ask(&fixture.candidate)["outcome"], expected);
+        drop(issuer);
+        let log =
+            radar_journal::OperationLog::open(fixture.dir.path().join("operations.jsonl")).unwrap();
+        assert_eq!(log.outstanding().count(), usize::from(expected == "issued"));
+    }
+}
+
+#[test]
 fn issued_history_retains_the_typed_reviewed_proposal_without_unreviewed_fields() {
     let mut fixture = Fixture::new();
     let expected = fixture.snapshot["proposal"].clone();
@@ -955,12 +1599,27 @@ fn acquisition_cost_fixture_opening_amount(
     evidence["block_time_unix_secs"] = json!(time.to_string());
     evidence["outcome"] = json!("succeeded");
     evidence["post_balances_lamports"] = json!(["284844000", "150000", "15001000"]);
+    let starting_raw = opening_amount.unwrap_or(10);
     let pre = json!({"account_index":1,"mint":fixture.snapshot["proposal"]["mint"],
-        "owner":fixture.config["wallet"],"program_id":address(0x44),"decimals":6,"raw_amount":"10"});
+        "owner":fixture.config["wallet"],"program_id":address(0x44),"decimals":6,"raw_amount":starting_raw.to_string()});
     let mut post = pre.clone();
-    post["raw_amount"] = json!("25");
+    post["raw_amount"] = json!((starting_raw + 15).to_string());
     evidence["pre_token_balances"] = json!([pre]);
     evidence["post_token_balances"] = json!([post]);
+    if opening_amount == Some(0) {
+        // A counterparty's unchanged units of the same mint must never enter
+        // this wallet's token anchors, even though the mint matches.
+        let foreign = json!({"account_index":2,"mint":fixture.snapshot["proposal"]["mint"],
+            "owner":address(0x77),"program_id":address(0x44),"decimals":6,"raw_amount":"7"});
+        evidence["pre_token_balances"]
+            .as_array_mut()
+            .unwrap()
+            .push(foreign.clone());
+        evidence["post_token_balances"]
+            .as_array_mut()
+            .unwrap()
+            .push(foreign);
+    }
     let evidence_path = fixture.dir.path().join("effects.json");
     write(&evidence_path, &evidence);
     let record = fixture
@@ -1124,12 +1783,20 @@ fn acquisition_report(fixture: &Fixture) -> std::process::Output {
         .expect("acquisition report")
 }
 
+fn sale_history_balances(case: &str) -> [&'static str; 4] {
+    match case {
+        "contiguous" | "gross_overspend" => ["284844000", "285844000", "15", "9"],
+        "token_gap" => ["284844000", "285844000", "16", "10"],
+        _ => ["300000000", "301000000", "15", "9"],
+    }
+}
+
 fn append_sale_history(
     fixture: &Fixture,
     case: &str,
     mut log: radar_journal::OperationLog,
 ) -> radar_journal::OperationId {
-    let source = log.outstanding().next().expect("buy").0.clone();
+    let source = log.entries().next().expect("buy").0.clone();
     let mut intent = log.entry(&source).expect("entry").intent;
     intent.amount = radar_types::TokenQuantity::lamports(5000);
     let mut binding = log.execution(&source).expect("binding").clone();
@@ -1166,13 +1833,14 @@ fn append_sale_history(
         json!({"account_index":1,"mint":address(0x22),"owner":fixture.config["wallet"],
         "program_id":address(0x44),"decimals":6,"raw_amount":amount})
     };
+    let [pre, post, token_pre, token_post] = sale_history_balances(case);
     let evidence = json!({"version":1,"authority":"read_only","commitment":"finalized","wallet":fixture.config["wallet"],
         "transaction_base64":signed,"signature":fixture_signature(&signed),"signature_verified_locally":false,
         "operation_reconciled":false,"usd_value":null,"realised_pnl":null,"outcome":"succeeded","slot":"1003",
         "minimum_slot":"1000","read_started_at_unix_secs":time,"read_completed_at_unix_secs":time,
         "block_time_unix_secs":(time-1).to_string(),"account_keys":[fixture.config["wallet"],address(0x22),address(0x11)],
-        "pre_balances_lamports":["300000000","0","0"],"post_balances_lamports":["301000000","0","0"],
-        "network_fee_lamports":"5000","pre_token_balances":[token("15")],"post_token_balances":[token("9")]});
+        "pre_balances_lamports":[pre,"0","0"],"post_balances_lamports":[post,"0","0"],
+        "network_fee_lamports":"5000","pre_token_balances":[token(token_pre)],"post_token_balances":[token(token_post)]});
     let effects_path = fixture.dir.path().join("sale-history-effects.json");
     write(&effects_path, &evidence);
     let output = fixture
@@ -1192,7 +1860,7 @@ fn append_sale_history(
     let price = json!({"version":1,"asset":"sol","micro_usd_per_sol":"200000003","as_of_slot":"1000",
         "as_of_unix_secs":(time-1).to_string(),"sale_proceeds":{"version":1,"operation":id.as_str(),
         "signed_transaction":signed,"wallet":fixture.config["wallet"],"mint":address(0x22),"token_program":address(0x44),
-        "decimals":6,"net_disposed_raw":"6","gross_proceeds_lamports":"1005000","tip_lamports":"0",
+        "decimals":6,"net_disposed_raw":"6","gross_proceeds_lamports":if case == "gross_overspend" {"1005001"} else {"1005000"},"tip_lamports":if case == "gross_overspend" {"1"} else {"0"},
         "rent_paid_lamports":"0","rent_refund_lamports":"0","other_cash_flows_absent":true}});
     let price_path = fixture.dir.path().join("sale-history-price.json");
     write(&price_path, &price);
@@ -1597,6 +2265,10 @@ fn append_failed_history_owned(
     facts["signature"] = fixture_signature(&settlement.signed_transaction);
     facts["operation"] = json!(id.as_str());
     set_failed_facts(facts, fixture);
+    if case == "valid_after_buy" {
+        facts["native_account_effects"][0]["pre_lamports"] = json!("284844000");
+        facts["native_account_effects"][0]["post_lamports"] = json!("284839000");
+    }
     log.record_settlement(&id, settlement.clone(), 1015)
         .expect("facts");
     if case == "missing" {
@@ -3065,9 +3737,10 @@ impl Fixture {
             "policy":radar_risk::Policy {
                 autonomy:radar_risk::Autonomy::Capped,
                 max_position:radar_types::MicroUsd(50_000_000),
+                max_native_spend_lamports:Some(250_000_000),
                 max_deployed:radar_types::MicroUsd(100_000_000),
                 max_per_creator:radar_types::MicroUsd(100_000_000),
-                max_daily_loss:radar_types::MicroUsd(10_000_000),
+                max_daily_loss:Some(radar_types::MicroUsd(10_000_000)),
                 max_round_trip_cost_bps:100, max_canary:radar_types::MicroUsd::ZERO,
                 max_input_staleness:radar_types::SlotDelta(10), max_consecutive_failures:2
             },
@@ -3721,6 +4394,8 @@ fn startup_refuses_missing_history_and_unbounded_config_and_runtime_revocation()
         ("/fee_reserve_lamports", json!(0)),
         ("/programs", json!([])),
         ("/policy/autonomy", json!("observe")),
+        ("/policy/max_native_spend_lamports", json!(null)),
+        ("/policy/max_native_spend_lamports", json!(0)),
         ("/history_path", json!("missing-history.jsonl")),
         ("/key_path", json!("missing-issuer-key.json")),
     ] {
@@ -3797,6 +4472,10 @@ fn conversion_rounds_down_and_fee_and_time_evidence_bound_the_proof() {
         let mut fixture = Fixture::new();
         fixture.snapshot["sol_upper_micro_usd"] = json!(price);
         fixture.config["fee_reserve_lamports"] = json!(fee);
+        // Isolate wallet reservation refusal from the new policy clamp. At a
+        // deliberately tiny price the converted amount exceeds available SOL;
+        // the default native cap would correctly narrow it to affordable size.
+        fixture.config["policy"]["max_native_spend_lamports"] = json!(u64::MAX);
         fixture.save();
         assert_eq!(fixture.start().ask(&fixture.candidate)["reason"], reason);
     }
@@ -3976,7 +4655,14 @@ fn collected_recorded_swap_is_matched_without_creating_an_external_transfer() {
         "after_slot_exclusive":"1000","through_slot_inclusive":"1002",
         "signatures":[{"signature":review["signature"],"slot":review["slot"],"outcome":review["outcome"]}],"transactions":[row]});
     fixture.save();
-    for _ in 0..2 {
+    for known_addresses in [false, true, true] {
+        if known_addresses {
+            let packet = &mut fixture.snapshot["wallet_evidence"]["wallet_activity"];
+            packet["coverage"] = json!("provider_reported_known_address_history");
+            packet["queried_addresses"] = json!([fixture.config["wallet"]]);
+            packet["signatures"][0]["reported_for_addresses"] = json!([fixture.config["wallet"]]);
+            fixture.save();
+        }
         let output = record_native(&fixture);
         assert!(
             output.status.success(),

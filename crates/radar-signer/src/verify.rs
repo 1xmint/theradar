@@ -39,6 +39,50 @@ pub const SYSTEM_PROGRAM: [u8; 32] = [0u8; 32];
 /// ever going to be signable.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, thiserror::Error)]
 pub enum Rejection {
+    /// An explicit output promise must be positive.
+    #[error("minimum output authority must be positive")]
+    InvalidOutputFloor,
+    /// Guaranteed output quantities overflow their raw-unit range.
+    #[error("aggregate minimum output overflows")]
+    OutputFloorOverflow,
+    /// Optional trade arguments can alter fill semantics and need review.
+    #[error("output guarantee has unsupported arguments for {0}")]
+    UnreadableOutputGuarantee(String),
+    /// The encoded transaction permits less output than authorized.
+    #[error("transaction guarantees {guaranteed} output units, below required {required}")]
+    OutputFloorNotMet {
+        /// Total encoded guaranteed output, not a quote or realized fill.
+        guaranteed: u64,
+        /// Minimum authorized output.
+        required: u64,
+    },
+    /// A known curve instruction names a different or missing mint/trader, or
+    /// a v2 quote asset whose units this native-SOL signer cannot authorize.
+    #[error("trade {instruction} has a missing or mismatched {role} role")]
+    TradeAccountMismatch {
+        /// Decoded instruction name.
+        instruction: String,
+        /// Role that failed independently of address-list membership.
+        role: String,
+    },
+    /// A decoded sale has no explicit raw-token authority.
+    #[error("sale requires an explicit token debit bound")]
+    MissingTokenDebitBound,
+    /// Combined decoded sales exceed their single authorization.
+    #[error("sells {found} raw token units, authorised for at most {allowed}")]
+    TokenOverSpend {
+        /// Aggregate raw quantity across the transaction's sales.
+        found: u64,
+        /// Authorized raw quantity.
+        allowed: u64,
+    },
+    /// The aggregate decoded sale quantity is not representable.
+    #[error("aggregate token debit overflow")]
+    TokenDebitOverflow,
+    /// A decoded venue trade acquires tokens under reduction authority, or
+    /// disposes of tokens under acquisition authority.
+    #[error("venue trade {0} contradicts the authorized action")]
+    TradeActionMismatch(String),
     /// The bytes did not decode.
     #[error("undecodable: {0}")]
     Undecodable(String),
@@ -198,12 +242,13 @@ const SYSTEM_TRANSFER: u32 = 2;
 /// Both are the caller's word and neither is trusted as a *permission*: they can
 /// only narrow what the authorization and the signer's own policy already allow.
 /// A compromised caller setting `max_lamports` to `u64::MAX` gains nothing,
-/// because the authorization's own ceiling still applies.
+/// because the signer's own native ceiling still applies.
 ///
 /// `max_lamports` exists because the authorization is denominated in micro-USD
 /// and a transaction in lamports, and this process has no price feed — see
-/// [`lamport_ceiling`]. The executor has one, so it converts and states the
-/// result here. That makes the executor's *intent* checkable against the
+/// [`lamport_ceiling`]. The issuer uses protected price evidence and binds the
+/// conversion into its Privy proof; the library alone cannot authenticate it.
+/// This makes the executor's *intent* checkable against the
 /// executor's *output*: a router that inflated the buy is caught by the process
 /// that holds the key rather than by the process that asked for it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -307,6 +352,13 @@ pub fn check(
         rejections.push(Rejection::ForeignFeePayer);
     }
 
+    rejections.extend(crate::trade_accounts::check(
+        &message,
+        authorization,
+        signing_wallet,
+    ));
+    rejections.extend(crate::output_bounds::check(&message, authorization));
+
     // Every action gets a ceiling on outgoing lamports, and until 2026-08-31
     // only `Buy` did.
     //
@@ -330,12 +382,10 @@ pub fn check(
     // transfer to an unrelated address, authorised against an `Exit` whose
     // notional was one micro-dollar.
     //
-    // The ceiling used is the authorisation's own, not a tighter rent-sized
-    // constant. A constant would be better and this is not the moment to invent
-    // one: no real exit has ever been signed, so any number here would be a
-    // guess, and a guess that is too small traps the position the old comment
-    // was rightly worried about. This bound is finite, which is the property
-    // that was missing.
+    // The native ceiling applies to every action. A sale's token notional is
+    // not its outgoing native spend; its incoming proceeds do not grant native
+    // transfer authority. The issuer-proven bound can narrow the protected
+    // native policy, and old configurations retain their legacy restriction.
     //
     // # The second hole that was here, and it is the one that mattered
     //
@@ -349,7 +399,7 @@ pub fn check(
     // was 5,000,000. Rule 1 says the signer re-derives the transaction and checks
     // it against the authorisation's bounds; for the only kind of transaction
     // Radar would ever sign, it did not. LEARNINGS 33.
-    let bought = match lamports_bought(&message) {
+    let bought = match lamports_bought(&message, authorization) {
         Ok(v) => v,
         Err(unreadable) => {
             rejections.extend(unreadable);
@@ -362,12 +412,13 @@ pub fn check(
         }
     };
     let moved = lamports_transferred(&message).saturating_add(bought);
-    // The tightest of the three. The authorisation may narrow the signer's
-    // policy and the caller may narrow the authorisation; neither may widen, and
-    // a caller that tried is already refused above.
-    let ceiling = lamport_ceiling(authorization)
-        .min(policy_ceiling.get())
-        .min(bounds.max_lamports);
+    // Compare physical quantities in lamports. USD policy/authorization checks
+    // above remain separate; an issuer proof binds the protected conversion.
+    let native_ceiling = policy.max_native_spend_lamports.unwrap_or_else(|| {
+        // Old policy files must not silently gain spend authority on upgrade.
+        lamport_ceiling(authorization).min(policy_ceiling.get())
+    });
+    let ceiling = native_ceiling.min(bounds.max_lamports);
     if moved > ceiling {
         rejections.push(Rejection::OverSpend {
             found: moved,
@@ -429,20 +480,26 @@ fn lamports_transferred(message: &Message) -> u64 {
 /// *minimum acceptable output*, not a spend, and adding it to the total would
 /// refuse a large exit for being large — the trap the comment above
 /// [`lamports_transferred`]'s call site describes. So sells contribute nothing
-/// here. That leaves the size of a sale unbounded by this process, and it is
-/// deliberately unbounded: the bound a sale needs is on **tokens**, and the
-/// authorization carries no token quantity to check one against. Recorded as a
-/// known gap rather than closed with a number nobody has measured.
+/// here, but their decoded side must agree with the authorized action and their
+/// argument bytes must be readable. Aggregate raw-token debits across all known
+/// sales must fit an explicit authorization bound; missing bounds and overflow
+/// refuse. This does not yet prove per-instruction mint/account roles, other
+/// program semantics, available holdings or the origin of a local authorization.
 ///
 /// # Errors
 ///
 /// Returns [`Rejection::UnreadableVenueInstruction`] for every pump.fun
 /// instruction whose discriminator is not in the decoder's table or whose
 /// arguments are truncated. Rule 9: an unreadable size is unknown, not zero.
-fn lamports_bought(message: &Message) -> Result<u64, Vec<Rejection>> {
+fn lamports_bought(
+    message: &Message,
+    authorization: &Authorization,
+) -> Result<u64, Vec<Rejection>> {
     let program = radar_decode::Program::PumpFun;
     let mut total = 0u64;
     let mut unreadable = Vec::new();
+    let mut sold = Some(0_u64);
+    let mut sale_seen = false;
     // The venue is named once, here, and the decoder is given it. It is
     // deliberately `PumpFun` and nothing else: this process signs the bonding
     // curve and only the bonding curve, and PumpSwap's `buy` carries the same
@@ -464,10 +521,10 @@ fn lamports_bought(message: &Message) -> Result<u64, Vec<Rejection>> {
             ));
             continue;
         };
-        if !known.is_buy() {
+        if !known.is_trade() {
             continue;
         }
-        // A buy that decodes to a known variant but whose arguments are
+        // A trade that decodes to a known variant but whose arguments are
         // truncated is refused rather than skipped: the discriminator said this
         // instruction spends, and the payload would not say how much.
         let Some(Ok(trade)) = radar_decode::pumpfun::trade_args(known, &instruction.data) else {
@@ -476,6 +533,19 @@ fn lamports_bought(message: &Message) -> Result<u64, Vec<Rejection>> {
             ));
             continue;
         };
+        if known.is_buy() != authorization.action.increases_exposure() {
+            unreadable.push(Rejection::TradeActionMismatch(
+                known.anchor_name().to_owned(),
+            ));
+            continue;
+        }
+        if !known.is_buy() {
+            sale_seen = true;
+            // The decoder tags token and native fields separately. A sale's
+            // minimum native output is never its outgoing token quantity.
+            sold = sold.and_then(|prior| prior.checked_add(trade.exact.tokens()?));
+            continue;
+        }
         // Exactly one of the two fields is lamports, and which one depends on
         // the variant — `radar_decode::args` carries the unit in the type so
         // this cannot read a token amount as money. `u64::MAX` as a max cost
@@ -488,6 +558,9 @@ fn lamports_bought(message: &Message) -> Result<u64, Vec<Rejection>> {
             .unwrap_or(u64::MAX);
         total = total.saturating_add(lamports);
     }
+    if sale_seen {
+        check_token_debit(sold, authorization.max_token_debit_raw, &mut unreadable);
+    }
     if unreadable.is_empty() {
         Ok(total)
     } else {
@@ -495,26 +568,22 @@ fn lamports_bought(message: &Message) -> Result<u64, Vec<Rejection>> {
     }
 }
 
-/// The lamport ceiling implied by an authorization's notional.
-///
-/// The authorization is denominated in micro-USD and the transaction in
-/// lamports, and this process has no price feed — deliberately, since a signer
-/// with a price feed has one more input to be lied to by.
-///
-/// So the conversion is left to the caller, who states it in
-/// [`CallerBounds::max_lamports`], and this stays as the floor under it: the notional
-/// read as lamports, a ceiling far tighter than any real trade at any real SOL
-/// price, so it fails closed rather than open.
-///
-/// **The residual, stated plainly.** Because this is the tighter of the two in
-/// every realistic case, a genuine trade sized from a real price will be refused
-/// by it, and the caller's honest conversion cannot lift it. So today the pair
-/// bounds *safety* correctly and cannot yet size a real trade. The fix is a
-/// lamport-denominated `Policy` — the signer holding its own ceiling in the unit
-/// the chain uses — which is a decision about what the operator's limit *means*
-/// and belongs in an ADR rather than in a patch. Nothing trades
-/// (`Policy::CLOSED`), so the order is right: hold the bound, then argue the
-/// unit.
+fn check_token_debit(found: Option<u64>, allowed: Option<u64>, rejections: &mut Vec<Rejection>) {
+    match (found, allowed) {
+        (_, None) => rejections.push(Rejection::MissingTokenDebitBound),
+        (None, Some(_)) => rejections.push(Rejection::TokenDebitOverflow),
+        (Some(found), Some(allowed)) if found > allowed => {
+            rejections.push(Rejection::TokenOverSpend { found, allowed });
+        }
+        _ => {}
+    }
+}
+
+/// Legacy restriction retained only for policies lacking an explicit native cap.
+/// This is not a USD conversion and rejects normally sized native trades. Do
+/// not silently lift old files' restrictions on upgrade. New issuer operation
+/// requires an explicit positive native policy; only that path uses reviewed
+/// USD conversion, issuer proof and an independently enforced lamport ceiling.
 const fn lamport_ceiling(authorization: &Authorization) -> u64 {
     authorization.max_notional.get()
 }
@@ -578,6 +647,8 @@ pub mod tests_support {
             action: Action::Buy,
             max_notional: MicroUsd(50_000_000),
             expires_after: Slot(1_150),
+            max_token_debit_raw: None,
+            min_output_raw: None,
             needs_operator_signature: false,
         };
         check(
@@ -647,6 +718,8 @@ mod tests {
             action: Action::Buy,
             max_notional: MicroUsd(50_000_000),
             expires_after: Slot(1_150),
+            max_token_debit_raw: None,
+            min_output_raw: None,
             needs_operator_signature: false,
         }
     }
@@ -697,16 +770,56 @@ mod tests {
 
     /// A transaction carrying one pump.fun instruction over the usual accounts.
     fn venue_tx(data: Vec<u8>) -> Vec<u8> {
-        build(
-            &[WALLET, MINT, PUMP, SYSTEM_PROGRAM],
-            &[(2, vec![0, 1], data)],
-        )
+        build(&venue_keys(), &[venue_ix(data)])
+    }
+
+    fn venue_keys() -> [[u8; 32]; 5] {
+        [
+            WALLET,
+            MINT,
+            PUMP,
+            SYSTEM_PROGRAM,
+            *radar_types::Asset::WRAPPED_SOL_MINT.as_bytes(),
+        ]
+    }
+
+    fn venue_ix(data: Vec<u8>) -> (u8, Vec<u8>, Vec<u8>) {
+        use radar_decode::pumpfun::Instruction;
+        let known = radar_decode::decode(radar_decode::Program::PumpFun, &data)
+            .known()
+            .copied()
+            .and_then(radar_decode::Instruction::pumpfun);
+        let roles = if matches!(
+            known,
+            Some(Instruction::BuyV2 | Instruction::BuyExactQuoteInV2 | Instruction::SellV2)
+        ) {
+            let mut roles = vec![3; 14];
+            roles[1] = 1;
+            roles[2] = 4;
+            roles[13] = 0;
+            roles
+        } else {
+            vec![3, 3, 1, 3, 3, 3, 0]
+        };
+        (2, roles, data)
     }
 
     /// `check` against the venue allowlist, with the caller's own ceiling given.
     fn check_venue(bytes: &[u8], max_lamports: u64) -> Result<Checked, Vec<Rejection>> {
+        check_venue_action(bytes, max_lamports, Action::Buy, None)
+    }
+
+    fn check_venue_action(
+        bytes: &[u8],
+        max_lamports: u64,
+        action: Action,
+        token_bound: Option<u64>,
+    ) -> Result<Checked, Vec<Rejection>> {
+        let mut auth = authorization();
+        auth.action = action;
+        auth.max_token_debit_raw = token_bound;
         check(
-            &authorization(),
+            &auth,
             bytes,
             &Address::new(WALLET),
             &venue_allowlist(),
@@ -1489,18 +1602,10 @@ mod tests {
         // of 30,000,000 under a ceiling of 50,000,000.
         use radar_decode::pumpfun::Instruction;
         let bytes = build(
-            &[WALLET, MINT, PUMP, SYSTEM_PROGRAM],
+            &venue_keys(),
             &[
-                (
-                    2,
-                    vec![0, 1],
-                    venue_trade(Instruction::BuyExactSolIn, 30_000_000, 0),
-                ),
-                (
-                    2,
-                    vec![0, 1],
-                    venue_trade(Instruction::BuyExactSolIn, 30_000_000, 0),
-                ),
+                venue_ix(venue_trade(Instruction::BuyExactSolIn, 30_000_000, 0)),
+                venue_ix(venue_trade(Instruction::BuyExactSolIn, 30_000_000, 0)),
             ],
         );
         assert!(check_venue(&bytes, u64::MAX).is_err());
@@ -1512,13 +1617,9 @@ mod tests {
         // rather than the sum would pass this.
         use radar_decode::pumpfun::Instruction;
         let bytes = build(
-            &[WALLET, MINT, PUMP, SYSTEM_PROGRAM],
+            &venue_keys(),
             &[
-                (
-                    2,
-                    vec![0, 1],
-                    venue_trade(Instruction::BuyExactSolIn, 30_000_000, 0),
-                ),
+                venue_ix(venue_trade(Instruction::BuyExactSolIn, 30_000_000, 0)),
                 (3, vec![0, 1], transfer(30_000_000)),
             ],
         );
@@ -1534,13 +1635,122 @@ mod tests {
         // limits exist to prevent.
         use radar_decode::pumpfun::Instruction;
         assert!(
-            check_venue(
+            check_venue_action(
                 &venue_tx(venue_trade(Instruction::Sell, 500_000_000_000, 900_000_000)),
                 u64::MAX,
+                Action::Exit,
+                Some(500_000_000_000),
             )
             .is_ok(),
             "a sell's minimum output is not a spend"
         );
+    }
+
+    #[test]
+    fn every_known_trade_direction_matches_its_authorization_including_mixed_messages() {
+        use radar_decode::pumpfun::Instruction;
+        for (instruction, _, _) in radar_decode::pumpfun::KNOWN
+            .iter()
+            .filter(|(ix, _, _)| ix.is_trade())
+        {
+            let bytes = venue_tx(venue_trade(*instruction, 10, 20));
+            for action in [Action::Buy, Action::Reduce, Action::Exit] {
+                let result = check_venue_action(&bytes, 50_000_000, action, Some(10));
+                if instruction.is_buy() == action.increases_exposure() {
+                    assert!(result.is_ok(), "{instruction:?} / {action:?}: {result:?}");
+                } else {
+                    assert!(
+                        result
+                            .unwrap_err()
+                            .contains(&Rejection::TradeActionMismatch(
+                                instruction.anchor_name().to_owned()
+                            ))
+                    );
+                }
+            }
+        }
+        let mixed = build(
+            &venue_keys(),
+            &[
+                venue_ix(venue_trade(Instruction::Buy, 10, 20)),
+                venue_ix(venue_trade(Instruction::Sell, 10, 20)),
+            ],
+        );
+        for action in [Action::Buy, Action::Reduce, Action::Exit] {
+            assert!(
+                check_venue_action(&mixed, 50_000_000, action, Some(10))
+                    .unwrap_err()
+                    .iter()
+                    .any(|reason| matches!(reason, Rejection::TradeActionMismatch(_)))
+            );
+        }
+        for instruction in [Instruction::Sell, Instruction::SellV2] {
+            let complete = venue_trade(instruction, 10, 20);
+            for length in 0..complete.len() {
+                assert!(
+                    check_venue_action(
+                        &venue_tx(complete[..length].to_vec()),
+                        50_000_000,
+                        Action::Reduce,
+                        Some(10)
+                    )
+                    .unwrap_err()
+                    .iter()
+                    .any(|reason| matches!(reason, Rejection::UnreadableVenueInstruction(_)))
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn known_sales_require_one_aggregate_token_bound_and_never_saturate_overflow() {
+        use radar_decode::pumpfun::Instruction;
+        for ix in [Instruction::Sell, Instruction::SellV2] {
+            for action in [Action::Reduce, Action::Exit] {
+                for (amounts, bound, expected) in [
+                    (vec![10], None, Some(Rejection::MissingTokenDebitBound)),
+                    (
+                        vec![1],
+                        Some(0),
+                        Some(Rejection::TokenOverSpend {
+                            found: 1,
+                            allowed: 0,
+                        }),
+                    ),
+                    (vec![10], Some(10), None),
+                    (vec![4, 6], Some(10), None),
+                    (
+                        vec![5, 6],
+                        Some(10),
+                        Some(Rejection::TokenOverSpend {
+                            found: 11,
+                            allowed: 10,
+                        }),
+                    ),
+                    (vec![u64::MAX], Some(u64::MAX), None),
+                    (
+                        vec![u64::MAX, 1],
+                        Some(u64::MAX),
+                        Some(Rejection::TokenDebitOverflow),
+                    ),
+                    (vec![0], Some(0), None),
+                ] {
+                    let instructions: Vec<_> = amounts
+                        .iter()
+                        .map(|amount| venue_ix(venue_trade(ix, *amount, 900_000_000)))
+                        .collect();
+                    let bytes = build(&venue_keys(), &instructions);
+                    let result = check_venue_action(&bytes, 1, action, bound);
+                    match expected {
+                        None => assert!(
+                            result.is_ok(),
+                            "{ix:?}/{action:?} {amounts:?}/{bound:?}: {result:?}"
+                        ),
+                        Some(why) => assert!(result.unwrap_err().contains(&why)),
+                    }
+                }
+            }
+        }
     }
 
     #[test]

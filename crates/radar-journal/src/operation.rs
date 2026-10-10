@@ -1133,6 +1133,32 @@ fn replay_opening(
     Ok(opening)
 }
 
+/// Bind completed cash to the original claim before accepting a replayed event.
+fn validate_completed(
+    entry: &OperationEntry,
+    previous: &OperationEntry,
+) -> Result<(), OperationError> {
+    if let OperationState::Confirmed(
+        Settlement::Completed(spent) | Settlement::CompletedCashFlow { spent, .. },
+    )
+    | OperationState::Reconciled(
+        Settlement::Completed(spent) | Settlement::CompletedCashFlow { spent, .. },
+    ) = entry.state
+        && (entry.intent != previous.intent
+            || entry.reserved != previous.reserved
+            || entry.reserved.and_then(|q| q.checked_sub(spent)).is_none())
+    {
+        return Err(OperationError::InvalidCompletedSettlement);
+    }
+    if let OperationState::Confirmed(Settlement::CompletedCashFlow { spent, received })
+    | OperationState::Reconciled(Settlement::CompletedCashFlow { spent, received }) = entry.state
+        && spent.decimals() != received.decimals()
+    {
+        return Err(OperationError::InvalidCompletedSettlement);
+    }
+    Ok(())
+}
+
 /// Rebuilds operations from the events a journal holds.
 ///
 /// Idempotent by operation identity: a line that says what the operation
@@ -1207,14 +1233,7 @@ fn replay(events: &[Event]) -> Result<BTreeMap<OperationId, Live>, OperationErro
             }
             live.settlement = Some(settlement.clone());
         }
-        if let OperationState::Confirmed(Settlement::Completed(spent))
-        | OperationState::Reconciled(Settlement::Completed(spent)) = entry.state
-            && (entry.intent != live.entry.intent
-                || entry.reserved != live.entry.reserved
-                || entry.reserved.and_then(|q| q.checked_sub(spent)).is_none())
-        {
-            return Err(OperationError::InvalidCompletedSettlement);
-        }
+        validate_completed(&entry, &live.entry)?;
         if let Some(binding) = &event.correlation.execution {
             let previous = live
                 .execution

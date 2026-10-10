@@ -18,16 +18,39 @@ fn policy() -> Policy {
         max_position: MicroUsd::from_dollars(50.0),
         max_deployed: MicroUsd::from_dollars(200.0),
         max_per_creator: MicroUsd::from_dollars(60.0),
-        max_daily_loss: MicroUsd::from_dollars(25.0),
+        max_daily_loss: Some(MicroUsd::from_dollars(25.0)),
         max_round_trip_cost_bps: 900,
         max_canary: MicroUsd::from_dollars(1.0),
         max_input_staleness: SlotDelta(150),
+        max_native_spend_lamports: None,
         max_consecutive_failures: 3,
     }
 }
 
 fn mint(n: u8) -> Address {
     Address::new([n; 32])
+}
+
+#[test]
+fn existing_kernel_decisions_do_not_invent_token_debit_authority() {
+    let verdict = evaluate(&buy(10.0), &PortfolioState::flat(Slot(1_000)), &policy());
+    let authorization = verdict.authorisation().expect("valid buy");
+    assert_eq!(authorization.max_token_debit_raw, None);
+    assert_eq!(authorization.min_output_raw, None);
+    let old_wire = serde_json::to_value(authorization).unwrap();
+    assert!(old_wire.get("max_token_debit_raw").is_none());
+    assert!(old_wire.get("min_output_raw").is_none());
+    let parsed: radar_risk::Authorization = serde_json::from_value(old_wire.clone()).unwrap();
+    assert_eq!(parsed, *authorization);
+    for limit in [0, 10, u64::MAX] {
+        let mut bounded = old_wire.clone();
+        bounded["max_token_debit_raw"] = serde_json::json!(limit);
+        bounded["min_output_raw"] = serde_json::json!(limit);
+        let parsed: radar_risk::Authorization = serde_json::from_value(bounded.clone()).unwrap();
+        assert_eq!(parsed.max_token_debit_raw, Some(limit));
+        assert_eq!(parsed.min_output_raw, Some(limit));
+        assert_eq!(serde_json::to_value(parsed).unwrap(), bounded);
+    }
 }
 
 fn buy(notional_dollars: f64) -> Proposal {
@@ -211,6 +234,75 @@ fn exiting_is_never_blocked_by_a_sizing_limit() {
 }
 
 // --- limits ------------------------------------------------------------------
+
+#[test]
+fn daily_caps_are_optional_but_disabling_one_does_not_disable_other_risk_checks() {
+    let mut pol = policy();
+    pol.max_daily_loss = Some(MicroUsd(1));
+    for (loss, allowed) in [(0, true), (1, false), (2, false)] {
+        let portfolio = PortfolioState {
+            realised_loss_today: MicroUsd(loss),
+            ..state()
+        };
+        assert_eq!(
+            evaluate(&buy(20.0), &portfolio, &pol)
+                .authorisation()
+                .is_some(),
+            allowed
+        );
+    }
+    pol.max_daily_loss = Some(MicroUsd::ZERO);
+    assert!(refusals(&evaluate(&buy(20.0), &state(), &pol)).contains(&Refusal::DailyLossReached));
+    pol.max_daily_loss = None;
+    let losing = PortfolioState {
+        realised_loss_today: MicroUsd(u64::MAX),
+        ..state()
+    };
+    assert!(
+        evaluate(&buy(20.0), &losing, &pol)
+            .authorisation()
+            .is_some()
+    );
+    for (portfolio, proposal, reason) in [
+        (
+            PortfolioState {
+                halted: true,
+                ..losing.clone()
+            },
+            buy(20.0),
+            Refusal::Halted,
+        ),
+        (
+            PortfolioState {
+                consecutive_failures: 3,
+                ..losing.clone()
+            },
+            buy(20.0),
+            Refusal::TooManyFailures,
+        ),
+        (losing.clone(), buy(51.0), Refusal::OverPositionLimit),
+        (
+            losing.clone(),
+            Proposal {
+                simulated_exit_capacity: None,
+                ..buy(20.0)
+            },
+            Refusal::ExitNotSimulated,
+        ),
+        (
+            losing,
+            Proposal {
+                oldest_input_slot: Slot(1),
+                ..buy(20.0)
+            },
+            Refusal::InputsTooStale,
+        ),
+    ] {
+        let reasons = refusals(&evaluate(&proposal, &portfolio, &pol));
+        assert!(reasons.contains(&reason), "{reasons:?}");
+        assert!(!reasons.contains(&Refusal::DailyLossReached));
+    }
+}
 
 #[test]
 fn creator_exposure_aggregates_across_their_tokens() {
@@ -599,9 +691,10 @@ fn a_proposal_exactly_at_every_limit_is_authorised() {
         max_deployed: limit,
         max_per_creator: limit,
         max_canary: limit,
-        max_daily_loss: MicroUsd::from_dollars(25.0),
+        max_daily_loss: Some(MicroUsd::from_dollars(25.0)),
         max_round_trip_cost_bps: 900,
         max_input_staleness: SlotDelta(150),
+        max_native_spend_lamports: None,
         max_consecutive_failures: 3,
     };
     let at_the_limit = Proposal {
