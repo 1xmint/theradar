@@ -4421,3 +4421,15 @@ valuation-idempotency assertion already corrected and passing on PR 335 at
 76fdf8e. The seven account-activity survivors are addressed on separate PR 338
 at 70ec786; fresh proof pending. Integrated primary needs fresh full-branch CI
 after these fixes, since the stacked mutation scopes do not cover the full base.
+
+PR 337 correction run 38065674814 at 285b7f7 passed every ordinary job and all
+four mutation baselines. Of 69 mutants, 52 were caught, 14 unviable and three
+missed. Added the missing buy-only/no-opening refusal to distinguish || from
+&& at risk_floor.rs:151:57. Changed the sale-loss timestamp fixture so seconds
+modulo one day cannot coincidentally equal the UTC day number, covering the /
+to % survivor at :121:64. The :121:16 < to <= mutant is equivalent: zero PnL
+negates/converts/adds as zero. Replaced the comparison with i128::is_negative,
+preserving its exact meaning, and asserted break-even PnL contributes no loss.
+No broad mutation exclusions added. New GitHub proof required. Integrated
+primary 62cfeb8 was published before these results; run 38065819742 is live and
+must finish intact before integrating this follow-up and refreshing its checks.

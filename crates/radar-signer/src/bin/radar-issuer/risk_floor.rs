@@ -118,7 +118,7 @@ fn disposal_losses(history: &Value, now: u64, floors: &mut Floors) -> Result<(),
             .as_str()
             .and_then(|value| value.parse::<i128>().ok())
             .ok_or("recorded PnL unknown")?;
-        if pnl < 0 && integer(sale, "execution_at_unix_secs")? / 86_400 == now / 86_400 {
+        if pnl.is_negative() && integer(sale, "execution_at_unix_secs")? / 86_400 == now / 86_400 {
             let loss = pnl
                 .checked_neg()
                 .and_then(|value| u64::try_from(value).ok())
@@ -206,7 +206,7 @@ mod tests {
         let history = json!({"wallet":wallet,
             "lots":[{"creator":creator,"net_acquired_raw":"10","position_cost_basis_micro_usd":"100",
                 "execution_slot":"10","execution_at_unix_secs":"172801"}],
-            "sales":[{"operation":"loss","execution_slot":"20","execution_at_unix_secs":"172802"},
+            "sales":[{"operation":"loss","execution_slot":"20","execution_at_unix_secs":"172803"},
                 {"operation":"win","execution_slot":"30","execution_at_unix_secs":"172803"}],
             "failed_execution_fees":[{"execution_slot":"5","execution_at_unix_secs":"172799","network_fee_micro_usd":"99"},
                 {"execution_slot":"40","execution_at_unix_secs":"172804","network_fee_micro_usd":"7"},
@@ -251,6 +251,15 @@ mod tests {
         higher.realised_loss_today = MicroUsd(30);
         higher.consecutive_failures = 3;
         assert!(verify(&history, Some(&opening), &higher, 172_810).is_ok());
+        let mut break_even = history.clone();
+        break_even["recorded_disposal_accounting"]["disposals"][1]["recorded_trade_pnl_micro_usd"] =
+            json!("0");
+        assert_eq!(
+            derive(&break_even, Some(&opening), &state, 172_810)
+                .unwrap()
+                .loss,
+            29
+        );
         // Exact watermark/time boundaries are permitted; a success resets a
         // previous streak, while a UTC day change alone does not.
         assert!(verify(&history, Some(&opening), &state, 172_805).is_ok());
@@ -344,6 +353,10 @@ mod tests {
         empty["lots"] = json!([{"creator":Address::new([2;32]),"net_acquired_raw":"2",
             "position_cost_basis_micro_usd":"1","execution_slot":"1","execution_at_unix_secs":"1"}]);
         empty["wallet"] = json!(opening.wallet);
+        assert_eq!(
+            verify(&empty, None, &state, 172_810).unwrap_err(),
+            "opening inventory risk basis unknown"
+        );
         assert!(verify(&empty, Some(&opening), &state, 172_810).is_ok());
     }
 }
