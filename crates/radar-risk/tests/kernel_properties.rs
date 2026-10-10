@@ -135,7 +135,7 @@ fn policy() -> impl Strategy<Value = Policy> {
         money(),
         money(),
         money(),
-        money(),
+        proptest::option::of(money()),
         any::<u32>(),
         any::<u32>(),
         0u64..100_000,
@@ -391,7 +391,7 @@ proptest! {
             max_position: MicroUsd(u64::MAX),
             max_deployed: MicroUsd(u64::MAX),
             max_per_creator: MicroUsd(u64::MAX),
-            max_daily_loss: MicroUsd(u64::MAX),
+            max_daily_loss: Some(MicroUsd(u64::MAX)),
             max_consecutive_failures: u32::MAX,
             // One basis point: a cost of one micro-dollar would be too much.
             max_round_trip_cost_bps: 1,

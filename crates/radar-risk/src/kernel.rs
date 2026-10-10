@@ -258,7 +258,10 @@ pub fn evaluate(proposal: &Proposal, state: &PortfolioState, policy: &Policy) ->
     {
         reasons.push(Refusal::TooManyFailures);
     }
-    if state.realised_loss_today >= policy.max_daily_loss {
+    if policy
+        .max_daily_loss
+        .is_some_and(|limit| state.realised_loss_today >= limit)
+    {
         reasons.push(Refusal::DailyLossReached);
     }
     // Staleness applies to every action. Exiting on an hour-old view of
