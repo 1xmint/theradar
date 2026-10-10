@@ -4916,3 +4916,31 @@ fresh issuer authority. Preserve that protection. Assert corrected bytes with
 the old nonce refuse for reuse, then re-attest a fresh nonce and require success.
 No production behavior changed in this correction. Verify on GitHub before
 integrating direction enforcement; autonomous signing remains closed.
+
+### Enforceable token-debit bound for exits (2026-10-10)
+
+Previous goal turn corrected native-policy regression/lint failures and combined
+verified direction enforcement. Current turn observed combined run 38079626824
+at aa1ea1c fully green. This branch began independently at verified direction
+5dc2cbe so source work did not cancel that run.
+
+Actual caller: radar_signer::check in the key-holding local and Privy processes.
+Authorization now carries optional max_token_debit_raw. All known curve sales
+share that single explicit bound; checked aggregate arithmetic refuses overflow,
+missing bound or excess quantity. Incoming SOL is never treated as outgoing
+tokens. The existing direction regression supplies a valid quantity so it still
+isolates side enforcement; large-exit regression explicitly bounds its tokens.
+
+Added unit coverage for both sale variants and Reduce/Exit, zero/exact/missing
+bounds, individually-small but collectively-excess sales and u64 overflow. The
+actual Privy process checks the same cases with valid proofs and detects tampered
+token authority. A risk wire regression shows old kernel output retains its wire
+shape and invents no raw-token authority. No local jobs or live changes. GitHub
+verification required; do not claim that token/account roles or live exits work.
+
+Next: merge the now-verified native-unit source before combined verification;
+then derive exit authority from protected holdings and reviewed execution data,
+bind mint/account roles and route reductions correctly. Current kernel and issuer
+leave token authority unset and issuer stays buy-only. Complete live portfolio
+coverage, recovery, adaptive supervisor/chat and isolated deployment still remain.
+Goal remains fully autonomous trading; no live activation is claimed.

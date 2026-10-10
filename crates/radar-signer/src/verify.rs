@@ -39,6 +39,20 @@ pub const SYSTEM_PROGRAM: [u8; 32] = [0u8; 32];
 /// ever going to be signable.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, thiserror::Error)]
 pub enum Rejection {
+    /// A decoded sale has no explicit raw-token authority.
+    #[error("sale requires an explicit token debit bound")]
+    MissingTokenDebitBound,
+    /// Combined decoded sales exceed their single authorization.
+    #[error("sells {found} raw token units, authorised for at most {allowed}")]
+    TokenOverSpend {
+        /// Aggregate raw quantity across the transaction's sales.
+        found: u64,
+        /// Authorized raw quantity.
+        allowed: u64,
+    },
+    /// The aggregate decoded sale quantity is not representable.
+    #[error("aggregate token debit overflow")]
+    TokenDebitOverflow,
     /// A decoded venue trade acquires tokens under reduction authority, or
     /// disposes of tokens under acquisition authority.
     #[error("venue trade {0} contradicts the authorized action")]
@@ -353,7 +367,7 @@ pub fn check(
     // was 5,000,000. Rule 1 says the signer re-derives the transaction and checks
     // it against the authorisation's bounds; for the only kind of transaction
     // Radar would ever sign, it did not. LEARNINGS 33.
-    let bought = match lamports_bought(&message, authorization.action) {
+    let bought = match lamports_bought(&message, authorization) {
         Ok(v) => v,
         Err(unreadable) => {
             rejections.extend(unreadable);
@@ -434,21 +448,25 @@ fn lamports_transferred(message: &Message) -> u64 {
 /// refuse a large exit for being large — the trap the comment above
 /// [`lamports_transferred`]'s call site describes. So sells contribute nothing
 /// here, but their decoded side must agree with the authorized action and their
-/// argument bytes must be readable. This binds direction, not token quantity.
-/// That leaves the size of a sale unbounded by this process, and it is
-/// deliberately unbounded: the bound a sale needs is on **tokens**, and the
-/// authorization carries no token quantity to check one against. Recorded as a
-/// known gap rather than closed with a number nobody has measured.
+/// argument bytes must be readable. Aggregate raw-token debits across all known
+/// sales must fit an explicit authorization bound; missing bounds and overflow
+/// refuse. This does not yet prove per-instruction mint/account roles, other
+/// program semantics, available holdings or the origin of a local authorization.
 ///
 /// # Errors
 ///
 /// Returns [`Rejection::UnreadableVenueInstruction`] for every pump.fun
 /// instruction whose discriminator is not in the decoder's table or whose
 /// arguments are truncated. Rule 9: an unreadable size is unknown, not zero.
-fn lamports_bought(message: &Message, action: Action) -> Result<u64, Vec<Rejection>> {
+fn lamports_bought(
+    message: &Message,
+    authorization: &Authorization,
+) -> Result<u64, Vec<Rejection>> {
     let program = radar_decode::Program::PumpFun;
     let mut total = 0u64;
     let mut unreadable = Vec::new();
+    let mut sold = Some(0_u64);
+    let mut sale_seen = false;
     // The venue is named once, here, and the decoder is given it. It is
     // deliberately `PumpFun` and nothing else: this process signs the bonding
     // curve and only the bonding curve, and PumpSwap's `buy` carries the same
@@ -482,13 +500,17 @@ fn lamports_bought(message: &Message, action: Action) -> Result<u64, Vec<Rejecti
             ));
             continue;
         };
-        if known.is_buy() != action.increases_exposure() {
+        if known.is_buy() != authorization.action.increases_exposure() {
             unreadable.push(Rejection::TradeActionMismatch(
                 known.anchor_name().to_owned(),
             ));
             continue;
         }
         if !known.is_buy() {
+            sale_seen = true;
+            // The decoder tags token and native fields separately. A sale's
+            // minimum native output is never its outgoing token quantity.
+            sold = sold.and_then(|prior| prior.checked_add(trade.exact.tokens()?));
             continue;
         }
         // Exactly one of the two fields is lamports, and which one depends on
@@ -503,10 +525,24 @@ fn lamports_bought(message: &Message, action: Action) -> Result<u64, Vec<Rejecti
             .unwrap_or(u64::MAX);
         total = total.saturating_add(lamports);
     }
+    if sale_seen {
+        check_token_debit(sold, authorization.max_token_debit_raw, &mut unreadable);
+    }
     if unreadable.is_empty() {
         Ok(total)
     } else {
         Err(unreadable)
+    }
+}
+
+fn check_token_debit(found: Option<u64>, allowed: Option<u64>, rejections: &mut Vec<Rejection>) {
+    match (found, allowed) {
+        (_, None) => rejections.push(Rejection::MissingTokenDebitBound),
+        (None, Some(_)) => rejections.push(Rejection::TokenDebitOverflow),
+        (Some(found), Some(allowed)) if found > allowed => {
+            rejections.push(Rejection::TokenOverSpend { found, allowed });
+        }
+        _ => {}
     }
 }
 
@@ -593,6 +629,7 @@ pub mod tests_support {
             action: Action::Buy,
             max_notional: MicroUsd(50_000_000),
             expires_after: Slot(1_150),
+            max_token_debit_raw: None,
             needs_operator_signature: false,
         };
         check(
@@ -662,6 +699,7 @@ mod tests {
             action: Action::Buy,
             max_notional: MicroUsd(50_000_000),
             expires_after: Slot(1_150),
+            max_token_debit_raw: None,
             needs_operator_signature: false,
         }
     }
@@ -720,16 +758,18 @@ mod tests {
 
     /// `check` against the venue allowlist, with the caller's own ceiling given.
     fn check_venue(bytes: &[u8], max_lamports: u64) -> Result<Checked, Vec<Rejection>> {
-        check_venue_action(bytes, max_lamports, Action::Buy)
+        check_venue_action(bytes, max_lamports, Action::Buy, None)
     }
 
     fn check_venue_action(
         bytes: &[u8],
         max_lamports: u64,
         action: Action,
+        token_bound: Option<u64>,
     ) -> Result<Checked, Vec<Rejection>> {
         let mut auth = authorization();
         auth.action = action;
+        auth.max_token_debit_raw = token_bound;
         check(
             &auth,
             bytes,
@@ -1563,6 +1603,7 @@ mod tests {
                 &venue_tx(venue_trade(Instruction::Sell, 500_000_000_000, 900_000_000)),
                 u64::MAX,
                 Action::Exit,
+                Some(500_000_000_000),
             )
             .is_ok(),
             "a sell's minimum output is not a spend"
@@ -1578,7 +1619,7 @@ mod tests {
         {
             let bytes = venue_tx(venue_trade(*instruction, 10, 20));
             for action in [Action::Buy, Action::Reduce, Action::Exit] {
-                let result = check_venue_action(&bytes, 50_000_000, action);
+                let result = check_venue_action(&bytes, 50_000_000, action, Some(10));
                 if instruction.is_buy() == action.increases_exposure() {
                     assert!(result.is_ok(), "{instruction:?} / {action:?}: {result:?}");
                 } else {
@@ -1601,7 +1642,7 @@ mod tests {
         );
         for action in [Action::Buy, Action::Reduce, Action::Exit] {
             assert!(
-                check_venue_action(&mixed, 50_000_000, action)
+                check_venue_action(&mixed, 50_000_000, action, Some(10))
                     .unwrap_err()
                     .iter()
                     .any(|reason| matches!(reason, Rejection::TradeActionMismatch(_)))
@@ -1614,12 +1655,64 @@ mod tests {
                     check_venue_action(
                         &venue_tx(complete[..length].to_vec()),
                         50_000_000,
-                        Action::Reduce
+                        Action::Reduce,
+                        Some(10)
                     )
                     .unwrap_err()
                     .iter()
                     .any(|reason| matches!(reason, Rejection::UnreadableVenueInstruction(_)))
                 );
+            }
+        }
+    }
+
+    #[test]
+    fn known_sales_require_one_aggregate_token_bound_and_never_saturate_overflow() {
+        use radar_decode::pumpfun::Instruction;
+        for ix in [Instruction::Sell, Instruction::SellV2] {
+            for action in [Action::Reduce, Action::Exit] {
+                for (amounts, bound, expected) in [
+                    (vec![10], None, Some(Rejection::MissingTokenDebitBound)),
+                    (
+                        vec![1],
+                        Some(0),
+                        Some(Rejection::TokenOverSpend {
+                            found: 1,
+                            allowed: 0,
+                        }),
+                    ),
+                    (vec![10], Some(10), None),
+                    (vec![4, 6], Some(10), None),
+                    (
+                        vec![5, 6],
+                        Some(10),
+                        Some(Rejection::TokenOverSpend {
+                            found: 11,
+                            allowed: 10,
+                        }),
+                    ),
+                    (vec![u64::MAX], Some(u64::MAX), None),
+                    (
+                        vec![u64::MAX, 1],
+                        Some(u64::MAX),
+                        Some(Rejection::TokenDebitOverflow),
+                    ),
+                    (vec![0], Some(0), None),
+                ] {
+                    let instructions: Vec<_> = amounts
+                        .iter()
+                        .map(|amount| (2, vec![0, 1], venue_trade(ix, *amount, 900_000_000)))
+                        .collect();
+                    let bytes = build(&[WALLET, MINT, PUMP, SYSTEM_PROGRAM], &instructions);
+                    let result = check_venue_action(&bytes, 1, action, bound);
+                    match expected {
+                        None => assert!(
+                            result.is_ok(),
+                            "{ix:?}/{action:?} {amounts:?}/{bound:?}: {result:?}"
+                        ),
+                        Some(why) => assert!(result.unwrap_err().contains(&why)),
+                    }
+                }
             }
         }
     }

@@ -335,6 +335,7 @@ mod tests {
                 action: Action::Buy,
                 max_notional: MicroUsd::from_dollars(100.0),
                 expires_after: Slot(1_150),
+                max_token_debit_raw: None,
                 needs_operator_signature: false,
             },
             now: Slot(1_100),

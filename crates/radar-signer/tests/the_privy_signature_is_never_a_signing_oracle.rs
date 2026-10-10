@@ -61,6 +61,7 @@ fn authorization() -> Authorization {
         action: Action::Buy,
         max_notional: MicroUsd(50_000_000),
         expires_after: Slot(1_150),
+        max_token_debit_raw: None,
         needs_operator_signature: false,
     }
 }

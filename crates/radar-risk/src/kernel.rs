@@ -188,6 +188,12 @@ pub struct Authorization {
     /// The most that may be committed. Not "about this much" — the signer
     /// refuses anything above it.
     pub max_notional: MicroUsd,
+    /// Maximum aggregate raw units of the authorized mint that may be sold.
+    /// This is independent of USD notional and native fee/spend bounds. Missing
+    /// authority cannot authorize a decoded sale. The current buy-only issuer
+    /// leaves this unset; exit issuance must derive it from protected holdings.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_token_debit_raw: Option<u64>,
     /// The slot after which this is void.
     pub expires_after: Slot,
     /// Whether an operator signature is still required.
@@ -315,6 +321,7 @@ pub fn evaluate(proposal: &Proposal, state: &PortfolioState, policy: &Policy) ->
         action: proposal.action,
         max_notional: proposal.notional,
         expires_after: state.now + AUTHORIZATION_LIFETIME,
+        max_token_debit_raw: None,
         needs_operator_signature: policy.autonomy == Autonomy::Approve,
     }))
 }

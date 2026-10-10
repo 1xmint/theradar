@@ -1307,10 +1307,28 @@ authorization. Sell arguments must be readable even though their minimum SOL
 output is not an outgoing-spend bound. The Privy process repeats this check
 after issuer proof verification; an issuer signature cannot waive it.
 
-This binds only the direction of known curve trades. Sale token quantities,
+This binds only the direction of known curve trades. Aggregate sale quantities
+are checked separately below. Verified holdings,
 per-instruction mint/account roles, other-program semantics and live exit
 issuance/accounting remain separate requirements. It does not enable live sales
 or replace any existing native spend, policy, expiry, ownership or nonce check.
+
+## Aggregate raw-token debit authority
+
+Authorization has an optional max_token_debit_raw, distinct from USD notional
+and native spend. Every decoded curve sale requires an explicit bound. The
+signer sums raw quantities across both known sale variants with checked addition
+and refuses missing authority, overspend or overflow. A sale's minimum incoming
+SOL does not count as outgoing tokens. The Privy issuer proof covers this field,
+so changing it after attestation refuses before key use. Old serialized buy
+authorizations preserve their wire form; absent sale bounds now refuse.
+
+The current kernel/issuer do not invent token authority: they leave the bound
+unset until an exit issuer derives it from independently protected holdings and
+reviewed exit evidence. Direct library/local inputs still lack authenticated
+provenance. Per-instruction mint/account roles and other-program semantics remain
+unresolved, so this quantity check alone cannot activate a live exit. It prepares
+the required enforceable bound, not a complete sell pipeline or ownership proof.
 
 ## What would reverse this
 

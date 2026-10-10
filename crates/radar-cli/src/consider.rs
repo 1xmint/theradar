@@ -2202,6 +2202,7 @@ mod tests {
                 action: radar_risk::Action::Buy,
                 max_notional: MicroUsd(1),
                 expires_after: watermark,
+                max_token_debit_raw: None,
                 needs_operator_signature: false,
             })),
         );
