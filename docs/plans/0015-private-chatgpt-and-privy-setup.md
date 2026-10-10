@@ -4221,3 +4221,27 @@ Then finish economic coverage and durable idempotent risk-state application,
 independent live risk inputs and execution/exits/recovery. Owner numeric limits,
 Privy policy/delegation, isolated key setup, funding and bounded live validation
 still precede activation; the public health check does not close those gates.
+
+### Connectivity restored; repeated CI timeout handback (2026-10-10)
+
+With owner approval, extended clawguard's expired Tailscale key through the
+admin console and completed the existing account's SSH check. The console now
+reports Connected and key expiry six months away. A fresh BatchMode SSH to
+guardian-vps-tail returned hostname clawguard and active tailscaled. Public
+Radar /health still returns ok at 3f38ee0ffaf2d1e349f54b43475f36c010bb335d.
+No deployment or trading-authority change occurred. An exploratory check of
+systemctl radar and port 8080 used unverified service/port names; their negative
+results do not establish a Radar outage. The public health response is positive.
+
+CI 38023346308 attempt 2 is complete, cancelled. Check-run annotations for
+114134402505 explicitly report the maximum execution time of 30m0s exceeded;
+its unmutated baseline passed (105s build, 16s test), but no final mutation
+summary was observed. Other ordinary checks and shards 0, 2 and 3 passed; the
+required mutants gate failed. This repeats attempt 1's timeout, so AGENTS
+sections 6 and 8 require an owner decision. Recommended change: increase only
+the mutation job timeout from 30 to 60 minutes, preserving all shards, test
+coverage and required-gate behavior. Asked owner; no workflow change, push,
+rerun or substitute broad local run performed. Completed sources through
+5a65043 remain local, awaiting fresh full CI before deployment. Autonomous
+execution remains off and the earlier economic/risk/execution/owner setup
+gaps remain open. Resume with the owner's timeout decision.
