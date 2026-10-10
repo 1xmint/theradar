@@ -4628,3 +4628,27 @@ the older 9e43e11 artifact as this source or enable autonomous execution: live
 risk construction, complete economic reconciliation/durable application,
 execution/exits/recovery, isolated service installation, Privy delegation and
 funding verification remain. Owner choices stay on the website per option.
+
+### Integrated release verification and design discussion (2026-10-10)
+
+Release run 38068470125 succeeded at
+ac2f87a821a507d6b05f2665c6c78c796d6bfa23. Downloaded radar-linux-x86_64 with
+gh run download into sibling radar-release-38068470125. BUILD-INFO names that
+exact commit; Get-FileHash SHA256 verified all six binaries. radar-issuer is
+1,950,624 bytes, hash
+8d22b49509d446a3d8254a6493c4edabd23f62ecde14d29b52a7e99aaf9cdd71.
+Full CI 38068474113 has passed every ordinary job; all four mutation shards
+remain live at inspection. Do not publish over that run or claim its final
+gate passed. The artifact has not been deployed. Radar health on port 8402
+still reports build 3f38ee0, policyClosed true and no Codex calls;
+radar-signer.socket remains inactive.
+
+Owner raised a direction question: adaptive risk management instead of a
+mandatory daily loss stop, plus conversational research assistance. Stopped
+implementation and discussed the recommendation in chat: optional daily cap,
+adaptive allocation and sizing, independent operational controls, measured
+performance and researched user tips under an existing mandate. This is a
+recommendation awaiting the owner's response, not a settled product decision;
+no policy, UI or trading behavior was changed to implement it. Continue
+artifact/CI verification independently, and settle the discussion before
+recording new product doctrine or implementing the risk-panel redesign.
