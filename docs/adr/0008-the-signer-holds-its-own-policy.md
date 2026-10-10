@@ -1420,6 +1420,39 @@ no-reservation refusals. These instruction guarantees do not prove final net
 wallet credits, current liquidity, token-account ownership, complete execution
 semantics or live fill/accounting. Live sales remain unissued and closed.
 
+## Protected sale completion with separate cash sides
+
+The offline reconcile-operation consumer now supports reverified retained sales
+as well as native-SOL buys and failed fees. CompletedCashFlow records outgoing
+network fees, tips and rent separately from gross sale proceeds and rent refunds.
+All outgoing units must fit the reserved native claim, even when incoming cash
+would make the net balance positive. A sale whose gross costs exceed its claim
+remains outstanding; incoming proceeds are not permission to overrun it.
+
+Portfolio settlement checks units, spending and final balance range before
+applying either side or removing the claim. OperationLog validates on a copy,
+persists the terminal record and only then changes the portfolio. Replay binds
+both the original intent/reservation and credit units. Existing debit-only wire
+variants keep their meaning. This is measured cash, not a price or PnL estimate.
+
+The issuer independently replays the signed binding, exact normalized valuation,
+FIFO basis, native pre/post anchors and current wallet checkpoint. Token anchors
+are checked chronologically across buys and sales, starting from the required
+zero-token opening basis. Retried completion revalidates retained economic facts
+and returns already_reconciled without changing history or applying proceeds twice.
+The next issuance still requires the new checkpoint and risk-state floors.
+
+Process regressions cover a completed buy followed by a partial sale, persisted
+fee/proceeds, remaining basis and restart idempotence; hidden token gaps, current
+cash/quantity mismatch, stale reads and credit-funded overspending refuse without
+releasing the claim. Generic portfolio and journal regressions cover atomic
+refusals, units, overflow, preservation of other claims and tampered replay.
+GitHub verification is required before treating this source as verified.
+
+This remains protected operator-provisioned economic reconciliation, not a live
+collector, holdings-derived exit issuer or recovered dropped transaction. Full
+wallet coverage and marked exposure remain unknown. No signing authority opens.
+
 ## What would reverse this
 
 Nothing foreseeable reverses holding a policy locally. The specific ceilings are

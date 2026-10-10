@@ -5260,3 +5260,34 @@ Settlement cannot by itself represent returned sale cash; do not disguise a
 credit as an unsigned negative debit or erase the fee. Actual routing, live
 portfolio/evidence, supervisor/research chat and protected site handover remain.
 Goal remains active and autonomous trading is off.
+
+### Sale cash completion implementation and handback (2026-10-10)
+
+Previous goal turn progressed by proving the exact output guard caught and
+integrating the verified builder/signer source. This turn observed broad
+integrated CI 38083559773 and release 38083555818 at 896009c fully green.
+Release download/hash verification remains to do; nothing new was deployed.
+
+Started feat/sale-cash-completion from 896009c. Actual callers are Portfolio::settle,
+OperationLog reconciliation/replay and the protected issuer reconcile-operation
+consumer. Added CompletedCashFlow with separate same-asset spent/received units;
+credits cannot hide spending beyond the claim. Both balance sides and range are
+validated before mutation; the journal persists before applying the copy. Replay
+checks the original intent/reservation and both units. Existing wire variants
+retain their meaning.
+
+The issuer derives the exact cash sides from reverified retained sale valuation,
+checks pre/post cash, chronological buy/sale token anchors and FIFO/current
+inventory before completion, and replays matching terminal sales exactly once.
+New process regressions cover buy then partial sale, fees/proceeds, remaining
+basis, restart/retry idempotence and next-issuance risk/checkpoint refusal. Hidden
+sale token gaps and incoming-credit-funded overspending remain refused with the
+claim and journal unchanged. Added portfolio atomicity/other-claim/unit/overflow
+regressions and extended journal tampered-terminal replay cases. Test floor 2239.
+
+Publish for GitHub tests/build/lint/mutation verification; no local jobs ran.
+This closes an offline economic completion gap, not holdings-derived exit
+issuance, actual route construction, live evidence/portfolio, dropped recovery,
+adaptive supervisor/research chat or protected site handover/deployment. Keep
+those goal items open and live signing closed. Inspect this branch's exact CI
+results next, then continue the protected exit path. Goal remains active.

@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 //! Offline operator-provisioned kernel issuer. It holds no wallet or Privy key.
 //! Configured private files are the trust boundary; stdin carries no authority.
-//! Reconciles retained native-SOL buys/failed fees against protected wallet reads.
-//! This is not yet a live snapshot adapter or a sale execution/recovery loop.
+//! Reconciles retained native-SOL buys, sales and failed fees against protected reads.
+//! This is not yet a live snapshot adapter, exit issuer or execution/recovery loop.
 
 use std::io::{BufRead as _, Read as _, Write as _};
 use std::path::{Path, PathBuf};
@@ -32,6 +32,9 @@ mod acquisitions;
 
 #[path = "radar-issuer/reconciliation.rs"]
 mod reconciliation;
+
+#[path = "radar-issuer/cash_completion.rs"]
+mod cash_completion;
 
 #[path = "radar-issuer/execution_output.rs"]
 mod execution_output;

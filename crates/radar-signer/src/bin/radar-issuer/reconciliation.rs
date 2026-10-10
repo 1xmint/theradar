@@ -2,9 +2,7 @@
 //! Durable completion of supported operations; retained economic facts replay after restart.
 
 use radar_journal::{Applied, OperationLog, OperationState};
-use radar_types::{
-    Asset, AssetRole, Balance, Holding, Portfolio, Settlement, TokenQuantity, Valuation,
-};
+use radar_types::{Asset, AssetRole, Balance, Holding, Portfolio, TokenQuantity, Valuation};
 use serde_json::{Value, json};
 
 use super::{Config, Snapshot, acquisitions, evidence_integer as integer, inventory};
@@ -14,16 +12,22 @@ fn verify_token_anchors(
     config: &Config,
     history: &Value,
 ) -> Result<(), String> {
+    let sales = history["sales"]
+        .as_array()
+        .ok_or("retained sales missing")?;
     let mut lots = history["lots"]
         .as_array()
         .ok_or("retained lots missing")?
         .iter()
-        .map(|lot| Ok((integer(lot, "execution_slot")?, lot)))
+        .map(|lot| (lot, false))
+        .chain(sales.iter().map(|sale| (sale, true)))
+        .map(|(row, sale)| Ok((integer(row, "execution_slot")?, row, sale)))
         .collect::<Result<Vec<_>, String>>()?;
-    lots.sort_by_key(|(slot, _)| *slot);
+    lots.sort_by_key(|(slot, _, _)| *slot);
     let mut quantities = std::collections::BTreeMap::<radar_types::Address, u64>::new();
-    for (_, lot) in lots {
-        let mint = serde_json::from_value(lot["mint"].clone()).map_err(|_| "lot mint missing")?;
+    for (_, lot, sale) in lots {
+        let units = if sale { &lot["proceeds"] } else { lot };
+        let mint = serde_json::from_value(units["mint"].clone()).map_err(|_| "lot mint missing")?;
         let id = log
             .entries()
             .find(|(id, _)| lot["operation"] == id.as_str())
@@ -40,7 +44,7 @@ fn verify_token_anchors(
                 .ok_or("token anchors missing")?
                 .iter()
                 .filter(|row| {
-                    row["owner"] == config.wallet.to_string() && row["mint"] == lot["mint"]
+                    row["owner"] == config.wallet.to_string() && row["mint"] == units["mint"]
                 })
                 .try_fold(0_u64, |sum, row| {
                     sum.checked_add(integer(row, "raw_amount")?)
@@ -48,13 +52,15 @@ fn verify_token_anchors(
                 })
         };
         let pre = quantities.entry(mint).or_default();
-        let post = pre
-            .checked_add(integer(lot, "net_acquired_raw")?)
-            .ok_or("token history overflow")?;
-        // Valuation already checks post minus pre equals net_acquired_raw.
-        // Anchor pre to retained units; that same checked delta anchors post.
-        // Partial coverage of this mint's retained units stays refused.
-        if amount("pre_token_balances")? != *pre {
+        let post = if sale {
+            pre.checked_sub(integer(units, "net_disposed_raw")?)
+        } else {
+            pre.checked_add(integer(units, "net_acquired_raw")?)
+        }
+        .ok_or("token history exceeds retained quantities")?;
+        // Bind both endpoints to the retained chronological inventory. A
+        // balanced disposal can still hide an unrelated intervening transfer.
+        if amount("pre_token_balances")? != *pre || amount("post_token_balances")? != post {
             return Err("token transaction anchors do not match retained quantities".into());
         }
         *pre = post;
@@ -81,11 +87,7 @@ pub(super) fn apply(
         .valuation(&id)
         .ok_or("operation has no retained valuation")?
         .review;
-    if value["sale_proceeds"].is_object() {
-        return Err("reconciliation currently supports native-SOL buys and failed fees".into());
-    }
-    let debit = TokenQuantity::lamports(integer(value, "wallet_net_debit_lamports")?);
-    let completion = Settlement::Completed(debit);
+    let completion = super::cash_completion::reviewed(value)?;
     let repeated = entry.state == OperationState::Reconciled(completion);
     if !repeated {
         if entry.state != OperationState::SubmissionUnknown || log.outstanding().count() != 1 {
@@ -115,7 +117,7 @@ pub(super) fn apply(
                 ),
             )
             .map_err(|_| "pre-execution cash unusable")?;
-        if pre.checked_sub(integer(value, "wallet_net_debit_lamports")?) != Some(post) {
+        if super::cash_completion::projected(completion, pre) != Some(post) {
             return Err("operation debit does not match verified cash effect".into());
         }
         log.rehold(&mut portfolio)

@@ -1207,11 +1207,22 @@ fn replay(events: &[Event]) -> Result<BTreeMap<OperationId, Live>, OperationErro
             }
             live.settlement = Some(settlement.clone());
         }
-        if let OperationState::Confirmed(Settlement::Completed(spent))
-        | OperationState::Reconciled(Settlement::Completed(spent)) = entry.state
+        if let OperationState::Confirmed(
+            Settlement::Completed(spent) | Settlement::CompletedCashFlow { spent, .. },
+        )
+        | OperationState::Reconciled(
+            Settlement::Completed(spent) | Settlement::CompletedCashFlow { spent, .. },
+        ) = entry.state
             && (entry.intent != live.entry.intent
                 || entry.reserved != live.entry.reserved
                 || entry.reserved.and_then(|q| q.checked_sub(spent)).is_none())
+        {
+            return Err(OperationError::InvalidCompletedSettlement);
+        }
+        if let OperationState::Confirmed(Settlement::CompletedCashFlow { spent, received })
+        | OperationState::Reconciled(Settlement::CompletedCashFlow { spent, received }) =
+            entry.state
+            && spent.decimals() != received.decimals()
         {
             return Err(OperationError::InvalidCompletedSettlement);
         }

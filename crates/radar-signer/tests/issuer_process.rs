@@ -174,6 +174,124 @@ fn reconcile_operation(fixture: &Fixture, id: &str) -> std::process::Output {
         .unwrap()
 }
 
+fn sale_reconciliation_fixture(case: &str) -> (Fixture, radar_journal::OperationId) {
+    let (mut fixture, buy) = reconciliation_fixture();
+    let result = reconcile_operation(&fixture, buy.as_str());
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    let path = fixture.dir.path().join("operations.jsonl");
+    let log = radar_journal::OperationLog::open(&path).unwrap();
+    let sale = append_sale_history(&fixture, case, log);
+    let log = radar_journal::OperationLog::open(&path).unwrap();
+    fixture.snapshot["accounting_checkpoint"] = json!(log.checkpoint());
+    fixture.snapshot["sol_lamports"] = json!(285_844_000);
+    fixture.snapshot["wallet_evidence"]["native_sol"]["raw_amount"] = json!("285844000");
+    set_inventory(&mut fixture, 9, 1004);
+    (fixture, sale)
+}
+
+#[test]
+fn issuer_completes_sale_cash_and_basis_once_across_restarts() {
+    let (mut fixture, sale) = sale_reconciliation_fixture("contiguous");
+    let path = fixture.dir.path().join("operations.jsonl");
+    let before: Value = serde_json::from_slice(&acquisition_report(&fixture).stdout).unwrap();
+    let result = reconcile_operation(&fixture, sale.as_str());
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    let result: Value = serde_json::from_slice(&result.stdout).unwrap();
+    assert_eq!(result["outcome"], "reconciled");
+    assert_eq!(result["reservation_released"], true);
+    assert_eq!(result["wallet_inventory_complete"], false);
+    let log = radar_journal::OperationLog::open(&path).unwrap();
+    assert_eq!(log.outstanding().count(), 0);
+    assert_eq!(
+        log.entry(&sale).unwrap().state,
+        radar_journal::OperationState::Reconciled(radar_types::Settlement::CompletedCashFlow {
+            spent: radar_types::TokenQuantity::lamports(5000),
+            received: radar_types::TokenQuantity::lamports(1_005_000),
+        })
+    );
+    let checkpoint = log.checkpoint().to_owned();
+    assert_eq!(result["accounting_checkpoint"], checkpoint);
+    drop(log);
+    let saved = std::fs::read(&path).unwrap();
+    for _ in 0..2 {
+        let retry = reconcile_operation(&fixture, sale.as_str());
+        assert!(
+            retry.status.success(),
+            "{}",
+            String::from_utf8_lossy(&retry.stderr)
+        );
+        let retry: Value = serde_json::from_slice(&retry.stdout).unwrap();
+        assert_eq!(retry["outcome"], "already_reconciled");
+        assert_eq!(std::fs::read(&path).unwrap(), saved);
+        let after: Value = serde_json::from_slice(&acquisition_report(&fixture).stdout).unwrap();
+        for field in [
+            "lots",
+            "sales",
+            "recorded_native_cash_flows",
+            "recorded_disposal_accounting",
+        ] {
+            assert_eq!(before[field], after[field], "{field}");
+        }
+        assert_eq!(
+            after["recorded_disposal_accounting"]["remaining_lots"][0]["remaining_raw"],
+            "9"
+        );
+        assert_eq!(
+            after["recorded_disposal_accounting"]["disposals"][0]["recorded_trade_pnl_micro_usd"],
+            "-1000481"
+        );
+    }
+    assert_eq!(
+        fixture.start().ask(&fixture.candidate)["reason"],
+        "snapshot accounting does not cover current journal history"
+    );
+    fixture.snapshot["accounting_checkpoint"] = json!(checkpoint);
+    fixture.save();
+    assert_eq!(
+        fixture.start().ask(&fixture.candidate)["reason"],
+        "snapshot risk state understates retained history"
+    );
+}
+
+#[test]
+fn sale_completion_refuses_hidden_inventory_gaps_and_credit_funded_overspending() {
+    for case in ["cash", "quantity", "age", "gross_overspend", "token_gap"] {
+        let (mut fixture, sale) =
+            sale_reconciliation_fixture(if matches!(case, "gross_overspend" | "token_gap") {
+                case
+            } else {
+                "contiguous"
+            });
+        match case {
+            "cash" => {
+                fixture.snapshot["sol_lamports"] = json!(285_844_001);
+                fixture.snapshot["wallet_evidence"]["native_sol"]["raw_amount"] =
+                    json!("285844001");
+            }
+            "quantity" => set_inventory(&mut fixture, 10, 1004),
+            "age" => fixture.snapshot["observed_at_unix_secs"] = json!(unix_now() - 121),
+            _ => {}
+        }
+        fixture.save();
+        let path = fixture.dir.path().join("operations.jsonl");
+        let saved = std::fs::read(&path).unwrap();
+        let output = reconcile_operation(&fixture, sale.as_str());
+        assert!(!output.status.success(), "{case}");
+        assert!(output.stdout.is_empty(), "{case}");
+        assert_eq!(std::fs::read(&path).unwrap(), saved, "{case}");
+        let log = radar_journal::OperationLog::open(&path).unwrap();
+        assert_eq!(log.outstanding().count(), 1, "{case}");
+    }
+}
+
 #[test]
 fn issuer_reconciles_buy_once_retains_basis_and_requires_new_risk_state_before_next_trade() {
     let (mut fixture, id) = reconciliation_fixture();
@@ -1670,7 +1788,7 @@ fn append_sale_history(
     case: &str,
     mut log: radar_journal::OperationLog,
 ) -> radar_journal::OperationId {
-    let source = log.outstanding().next().expect("buy").0.clone();
+    let source = log.entries().next().expect("buy").0.clone();
     let mut intent = log.entry(&source).expect("entry").intent;
     intent.amount = radar_types::TokenQuantity::lamports(5000);
     let mut binding = log.execution(&source).expect("binding").clone();
@@ -1707,13 +1825,24 @@ fn append_sale_history(
         json!({"account_index":1,"mint":address(0x22),"owner":fixture.config["wallet"],
         "program_id":address(0x44),"decimals":6,"raw_amount":amount})
     };
+    let contiguous = matches!(case, "contiguous" | "gross_overspend" | "token_gap");
+    let (pre, post) = if contiguous {
+        ("284844000", "285844000")
+    } else {
+        ("300000000", "301000000")
+    };
+    let (token_pre, token_post) = if case == "token_gap" {
+        ("16", "10")
+    } else {
+        ("15", "9")
+    };
     let evidence = json!({"version":1,"authority":"read_only","commitment":"finalized","wallet":fixture.config["wallet"],
         "transaction_base64":signed,"signature":fixture_signature(&signed),"signature_verified_locally":false,
         "operation_reconciled":false,"usd_value":null,"realised_pnl":null,"outcome":"succeeded","slot":"1003",
         "minimum_slot":"1000","read_started_at_unix_secs":time,"read_completed_at_unix_secs":time,
         "block_time_unix_secs":(time-1).to_string(),"account_keys":[fixture.config["wallet"],address(0x22),address(0x11)],
-        "pre_balances_lamports":["300000000","0","0"],"post_balances_lamports":["301000000","0","0"],
-        "network_fee_lamports":"5000","pre_token_balances":[token("15")],"post_token_balances":[token("9")]});
+        "pre_balances_lamports":[pre,"0","0"],"post_balances_lamports":[post,"0","0"],
+        "network_fee_lamports":"5000","pre_token_balances":[token(token_pre)],"post_token_balances":[token(token_post)]});
     let effects_path = fixture.dir.path().join("sale-history-effects.json");
     write(&effects_path, &evidence);
     let output = fixture
@@ -1733,7 +1862,7 @@ fn append_sale_history(
     let price = json!({"version":1,"asset":"sol","micro_usd_per_sol":"200000003","as_of_slot":"1000",
         "as_of_unix_secs":(time-1).to_string(),"sale_proceeds":{"version":1,"operation":id.as_str(),
         "signed_transaction":signed,"wallet":fixture.config["wallet"],"mint":address(0x22),"token_program":address(0x44),
-        "decimals":6,"net_disposed_raw":"6","gross_proceeds_lamports":"1005000","tip_lamports":"0",
+        "decimals":6,"net_disposed_raw":"6","gross_proceeds_lamports":if case == "gross_overspend" {"1005001"} else {"1005000"},"tip_lamports":if case == "gross_overspend" {"1"} else {"0"},
         "rent_paid_lamports":"0","rent_refund_lamports":"0","other_cash_flows_absent":true}});
     let price_path = fixture.dir.path().join("sale-history-price.json");
     write(&price_path, &price);

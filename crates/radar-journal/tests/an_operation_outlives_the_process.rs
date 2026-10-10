@@ -1429,7 +1429,7 @@ fn rejected_or_unwritten_completion_changes_neither_history_nor_portfolio() {
 
 #[test]
 fn replay_refuses_completed_spends_that_change_or_exceed_the_recorded_reservation() {
-    for change in 0..6 {
+    for change in 0..10 {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = somewhere(&dir);
         let mut portfolio = account();
@@ -1456,7 +1456,36 @@ fn replay_refuses_completed_spends_that_change_or_exceed_the_recorded_reservatio
                     )));
             }
             4 => entry.reserved = None,
-            _ => entry.intent.asset = Asset::Usdc,
+            5 => entry.intent.asset = Asset::Usdc,
+            6 => {
+                entry.state = OperationState::Reconciled(Settlement::CompletedCashFlow {
+                    spent: TokenQuantity::lamports(1),
+                    received: TokenQuantity::new(
+                        1,
+                        radar_types::Decimals::from_mint_account(6).unwrap(),
+                    ),
+                })
+            }
+            7 => {
+                entry.state = OperationState::Confirmed(Settlement::CompletedCashFlow {
+                    spent: TokenQuantity::lamports(CLAIM + 1),
+                    received: TokenQuantity::lamports(CLAIM + 100),
+                })
+            }
+            8 => {
+                entry.state = OperationState::Reconciled(Settlement::CompletedCashFlow {
+                    spent: TokenQuantity::lamports(1),
+                    received: TokenQuantity::lamports(100),
+                });
+                entry.intent.amount = TokenQuantity::lamports(CLAIM + 1);
+            }
+            _ => {
+                entry.state = OperationState::Reconciled(Settlement::CompletedCashFlow {
+                    spent: TokenQuantity::lamports(1),
+                    received: TokenQuantity::lamports(100),
+                });
+                entry.reserved = None;
+            }
         }
         drop(log);
         radar_journal::Journal::open(&path)
