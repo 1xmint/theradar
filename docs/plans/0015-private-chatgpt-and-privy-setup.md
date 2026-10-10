@@ -3902,3 +3902,47 @@ application. Independent live risk inputs, execution/exits/recovery/scheduling
 and owner limits/isolated keys/verified Privy policy/delegation/funding/bounded
 deployment validation remain activation requirements. Opening/current account
 union is not exhaustive wallet history and must not soften those refusals.
+
+
+### Known-account bounded activity collection (2026-10-10)
+
+CI 38023346308 still runs at 255337c, with ordinary checks successful and mutation
+shards pending at the latest inspection. To avoid cancelling it, use isolated
+feat/known-account-activity in the native sibling worktree, based on primary
+540c152. No push while that verification is in flight.
+
+Add optional --inventory-review <path> to wallet-activity-read. It validates the
+configured wallet and inventory-comparison shape, bounds file reads to one MiB,
+and accepts at most fifteen unique account addresses distinct from the wallet,
+including retained accounts absent from current observations. Labels are not
+authenticated provenance and output explicitly leaves ownership unverified.
+Read-only on-chain collection scans sorted unique wallet/known accounts under
+one shared 108-call/16-page/20-second budget. Per-address stops stay explicit;
+identical cross-address signatures/transactions merge, conflicts refuse. Global
+scan/fetch completion requires every address, never one successful scan.
+
+Seven regressions cover merged duplicates/query identity/failed transactions,
+slot/outcome/metadata conflicts, shared budget exhaustion and unavailable fetches,
+exact target/file-size bounds, unsupported review shapes, and an actual CLI
+process that fetches a missing-current account's history. The new known-address
+coverage label is deliberately unsupported by the existing single-address native
+adapter. This preserves unknown activity, grants no authority, and does not
+establish ownership, exhaustive history or economic reconciliation. No live
+network measurement, secrets, deployment, delegation or trade in this increment.
+
+
+Restored local checks passed 352 scoped tests (CLI 241, on-chain 111), Rust 1.99
+scoped all-target Clippy and formatting. All sixteen manual logic faults caught
+and restored: wallet target inclusion, target maximum, cross-address conflict,
+all-target scan/fetch completion, exact file-size and token-count bounds,
+duplicate wallet/account targets, authority/wallet/coverage/history/portfolio
+shape guards and actual CLI dispatch. The fetch-completion fault has a dedicated
+case where one scan fetch fails and another has an empty completed read.
+Unchanged transport plumbing and JSON formatting are not separately mutated.
+A first compile found a missing String borrow in targets; corrected before
+successful tests. A multiline test-insertion assertion stopped before changing
+source; use the function boundary to insert the intended case. No fault,
+dependency, suppression or exclusion retained. All 33 conformance checks passed
+after staging; new-source full CI remains required. Prior-run logs are not yet
+available through gh while that run is in progress; do not report a test total
+from the empty/error log response.

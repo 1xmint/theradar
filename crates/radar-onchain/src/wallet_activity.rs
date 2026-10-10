@@ -165,6 +165,93 @@ pub fn read(
     )
 }
 
+/// Collect the wallet and at most fifteen other known addresses with one shared
+/// budget. Targets are caller-supplied, not an ownership or completeness proof.
+///
+/// # Errors
+/// Invalid bounds/target count or inconsistent duplicate evidence across scans.
+pub fn read_known_accounts(
+    rpc: &RpcClient,
+    wallet: Address,
+    accounts: &[Address],
+    after: u64,
+    through: u64,
+    budget: &mut Budget,
+) -> Result<Value, String> {
+    let addresses: BTreeSet<_> = accounts.iter().copied().chain([wallet]).collect();
+    if addresses.len() > 16 {
+        return Err("activity supports at most sixteen known addresses including wallet".into());
+    }
+    let mut scans = Vec::new();
+    let mut signatures = std::collections::BTreeMap::<String, Value>::new();
+    let mut transactions = std::collections::BTreeMap::<String, Value>::new();
+    let mut reported_for = std::collections::BTreeMap::<String, BTreeSet<Address>>::new();
+    for address in &addresses {
+        let mut scan = read(rpc, *address, after, through, budget)?;
+        for entry in scan["signatures"]
+            .as_array()
+            .ok_or("activity signatures missing")?
+        {
+            merge_known(&mut signatures, entry)?;
+            reported_for
+                .entry(
+                    entry["signature"]
+                        .as_str()
+                        .ok_or("activity signature missing")?
+                        .to_owned(),
+                )
+                .or_default()
+                .insert(*address);
+        }
+        for entry in scan["transactions"]
+            .as_array()
+            .ok_or("activity transactions missing")?
+        {
+            merge_known(&mut transactions, entry)?;
+        }
+        // The single-address reader's field names its query target. Preserve the
+        // configured wallet only at the outer boundary, not on a token-account scan.
+        scan.as_object_mut()
+            .ok_or("activity scan missing")?
+            .remove("wallet");
+        scan["queried_address"] = json!(address);
+        scans.push(scan);
+    }
+    let entries: Vec<_> = signatures
+        .into_iter()
+        .map(|(signature, mut entry)| {
+            entry["reported_for_addresses"] = json!(reported_for.get(&signature));
+            entry
+        })
+        .collect();
+    Ok(
+        json!({"version":1,"authority":"read_only","commitment":"finalized","wallet":wallet,
+        "after_slot_exclusive":after.to_string(),"through_slot_inclusive":through.to_string(),
+        "queried_addresses":addresses,"address_scans":scans,
+        "signature_scan_finished":scans.iter().all(|scan| scan["signature_scan_finished"] == true),
+        "transaction_fetch_finished":scans.iter().all(|scan| scan["transaction_fetch_finished"] == true),
+        "signatures":entries,"transactions":transactions.into_values().collect::<Vec<_>>(),
+        "coverage":"provider_reported_known_address_history","targets_owned_by_wallet_verified":false,
+        "wallet_coverage_complete":false,"economic_reconciliation_complete":false,
+        "portfolio_state_updated":false,"reservation_released":false}),
+    )
+}
+
+fn merge_known(
+    records: &mut std::collections::BTreeMap<String, Value>,
+    entry: &Value,
+) -> Result<(), String> {
+    let key = entry["signature"]
+        .as_str()
+        .ok_or("activity signature missing")?
+        .to_owned();
+    if records.get(&key).is_some_and(|prior| prior != entry) {
+        return Err("activity evidence conflicts across known address scans".into());
+    }
+    records.insert(key, entry.clone());
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -490,5 +577,139 @@ mod tests {
         value = raw(1, 45, false);
         value["meta"].as_object_mut().unwrap().remove("err");
         assert!(transaction(&value, &entry).is_err());
+    }
+
+    #[test]
+    fn known_account_scans_merge_duplicates_and_preserve_query_identity() {
+        let wallet = Address::new([0x55; 32]);
+        let token = Address::new([0x56; 32]);
+        let (rpc, calls) = client(vec![
+            json!([row(5, 45, false)]),
+            raw(5, 45, false),
+            json!([row(6, 46, true), row(5, 45, false)]),
+            raw(6, 46, true),
+            raw(5, 45, false),
+        ]);
+        let report = read_known_accounts(
+            &rpc,
+            wallet,
+            &[token, token, wallet],
+            40,
+            50,
+            &mut budget(10, 3),
+        )
+        .unwrap();
+        assert_eq!(report["wallet"], wallet.to_string());
+        assert_eq!(report["queried_addresses"], json!([wallet, token]));
+        assert_eq!(report["signatures"].as_array().unwrap().len(), 2);
+        assert_eq!(report["transactions"].as_array().unwrap().len(), 2);
+        let shared = report["signatures"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|entry| entry["signature"] == Signature::new([5; 64]).to_string())
+            .unwrap();
+        assert_eq!(shared["reported_for_addresses"], json!([wallet, token]));
+        assert_eq!(report["signature_scan_finished"], true);
+        assert_eq!(report["transaction_fetch_finished"], true);
+        assert_eq!(
+            report["address_scans"][1]["queried_address"],
+            token.to_string()
+        );
+        assert!(report["address_scans"][1].get("wallet").is_none());
+        for flag in [
+            "wallet_coverage_complete",
+            "economic_reconciliation_complete",
+            "portfolio_state_updated",
+            "reservation_released",
+            "targets_owned_by_wallet_verified",
+        ] {
+            assert_eq!(report[flag], false);
+        }
+        let calls = calls.lock().unwrap();
+        assert_eq!(calls.len(), 5);
+        assert_eq!(calls[0]["params"][0], wallet.to_string());
+        assert_eq!(calls[2]["params"][0], token.to_string());
+    }
+
+    #[test]
+    fn known_account_conflicting_signature_outcome_or_raw_metadata_refuses() {
+        let wallet = Address::new([0x55; 32]);
+        let token = Address::new([0x56; 32]);
+        for change in 0..3 {
+            let (slot, failed) = match change {
+                0 => (46, false),
+                1 => (45, true),
+                _ => (45, false),
+            };
+            let mut second = raw(5, slot, failed);
+            if change == 2 {
+                second["meta"]["fee"] = json!(1);
+            }
+            let (rpc, _) = client(vec![
+                json!([row(5, 45, false)]),
+                raw(5, 45, false),
+                json!([row(5, slot, failed)]),
+                second,
+            ]);
+            assert_eq!(
+                read_known_accounts(&rpc, wallet, &[token], 40, 50, &mut budget(10, 3))
+                    .unwrap_err(),
+                "activity evidence conflicts across known address scans"
+            );
+        }
+    }
+
+    #[test]
+    fn known_account_scans_share_budgets_and_never_hide_unread_targets() {
+        let wallet = Address::new([0x55; 32]);
+        let token = Address::new([0x56; 32]);
+        let (rpc, calls) = client(vec![json!([row(5, 45, false)]), raw(5, 45, false)]);
+        let report =
+            read_known_accounts(&rpc, wallet, &[token], 40, 50, &mut budget(2, 2)).unwrap();
+        assert_eq!(calls.lock().unwrap().len(), 2);
+        assert_eq!(report["signature_scan_finished"], false);
+        assert_eq!(report["address_scans"].as_array().unwrap().len(), 2);
+        assert_eq!(
+            report["address_scans"][1]["signature_scan_stop"],
+            "call_budget"
+        );
+        let (rpc, calls) = client(vec![]);
+        let report =
+            read_known_accounts(&rpc, wallet, &[token], 40, 50, &mut budget(10, 0)).unwrap();
+        assert!(calls.lock().unwrap().is_empty());
+        assert_eq!(report["signature_scan_finished"], false);
+        assert_eq!(
+            report["address_scans"][0]["signature_scan_stop"],
+            "page_budget"
+        );
+        let (rpc, _) = client(vec![json!([row(5, 45, false)]), Value::Null, json!([])]);
+        let report =
+            read_known_accounts(&rpc, wallet, &[token], 40, 50, &mut budget(10, 3)).unwrap();
+        assert_eq!(report["signature_scan_finished"], true);
+        assert_eq!(report["transaction_fetch_finished"], false);
+        assert_eq!(
+            report["address_scans"][0]["transaction_fetch_stop"],
+            "transaction_unavailable"
+        );
+    }
+
+    #[test]
+    fn known_account_target_count_and_bounds_refuse_before_rpc() {
+        let wallet = Address::new([0x55; 32]);
+        let accounts: Vec<_> = (1..17).map(|seed| Address::new([seed; 32])).collect();
+        let (rpc, calls) = client(vec![]);
+        assert!(read_known_accounts(&rpc, wallet, &accounts, 40, 50, &mut budget(30, 20)).is_err());
+        assert!(read_known_accounts(&rpc, wallet, &[], 50, 50, &mut budget(30, 20)).is_err());
+        assert!(calls.lock().unwrap().is_empty());
+        let (rpc, _) = client(vec![json!([]); 16]);
+        assert_eq!(
+            read_known_accounts(&rpc, wallet, &accounts[..15], 40, 50, &mut budget(16, 16))
+                .unwrap()["queried_addresses"]
+                .as_array()
+                .unwrap()
+                .len(),
+            16
+        );
     }
 }

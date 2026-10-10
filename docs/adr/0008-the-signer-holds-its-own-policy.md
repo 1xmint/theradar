@@ -1198,6 +1198,31 @@ created and closed between reads. Historical coverage, economics, spendability,
 portfolio updates and authority remain incomplete. The caller is inventory
 review; the journal retains data without claiming independent chain provenance.
 
+The operator can add --inventory-review <path> to wallet-activity-read to scan
+the configured wallet and the known opening/current token-account union. The
+review file is size bounded to one MiB, identity/coverage shape checked, and
+limited to fifteen unique token addresses distinct from the wallet. Its labels
+are not authenticated provenance: collection explicitly does not verify wallet
+ownership of the supplied targets. Older unknown opening history is allowed
+as current-account targeting, without claiming historical discovery.
+
+Known-account mode shares 108 calls, sixteen pages and twenty seconds across
+at most sixteen sorted unique addresses, rather than multiplying a per-account
+budget. Each address retains its scan/fetch completion and stop reasons.
+Identical signatures and transaction records merge once; conflicting slot,
+outcome or metadata across scans refuses. The query address is separate from
+the configured wallet, and merged signatures name every reporting address.
+Global scan/fetch completion requires every target to finish. Repeated fetches
+still consume the shared budget. Provider failure or exhaustion remains
+explicitly incomplete, including targets reached after the budget is spent.
+
+This packet has provider_reported_known_address_history coverage. It is not
+accepted as the existing single-address native-transfer packet and makes no
+claim of local target membership, ownership, inclusion or exhaustive history.
+Raw metadata and unresolved transactions are data for subsequent review; no
+portfolio update, reservation release or authority results from collection.
+Accounts never observed at either endpoint still need independent discovery.
+
 ## What would reverse this
 
 Nothing foreseeable reverses holding a policy locally. The specific ceilings are

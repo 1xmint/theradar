@@ -773,3 +773,56 @@ fn the_curve_command_accounts_for_captured_extensions_and_larger_exotic_fees() {
         assert_eq!(server.join().expect("RPC fixture").len(), 1);
     }
 }
+
+#[test]
+fn known_account_activity_command_scans_retained_missing_account_and_keeps_incomplete_authority() {
+    let wallet = radar_types::Address::new([0x55; 32]);
+    let token = radar_types::Address::new([0x56; 32]);
+    let file = tempfile::NamedTempFile::new().unwrap();
+    std::fs::write(file.path(),json!({"authority":"protected_operator_inventory_comparison","wallet":wallet,
+        "token_account_comparison":{"coverage":"opening_and_current_accounts_only","opening_accounts_retained":true,
+            "historical_account_coverage_complete":false,"portfolio_state_updated":false,
+            "accounts":[{"address":token,"current_present":false}]}}).to_string()).unwrap();
+    let signature = radar_types::Signature::new([0xAB; 64]).to_string();
+    let (endpoint, server) = fixture(vec![
+        json!({"result":[]}),
+        json!({"result":[{"signature":signature,"slot":50,"err":null,"confirmationStatus":"finalized"}]}),
+        json!({"result":settlement_result()}),
+    ]);
+    let output = Command::new(env!("CARGO_BIN_EXE_radar"))
+        .args([
+            "wallet-activity-read",
+            "--wallet",
+            &wallet.to_string(),
+            "--after-slot",
+            "49",
+            "--through-slot",
+            "50",
+            "--rpc",
+            &endpoint,
+            "--inventory-review",
+            file.path().to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{:?}", output.stderr);
+    let report: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(
+        report["coverage"],
+        "provider_reported_known_address_history"
+    );
+    assert_eq!(report["queried_addresses"], json!([wallet, token]));
+    assert_eq!(report["transactions"].as_array().unwrap().len(), 1);
+    assert_eq!(report["signature_scan_finished"], true);
+    assert_eq!(report["transaction_fetch_finished"], true);
+    assert_eq!(report["wallet_coverage_complete"], false);
+    assert_eq!(report["targets_owned_by_wallet_verified"], false);
+    assert_eq!(
+        report["signatures"][0]["reported_for_addresses"],
+        json!([token])
+    );
+    let calls = server.join().unwrap();
+    assert_eq!(calls.len(), 3);
+    assert_eq!(calls[1]["params"][0], token.to_string());
+    assert_eq!(calls[2]["method"], "getTransaction");
+}

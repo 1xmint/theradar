@@ -118,7 +118,7 @@ commands:
                                  whether it is fixed or proportional
   wallet-read --wallet <address> --rpc <URL>
     Finalized balances plus raw token/mint verification; no prices or authority.
-  wallet-activity-read --wallet <address> --after-slot <N> --through-slot <N> --rpc <URL>
+  wallet-activity-read --wallet <address> --after-slot <N> --through-slot <N> --rpc <URL> [--inventory-review <path>]
     Bounded finalized address history and raw transactions; incomplete wallet coverage.
   curve-exit --mint <address> --raw-tokens <N> --rpc <URL>
     One-context curve/mint/fee read; conservative hypothetical sell, no authority.

@@ -83,3 +83,16 @@ accounts. Missing opening-account history stays unknown; missing current account
 retain their former identities with unknown current quantities. This provides
 known scan targets, not exhaustive discovery of closed/transient accounts.
 Idempotent portfolio application remains unimplemented.
+
+
+## Known-address collection follow-up
+
+An optional inventory-review input now targets the known opening/current account
+union plus the wallet with one shared bounded budget. Per-address completion
+remains explicit; identical cross-address records merge and conflicting evidence
+refuses. This is implemented locally, not yet full-CI verified. Operator-file
+labels are not authenticated ownership evidence. The packet deliberately uses
+a different coverage label from the single-wallet scan, and the existing native
+adapter must not accept it as complete wallet coverage. Historical discovery,
+local token-effect classification and independently verified economic coverage
+remain unfinished.
