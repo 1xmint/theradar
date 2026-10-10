@@ -4391,3 +4391,11 @@ is pending GitHub Actions, with no local test/build/lint/mutation jobs. No live
 deployment or authority changed. PR 337 separately contains the retained-risk
 guard; its first GitHub baseline found two older nonzero-opening fixtures that
 must be constructed as historical journal entries, not newly authorized trades.
+
+PR 338 run 38065557483 passed each nonempty mutation baseline but reported one
+new survivor at account_activity.rs:15:20, changing packet length >1232 to
+>=1232. Added a correctly signed, decodable packet of exactly 1232 bytes with an
+opaque instruction; trailing bytes would not test this boundary because the
+decoder refuses them independently. Ordinary jobs were still finishing at last
+inspection. Wait for terminal status before publishing this test correction;
+all verification remains on GitHub. No exclusions or production guard changes.
