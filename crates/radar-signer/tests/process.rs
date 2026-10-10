@@ -91,6 +91,67 @@ fn privy_process_checks_aggregate_sale_tokens_and_proof_binds_the_bound() {
 }
 
 #[test]
+fn privy_process_enforces_native_policy_and_proven_conversion_in_separate_units() {
+    // At $200/SOL, a $50 authorization permits 250m lamports, not 50m.
+    // The protected native ceiling and issuer-proven conversion both bind.
+    for (native_limit, spend, conversion, usd, allowed) in [
+        (
+            Some(250_000_000),
+            250_000_000_u64,
+            250_000_000,
+            50_000_000,
+            true,
+        ),
+        (Some(250_000_000), 250_000_001, u64::MAX, 50_000_000, false),
+        (
+            Some(300_000_000),
+            250_000_001,
+            250_000_000,
+            50_000_000,
+            false,
+        ),
+        (
+            Some(250_000_000),
+            250_000_000,
+            u64::MAX,
+            1_000_000_001,
+            false,
+        ),
+        (Some(0), 1, u64::MAX, 50_000_000, false),
+        (None, 250_000_000, 250_000_000, 50_000_000, false),
+    ] {
+        let scratch = Scratch::new("native-spend-units");
+        let mut policy = open_policy();
+        policy.max_native_spend_lamports = native_limit;
+        let path = policy_file(&scratch.0, &policy);
+        let mut signer = Signer::from_command(privy_only_command(&path));
+        let mut data = 2u32.to_le_bytes().to_vec();
+        data.extend_from_slice(&spend.to_le_bytes());
+        let bytes = transaction(&[wallet(), MINT, SYSTEM], &[(2, vec![0, 1], data)]);
+        let mut input = privy_request(&bytes);
+        input["authorization"]["max_notional"] = serde_json::json!(usd);
+        input["max_lamports"] = serde_json::json!(conversion);
+        attest(&mut input);
+        let answer = signer.ask(&input);
+        assert_eq!(
+            answer["outcome"],
+            if allowed { "authorised" } else { "refused" },
+            "limit={native_limit:?} spend={spend} conversion={conversion} usd={usd}: {answer}"
+        );
+        // The proof binds the conversion: changing it after attestation refuses.
+        input["authorization"]["nonce"] = serde_json::json!("tampered");
+        attest(&mut input);
+        input["max_lamports"] = serde_json::json!(conversion - 1);
+        let tampered = signer.ask(&input);
+        assert_eq!(tampered["outcome"], "refused", "{tampered}");
+        assert!(
+            tampered["reasons"].to_string().contains("issuer"),
+            "{tampered}"
+        );
+    }
+}
+
+#[test]
 fn privy_process_rechecks_venue_trade_direction_after_a_valid_issuer_proof() {
     let scratch = Scratch::new("privy-trade-direction");
     let policy = policy_file(&scratch.0, &open_policy());

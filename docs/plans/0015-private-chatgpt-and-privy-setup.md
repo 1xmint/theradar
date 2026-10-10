@@ -4856,6 +4856,48 @@ required execution work, not a replacement objective or readiness claim. Live
 snapshot/reconciliation coverage, adaptive supervisor/chat, isolated delegation
 and canary/recovery verification remain open.
 
+### Native spend units implementation (2026-10-10)
+
+Previous goal turn made progress correcting an erroneous process-test nonce
+expectation and publishing GitHub verification. Current turn observed direction
+run 38078931338 at 5dc2cbe fully green. Work continues on a separate branch from
+verified integrated 63e66e6 so physical-unit work cannot cancel or depend on the
+direction test run. Preserve and integrate that verified direction separately.
+
+Actual callers are radar_signer::check and radar-issuer::prepare. Explicit
+protected native policy separates chain units from USD exposure. Issuer refuses
+missing/zero native configuration, converts the authorized USD amount with the
+protected SOL upper price, clamps to its native cap and proves the resulting
+max_lamports. Signer independently clamps in native units; missing old fields
+retain the prior restriction and do not silently gain authority. The model
+cannot write either protected policy. Fee reservation stays additional.
+
+Added actual Privy process cases for a $50 / $200-per-SOL conversion, exact native
+boundary, independent signer/caller limits, USD overauthorization, zero and
+legacy fallback, and proof tampering. An actual issuer-process curve buy verifies
+250m lamports under $50 authorization, smaller protected cap, refusals beyond
+either cap, retained proof and absence of reservations after refusal. Startup
+refuses null/zero caps. A wire regression covers explicit native units and old
+policy compatibility. Unit floor 2221 on this branch (direction integration adds
+its separate test). GitHub verification required; no local jobs or live changes.
+
+Still open: live complete portfolio/evidence adapter, token-bounded exits and
+mint/account roles, routing, adaptive supervisor/chat, isolated deployment and
+end-to-end recovery/canary evidence. Goal remains fully autonomous trading.
+
+### Native policy regression correction (2026-10-10)
+
+Run 38079356230 at 7a8fe94 found an old reservation test whose deliberately tiny
+SOL price now hits the native cap before reaching its intended insufficient-cash
+guard. In that test only, set the native ceiling above available cash so wallet
+reservation remains the isolated guard. New exact-cap and converted-amount
+regressions remain unchanged. Lint also requires simplifying the startup guard
+to is_none_or(limit == 0). New curve-buy and native signer cases passed in the
+completed mutation baseline log, but that baseline failed at the old test; do
+not count any mutation verification from this failed run. Preserve the current
+run until terminal before publishing the correction. Protocol comments now
+state separate USD/native checks and the authenticated Privy conversion exactly.
+
 ### Signer verifies known curve trade direction (2026-10-10)
 
 Native completion PR 347 at 8acc176 passed all jobs in GitHub run
@@ -4917,6 +4959,12 @@ the old nonce refuse for reuse, then re-attest a fresh nonce and require success
 No production behavior changed in this correction. Verify on GitHub before
 integrating direction enforcement; autonomous signing remains closed.
 
+Merged verified trade-direction source 5dc2cbe into the native-unit branch while
+its original run finishes. Preserve both process regressions and ADR/plan
+sections. Combined unit floor 2222. The merge requires a fresh GitHub run with
+the reservation/lint correction; do not infer combined verification from the
+separate direction run. No production configuration or service was changed.
+
 ### Enforceable token-debit bound for exits (2026-10-10)
 
 Previous goal turn corrected native-policy regression/lint failures and combined
@@ -4944,3 +4992,9 @@ bind mint/account roles and route reductions correctly. Current kernel and issue
 leave token authority unset and issuer stays buy-only. Complete live portfolio
 coverage, recovery, adaptive supervisor/chat and isolated deployment still remain.
 Goal remains fully autonomous trading; no live activation is claimed.
+
+Merged verified native-unit source aa1ea1c (all GitHub checks green in
+38079626824) into the token-bound branch before publication. Retained both
+physical-unit and token-quantity checks and all three actual-process regressions.
+Combined minimum test floor 2225. Fresh combined GitHub verification is required;
+separate native verification does not prove this new token-bound behavior.

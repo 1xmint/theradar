@@ -13,7 +13,7 @@
 //! Transaction claims are checked against decoded bytes. Caller-supplied
 //! authorization bounds are also checked against this signer's own policy.
 
-use radar_risk::{Action, Authorization, Autonomy, Policy};
+use radar_risk::{Authorization, Autonomy, Policy};
 use radar_types::{Address, Slot};
 
 use crate::tx::{DecodeError, Message, decode};
@@ -216,12 +216,13 @@ const SYSTEM_TRANSFER: u32 = 2;
 /// Both are the caller's word and neither is trusted as a *permission*: they can
 /// only narrow what the authorization and the signer's own policy already allow.
 /// A compromised caller setting `max_lamports` to `u64::MAX` gains nothing,
-/// because the authorization's own ceiling still applies.
+/// because the signer's own native ceiling still applies.
 ///
 /// `max_lamports` exists because the authorization is denominated in micro-USD
 /// and a transaction in lamports, and this process has no price feed — see
-/// [`lamport_ceiling`]. The executor has one, so it converts and states the
-/// result here. That makes the executor's *intent* checkable against the
+/// [`lamport_ceiling`]. The issuer uses protected price evidence and binds the
+/// conversion into its Privy proof; the library alone cannot authenticate it.
+/// This makes the executor's *intent* checkable against the
 /// executor's *output*: a router that inflated the buy is caught by the process
 /// that holds the key rather than by the process that asked for it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -348,12 +349,10 @@ pub fn check(
     // transfer to an unrelated address, authorised against an `Exit` whose
     // notional was one micro-dollar.
     //
-    // The ceiling used is the authorisation's own, not a tighter rent-sized
-    // constant. A constant would be better and this is not the moment to invent
-    // one: no real exit has ever been signed, so any number here would be a
-    // guess, and a guess that is too small traps the position the old comment
-    // was rightly worried about. This bound is finite, which is the property
-    // that was missing.
+    // The native ceiling applies to every action. A sale's token notional is
+    // not its outgoing native spend; its incoming proceeds do not grant native
+    // transfer authority. The issuer-proven bound can narrow the protected
+    // native policy, and old configurations retain their legacy restriction.
     //
     // # The second hole that was here, and it is the one that mattered
     //
@@ -380,12 +379,13 @@ pub fn check(
         }
     };
     let moved = lamports_transferred(&message).saturating_add(bought);
-    // The tightest of the three. The authorisation may narrow the signer's
-    // policy and the caller may narrow the authorisation; neither may widen, and
-    // a caller that tried is already refused above.
-    let ceiling = lamport_ceiling(authorization)
-        .min(policy_ceiling.get())
-        .min(bounds.max_lamports);
+    // Compare physical quantities in lamports. USD policy/authorization checks
+    // above remain separate; an issuer proof binds the protected conversion.
+    let native_ceiling = policy.max_native_spend_lamports.unwrap_or_else(|| {
+        // Old policy files must not silently gain spend authority on upgrade.
+        lamport_ceiling(authorization).min(policy_ceiling.get())
+    });
+    let ceiling = native_ceiling.min(bounds.max_lamports);
     if moved > ceiling {
         rejections.push(Rejection::OverSpend {
             found: moved,
@@ -546,26 +546,11 @@ fn check_token_debit(found: Option<u64>, allowed: Option<u64>, rejections: &mut 
     }
 }
 
-/// The lamport ceiling implied by an authorization's notional.
-///
-/// The authorization is denominated in micro-USD and the transaction in
-/// lamports, and this process has no price feed — deliberately, since a signer
-/// with a price feed has one more input to be lied to by.
-///
-/// So the conversion is left to the caller, who states it in
-/// [`CallerBounds::max_lamports`], and this stays as the floor under it: the notional
-/// read as lamports, a ceiling far tighter than any real trade at any real SOL
-/// price, so it fails closed rather than open.
-///
-/// **The residual, stated plainly.** Because this is the tighter of the two in
-/// every realistic case, a genuine trade sized from a real price will be refused
-/// by it, and the caller's honest conversion cannot lift it. So today the pair
-/// bounds *safety* correctly and cannot yet size a real trade. The fix is a
-/// lamport-denominated `Policy` — the signer holding its own ceiling in the unit
-/// the chain uses — which is a decision about what the operator's limit *means*
-/// and belongs in an ADR rather than in a patch. Nothing trades
-/// (`Policy::CLOSED`), so the order is right: hold the bound, then argue the
-/// unit.
+/// Legacy restriction retained only for policies lacking an explicit native cap.
+/// This is not a USD conversion and rejects normally sized native trades. Do
+/// not silently lift old files' restrictions on upgrade. New issuer operation
+/// requires an explicit positive native policy; only that path uses reviewed
+/// USD conversion, issuer proof and an independently enforced lamport ceiling.
 const fn lamport_ceiling(authorization: &Authorization) -> u64 {
     authorization.max_notional.get()
 }

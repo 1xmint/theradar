@@ -39,6 +39,7 @@
 //!     max_canary: MicroUsd::from_dollars(1.0),
 //!     max_input_staleness: SlotDelta(150),
 //!     max_consecutive_failures: 3,
+//!     max_native_spend_lamports: None,
 //! };
 //!
 //! let proposal = Proposal {

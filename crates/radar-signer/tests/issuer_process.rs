@@ -7,6 +7,68 @@ use std::process::{Child, Command, Stdio};
 
 const SEED: [u8; 32] = [0x6B; 32];
 
+#[test]
+fn issuer_converts_usd_to_native_units_then_clamps_and_proves_the_native_policy() {
+    for (limit, spend, expected, ceiling) in [
+        (250_000_000, 250_000_000_u64, "issued", 250_000_000),
+        (100_000_000, 100_000_000, "issued", 100_000_000),
+        (100_000_000, 100_000_001, "refused", 100_000_000),
+        (300_000_000, 250_000_001, "refused", 250_000_000),
+    ] {
+        let mut fixture = Fixture::new();
+        fixture.config["policy"]["max_native_spend_lamports"] = json!(limit);
+        let pump = radar_decode::pumpfun::PROGRAM_ID;
+        fixture.config["programs"] = json!([pump]);
+        let mut bytes =
+            radar_types::b64::decode(fixture.candidate["transaction"].as_str().unwrap()).unwrap();
+        // Three static accounts, then blockhash; replace the synthetic venue
+        // with a real curve-buy discriminator and a readable native size.
+        bytes[133..165].copy_from_slice(pump.as_bytes());
+        bytes.truncate(197);
+        let mut data = radar_decode::pumpfun::Instruction::BuyExactSolIn
+            .discriminator()
+            .as_bytes()
+            .to_vec();
+        data.extend(spend.to_le_bytes());
+        data.extend(1_u64.to_le_bytes());
+        bytes.extend([1, 2, 2, 0, 1, 24]);
+        bytes.extend(data);
+        let encoded = radar_types::b64::encode(&bytes);
+        fixture.candidate["transaction"] = json!(encoded);
+        fixture.snapshot["transaction"] = json!(encoded);
+        fixture.snapshot["transaction_evidence"]["transaction_base64"] = json!(encoded);
+        fixture.snapshot["transaction_evidence"]["message_base64"] =
+            json!(radar_types::b64::encode(&bytes[65..]));
+        fixture.save();
+        let answer = fixture.start().ask(&fixture.candidate);
+        assert_eq!(
+            answer["outcome"], expected,
+            "limit={limit} spend={spend}: {answer}"
+        );
+        let log =
+            radar_journal::OperationLog::open(fixture.dir.path().join("operations.jsonl")).unwrap();
+        assert_eq!(log.outstanding().count(), usize::from(expected == "issued"));
+        if expected == "issued" {
+            assert_eq!(answer["intent"]["max_lamports"], ceiling);
+            assert_eq!(
+                answer["intent"]["authorization"]["max_notional"],
+                50_000_000
+            );
+            let intent: radar_signer::protocol::PrivyAuthorization =
+                serde_json::from_value(answer["intent"].clone()).unwrap();
+            let key = ed25519_dalek::SigningKey::from_bytes(&SEED);
+            let issuer = radar_signer::attestation::Issuer::new(
+                &radar_types::Address::new(key.verifying_key().to_bytes()),
+                60,
+            )
+            .unwrap();
+            assert!(issuer.check(&intent, unix_now()).is_ok());
+        } else {
+            assert_eq!(answer["reason"], "transaction refused");
+        }
+    }
+}
+
 fn reconciliation_fixture() -> (Fixture, radar_journal::OperationId) {
     let mut fixture = inventory_fixture_opening(Some(0));
     let log =
@@ -3463,6 +3525,7 @@ impl Fixture {
             "policy":radar_risk::Policy {
                 autonomy:radar_risk::Autonomy::Capped,
                 max_position:radar_types::MicroUsd(50_000_000),
+                max_native_spend_lamports:Some(250_000_000),
                 max_deployed:radar_types::MicroUsd(100_000_000),
                 max_per_creator:radar_types::MicroUsd(100_000_000),
                 max_daily_loss:Some(radar_types::MicroUsd(10_000_000)),
@@ -4119,6 +4182,8 @@ fn startup_refuses_missing_history_and_unbounded_config_and_runtime_revocation()
         ("/fee_reserve_lamports", json!(0)),
         ("/programs", json!([])),
         ("/policy/autonomy", json!("observe")),
+        ("/policy/max_native_spend_lamports", json!(null)),
+        ("/policy/max_native_spend_lamports", json!(0)),
         ("/history_path", json!("missing-history.jsonl")),
         ("/key_path", json!("missing-issuer-key.json")),
     ] {
@@ -4195,6 +4260,10 @@ fn conversion_rounds_down_and_fee_and_time_evidence_bound_the_proof() {
         let mut fixture = Fixture::new();
         fixture.snapshot["sol_upper_micro_usd"] = json!(price);
         fixture.config["fee_reserve_lamports"] = json!(fee);
+        // Isolate wallet reservation refusal from the new policy clamp. At a
+        // deliberately tiny price the converted amount exceeds available SOL;
+        // the default native cap would correctly narrow it to affordable size.
+        fixture.config["policy"]["max_native_spend_lamports"] = json!(u64::MAX);
         fixture.save();
         assert_eq!(fixture.start().ask(&fixture.candidate)["reason"], reason);
     }

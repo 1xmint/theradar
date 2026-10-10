@@ -432,6 +432,10 @@ impl Issuer {
             .map_err(|_| "invalid issuer configuration")?;
         if !config.active
             || config.policy.is_closed()
+            || config
+                .policy
+                .max_native_spend_lamports
+                .is_none_or(|limit| limit == 0)
             || config.max_snapshot_age_secs == 0
             || config.intent_lifetime_secs == 0
             || config.fee_reserve_lamports == 0
@@ -490,7 +494,8 @@ impl Issuer {
             u128::from(authorization.max_notional.get()) * 1_000_000_000
                 / u128::from(snapshot.sol_upper_micro_usd),
         )
-        .map_err(|_| "lamport ceiling overflow")?;
+        .map_err(|_| "lamport ceiling overflow")?
+        .min(self.config.policy.max_native_spend_lamports.unwrap_or(0));
         if max_lamports == 0 {
             return Err("lamport ceiling is zero".into());
         }
