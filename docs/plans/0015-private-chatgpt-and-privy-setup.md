@@ -5074,6 +5074,42 @@ existing executor run is terminal. Role behavior is already verified; executor
 behavior and the combined result still require the fresh full GitHub run. This
 supersedes the earlier sequencing note, not any activation gate. No live change.
 
+
+### Exact-SOL output units and handback (2026-10-10)
+
+Previous goal turn made source progress by combining verified role checks and the
+executor correction. This turn verified CI 38081547094 at f90b058 fully green:
+17 mutants, nine caught and eight unviable, none missed; tests/build/lint and all
+other jobs passed. PR 352 now records those results. Nothing new was deployed.
+
+Started fix/curve-minimum-output-units from that verified combined source.
+Source inspection found the direct builder mislabeled min_tokens_out as
+slippage_bps. First-party pump interface at 2293f9a and successful captured
+transaction 3Dk1fn5... confirm native input then raw-token floor. Research 0039
+records the evidence, including the old failed-packet caveat. Rename the field
+and add Trade::exact_sol_buy, used by the existing builder-to-signer integration,
+to calculate a nonzero raw floor from a fee-inclusive quote and tolerance.
+Added capture-backed arguments and boundary/encoding regressions. Floor 2230.
+No local tests/build/lint/mutation jobs or live signing/deployment occurred.
+
+Publish for fresh GitHub verification. This corrects construction units, not
+quote freshness/provenance or independent authorized minimum-output enforcement.
+Those, live holdings/exit authority, supported sell construction and reconciliation,
+portfolio accounting/recovery, adaptive supervisor/research chat and protected
+site handover/deployment still remain. Goal stays fully autonomous trading.
+
+Exact-SOL run 38081913177 at fe1da36 found a lint naming collision in the new
+capture test (captures/captured). Rename the payload packet. All mutation shards
+passed; let remaining jobs finish before publishing the correction. Require a
+fresh full GitHub run rather than treating a naming-only fix as already verified.
+
+The same initial output-unit run also found the new LEARNINGS entry lacked the
+required recurrence-check line and index row. Added both, naming its actual
+argument/conversion regressions; adjusted the index count. The trading tests
+passed in that run, but repository conformance is a required test and the run
+remains failed. Publish this documentation fix with the naming correction only
+after the old run finishes. No production behavior changed in either correction.
+
 ### Integrated verified signer and executor source (2026-10-10)
 
 Fast-forwarded feat/integrated-autonomous-controls from 63e66e6 to verified
@@ -5091,6 +5127,7 @@ naming-only lint correction committed as 72f296a, awaiting terminal old run befo
 publication. Do not integrate it as verified yet. Authorized output floors, live
 holdings/exit issuance and reconciliation, portfolio inputs, adaptive supervisor/
 research chat, recovery and protected site handover remain goal work.
+
 
 ### Issuer-bound output protection and handback (2026-10-10)
 
@@ -5161,3 +5198,41 @@ exit authority and actual bidirectional construction/reconciliation, live marked
 portfolio/evidence, adaptive supervisor/research chat, recovery and protected
 site handover. Existing checklist decisions remain settled; do not ask for chat
 limits again. Autonomous trading remains off and the goal remains active.
+
+
+### Corrected builder verification after base retarget
+
+GitHub marked executor/role/token PRs integrated when their exact source reached
+the integration branch, and retargeted PR 353 to that branch. Its correction
+push c963b24 had no CI run because appended plan notes conflicted with 33cbe0f.
+Merged that verified documentation base, preserving both handbacks; no source
+conflict or trading behavior change. Fresh GitHub verification is required.
+Issuer-output enforcement is independently published as PR 354 at 6df0d00 and
+not yet integrated or verified. Integrated 33cbe0f CI/release both passed; no
+production authority or service changed. Goal remains fully autonomous trading.
+
+
+### Combined output protections and diagnostic gate (2026-10-10)
+
+Prior turn made progress publishing the output correction and verifying the
+builder. This turn observed CI 38082995334 at f2fa79e fully green: 32 mutants,
+19 caught and 13 unviable, none missed. However shard 0 had eight unviable and
+zero caught, with an explicit cargo-mutants warning. Therefore the exact original
+execution_output.rs:8:13 guard regression is not yet proven caught; a green
+summary alone does not meet that acceptance criterion. The workflow retained no
+mutation logs, so the compiler cause is presently unknown.
+
+Merged verified builder f18f368 into the output branch, retaining both appended
+plan histories and setting the combined test floor to 2235. Added per-shard
+GitHub diagnostic artifacts (outcomes, logs and diffs) using the already-pinned
+upload action, without changing mutation selection or weakening any check.
+Publish this combined source for full GitHub CI and inspect the exact guard's
+outcome/compiler log before treating output protection verification as complete.
+No local verification jobs or live wallet/service/authority changes occurred.
+
+Next actionable execution gap confirmed by source: issuer issue remains buy-only
+and reconciliation apply rejects sales, while the executor dispatches sells.
+Holdings-derived token authority, sale completion/credits and durable recovery
+must be connected before autonomous position management. Actual supported route
+construction, live marked portfolio/evidence, adaptive supervisor/chat and
+protected website handover remain. Goal active; autonomous trading stays off.
