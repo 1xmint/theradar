@@ -4833,3 +4833,25 @@ the suggested empty array RHS ambiguous (E0282, issuer_process.rs:237). Compare
 the JSON array directly to json!([]). Mutation baselines could not build, so
 none of this run's mutation outcomes count as verification. Preserve the run
 until terminal, then publish this test-only correction and reverify all checks.
+
+
+### Verified native completion integration (2026-10-10)
+
+Previous goal turn made source and deployment progress. Current turn verified
+corrected PR 347 at 8acc176: GitHub run 38077732628 passed every job, all four
+baselines and the final mutation gate. Thirty-three mutants tested, twenty-seven
+caught and six unviable, none missed. The six actual-process regressions passed
+and the first run's ownership/count survivors are now caught without exclusions.
+Fast-forwarded the combined local branch to that verified source. Publish its
+combined CI and fresh six-binary Linux release without changing any live signing
+configuration. Deployed server remains verified 57c2757 with closed policy and
+inactive signer.
+
+Next execution work must distinguish actual acquisition from reduction in the
+signer and bound what an exit spends. Existing pipeline always requests build_buy;
+signer checks native outgoing spend but does not bind a known venue trade's side
+to Authorization.action, and its sale token quantity is explicitly unbounded.
+Inspect and close that concrete mismatch before enabling live exits. This is
+required execution work, not a replacement objective or readiness claim. Live
+snapshot/reconciliation coverage, adaptive supervisor/chat, isolated delegation
+and canary/recovery verification remain open.
