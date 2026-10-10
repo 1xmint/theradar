@@ -4114,3 +4114,10 @@ complete coverage/reconciliation and idempotent risk-state application. Live ris
 inputs, execution/exits/recovery and owner limits/Privy deployment are still open.
 
 All 33 staged repo-conformance checks and git diff --cached --check passed.
+
+Integration: fast-forwarded primary fix/wallet-signin-diagnostics to f0c0e9a.
+Both checkouts were clean after integration, no Cargo/rustc processes remained,
+and C: had 59,410,722,816 bytes free. Latest CI inspection still showed attempt 2
+shard 1 running; no push or deployment. Preserve these local commits and inspect
+the prior completed rerun before publishing them. No further CI polling or local
+build remains running for this handback.
