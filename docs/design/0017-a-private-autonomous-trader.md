@@ -25,8 +25,12 @@ This document recommends the architecture and experiments to pursue that decisio
 On 2026-10-06 Josh requested live wallet balances, editable capital, per-trade
 and daily-loss inputs, and an option for ChatGPT to choose wallet actions. After
 the recommendation that only the owner can change limits, Josh said to continue.
-The private interface therefore records owner-entered draft limits and a request
-for autonomous trade selection and sizing within those limits. No numeric mandate
+On 2026-10-10 Josh clarified that each of capital, maximum trade and daily loss
+gets its own "Agent decides" checkbox. Unchecked means an owner-entered value
+within which the agent trades; checked means the agent chooses that option from
+the wallet balance. Mixed choices are supported. This supersedes requiring every
+numeric value from the owner or a single handover button. The site owns this
+choice; do not ask the owner to supply these numbers in chat. No numeric mandate
 was supplied. Draft preferences are not a kernel Policy or a signing grant;
 the separate signer and execution supervisor must enforce an approved Policy
 before any live execution. Wallet creation remains an explicit owner action.

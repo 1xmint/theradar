@@ -4484,3 +4484,34 @@ primary 62cfeb8 into the follow-up, preserving both plan sections and combined
 floor 2213, so GitHub can verify it. Keep primary run 38065819742 intact. Next:
 inspect PR 339 results, fix any failures, then integrate the correction and
 refresh full primary CI only after its current run finishes. Autonomous off.
+
+### Per-option agent control owner decision and implementation (2026-10-10)
+
+Josh reaffirmed that the site owns the choices and clarified three independent
+Agent decides checkboxes: unchecked uses the owner's manual value and permits
+agent trading within it; checked lets the agent choose that option from wallet
+balance. Mixed choices are required. Stopped the uncommitted single-button
+implementation and replaced it with this flow. Recorded the superseding owner
+decision in design 0017; do not request these numbers in chat again.
+
+The site now records each field's choice independently, preserves dormant manual
+values for unchecking, and permits saving all three agent choices with no manual
+numbers. Saving requests autonomous trade selection. Server validation requires
+positive fixed-precision values only for manual fields, with manual trade/loss
+bounded by manual capital when both are specified. A dynamic choice is unknown
+until the live agent/verified wallet adapter resolves it; it is not zero, an
+unlimited numeric policy, or signing authority. Existing preferences default to
+manual per option. Wallet/identity binding and inactive execution are retained.
+Added two Rust regressions for all eight mode combinations, manual constraints,
+durability and legacy parsing; web checks cover mixed/all-agent/manual restore,
+save failure and legacy data. Unit floor 2215. Verification is GitHub-only;
+publish this independent branch while the primary mutation run finishes.
+
+Risk follow-up f39d8d7 passed every job in run 38066090016: 2610 tests and all
+four mutation baselines; seven mutants (six caught, one unviable), none missed.
+Fast-forwarded local primary to it, without pushing over full-branch run
+38065819742, which remains live. PR 339 records the follow-up; full primary
+verification must still incorporate it after that current run finishes. No live
+deployment, policy grant or trade. Future agent-selected numbers must become
+explicit wallet-derived bounds enforced by the independent kernel/signer, with
+durable loss/recovery state; the model cannot directly write signing authority.

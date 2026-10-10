@@ -3,10 +3,12 @@ import { useEffect, useRef, useState } from "react";
 import { PrivyProvider, usePrivy } from "@privy-io/react-auth";
 import { useCreateWallet, useWallets } from "@privy-io/react-auth/solana";
 
-type Preferences = { capital_usd: string; max_trade_usd: string; daily_loss_usd: string; autonomous_requested: boolean };
+type Limit = "capital_usd" | "max_trade_usd" | "daily_loss_usd";
+type Preferences = { capital_usd: string; max_trade_usd: string; daily_loss_usd: string; autonomous_requested: boolean; agent_decides: Record<Limit, boolean> };
 type Wallet = { address: string; id: string | null; delegated: boolean };
 type Holdings = { wallet: string; slot: number; age_seconds: number; sol: { ui_amount: string }; tokens: { mint: string; ui_amount: string }[] };
-const empty: Preferences = { capital_usd: "", max_trade_usd: "", daily_loss_usd: "", autonomous_requested: false };
+const manual = { capital_usd: false, max_trade_usd: false, daily_loss_usd: false };
+const empty: Preferences = { capital_usd: "", max_trade_usd: "", daily_loss_usd: "", autonomous_requested: false, agent_decides: manual };
 const button = "rounded border border-[var(--color-line)] px-3 py-2 text-sm disabled:opacity-50";
 
 async function request<T>(path: string, token: string, signal: AbortSignal, body?: Preferences): Promise<T> {
@@ -86,7 +88,7 @@ export function OwnerWallet() {
         request<{ preferences: Preferences | null }>("limits", access, signal).then((saved) => {
           if (!active()) return;
           if (!("preferences" in saved)) throw new Error("Saved wallet settings could not be read.");
-          setPreferences(saved.preferences ?? empty); setSettingsReady(true);
+          setPreferences(saved.preferences ? { ...saved.preferences, agent_decides: { ...manual, ...saved.preferences.agent_decides } } : empty); setSettingsReady(true);
         }).catch((cause: unknown) => { if (active()) setError(cause instanceof Error ? cause.message : "Saved wallet settings are unknown."); }),
         request<Holdings>("balance", access, signal).then((balance) => {
           if (!active()) return;
@@ -117,11 +119,15 @@ export function OwnerWallet() {
     const signal = lifetime.current?.signal;
     if (!signal || signal.aborted || busy) return;
     setBusy(true); setError(null); setNotice(null);
+    const next = { ...preferences, autonomous_requested: true };
     try {
       const access = await token();
       if (signal.aborted) return;
-      await request("limits", access, signal, preferences);
-      if (!signal.aborted) setNotice("Settings saved. Autonomous trading remains inactive until execution is connected.");
+      await request("limits", access, signal, next);
+      if (!signal.aborted) {
+        setPreferences(next);
+        setNotice("Settings saved. Autonomous trading remains inactive until execution is connected.");
+      }
     } catch (cause) { if (!signal.aborted) setError(cause instanceof Error ? cause.message : "Could not save settings."); }
     finally { if (!signal.aborted) setBusy(false); }
   }
@@ -149,17 +155,16 @@ export function OwnerWallet() {
       </div>
       <form onSubmit={(event) => { event.preventDefault(); void save(); }} className="space-y-3">
         <h4 className="font-medium">Trading limits (USD)</h4>
-        <p className="text-sm text-[var(--color-dim)]">Set the capital Radar may use, maximum amount per trade, and daily loss stop. These settings are saved as a draft; signing authority is not active.</p>
+        <p className="text-sm text-[var(--color-dim)]">Set each value yourself, or check Agent decides to let ChatGPT choose it based on your wallet balance. With a manual value, ChatGPT trades within that limit. These settings are saved as a draft; trading is not active yet.</p>
         <fieldset disabled={busy || !settingsReady} className="space-y-3">
-          {([ ["capital_usd", "Capital budget"], ["max_trade_usd", "Maximum per trade"], ["daily_loss_usd", "Daily loss limit"] ] as const).map(([field, label]) => <label key={field} className="block text-sm">
-            {label}<input aria-label={label} required type="text" inputMode="decimal" autoComplete="off" value={preferences[field]}
+          {([ ["capital_usd", "Capital budget"], ["max_trade_usd", "Maximum per trade"], ["daily_loss_usd", "Daily loss limit"] ] as const).map(([field, label]) => <div key={field} className="space-y-1 text-sm">
+            <label className="block">{label}<input aria-label={label} required={!preferences.agent_decides[field]} disabled={preferences.agent_decides[field]} type="text" inputMode="decimal" autoComplete="off" value={preferences.agent_decides[field] ? "" : preferences[field]}
+              placeholder={preferences.agent_decides[field] ? "Agent chooses from wallet balance" : "USD amount"}
               onChange={(event) => { setPreferences({ ...preferences, [field]: event.target.value }); setNotice(null); }}
-              className="mt-1 block w-full rounded border border-[var(--color-line)] bg-[var(--color-bg)] px-3 py-2" />
-          </label>)}
-          <label className="flex items-start gap-2 text-sm"><input type="checkbox" checked={preferences.autonomous_requested}
-            onChange={(event) => { setPreferences({ ...preferences, autonomous_requested: event.target.checked }); setNotice(null); }} />
-            Let ChatGPT choose trades and sizing within my saved limits</label>
-          <p className="text-sm text-[var(--color-dim)]">Only you can change these limits. Requesting autonomy does not enable trading.</p>
+              className="mt-1 block w-full rounded border border-[var(--color-line)] bg-[var(--color-bg)] px-3 py-2 disabled:opacity-50" /></label>
+            <label className="flex items-center gap-2"><input type="checkbox" aria-label={`Agent decides ${label.toLowerCase()}`} checked={preferences.agent_decides[field]}
+              onChange={(event) => { setPreferences({ ...preferences, agent_decides: { ...preferences.agent_decides, [field]: event.target.checked } }); setNotice(null); }} />Agent decides</label>
+          </div>)}
           <button className={button} type="submit">Save wallet settings</button>
         </fieldset>
         {notice && <p role="status" className="text-sm">{notice}</p>}

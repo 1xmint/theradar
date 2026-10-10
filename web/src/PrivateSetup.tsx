@@ -46,8 +46,9 @@ export function PrivateSetup() {
         <h3 className="font-medium">Autonomous execution: not enabled</h3>
         <p className="mt-2 text-sm text-[var(--color-dim)]">
           The execution supervisor still needs to be connected to the Privy signing lane.
-          Before enabling it, set capital, position and daily-loss limits, allowed assets,
-          an inference allowance, and a session expiry. Missing limits keep trading off.
+          Choose a manual value or Agent decides for each wallet option above.
+          Execution also needs verified wallet-based bounds, allowed assets,
+          an inference allowance, and a session expiry before trading can start.
         </p>
       </div>
     </section>

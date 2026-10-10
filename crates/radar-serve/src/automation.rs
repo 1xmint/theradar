@@ -189,6 +189,24 @@ struct Preferences {
     max_trade_usd: String,
     daily_loss_usd: String,
     autonomous_requested: bool,
+    #[serde(default)]
+    agent_decides: AgentDecisions,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+struct AgentDecisions {
+    capital_usd: bool,
+    max_trade_usd: bool,
+    daily_loss_usd: bool,
+}
+
+fn manual_amount(input: &str, agent_decides: bool) -> Result<Option<u64>, ()> {
+    if agent_decides {
+        Ok(None)
+    } else {
+        micro_usd(input).map(Some).ok_or(())
+    }
 }
 
 // Fixed decimal arithmetic: no float rounding, exponent or non-finite input.
@@ -213,11 +231,14 @@ fn micro_usd(input: &str) -> Option<u64> {
 impl Preferences {
     fn validate(&self) -> bool {
         match (
-            micro_usd(&self.capital_usd),
-            micro_usd(&self.max_trade_usd),
-            micro_usd(&self.daily_loss_usd),
+            manual_amount(&self.capital_usd, self.agent_decides.capital_usd),
+            manual_amount(&self.max_trade_usd, self.agent_decides.max_trade_usd),
+            manual_amount(&self.daily_loss_usd, self.agent_decides.daily_loss_usd),
         ) {
-            (Some(capital), Some(trade), Some(loss)) => trade <= capital && loss <= capital,
+            (Ok(capital), Ok(trade), Ok(loss)) => capital.is_none_or(|capital| {
+                trade.is_none_or(|trade| trade <= capital)
+                    && loss.is_none_or(|loss| loss <= capital)
+            }),
             _ => false,
         }
     }
@@ -308,7 +329,7 @@ async fn save(
     if !preferences.validate() {
         return refuse(
             StatusCode::BAD_REQUEST,
-            "Enter positive USD amounts with at most six decimal places. Trade and daily loss limits cannot exceed capital.",
+            "Enter a positive USD amount for each manual option, or select Agent decides. Manual trade and daily loss limits cannot exceed manual capital.",
         );
     }
     let Some(store) = store else {
@@ -556,6 +577,7 @@ mod tests {
             max_trade_usd: "10".into(),
             daily_loss_usd: "5".into(),
             autonomous_requested: true,
+            agent_decides: AgentDecisions::default(),
         }
     }
     #[test]
@@ -624,5 +646,74 @@ mod tests {
         )
         .unwrap();
         assert_eq!(store.read(&alice), Err(()));
+    }
+
+    #[test]
+    fn every_agent_choice_is_independent_and_manual_values_still_require_bounds() {
+        for mask in 0..8 {
+            let mut prefs = preferences();
+            prefs.agent_decides = AgentDecisions {
+                capital_usd: mask & 1 != 0,
+                max_trade_usd: mask & 2 != 0,
+                daily_loss_usd: mask & 4 != 0,
+            };
+            assert!(prefs.validate());
+            for field in 0..3 {
+                let mut changed = prefs.clone();
+                match field {
+                    0 => changed.capital_usd.clear(),
+                    1 => changed.max_trade_usd.clear(),
+                    _ => changed.daily_loss_usd.clear(),
+                }
+                assert_eq!(
+                    changed.validate(),
+                    mask & (1 << field) != 0,
+                    "{mask}/{field}"
+                );
+            }
+            let mut changed = prefs.clone();
+            changed.max_trade_usd = "101".into();
+            assert_eq!(
+                changed.validate(),
+                prefs.agent_decides.capital_usd || prefs.agent_decides.max_trade_usd
+            );
+            changed = prefs.clone();
+            changed.daily_loss_usd = "101".into();
+            assert_eq!(
+                changed.validate(),
+                prefs.agent_decides.capital_usd || prefs.agent_decides.daily_loss_usd
+            );
+        }
+    }
+
+    #[test]
+    fn agent_choices_survive_restart_and_legacy_settings_remain_manual() {
+        let dir = tempfile::tempdir().unwrap();
+        let owner = proof("alice", "first");
+        let store = Store::at(dir.path().into()).unwrap();
+        let mut prefs = preferences();
+        prefs.agent_decides = AgentDecisions {
+            capital_usd: true,
+            max_trade_usd: false,
+            daily_loss_usd: true,
+        };
+        prefs.capital_usd.clear();
+        prefs.daily_loss_usd.clear();
+        assert!(prefs.validate());
+        store.write(&owner, &prefs).unwrap();
+        assert_eq!(
+            Store::at(dir.path().into()).unwrap().read(&owner),
+            Ok(Some(prefs))
+        );
+        let mut legacy = serde_json::to_value(preferences()).unwrap();
+        legacy.as_object_mut().unwrap().remove("agent_decides");
+        let parsed: Preferences = serde_json::from_value(legacy).unwrap();
+        assert_eq!(parsed.agent_decides, AgentDecisions::default());
+        assert!(parsed.validate());
+        for invalid in [json!({"capital_usd":"true"}), json!({"other":true})] {
+            let mut value = serde_json::to_value(preferences()).unwrap();
+            value["agent_decides"] = invalid;
+            assert!(serde_json::from_value::<Preferences>(value).is_err());
+        }
     }
 }
