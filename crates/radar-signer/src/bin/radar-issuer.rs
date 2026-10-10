@@ -319,7 +319,21 @@ fn history_refusal(error: &radar_journal::OperationError) -> &'static str {
 
 impl Issuer {
     fn inventory_mode(&mut self, args: &[String]) -> Result<bool, String> {
-        if args == ["--record-opening-inventory"] {
+        if args.len() == 2 && args[0] == "--reconcile-operation" {
+            let snapshot: Snapshot =
+                serde_json::from_slice(&private_read(&self.config.snapshot_path)?)
+                    .map_err(|_| "invalid trusted snapshot")?;
+            println!(
+                "{}",
+                reconciliation::apply(
+                    &mut self.operations,
+                    &self.config,
+                    &snapshot,
+                    &args[1],
+                    unix_now()?
+                )?
+            );
+        } else if args == ["--record-opening-inventory"] {
             self.record_opening_inventory()?;
             println!(
                 "{}",
@@ -796,22 +810,6 @@ fn run() -> Result<(), String> {
     let mut issuer = Issuer::load(Path::new(&path))?;
     let args: Vec<_> = std::env::args().skip(1).collect();
     if issuer.inventory_mode(&args)? {
-        return Ok(());
-    }
-    if args.len() == 2 && args[0] == "--reconcile-operation" {
-        let snapshot: Snapshot =
-            serde_json::from_slice(&private_read(&issuer.config.snapshot_path)?)
-                .map_err(|_| "invalid trusted snapshot")?;
-        println!(
-            "{}",
-            reconciliation::apply(
-                &mut issuer.operations,
-                &issuer.config,
-                &snapshot,
-                &args[1],
-                unix_now()?
-            )?
-        );
         return Ok(());
     }
     if args == ["--review-acquisitions"] {

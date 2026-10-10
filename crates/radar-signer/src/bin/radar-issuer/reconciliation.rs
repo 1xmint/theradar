@@ -81,7 +81,7 @@ pub(super) fn apply(
         .valuation(&id)
         .ok_or("operation has no retained valuation")?
         .review;
-    if value["sale_proceeds"].is_object() || entry.intent.asset != Asset::Sol {
+    if value["sale_proceeds"].is_object() {
         return Err("reconciliation currently supports native-SOL buys and failed fees".into());
     }
     let debit = TokenQuantity::lamports(integer(value, "wallet_net_debit_lamports")?);

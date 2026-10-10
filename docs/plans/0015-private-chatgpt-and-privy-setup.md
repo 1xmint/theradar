@@ -4797,3 +4797,31 @@ controls. No local jobs or live signing. This does not close complete live walle
 coverage, sale completion, dropped-transaction recovery, delegation, adaptive
 reasoning, research chat or live supervision. Goal remains fully autonomous
 trading, not this offline milestone.
+
+
+### Verified controls deployment and reconciliation corrections (2026-10-10)
+
+Full-scope primary CI 38068474113 at ac2f87a is now terminal green, with
+1,633 mutants tested: 1,288 caught, 345 unviable, none missed. All ordinary jobs
+and the final mutation gate passed. Integrated controls CI 38070118800 at
+57c2757 is also fully green. All six release 38070117408 hashes matched.
+Copied only verified radar-serve to /tmp/radar-serve.new and used the fixed
+sudo radar-deploy procedure. Health on 8402 now reports exact build 57c2757,
+ok, policyClosed=true, configured Codex with last_call=never; signer socket
+remains inactive. This deployment exposes optional daily-cap drafts; it grants
+no signing authority and does not deploy the pending reconciliation command.
+
+PR 347 source 90d3d37 run 38077204642 completed with failures. Every mutation
+baseline and the actual process tests passed, but three mutations survived:
+reconciliation.rs:43:63 &&->|| in owner/mint filtering, 84:43 ||->&& in the
+sale/asset guard, and 91:61 ||->&& in state/count checking. Lint also reported
+the new CLI run body exceeding 100 lines and one empty-vector assertion.
+Move the CLI dispatch into its existing mode handler and use a diagnostic array
+comparison. Add same-mint counterparty rows to consistent zero-opening fixtures
+so foreign ownership cannot satisfy a wallet anchor. Make the concurrent
+unknown-operation fixture's snapshot and sequential cash effects consistent;
+its refusal must depend on the intended count gate, not an earlier stale
+checkpoint/cash mismatch. Remove the redundant asset guard: the only supplied
+portfolio holding is native SOL, and rehold already refuses any other asset.
+The sale guard remains explicit. No mutation exclusions or check weakening.
+Reverify the corrections on GitHub after the previous run is terminal.

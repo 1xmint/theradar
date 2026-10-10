@@ -160,8 +160,12 @@ fn issuer_reconciliation_requires_known_opening_basis_and_one_submitted_operatio
         assert!(!reconcile_operation(&fixture, id.as_str()).status.success());
         assert_eq!(std::fs::read(&path).unwrap(), saved);
     }
-    let (fixture, id) = reconciliation_fixture();
-    let (_, log) = append_failed_history(&fixture, "valid");
+    let (mut fixture, id) = reconciliation_fixture();
+    let (_, log) = append_failed_history(&fixture, "valid_after_buy");
+    fixture.snapshot["accounting_checkpoint"] = json!(log.checkpoint());
+    fixture.snapshot["sol_lamports"] = json!(284_839_000);
+    fixture.snapshot["wallet_evidence"]["native_sol"]["raw_amount"] = json!("284839000");
+    fixture.save();
     let path = fixture.dir.path().join("operations.jsonl");
     drop(log);
     let saved = std::fs::read(&path).unwrap();
@@ -230,7 +234,7 @@ fn issuer_reconciles_failed_network_fee_once_and_keeps_loss_and_failure_history(
     assert!(reconcile_operation(&fixture, id.as_str()).status.success());
     assert_eq!(std::fs::read(&path).unwrap(), saved);
     let report: Value = serde_json::from_slice(&acquisition_report(&fixture).stdout).unwrap();
-    assert!(report["lots"].as_array().unwrap().is_empty());
+    assert_eq!(report["lots"].as_array().unwrap().as_slice(), []);
     assert_eq!(report["failed_execution_fees"].as_array().unwrap().len(), 1);
     assert_eq!(
         report["recorded_failed_fee_totals"]["network_fee_micro_usd"],
@@ -1337,6 +1341,20 @@ fn acquisition_cost_fixture_opening_amount(
     post["raw_amount"] = json!((starting_raw + 15).to_string());
     evidence["pre_token_balances"] = json!([pre]);
     evidence["post_token_balances"] = json!([post]);
+    if opening_amount == Some(0) {
+        // A counterparty's unchanged units of the same mint must never enter
+        // this wallet's token anchors, even though the mint matches.
+        let foreign = json!({"account_index":2,"mint":fixture.snapshot["proposal"]["mint"],
+            "owner":address(0x77),"program_id":address(0x44),"decimals":6,"raw_amount":"7"});
+        evidence["pre_token_balances"]
+            .as_array_mut()
+            .unwrap()
+            .push(foreign.clone());
+        evidence["post_token_balances"]
+            .as_array_mut()
+            .unwrap()
+            .push(foreign);
+    }
     let evidence_path = fixture.dir.path().join("effects.json");
     write(&evidence_path, &evidence);
     let record = fixture
@@ -1973,6 +1991,10 @@ fn append_failed_history_owned(
     facts["signature"] = fixture_signature(&settlement.signed_transaction);
     facts["operation"] = json!(id.as_str());
     set_failed_facts(facts, fixture);
+    if case == "valid_after_buy" {
+        facts["native_account_effects"][0]["pre_lamports"] = json!("284844000");
+        facts["native_account_effects"][0]["post_lamports"] = json!("284839000");
+    }
     log.record_settlement(&id, settlement.clone(), 1015)
         .expect("facts");
     if case == "missing" {
