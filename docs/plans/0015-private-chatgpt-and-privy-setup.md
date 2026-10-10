@@ -4189,3 +4189,35 @@ remained; C: had 59,382,648,832 bytes free. CI attempt 2 shard 1 remained runnin
 at final inspection. No push, deployment or authority change. Resume by checking
 the existing rerun, then publish the completed follow-ups only after it finishes
 and its results are inspected; these new sources have local proof, not full CI.
+
+### Operational readiness inspection and handback (2026-10-10)
+
+At around 05:00 UTC, public health was ok at deployed Serve
+3f38ee0ffaf2d1e349f54b43475f36c010bb335d, agent configured true/provider codex,
+last call never, policyClosed true; /automation returned HTTP 302 unauthenticated.
+This proves public reachability, not authenticated setup, live inference or
+signing. trading=true is the configured component field, not autonomous authority.
+
+SSH guardian-vps-tail timed out. Read-only local Tailscale status showed Running,
+no health warnings and self online. The exact SSH target peer 100.105.198.39 is
+clawguard, offline, last seen 2026-10-07T17:22:48.1Z. No host configuration,
+service restart or connectivity change was attempted. Asked the owner to check
+Tailscale; answer is pending. Public reachability makes this a private access
+problem, not evidence that the whole VPS is down. Current host provisioning and
+wallet funding remain unknown.
+
+CI 38023346308 attempt 2 at 255337c still runs shard 1 (114134402505, started
+04:45:40 UTC); other listed jobs are successful. Do not push over that run or
+claim new-source CI. No local build, background waiter, trade or deployment is
+running. Completed code through 5a65043 is integrated locally and clean before
+this documentation update. STATE now puts the verified limited inspection above
+its explicitly historical September snapshot.
+
+Next: inspect the existing rerun on completion; if successful, read every shard
+baseline/summary/final gate and publish the completed collector/review changes for
+fresh full CI. A repeated timeout requires an owner decision before changing the
+gate. Restore VPS private connectivity before any host inspection/deployment.
+Then finish economic coverage and durable idempotent risk-state application,
+independent live risk inputs and execution/exits/recovery. Owner numeric limits,
+Privy policy/delegation, isolated key setup, funding and bounded live validation
+still precede activation; the public health check does not close those gates.
