@@ -4259,3 +4259,36 @@ all job results, each shard's baseline and mutation summary, and the final gate
 before treating these sources as verified or deploying. Do not push over the
 new run. Autonomous execution remains off pending the previously recorded
 economic coverage, risk-state, live input, execution and owner setup work.
+
+### Known token endpoint comparison handback (2026-10-10)
+
+Separate branch feat/account-balance-reconciliation starts at cea2e21 while
+primary CI 38063256175 runs. The protected account-activity command now calls a
+read-only token reconciliation helper after its signature, target and per-row
+effect checks. It compares retained opening/current known account identities
+and quantities with an ordered chain of supplied token effects. Endpoint token
+read slots must agree exactly with the history interval. Collection flags must
+report completion; new/disappeared accounts, unsupported effects, owner/unit
+changes, pre-balance gaps, unexplained final balances and duplicate transaction
+slots stay unresolved. Signature lexical order cannot prove intra-slot order.
+Reported ownership accompanies existing token effect output so an unknown
+wallet-owned account cannot silently disappear from this comparison.
+
+This is consistency of supplied known-account token data, not native cash
+reconciliation, independent metadata provenance, exhaustive historical account
+discovery, durable portfolio application or trading authority. Root coverage and
+economic completion flags stay false. The helper adds no journal write or key.
+Three unit regressions and the existing protected-process test cover the new
+comparison/dispatch; unit test floor increases by three. Source formatted locally
+as an editing step; no local tests, build, lint or mutation jobs run. Fresh
+GitHub CI is required and has not yet verified this change. Publish this branch
+separately so primary's running mutation jobs are not cancelled.
+
+Primary CI ordinary build, lint, format, web, MSRV, licence and dependency jobs
+passed; tests failed in protected_cost_record_is_durable_idempotent_and_refuses_changed_economics
+at issuer_process.rs:1021, repeated --record-valuation assertion. Its child stderr
+is absent from that assertion; cause remains unknown. All mutation shards were
+still running at inspection. Do not call primary green or deploy it. Inspect
+final shard baselines/summaries and new-branch test results; investigate the
+valuation failure without removing its idempotency assertion. Autonomous
+execution remains off; earlier activation requirements still apply.

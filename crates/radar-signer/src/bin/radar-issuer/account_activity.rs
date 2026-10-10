@@ -165,9 +165,15 @@ pub(super) fn review(
     }
     super::read_evidence_expiry(packet, config, now)?;
     let reviewed = rows(packet, &known, after, through)?;
+    let token_reconciliation = super::token_reconciliation::review(
+        opening,
+        &snapshot.wallet_evidence,
+        &comparison,
+        &reviewed,
+    );
     Ok(
         json!({"version":1,"authority":"protected_operator_account_activity_review","wallet":config.wallet,
-        "accounting_checkpoint":checkpoint,"transactions":reviewed,"coverage":"supplied_known_address_transactions",
+        "accounting_checkpoint":checkpoint,"transactions":reviewed,"reported_known_token_reconciliation":token_reconciliation,"coverage":"supplied_known_address_transactions",
         "collection_completeness_verified":false,"metadata_verified_independently":false,"wallet_coverage_complete":false,
         "economic_reconciliation_complete":false,"portfolio_state_updated":false,"reservation_released":false}),
     )

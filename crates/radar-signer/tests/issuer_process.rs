@@ -4208,6 +4208,14 @@ fn account_activity_review_verifies_all_signers_without_writing_or_claiming_exec
         assert_eq!(report[flag], false);
     }
     assert_eq!(report["transactions"][0]["classification"], "unresolved");
+    assert_eq!(
+        report["reported_known_token_reconciliation"]["reason"],
+        "opening_inventory_missing"
+    );
+    assert_eq!(
+        report["transactions"][0]["reported_effect_review"]["reported_token_changes"][0]["reported_owner"],
+        fixture.config["wallet"]
+    );
     let intent = &report["transactions"][0]["top_level_instruction_intents"][0];
     assert_eq!(intent["kind"], "spl_token_transfer_checked_intent");
     assert_eq!(intent["requested_raw_amount"], "7");

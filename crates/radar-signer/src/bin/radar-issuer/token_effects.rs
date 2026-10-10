@@ -166,7 +166,7 @@ fn consistent(message: &Message, row: &Value, intents: &[Value]) -> Result<Value
         if expected.get(index) != Some(&after.amount) {
             return Err("token_effect_unexplained");
         }
-        changes.push(json!({"account":Address::new(message.accounts[*index]),"mint":before.mint,"program":before.program,
+        changes.push(json!({"account":Address::new(message.accounts[*index]),"mint":before.mint,"program":before.program,"reported_owner":before.owner,
             "decimals":before.decimals,"reported_pre_raw":before.amount.to_string(),"reported_post_raw":after.amount.to_string(),
             "reported_change_raw":(i128::from(after.amount)-i128::from(before.amount)).to_string()}));
     }

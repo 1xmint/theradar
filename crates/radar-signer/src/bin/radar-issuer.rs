@@ -44,6 +44,9 @@ mod token_intents;
 #[path = "radar-issuer/token_effects.rs"]
 mod token_effects;
 
+#[path = "radar-issuer/token_reconciliation.rs"]
+mod token_reconciliation;
+
 #[path = "radar-issuer/account_inventory.rs"]
 mod account_inventory;
 
