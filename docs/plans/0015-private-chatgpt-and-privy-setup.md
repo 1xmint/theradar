@@ -4560,3 +4560,38 @@ all mutation shards (25 mutants: 20 caught, five unviable), with build/tests
 still live at inspection. Inspect terminal results before integration and
 publish the combined primary only after its existing full run finishes. No
 local test/build/lint/mutation jobs or deployment occurred in this handback.
+
+### Mixed recorded/external wallet activity (2026-10-10)
+
+Found an execution-path gap: native transfer capture rejects a collected swap
+even when that exact transaction has already been verified and valued in the
+owned journal. Acquisition review now exposes its replayed settlement records.
+Collected activity recognizes those exact signed bytes, signature, slot,
+outcome, fee and every native/token balance before leaving the existing trade
+in history and collecting only external plain transfers. Duplicate recorded
+rows and changed metadata refuse; manually supplied transfers keep their prior
+duplicate refusal. Unknown activity remains unsupported, and address history
+completion still does not assert complete wallet coverage or release capital.
+
+Added two unit regressions for mixed known/unknown activity and exact metadata
+matching, and a process regression exercising --record-native-transfers against
+a real replayed recorded swap with repeated reads and conflicting token data.
+Unit floor 2217. Publish on an independent branch based on verified per-option
+controls while primary run 38065819742 finishes; all test/build/lint/mutation
+verification stays on GitHub. No production deployment, signing grant or trade.
+
+PR 341 first run 38067543478 at b1f0d12 is terminal: every ordinary job except
+lint passed, as did all four mutation baselines and final gate. Twenty-five
+mutants tested (twenty caught, five unviable), none missed. Lint found capture
+over its line limit and an empty assertion style issue. Simplified capture to a
+direct loop with normal error propagation and changed the assertion to show the
+actual length. No lint suppression or mutation exclusion; publish for fresh
+GitHub proof now that the prior run finished. Primary run 38065819742 remains
+live. Separate PR 342 includes the issuer in release hashes/artifacts; release
+run 38067699398 is live and has not installed anything on the VPS.
+
+PR 341 correction run 38067797787 at 7643dd8 is now fully green: every job,
+2615 Rust tests, all four baselines and the final mutation gate passed. Merged
+this verified source into local primary with only appended plan sections in
+conflict; preserved both. Full-scope primary verification is still required
+after its existing live run finishes. Release artifact proof remains pending.

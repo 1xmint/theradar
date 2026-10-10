@@ -2256,6 +2256,13 @@ fn acquisition_history_includes_completed_lots_once_and_keeps_wallet_risk_unknow
     let first: Value = serde_json::from_slice(&result.stdout).expect("report");
     assert_eq!(first["lots"].as_array().expect("lots").len(), 1);
     assert_eq!(first["lots"][0]["operation"], id.as_str());
+    let source = &first["recorded_settlements"][0];
+    let recorded = radar_journal::OperationLog::open(&history).expect("settlement history");
+    assert_eq!(
+        source,
+        &serde_json::to_value(recorded.valuation(&id).unwrap().settlement.clone()).unwrap()
+    );
+    drop(recorded);
     assert_eq!(
         first["lots"][0]["creator"],
         fixture.snapshot["proposal"]["creator"]
@@ -3933,6 +3940,58 @@ fn record_native(fixture: &Fixture) -> std::process::Output {
         .arg("--record-native-transfers")
         .output()
         .unwrap()
+}
+
+#[test]
+fn collected_recorded_swap_is_matched_without_creating_an_external_transfer() {
+    let mut fixture = inventory_fixture();
+    let path = fixture.dir.path().join("operations.jsonl");
+    let saved = std::fs::read(&path).unwrap();
+    let history: Value = serde_json::from_slice(&acquisition_report(&fixture).stdout).unwrap();
+    let record = &history["recorded_settlements"][0];
+    let review = &record["review"];
+    let native = |field: &str| {
+        review["native_account_effects"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|effect| effect[field].as_str().unwrap().parse::<u64>().unwrap())
+            .collect::<Vec<_>>()
+    };
+    let tokens = |field: &str| {
+        review[field].as_array().unwrap().iter().map(|token| json!({
+        "accountIndex":token["account_index"],"mint":token["mint"],"owner":token["owner"],
+        "programId":token["program_id"],"uiTokenAmount":{"amount":token["raw_amount"],"decimals":token["decimals"]}
+    })).collect::<Vec<_>>()
+    };
+    let row = json!({"signature":review["signature"],"slot":review["slot"],"outcome":review["outcome"],
+        "transaction_base64":record["signed_transaction"],"network_fee_lamports":review["network_fee_lamports"],
+        "raw_metadata":{"err":null,"fee":review["network_fee_lamports"].as_str().unwrap().parse::<u64>().unwrap(),
+            "preBalances":native("pre_lamports"),"postBalances":native("post_lamports"),
+            "preTokenBalances":tokens("pre_token_balances"),"postTokenBalances":tokens("post_token_balances")}});
+    fixture.snapshot["wallet_evidence"]["wallet_activity"] = json!({
+        "version":1,"authority":"read_only","commitment":"finalized","wallet":fixture.config["wallet"],
+        "read_started_at_unix_secs":unix_now(),"read_completed_at_unix_secs":unix_now(),
+        "coverage":"provider_reported_address_history","signature_scan_finished":true,"transaction_fetch_finished":true,
+        "after_slot_exclusive":"1000","through_slot_inclusive":"1002",
+        "signatures":[{"signature":review["signature"],"slot":review["slot"],"outcome":review["outcome"]}],"transactions":[row]});
+    fixture.save();
+    for _ in 0..2 {
+        let output = record_native(&fixture);
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let result: Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(result["native_transfers_advanced"], 0);
+        assert_eq!(std::fs::read(&path).unwrap(), saved);
+    }
+    fixture.snapshot["wallet_evidence"]["wallet_activity"]["transactions"][0]["raw_metadata"]["postTokenBalances"]
+        [0]["uiTokenAmount"]["amount"] = json!("26");
+    fixture.save();
+    assert!(!record_native(&fixture).status.success());
+    assert_eq!(std::fs::read(&path).unwrap(), saved);
 }
 
 #[test]
