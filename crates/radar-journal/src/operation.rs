@@ -383,19 +383,43 @@ struct Live {
     claim: Option<ReservationId>,
 }
 
+struct Owner {
+    file: std::fs::File,
+    process: u32,
+}
+
+impl Owner {
+    fn release(&self) {
+        // Close alone leaves flock held by descriptors inherited during a
+        // concurrent fork. End ownership here even if such a duplicate survives.
+        // A forked child's destructor must not unlock its parent's ownership.
+        // Failure remains closed: the OS still releases on the last close.
+        if self.process == std::process::id() {
+            let _ = self.file.unlock();
+        }
+    }
+}
+
+impl Drop for Owner {
+    fn drop(&mut self) {
+        self.release();
+    }
+}
+
 /// Operations, and the journal they are recorded in.
 ///
 /// The caller is `radar consider`, which reopens the log before the risk kernel
 /// sizes anything so that capital claimed by an operation still in flight is not
 /// offered to a second one.
 /// Ownership is held by a nonblocking OS lock on `<journal>.lock` until this
-/// log is dropped. Keep the pathname and sidecar protected and stable: deleting
-/// or replacing them can bypass cooperative ownership. Generic `Journal`
-/// readers do not take this lock and must not write operation history.
+/// log is dropped, when it is explicitly released even if a duplicate survives.
+/// Keep the pathname and sidecar protected and stable: deleting or replacing
+/// them can bypass cooperative ownership. Generic `Journal` readers do not take
+/// this lock and must not write operation history.
 pub struct OperationLog {
     // Holding the OS handle holds ownership, including through replay and
     // external submission. Never delete the lock file to release ownership.
-    _owner: std::fs::File,
+    _owner: Owner,
     journal: Journal,
     operations: BTreeMap<OperationId, Live>,
     build: Option<String>,
@@ -504,6 +528,11 @@ impl OperationLog {
             path: lock_path.display().to_string(),
             source: source.into(),
         })?;
+        // Also release explicitly if replay fails after acquiring ownership.
+        let owner = Owner {
+            file: owner,
+            process: std::process::id(),
+        };
         let journal = Journal::open(&path)?;
         let integrity = journal.verify()?;
         if !matches!(integrity, Verified::Intact { .. }) {
@@ -1219,6 +1248,42 @@ fn replay(events: &[Event]) -> Result<BTreeMap<OperationId, Live>, OperationErro
 mod tests {
     use super::{OperationError, OperationState};
     use radar_types::{Decimals, Settlement, TokenQuantity};
+
+    #[cfg(unix)]
+    #[test]
+    fn dropping_owner_releases_ownership_even_with_a_duplicated_descriptor() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("operations.jsonl");
+        let file = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(dir.path().join("operations.jsonl.lock"))
+            .unwrap();
+        file.try_lock().unwrap();
+        // dup shares the same open file description as a fork-inherited fd.
+        // Keep it alive to deterministically test the lifetime, without a race.
+        let duplicate = file.try_clone().unwrap();
+        let owner = super::Owner {
+            file,
+            process: std::process::id(),
+        };
+        // Simulate the inherited wrapper's destructor running in another PID.
+        // It must close its duplicate without explicitly unlocking the parent.
+        drop(super::Owner {
+            file: duplicate.try_clone().unwrap(),
+            process: std::process::id().wrapping_add(1),
+        });
+        assert!(super::OperationLog::open(&path).is_err());
+        drop(owner);
+        let next = super::OperationLog::open(&path).expect("dropped owner releases lock");
+        // The stale duplicate closing must not release the new owner's lock.
+        drop(duplicate);
+        assert!(super::OperationLog::open(&path).is_err());
+        drop(next);
+        assert!(super::OperationLog::open(&path).is_ok());
+    }
 
     fn some() -> Settlement {
         Settlement::PartiallyFilled(TokenQuantity::new(1, Decimals::NATIVE_SOL))

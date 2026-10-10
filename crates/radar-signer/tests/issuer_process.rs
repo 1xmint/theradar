@@ -474,7 +474,12 @@ fn protected_failed_fee_costs_are_durable_without_releasing_or_closing_claims() 
     assert_eq!(report["portfolio_state_updated"], false);
     assert_eq!(report["reservation_released"], false);
     assert_eq!(std::fs::read(&history).expect("unchanged"), before);
-    assert!(run("--record-valuation").status.success());
+    let repeated = run("--record-valuation");
+    assert!(
+        repeated.status.success(),
+        "{}",
+        String::from_utf8_lossy(&repeated.stderr)
+    );
     let saved = std::fs::read(&history).expect("recorded");
     assert_ne!(saved, before);
     for _ in 0..2 {
@@ -1018,7 +1023,12 @@ fn protected_cost_record_is_durable_idempotent_and_refuses_changed_economics() {
     assert_eq!(log.outstanding().count(), 1);
     drop(log);
     let saved = std::fs::read(&history).expect("history");
-    assert!(run("--record-valuation").status.success());
+    let repeated = run("--record-valuation");
+    assert!(
+        repeated.status.success(),
+        "{}",
+        String::from_utf8_lossy(&repeated.stderr)
+    );
     assert_eq!(std::fs::read(&history).expect("unchanged"), saved);
     let text = String::from_utf8(saved.clone()).expect("text");
     assert!(!text.contains("UNREVIEWED_RESPONSE_MUST_NOT_PERSIST"));

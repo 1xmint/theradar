@@ -59,7 +59,7 @@ cargo := env("RADAR_CARGO", "cargo")
 # the bot's files -- 11 in brief.rs (the analyst, contest and vault checks), 5
 # in seven_days.rs, 6 in radar-backfill's analyst_log.rs and 3 for the watched
 # seven-day checkpoint in checkpoints.rs.
-export MIN_TESTS := "2208"
+export MIN_TESTS := "2209"
 
 _default:
     @just --list --unsorted
