@@ -4675,3 +4675,41 @@ Collector/issuer bridge PR 343 at 2031e2e passed every job in GitHub run
 38068950676, including all four baselines and final mutation gate. Logs show
 twelve mutants, nine caught and three unviable, none missed. Its verified source
 is ready for integration after the primary's current full run finishes.
+
+### Optional daily cap at the actual risk consumer (2026-10-10)
+
+PR 344 at 2b80d25 passed every GitHub job in run 38069237983, including web,
+Rust tests, all four mutation shards and the final gate. Draft preferences now
+represent whether the owner enabled a cap, but the actual kernel still required
+a number. Policy.max_daily_loss now uses Option<MicroUsd>: existing serialized
+numeric caps remain numerically identical, explicit null disables only that
+check, and an omitted field defaults to Some(0), preserving refusal rather than
+silently disabling protection. Policy::CLOSED remains closed. No enormous-dollar
+sentinel or model-dependent exception is used.
+
+The private offline issuer consumes this Policy directly. Added actual issuer
+process cases for explicit null, numeric and omitted caps, plus halt with no cap;
+refused cases retain no outstanding reservation. Kernel regression covers the
+exact loss boundary and enabled zero cap, and verifies that no-cap policies still
+enforce halt, failures, position sizing, stale inputs and measurable exits.
+Property generators now exercise both enabled and disabled caps. Updated typed
+test fixtures/doc example without changing their serialized numeric caps. Unit
+floor 2219. Verify on GitHub in a separate stacked PR; do not publish over primary
+CI 38068474113 while it remains live.
+
+This closes the Policy representation gap only after verification. Converting
+the owner's draft choices and adaptive proposals into an authorized live policy
+still requires the independent mandate and verified wallet inputs. Existing
+action-aware reduction work, accounting, execution/recovery and delegation
+remain necessary; no live service, policy file, authority or funds changed.
+
+PR 345 first run 38069556295 at d7d506c exposed a serde-default helper lint
+and one equivalent survivor. Lint rejected a function always returning Some;
+read the value from Policy::CLOSED instead, keeping a single default source.
+Shard 3 applied policy.rs:139:5's exact Some(Default::default()) replacement
+and passed its baseline and mutated tests. MicroUsd derives Default over u64,
+so this equals Some(MicroUsd::ZERO). Added only that exact replacement to the
+documented equivalence list; None replacements and the daily-loss boundary
+remain tested. All four baselines passed: four mutants, two caught, one unviable
+and the equivalent survivor. Other jobs passed except lint; tests remain live
+at inspection. Do not push this correction until the current run is terminal.
