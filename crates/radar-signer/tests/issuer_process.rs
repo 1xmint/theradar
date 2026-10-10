@@ -846,8 +846,17 @@ fn finalized_fixture_owned_amount(
         fixture.save();
     }
     let mut issuer = fixture.start();
-    assert_eq!(issuer.ask(&fixture.candidate)["outcome"], "issued");
-    drop(issuer);
+    if opening_amount.is_some_and(|amount| amount > 0) {
+        assert_eq!(
+            issuer.ask(&fixture.candidate)["reason"],
+            "opening inventory risk basis unknown"
+        );
+        drop(issuer);
+        record_historical_fixture(&fixture);
+    } else {
+        assert_eq!(issuer.ask(&fixture.candidate)["outcome"], "issued");
+        drop(issuer);
+    }
     let signature = key.sign(&signed[65..]).to_bytes();
     signed[1..65].copy_from_slice(&signature);
     let history = fixture.dir.path().join("operations.jsonl");
@@ -863,6 +872,50 @@ fn finalized_fixture_owned_amount(
         "post_balances_lamports":["299995000","0","0"],"network_fee_lamports":"5000","pre_token_balances":[],"post_token_balances":[],
         "provider_response":"UNREVIEWED_RESPONSE_MUST_NOT_PERSIST"});
     (fixture, signed, id, evidence, log)
+}
+
+// Older protected history can contain positions whose opening basis was never
+// recorded. Seed the generic journal directly to test reviewing that history;
+// the current issuer must refuse creating a new authorization in this state.
+fn record_historical_fixture(fixture: &Fixture) {
+    use radar_journal::{Correlation, ExecutionBinding, Intent, OperationLog};
+    use radar_types::{Asset, Slot, TokenQuantity};
+    let mut log = OperationLog::open(fixture.dir.path().join("operations.jsonl")).unwrap();
+    let principal = u64::try_from(
+        u128::from(fixture.snapshot["proposal"]["notional"].as_u64().unwrap()) * 1_000_000_000
+            / u128::from(fixture.snapshot["sol_upper_micro_usd"].as_u64().unwrap()),
+    )
+    .unwrap();
+    let amount = principal
+        .checked_add(fixture.config["fee_reserve_lamports"].as_u64().unwrap())
+        .unwrap();
+    let id = log
+        .propose(
+            Intent {
+                asset: Asset::Sol,
+                amount: TokenQuantity::lamports(amount),
+                at: Slot(1000),
+            },
+            unix_now(),
+            Correlation {
+                execution: Some(ExecutionBinding {
+                    wallet: serde_json::from_value(fixture.config["wallet"].clone()).unwrap(),
+                    transaction: fixture.candidate["transaction"]
+                        .as_str()
+                        .unwrap()
+                        .to_owned(),
+                    signed_transaction: None,
+                    reviewed_proposal: Some(fixture.snapshot["proposal"].clone()),
+                }),
+                ..Correlation::default()
+            },
+        )
+        .unwrap();
+    let mut portfolio = native_portfolio(fixture);
+    log.reserve(&id, &mut portfolio, unix_now()).unwrap();
+    log.submit(&id, unix_now(), |_| Ok::<(), ()>(()))
+        .unwrap()
+        .unwrap();
 }
 
 fn acquisition_cost_fixture() -> (

@@ -4403,3 +4403,21 @@ account-count boundary); its last shard is still running. Inspect the complete
 run before fixing and publishing integrated primary. No deployment, signing
 authority or trade enabled. Live risk input/reconciliation, execution and exits,
 owner numeric limits, isolated deployment, delegation and funding remain.
+
+PR 337 first run 38065430606 at dd762b0 completed with build, lint, formatting,
+MSRV, web, site and ancillary jobs passing. Tests and all four mutation
+baselines failed the same two older fixtures at issuer_process.rs:849: a newly
+requested authorization over nonzero opening holdings now correctly refuses.
+Both new risk unit tests and the new completed-buy process regression passed
+in that baseline; no mutation coverage was established. Corrected the fixture
+to assert the actual issuer refusal, then seed generic historical journal
+records for the existing read/replay tests. No production guard was weakened.
+Fresh GitHub verification is required after this fixture-only correction.
+
+Older primary run 38063256175 is now terminal. All four baselines passed and
+1511 mutants completed within the approved 60-minute limit: 1182 caught,
+322 unviable, seven missed. No timeout. Its ordinary test failure is the
+valuation-idempotency assertion already corrected and passing on PR 335 at
+76fdf8e. The seven account-activity survivors are addressed on separate PR 338
+at 70ec786; fresh proof pending. Integrated primary needs fresh full-branch CI
+after these fixes, since the stacked mutation scopes do not cover the full base.
