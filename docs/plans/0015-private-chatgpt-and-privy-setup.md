@@ -4875,8 +4875,9 @@ Exit authority; its minimum incoming SOL still does not count as outgoing spend.
 
 Added one unit matrix across all six trade variants and all three actions,
 mixed messages and every truncated sale argument extent, plus an actual Privy
-process regression with valid re-attested proofs. Refusal leaves the nonce
-available, corrected direction succeeds once and duplicate success refuses.
+process regression with valid re-attested proofs. A verified issuer attempt
+consumes its nonce even on refusal; corrected direction needs fresh authority
+and duplicate success refuses.
 Unit floor 2221. Verify on GitHub; no local jobs or live signing.
 
 This closes only a concrete side mismatch after verification. Sale token bounds,
@@ -4903,3 +4904,15 @@ bound to issuer proof, must replace that unit substitution before activation.
 Do not fix it by widening an untrusted caller bound or silently trusting a price
 inside the signer. Preserve the owner's USD-facing choices and closed defaults.
 This is an implementation requirement to resolve next, not new authority.
+
+### Direction process regression correction (2026-10-10)
+
+Run 38078622823 at 7073f4e completed with a failing new process regression,
+including mutation baselines. Build, lint, format and unit direction checks
+passed. The regression incorrectly expected a refused, issuer-verified attempt
+to leave its nonce reusable. Actual handle_privy deliberately claims before
+key use/checks and never rolls back: even interrupted or rejected attempts need
+fresh issuer authority. Preserve that protection. Assert corrected bytes with
+the old nonce refuse for reuse, then re-attest a fresh nonce and require success.
+No production behavior changed in this correction. Verify on GitHub before
+integrating direction enforcement; autonomous signing remains closed.

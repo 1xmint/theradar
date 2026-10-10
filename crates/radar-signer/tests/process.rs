@@ -74,11 +74,19 @@ fn privy_process_rechecks_venue_trade_direction_after_a_valid_issuer_proof() {
                     "{answer}"
                 );
                 // A proof from a trusted issuer cannot override transaction
-                // direction. A refusal also must not consume its durable nonce.
+                // direction. Even a refused attempt consumes its durable nonce;
+                // correcting the action requires fresh issuer authority.
                 input["authorization"]["action"] =
                     serde_json::json!(if instruction.is_buy() { "buy" } else { "exit" });
                 attest(&mut input);
-                assert_eq!(signer.ask(&input)["outcome"], "authorised");
+                let retry = signer.ask(&input);
+                assert_eq!(retry["outcome"], "refused", "{retry}");
+                assert!(retry["reasons"].to_string().contains("nonce is reused"));
+                input["authorization"]["nonce"] =
+                    serde_json::json!(format!("{}-{action}-corrected", instruction.anchor_name()));
+                attest(&mut input);
+                let corrected = signer.ask(&input);
+                assert_eq!(corrected["outcome"], "authorised", "{corrected}");
             }
         }
     }
