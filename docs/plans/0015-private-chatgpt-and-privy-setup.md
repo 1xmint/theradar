@@ -4595,3 +4595,17 @@ PR 341 correction run 38067797787 at 7643dd8 is now fully green: every job,
 this verified source into local primary with only appended plan sections in
 conflict; preserved both. Full-scope primary verification is still required
 after its existing live run finishes. Release artifact proof remains pending.
+
+### Issuer artifact proof (2026-10-10)
+
+Release run 38067699398 succeeded at 9e43e1140f03e0c754adb33d5209a3b5503531a0.
+Downloaded artifact 11676061580, radar-linux-x86_64, with gh run download into
+the sibling radar-release-38067699398 directory. BUILD-INFO names that exact
+commit. Get-FileHash SHA256 verified all six listed binaries, including the
+1,935,552-byte radar-issuer with hash
+4af9566650d0028fdf5b1cddd008581809037feeffc663de378e55b38b1b45ce.
+Packaging omission is now closed by actual artifact evidence. The artifact
+predates mixed-activity integration 164d334 and must not be represented as its
+release. Primary run 38065819742 shard 1 remains confirmed live at inspection;
+wait for its terminal output before publishing the integrated source and
+requesting its full CI/release build. Nothing was installed or activated.
