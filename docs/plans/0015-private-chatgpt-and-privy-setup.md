@@ -4628,3 +4628,50 @@ the older 9e43e11 artifact as this source or enable autonomous execution: live
 risk construction, complete economic reconciliation/durable application,
 execution/exits/recovery, isolated service installation, Privy delegation and
 funding verification remain. Owner choices stay on the website per option.
+
+### Integrated release verification and design discussion (2026-10-10)
+
+Release run 38068470125 succeeded at
+ac2f87a821a507d6b05f2665c6c78c796d6bfa23. Downloaded radar-linux-x86_64 with
+gh run download into sibling radar-release-38068470125. BUILD-INFO names that
+exact commit; Get-FileHash SHA256 verified all six binaries. radar-issuer is
+1,950,624 bytes, hash
+8d22b49509d446a3d8254a6493c4edabd23f62ecde14d29b52a7e99aaf9cdd71.
+Full CI 38068474113 has passed every ordinary job; all four mutation shards
+remain live at inspection. Do not publish over that run or claim its final
+gate passed. The artifact has not been deployed. Radar health on port 8402
+still reports build 3f38ee0, policyClosed true and no Codex calls;
+radar-signer.socket remains inactive.
+
+Owner raised a direction question: adaptive risk management instead of a
+mandatory daily loss stop, plus conversational research assistance. Stopped
+implementation and discussed the recommendation in chat: optional daily cap,
+adaptive allocation and sizing, independent operational controls, measured
+performance and researched user tips under an existing mandate. This is a
+recommendation awaiting the owner's response, not a settled product decision;
+no policy, UI or trading behavior was changed to implement it. Continue
+artifact/CI verification independently, and settle the discussion before
+recording new product doctrine or implementing the risk-panel redesign.
+
+### Approved adaptive-risk direction and optional cap drafts (2026-10-10)
+
+Josh accepted the recommendation and requested it in the checklist. Recorded
+the decision in design 0017 and the executable-work checklist in plan 0011:
+adaptive risk by default, optional daily cap, current portfolio/risk explanations,
+conversational research leads, measured results and reviewed tool improvements.
+The prior discussion is settled; implementation resumed with optional cap
+preferences. New site drafts disable the daily cap explicitly. Older persisted
+preferences missing daily_loss_enabled keep their existing cap enabled. The
+separate Agent decides choice and saved manual value survive disabling,
+re-enabling and refresh. Enabled manual caps retain numeric validation;
+disabling the cap does not bypass capital/per-trade validation. These settings
+remain drafts; live Policy construction and adaptive behavior remain open.
+
+Added Rust legacy/validation/restart and web toggle/save/refresh regressions;
+unit floor 2218. Verify on GitHub in an independent branch while primary full
+CI 38068474113 remains live. No local jobs, deployment or signing activation.
+
+Collector/issuer bridge PR 343 at 2031e2e passed every job in GitHub run
+38068950676, including all four baselines and final mutation gate. Logs show
+twelve mutants, nine caught and three unviable, none missed. Its verified source
+is ready for integration after the primary's current full run finishes.

@@ -4,11 +4,11 @@ import { PrivyProvider, usePrivy } from "@privy-io/react-auth";
 import { useCreateWallet, useWallets } from "@privy-io/react-auth/solana";
 
 type Limit = "capital_usd" | "max_trade_usd" | "daily_loss_usd";
-type Preferences = { capital_usd: string; max_trade_usd: string; daily_loss_usd: string; autonomous_requested: boolean; agent_decides: Record<Limit, boolean> };
+type Preferences = { capital_usd: string; max_trade_usd: string; daily_loss_usd: string; daily_loss_enabled: boolean; autonomous_requested: boolean; agent_decides: Record<Limit, boolean> };
 type Wallet = { address: string; id: string | null; delegated: boolean };
 type Holdings = { wallet: string; slot: number; age_seconds: number; sol: { ui_amount: string }; tokens: { mint: string; ui_amount: string }[] };
 const manual = { capital_usd: false, max_trade_usd: false, daily_loss_usd: false };
-const empty: Preferences = { capital_usd: "", max_trade_usd: "", daily_loss_usd: "", autonomous_requested: false, agent_decides: manual };
+const empty: Preferences = { capital_usd: "", max_trade_usd: "", daily_loss_usd: "", daily_loss_enabled: false, autonomous_requested: false, agent_decides: manual };
 const button = "rounded border border-[var(--color-line)] px-3 py-2 text-sm disabled:opacity-50";
 
 async function request<T>(path: string, token: string, signal: AbortSignal, body?: Preferences): Promise<T> {
@@ -88,7 +88,7 @@ export function OwnerWallet() {
         request<{ preferences: Preferences | null }>("limits", access, signal).then((saved) => {
           if (!active()) return;
           if (!("preferences" in saved)) throw new Error("Saved wallet settings could not be read.");
-          setPreferences(saved.preferences ? { ...saved.preferences, agent_decides: { ...manual, ...saved.preferences.agent_decides } } : empty); setSettingsReady(true);
+          setPreferences(saved.preferences ? { ...saved.preferences, daily_loss_enabled: saved.preferences.daily_loss_enabled ?? true, agent_decides: { ...manual, ...saved.preferences.agent_decides } } : empty); setSettingsReady(true);
         }).catch((cause: unknown) => { if (active()) setError(cause instanceof Error ? cause.message : "Saved wallet settings are unknown."); }),
         request<Holdings>("balance", access, signal).then((balance) => {
           if (!active()) return;
@@ -154,15 +154,18 @@ export function OwnerWallet() {
         </div> : <p className="mt-2 text-sm">{balanceError ? `Balance unknown. ${balanceError}` : "Reading balance…"}</p>}
       </div>
       <form onSubmit={(event) => { event.preventDefault(); void save(); }} className="space-y-3">
-        <h4 className="font-medium">Trading limits (USD)</h4>
+        <h4 className="font-medium">Trading preferences (USD)</h4>
         <p className="text-sm text-[var(--color-dim)]">Set each value yourself, or check Agent decides to let ChatGPT choose it based on your wallet balance. With a manual value, ChatGPT trades within that limit. These settings are saved as a draft; trading is not active yet.</p>
         <fieldset disabled={busy || !settingsReady} className="space-y-3">
+          <label className="flex items-center gap-2 text-sm"><input type="checkbox" aria-label="Use daily loss cap" checked={preferences.daily_loss_enabled}
+            onChange={(event) => { setPreferences({ ...preferences, daily_loss_enabled: event.target.checked }); setNotice(null); }} />Use daily loss cap (optional)</label>
+          <p className="text-sm text-[var(--color-dim)]">A daily cap stops new entries when reached. Without one, there is no calendar-based loss stop. Adaptive risk management is being connected; saving these preferences does not activate it.</p>
           {([ ["capital_usd", "Capital budget"], ["max_trade_usd", "Maximum per trade"], ["daily_loss_usd", "Daily loss limit"] ] as const).map(([field, label]) => <div key={field} className="space-y-1 text-sm">
-            <label className="block">{label}<input aria-label={label} required={!preferences.agent_decides[field]} disabled={preferences.agent_decides[field]} type="text" inputMode="decimal" autoComplete="off" value={preferences.agent_decides[field] ? "" : preferences[field]}
+            <label className="block">{label}<input aria-label={label} required={!preferences.agent_decides[field] && (field !== "daily_loss_usd" || preferences.daily_loss_enabled)} disabled={preferences.agent_decides[field] || (field === "daily_loss_usd" && !preferences.daily_loss_enabled)} type="text" inputMode="decimal" autoComplete="off" value={preferences.agent_decides[field] ? "" : preferences[field]}
               placeholder={preferences.agent_decides[field] ? "Agent chooses from wallet balance" : "USD amount"}
               onChange={(event) => { setPreferences({ ...preferences, [field]: event.target.value }); setNotice(null); }}
               className="mt-1 block w-full rounded border border-[var(--color-line)] bg-[var(--color-bg)] px-3 py-2 disabled:opacity-50" /></label>
-            <label className="flex items-center gap-2"><input type="checkbox" aria-label={`Agent decides ${label.toLowerCase()}`} checked={preferences.agent_decides[field]}
+            <label className="flex items-center gap-2"><input type="checkbox" aria-label={`Agent decides ${label.toLowerCase()}`} disabled={field === "daily_loss_usd" && !preferences.daily_loss_enabled} checked={preferences.agent_decides[field]}
               onChange={(event) => { setPreferences({ ...preferences, agent_decides: { ...preferences.agent_decides, [field]: event.target.checked } }); setNotice(null); }} />Agent decides</label>
           </div>)}
           <button className={button} type="submit">Save wallet settings</button>

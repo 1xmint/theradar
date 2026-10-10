@@ -76,17 +76,19 @@ describe("private Privy wallet", () => {
     await waitFor(() => expect((screen.getByLabelText("Capital budget") as HTMLInputElement).disabled).toBe(false));
     expect((screen.getByLabelText("Capital budget") as HTMLInputElement).value).toBe("");
     expect(fetch.mock.calls.every(([, options]) => options?.method !== "POST")).toBe(true);
+    fireEvent.click(screen.getByRole("checkbox", { name: "Use daily loss cap" }));
     for (const [label, value] of [["Capital budget", "100"], ["Maximum per trade", "10"], ["Daily loss limit", "5"]]) fireEvent.change(screen.getByLabelText(label!), { target: { value } });
     fireEvent.click(screen.getByRole("button", { name: "Save wallet settings" }));
     await screen.findByText("Settings saved. Autonomous trading remains inactive until execution is connected.");
     const post = fetch.mock.calls.find(([, options]) => options?.method === "POST")!;
-    expect(JSON.parse(post[1]!.body as string)).toEqual({ capital_usd: "100", max_trade_usd: "10", daily_loss_usd: "5", autonomous_requested: true,
+    expect(JSON.parse(post[1]!.body as string)).toEqual({ capital_usd: "100", max_trade_usd: "10", daily_loss_usd: "5", daily_loss_enabled: true, autonomous_requested: true,
       agent_decides: { capital_usd: false, max_trade_usd: false, daily_loss_usd: false } });
     expect(post[1]!.headers).toMatchObject({ Authorization: "Bearer test-token" });
   });
   it("saves independent agent choices and restores manual values when unchecked", async () => {
     const fetch = server(); vi.stubGlobal("fetch", fetch); render(<PrivyWallet appId="app" />);
     await screen.findByText("1.5 SOL");
+    fireEvent.click(screen.getByRole("checkbox", { name: "Use daily loss cap" }));
     for (const [label, value] of [["Capital budget", "100"], ["Maximum per trade", "10"], ["Daily loss limit", "5"]]) fireEvent.change(screen.getByLabelText(label!), { target: { value } });
     fireEvent.click(screen.getByRole("checkbox", { name: "Agent decides maximum per trade" }));
     expect((screen.getByLabelText("Maximum per trade") as HTMLInputElement).disabled).toBe(true);
@@ -113,7 +115,7 @@ describe("private Privy wallet", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save wallet settings" }));
     await screen.findByText("Settings saved. Autonomous trading remains inactive until execution is connected.");
     const post = fetch.mock.calls.find(([, options]) => options?.method === "POST")!;
-    expect(JSON.parse(post[1]!.body as string)).toEqual({ capital_usd: "", max_trade_usd: "", daily_loss_usd: "", autonomous_requested: true,
+    expect(JSON.parse(post[1]!.body as string)).toEqual({ capital_usd: "", max_trade_usd: "", daily_loss_usd: "", daily_loss_enabled: true, autonomous_requested: true,
       agent_decides: { capital_usd: true, max_trade_usd: true, daily_loss_usd: true } });
   });
   it("keeps older saved numeric limits manual when agent choices are absent", async () => {
@@ -122,8 +124,36 @@ describe("private Privy wallet", () => {
       ? Response.json({ preferences: { capital_usd: "100", max_trade_usd: "10", daily_loss_usd: "5", autonomous_requested: true }, execution_enabled: false }) : fetch(url, options)));
     render(<PrivyWallet appId="app" />);
     await screen.findByDisplayValue("100");
-    for (const checkbox of screen.getAllByRole("checkbox")) expect((checkbox as HTMLInputElement).checked).toBe(false);
+    for (const checkbox of screen.getAllByRole("checkbox", { name: /^Agent decides/ })) expect((checkbox as HTMLInputElement).checked).toBe(false);
+    expect((screen.getByRole("checkbox", { name: "Use daily loss cap" }) as HTMLInputElement).checked).toBe(true);
     expect((screen.getByLabelText("Maximum per trade") as HTMLInputElement).value).toBe("10");
+  });
+  it("defaults new drafts to no daily cap and preserves the chosen cap across toggles and refresh", async () => {
+    const fetch = server(); vi.stubGlobal("fetch", fetch); render(<PrivyWallet appId="app" />);
+    await screen.findByText("1.5 SOL");
+    const cap = screen.getByRole("checkbox", { name: "Use daily loss cap" }) as HTMLInputElement;
+    const amount = screen.getByLabelText("Daily loss limit") as HTMLInputElement;
+    const agent = screen.getByRole("checkbox", { name: "Agent decides daily loss limit" }) as HTMLInputElement;
+    expect(cap.checked).toBe(false); expect(amount.disabled).toBe(true); expect(amount.required).toBe(false); expect(agent.disabled).toBe(true);
+    fireEvent.change(screen.getByLabelText("Capital budget"), { target: { value: "100" } });
+    fireEvent.change(screen.getByLabelText("Maximum per trade"), { target: { value: "10" } });
+    fireEvent.click(cap); expect(amount.disabled).toBe(false); expect(amount.required).toBe(true);
+    fireEvent.change(amount, { target: { value: "5" } });
+    fireEvent.click(agent); expect(amount.disabled).toBe(true);
+    fireEvent.click(cap); expect(agent.disabled).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Save wallet settings" }));
+    await screen.findByText("Settings saved. Autonomous trading remains inactive until execution is connected.");
+    const post = fetch.mock.calls.find(([, options]) => options?.method === "POST")!;
+    expect(JSON.parse(post[1]!.body as string)).toMatchObject({ daily_loss_enabled: false, daily_loss_usd: "5", agent_decides: { daily_loss_usd: true } });
+    fireEvent.click(screen.getByRole("button", { name: "Refresh wallet" }));
+    await screen.findByText("1.5 SOL");
+    await waitFor(() => expect((screen.getByRole("button", { name: "Save wallet settings" }) as HTMLButtonElement).disabled).toBe(false));
+    const restoredCap = screen.getByRole("checkbox", { name: "Use daily loss cap" }) as HTMLInputElement;
+    const restoredAgent = screen.getByRole("checkbox", { name: "Agent decides daily loss limit" }) as HTMLInputElement;
+    expect(restoredCap.checked).toBe(false); expect(restoredAgent.checked).toBe(true);
+    fireEvent.click(restoredCap); fireEvent.click(restoredAgent);
+    const restoredAmount = screen.getByLabelText("Daily loss limit") as HTMLInputElement;
+    expect(restoredAmount.value).toBe("5"); expect(restoredAmount.disabled).toBe(false);
   });
   it("does not acknowledge agent choices when saving fails", async () => {
     const fetch = server();
