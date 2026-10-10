@@ -4182,3 +4182,10 @@ independent metadata truth. Independent live risk inputs, execution/exits/recove
 and owner limits/Privy policy/delegation/funding/deployment remain unfinished.
 
 All 33 staged repo-conformance checks and git diff --cached --check passed.
+
+Integration handback: fast-forwarded primary fix/wallet-signin-diagnostics to
+5a65043. Both checkouts were clean after integration. No Cargo/rustc process
+remained; C: had 59,382,648,832 bytes free. CI attempt 2 shard 1 remained running
+at final inspection. No push, deployment or authority change. Resume by checking
+the existing rerun, then publish the completed follow-ups only after it finishes
+and its results are inspected; these new sources have local proof, not full CI.
