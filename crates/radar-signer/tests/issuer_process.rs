@@ -1783,6 +1783,14 @@ fn acquisition_report(fixture: &Fixture) -> std::process::Output {
         .expect("acquisition report")
 }
 
+fn sale_history_balances(case: &str) -> [&'static str; 4] {
+    match case {
+        "contiguous" | "gross_overspend" => ["284844000", "285844000", "15", "9"],
+        "token_gap" => ["284844000", "285844000", "16", "10"],
+        _ => ["300000000", "301000000", "15", "9"],
+    }
+}
+
 fn append_sale_history(
     fixture: &Fixture,
     case: &str,
@@ -1825,17 +1833,7 @@ fn append_sale_history(
         json!({"account_index":1,"mint":address(0x22),"owner":fixture.config["wallet"],
         "program_id":address(0x44),"decimals":6,"raw_amount":amount})
     };
-    let contiguous = matches!(case, "contiguous" | "gross_overspend" | "token_gap");
-    let (pre, post) = if contiguous {
-        ("284844000", "285844000")
-    } else {
-        ("300000000", "301000000")
-    };
-    let (token_pre, token_post) = if case == "token_gap" {
-        ("16", "10")
-    } else {
-        ("15", "9")
-    };
+    let [pre, post, token_pre, token_post] = sale_history_balances(case);
     let evidence = json!({"version":1,"authority":"read_only","commitment":"finalized","wallet":fixture.config["wallet"],
         "transaction_base64":signed,"signature":fixture_signature(&signed),"signature_verified_locally":false,
         "operation_reconciled":false,"usd_value":null,"realised_pnl":null,"outcome":"succeeded","slot":"1003",

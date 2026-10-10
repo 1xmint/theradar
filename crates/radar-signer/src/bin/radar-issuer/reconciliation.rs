@@ -58,9 +58,10 @@ fn verify_token_anchors(
             pre.checked_add(integer(units, "net_acquired_raw")?)
         }
         .ok_or("token history exceeds retained quantities")?;
-        // Bind both endpoints to the retained chronological inventory. A
-        // balanced disposal can still hide an unrelated intervening transfer.
-        if amount("pre_token_balances")? != *pre || amount("post_token_balances")? != post {
+        // Valuation already verifies the exact token delta. Bind its starting
+        // point to retained inventory; the verified delta then anchors the end.
+        // Rechecking the end here would duplicate that independent guarantee.
+        if amount("pre_token_balances")? != *pre {
             return Err("token transaction anchors do not match retained quantities".into());
         }
         *pre = post;

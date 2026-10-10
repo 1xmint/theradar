@@ -5291,3 +5291,17 @@ issuance, actual route construction, live evidence/portfolio, dropped recovery,
 adaptive supervisor/research chat or protected site handover/deployment. Keep
 those goal items open and live signing closed. Inspect this branch's exact CI
 results next, then continue the protected exit path. Goal remains active.
+
+Initial sale CI 38084015922 at 2be1777 found journal replay exceeded the lint
+function-length threshold. Extracted its unchanged completed-record validation
+into a focused helper. Mutation shard 1 found reconciliation.rs:63:50 OR-to-AND
+survived: checking both token endpoints duplicated the already reverified exact
+delta. Removed the redundant end check instead of adding a test for an impossible
+single-endpoint inconsistency. Chronological starting quantities plus the retained
+verified delta still anchor both ends, and the balanced hidden-gap regression
+remains. No exclusion or relaxed check. Shortened the enlarged sale fixture helper.
+
+Integrated 896009c release 38083555818 has now been downloaded; all six SHA256
+hashes matched BUILD-INFO.txt. Its CI 38083559773 also passed. Nothing deployed.
+Let the initial sale run finish, inspect remaining results, then publish this
+correction and require a fresh full GitHub run. Goal active; live signing closed.
