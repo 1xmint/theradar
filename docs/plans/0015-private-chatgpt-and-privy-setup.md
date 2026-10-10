@@ -4515,3 +4515,16 @@ verification must still incorporate it after that current run finishes. No live
 deployment, policy grant or trade. Future agent-selected numbers must become
 explicit wallet-derived bounds enforced by the independent kernel/signer, with
 durable loss/recovery state; the model cannot directly write signing authority.
+
+### Per-option verification handback (2026-10-10)
+
+At 26e0aa3, PR 340 run 38066782544 passed every GitHub job and final mutation
+gate. Inspected each mutation baseline and summary: four baselines passed, ten
+mutants tested (four caught, six unviable), none missed. GitHub web job reported
+356 passing tests across 27 files; Rust job reported 2612 passing tests. No local
+test/build/lint/mutation jobs ran. Fast-forwarded local primary to this source;
+do not publish over primary run 38065819742, still in progress at inspection.
+Next inspect that run's terminal results, publish the integrated primary for
+full-scope verification, then deploy only the verified artifact through the
+fixed deployment procedure. These controls save preferences; autonomous signing
+and trading remain off pending live risk inputs and execution integration.
