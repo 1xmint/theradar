@@ -39,6 +39,15 @@ pub const SYSTEM_PROGRAM: [u8; 32] = [0u8; 32];
 /// ever going to be signable.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, thiserror::Error)]
 pub enum Rejection {
+    /// A known curve instruction names a different or missing mint/trader, or
+    /// a v2 quote asset whose units this native-SOL signer cannot authorize.
+    #[error("trade {instruction} has a missing or mismatched {role} role")]
+    TradeAccountMismatch {
+        /// Decoded instruction name.
+        instruction: String,
+        /// Role that failed independently of address-list membership.
+        role: String,
+    },
     /// A decoded sale has no explicit raw-token authority.
     #[error("sale requires an explicit token debit bound")]
     MissingTokenDebitBound,
@@ -325,6 +334,12 @@ pub fn check(
     if message.fee_payer() != Some(*signing_wallet.as_bytes()) {
         rejections.push(Rejection::ForeignFeePayer);
     }
+
+    rejections.extend(crate::trade_accounts::check(
+        &message,
+        authorization,
+        signing_wallet,
+    ));
 
     // Every action gets a ceiling on outgoing lamports, and until 2026-08-31
     // only `Buy` did.
@@ -735,10 +750,38 @@ mod tests {
 
     /// A transaction carrying one pump.fun instruction over the usual accounts.
     fn venue_tx(data: Vec<u8>) -> Vec<u8> {
-        build(
-            &[WALLET, MINT, PUMP, SYSTEM_PROGRAM],
-            &[(2, vec![0, 1], data)],
-        )
+        build(&venue_keys(), &[venue_ix(data)])
+    }
+
+    fn venue_keys() -> [[u8; 32]; 5] {
+        [
+            WALLET,
+            MINT,
+            PUMP,
+            SYSTEM_PROGRAM,
+            *radar_types::Asset::WRAPPED_SOL_MINT.as_bytes(),
+        ]
+    }
+
+    fn venue_ix(data: Vec<u8>) -> (u8, Vec<u8>, Vec<u8>) {
+        use radar_decode::pumpfun::Instruction;
+        let known = radar_decode::decode(radar_decode::Program::PumpFun, &data)
+            .known()
+            .copied()
+            .and_then(radar_decode::Instruction::pumpfun);
+        let roles = if matches!(
+            known,
+            Some(Instruction::BuyV2 | Instruction::BuyExactQuoteInV2 | Instruction::SellV2)
+        ) {
+            let mut roles = vec![3; 14];
+            roles[1] = 1;
+            roles[2] = 4;
+            roles[13] = 0;
+            roles
+        } else {
+            vec![3, 3, 1, 3, 3, 3, 0]
+        };
+        (2, roles, data)
     }
 
     /// `check` against the venue allowlist, with the caller's own ceiling given.
@@ -1539,18 +1582,10 @@ mod tests {
         // of 30,000,000 under a ceiling of 50,000,000.
         use radar_decode::pumpfun::Instruction;
         let bytes = build(
-            &[WALLET, MINT, PUMP, SYSTEM_PROGRAM],
+            &venue_keys(),
             &[
-                (
-                    2,
-                    vec![0, 1],
-                    venue_trade(Instruction::BuyExactSolIn, 30_000_000, 0),
-                ),
-                (
-                    2,
-                    vec![0, 1],
-                    venue_trade(Instruction::BuyExactSolIn, 30_000_000, 0),
-                ),
+                venue_ix(venue_trade(Instruction::BuyExactSolIn, 30_000_000, 0)),
+                venue_ix(venue_trade(Instruction::BuyExactSolIn, 30_000_000, 0)),
             ],
         );
         assert!(check_venue(&bytes, u64::MAX).is_err());
@@ -1562,13 +1597,9 @@ mod tests {
         // rather than the sum would pass this.
         use radar_decode::pumpfun::Instruction;
         let bytes = build(
-            &[WALLET, MINT, PUMP, SYSTEM_PROGRAM],
+            &venue_keys(),
             &[
-                (
-                    2,
-                    vec![0, 1],
-                    venue_trade(Instruction::BuyExactSolIn, 30_000_000, 0),
-                ),
+                venue_ix(venue_trade(Instruction::BuyExactSolIn, 30_000_000, 0)),
                 (3, vec![0, 1], transfer(30_000_000)),
             ],
         );
@@ -1619,10 +1650,10 @@ mod tests {
             }
         }
         let mixed = build(
-            &[WALLET, MINT, PUMP, SYSTEM_PROGRAM],
+            &venue_keys(),
             &[
-                (2, vec![0, 1], venue_trade(Instruction::Buy, 10, 20)),
-                (2, vec![0, 1], venue_trade(Instruction::Sell, 10, 20)),
+                venue_ix(venue_trade(Instruction::Buy, 10, 20)),
+                venue_ix(venue_trade(Instruction::Sell, 10, 20)),
             ],
         );
         for action in [Action::Buy, Action::Reduce, Action::Exit] {
@@ -1686,9 +1717,9 @@ mod tests {
                 ] {
                     let instructions: Vec<_> = amounts
                         .iter()
-                        .map(|amount| (2, vec![0, 1], venue_trade(ix, *amount, 900_000_000)))
+                        .map(|amount| venue_ix(venue_trade(ix, *amount, 900_000_000)))
                         .collect();
-                    let bytes = build(&[WALLET, MINT, PUMP, SYSTEM_PROGRAM], &instructions);
+                    let bytes = build(&venue_keys(), &instructions);
                     let result = check_venue_action(&bytes, 1, action, bound);
                     match expected {
                         None => assert!(

@@ -22,6 +22,204 @@ const SYSTEM: [u8; 32] = [0u8; 32];
 const SEED: [u8; 32] = [0x5A; 32];
 
 #[test]
+fn privy_process_binds_each_captured_trade_mint_trader_and_native_quote() {
+    let captures: serde_json::Value =
+        serde_json::from_str(include_str!("fixtures/pumpfun_trade_roles.json")).unwrap();
+    let scratch = Scratch::new("privy-trade-roles");
+    let mut policy = open_policy();
+    policy.max_native_spend_lamports = Some(u64::MAX);
+    let path = policy_file(&scratch.0, &policy);
+    let pump = *radar_decode::pumpfun::PROGRAM_ID.as_bytes();
+    let mut command = privy_only_command(&path);
+    command.env("RADAR_SIGNER_PROGRAMS", b58(&pump));
+    let mut signer = Signer::from_command(command);
+    let rows = captures["trades"].as_array().unwrap();
+    assert_eq!(rows.len(), 6);
+    for row in rows {
+        assert!(row["execution_error"].is_null());
+        assert!(
+            row["trader_transaction_index"].as_u64().unwrap()
+                < row["required_signatures"].as_u64().unwrap()
+        );
+        let mint = *row["mint"]
+            .as_str()
+            .unwrap()
+            .parse::<radar_types::Address>()
+            .unwrap()
+            .as_bytes();
+        let trader = row["trader"].as_str().unwrap();
+        assert!(
+            row["reported_token_anchors"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|anchor| anchor["mint"] == row["mint"] && anchor["owner"] == trader)
+        );
+        let data = radar_types::b64::decode(row["data_base64"].as_str().unwrap()).unwrap();
+        let known = radar_decode::decode(radar_decode::Program::PumpFun, &data)
+            .known()
+            .copied()
+            .unwrap()
+            .pumpfun()
+            .unwrap();
+        assert_eq!(known.anchor_name(), row["name"].as_str().unwrap());
+        let accounts = captured_accounts(row, trader);
+        let cases = captured_role_cases(&accounts, mint, known);
+        for (index, (damaged, reason)) in cases.into_iter().enumerate() {
+            for mixed in [false, true] {
+                let bytes = captured_message(pump, mint, &accounts, &damaged, &data, mixed);
+                let mut input = privy_request(&bytes);
+                input["authorization"]["mint"] = row["mint"].clone();
+                input["authorization"]["action"] =
+                    serde_json::json!(if known.is_buy() { "buy" } else { "exit" });
+                input["authorization"]["max_token_debit_raw"] = serde_json::json!(u64::MAX);
+                input["authorization"]["nonce"] =
+                    serde_json::json!(format!("{}-{index}-{mixed}", known.anchor_name()));
+                attest(&mut input);
+                let answer = signer.ask(&input);
+                assert_eq!(
+                    answer["outcome"],
+                    if reason.is_none() {
+                        "authorised"
+                    } else {
+                        "refused"
+                    },
+                    "{} case {index} mixed={mixed}: {answer}",
+                    known.anchor_name()
+                );
+                if let Some(reason) = reason {
+                    assert!(answer["reasons"].to_string().contains(reason), "{answer}");
+                }
+            }
+        }
+        let bytes = captured_message(pump, mint, &accounts, &accounts, &data, false);
+        let mut unsigned = radar_types::b64::decode(&bytes).unwrap();
+        unsigned[65] = 0; // Legacy message header after one signature slot.
+        let mut input = privy_request(&radar_types::b64::encode(&unsigned));
+        input["authorization"]["mint"] = row["mint"].clone();
+        input["authorization"]["nonce"] = serde_json::json!(known.anchor_name());
+        attest(&mut input);
+        let answer = signer.ask(&input);
+        assert_eq!(answer["outcome"], "refused", "{answer}");
+        assert!(
+            answer["reasons"]
+                .to_string()
+                .contains("signing wallet role")
+        );
+    }
+}
+
+type RoleCase = (Vec<[u8; 32]>, Option<&'static str>);
+
+fn captured_role_cases(
+    accounts: &[[u8; 32]],
+    mint: [u8; 32],
+    known: radar_decode::pumpfun::Instruction,
+) -> Vec<RoleCase> {
+    let mint_role = accounts.iter().position(|key| key == &mint).unwrap();
+    let trader_role = accounts.iter().position(|key| key == &wallet()).unwrap();
+    let mut cases = vec![(accounts.to_vec(), None), (Vec::new(), Some("mint role"))];
+    let mut wrong_mint = accounts.to_vec();
+    wrong_mint[mint_role] = [0x99; 32];
+    cases.push((wrong_mint, Some("mint role")));
+    let mut wrong_trader = accounts.to_vec();
+    wrong_trader[trader_role] = [0x98; 32];
+    cases.push((wrong_trader, Some("signing wallet role")));
+    cases.push((
+        accounts[..trader_role].to_vec(),
+        Some("signing wallet role"),
+    ));
+    if matches!(
+        known,
+        radar_decode::pumpfun::Instruction::BuyV2
+            | radar_decode::pumpfun::Instruction::BuyExactQuoteInV2
+            | radar_decode::pumpfun::Instruction::SellV2
+    ) {
+        let mut wrong_quote = accounts.to_vec();
+        wrong_quote[2] = *radar_types::Asset::USDC_MINT.as_bytes();
+        cases.push((wrong_quote, Some("native quote mint role")));
+    }
+    cases
+}
+
+fn captured_accounts(row: &serde_json::Value, trader: &str) -> Vec<[u8; 32]> {
+    row["accounts"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|key| {
+            if key.as_str().unwrap() == trader {
+                wallet()
+            } else {
+                *key.as_str()
+                    .unwrap()
+                    .parse::<radar_types::Address>()
+                    .unwrap()
+                    .as_bytes()
+            }
+        })
+        .collect()
+}
+
+fn captured_message(
+    pump: [u8; 32],
+    mint: [u8; 32],
+    original: &[[u8; 32]],
+    damaged: &[[u8; 32]],
+    data: &[u8],
+    mixed: bool,
+) -> String {
+    // Keep the authorized mint and wallet in the static account list even when
+    // their instruction roles are substituted: membership cannot mask binding.
+    let mut keys = vec![wallet(), pump, mint];
+    for key in original.iter().chain(damaged) {
+        if !keys.contains(key) {
+            keys.push(*key);
+        }
+    }
+    let indices = |accounts: &[[u8; 32]]| {
+        accounts
+            .iter()
+            .map(|key| {
+                u8::try_from(keys.iter().position(|candidate| candidate == key).unwrap()).unwrap()
+            })
+            .collect()
+    };
+    let mut instructions = Vec::new();
+    if mixed {
+        instructions.push((1, indices(original), data.to_vec()));
+    }
+    instructions.push((1, indices(damaged), data.to_vec()));
+    transaction(&keys, &instructions)
+}
+
+fn venue_keys(pump: [u8; 32]) -> [[u8; 32]; 5] {
+    [
+        wallet(),
+        MINT,
+        pump,
+        SYSTEM,
+        *radar_types::Asset::WRAPPED_SOL_MINT.as_bytes(),
+    ]
+}
+
+fn venue_roles(ix: radar_decode::pumpfun::Instruction) -> Vec<u8> {
+    use radar_decode::pumpfun::Instruction;
+    if matches!(
+        ix,
+        Instruction::BuyV2 | Instruction::BuyExactQuoteInV2 | Instruction::SellV2
+    ) {
+        let mut roles = vec![3; 14];
+        roles[1] = 1;
+        roles[2] = 4;
+        roles[13] = 0;
+        roles
+    } else {
+        vec![3, 3, 1, 3, 3, 3, 0]
+    }
+}
+
+#[test]
 fn privy_process_checks_aggregate_sale_tokens_and_proof_binds_the_bound() {
     let scratch = Scratch::new("privy-token-debit");
     let policy = policy_file(&scratch.0, &open_policy());
@@ -55,10 +253,10 @@ fn privy_process_checks_aggregate_sale_tokens_and_proof_binds_the_bound() {
                         let mut data = ix.discriminator().as_bytes().to_vec();
                         data.extend(amount.to_le_bytes());
                         data.extend(900_000_000_u64.to_le_bytes());
-                        (2, vec![0, 1], data)
+                        (2, venue_roles(ix), data)
                     })
                     .collect();
-                let bytes = transaction(&[wallet(), MINT, pump, SYSTEM], &instructions);
+                let bytes = transaction(&venue_keys(pump), &instructions);
                 let mut input = privy_request(&bytes);
                 input["authorization"]["action"] = serde_json::json!(action);
                 input["authorization"]["nonce"] =
@@ -169,7 +367,7 @@ fn privy_process_rechecks_venue_trade_direction_after_a_valid_issuer_proof() {
         let mut data = instruction.discriminator().as_bytes().to_vec();
         data.extend(10_u64.to_le_bytes());
         data.extend(20_u64.to_le_bytes());
-        let bytes = transaction(&[wallet(), MINT, pump, SYSTEM], &[(2, vec![0, 1], data)]);
+        let bytes = transaction(&venue_keys(pump), &[(2, venue_roles(*instruction), data)]);
         for (action, buying) in [("buy", true), ("reduce", false), ("exit", false)] {
             let mut input = privy_request(&bytes);
             input["authorization"]["action"] = serde_json::json!(action);

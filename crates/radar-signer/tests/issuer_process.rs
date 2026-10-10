@@ -31,7 +31,7 @@ fn issuer_converts_usd_to_native_units_then_clamps_and_proves_the_native_policy(
             .to_vec();
         data.extend(spend.to_le_bytes());
         data.extend(1_u64.to_le_bytes());
-        bytes.extend([1, 2, 2, 0, 1, 24]);
+        bytes.extend([1, 2, 7, 1, 1, 1, 1, 1, 1, 0, 24]);
         bytes.extend(data);
         let encoded = radar_types::b64::encode(&bytes);
         fixture.candidate["transaction"] = json!(encoded);

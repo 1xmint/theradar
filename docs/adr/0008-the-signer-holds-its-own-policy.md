@@ -1369,6 +1369,28 @@ transactions. This change does not turn a quote into execution support or derive
 sale authority from holdings. Live exit issuance, supported builders, independent
 signer semantics and sale accounting remain required before activation.
 
+## Known curve mint, trader and native quote binding
+
+Every known curve trade now binds its instruction mint to Authorization.mint
+and its trader to the signing wallet, which must be a required static signer.
+Address-list membership alone is insufficient. Successful public mainnet
+captures establish older mint/trader positions 2/6 and v2 positions 1/13.
+V2 additionally names its quote mint at position 2; the current native-spend
+lane requires wrapped SOL there. Other quote assets need typed spend authority.
+
+The Privy process regression reconstructs legacy messages from six captured
+instruction account lists and argument payloads, substitutes the deterministic
+test wallet, and re-attests every damaged message. It checks missing/substituted
+roles, mixed messages and a trader that is not a required signer. Captured RPC
+metadata anchors the layout, not independent inclusion or historical ownership.
+The fixture retains public source signatures and the source transaction version;
+reconstructed messages are not claimed to have executed on mainnet.
+
+These checks do not derive curve or token accounts, prove their ownership or
+writability, verify arbitrary allowed-program semantics, or provide live holdings
+coverage. Exit issuance, routing and accounting remain required. No deployment,
+signing permission or live wallet authority is changed by this source update.
+
 ## What would reverse this
 
 Nothing foreseeable reverses holding a policy locally. The specific ceilings are
