@@ -4628,3 +4628,27 @@ the older 9e43e11 artifact as this source or enable autonomous execution: live
 risk construction, complete economic reconciliation/durable application,
 execution/exits/recovery, isolated service installation, Privy delegation and
 funding verification remain. Owner choices stay on the website per option.
+
+### Combined known-address history ingestion (2026-10-10)
+
+The actual wallet-activity-read --inventory-review collector emits
+provider_reported_known_address_history. Native transfer capture previously
+accepted only the wallet-only history variant, preventing the combined packet
+from reaching --record-native-transfers even for an exact retained swap or
+plain native transfer. Accept both collection variants. Combined-query packets
+must have unique, bounded targets including the wallet; reuse account activity
+row verification to bind each enumerated reporting address to a queried target
+and to the signed message before recognizing retained operations or classifying
+external native transfers. These targets describe queries, not verified account
+ownership. No complete wallet-coverage assertion or economic state release is
+introduced, and unsupported token/opaque external activity still refuses.
+
+Added a unit regression for recipient-account queries, exact sixteen-target
+boundary, forged membership, malformed targets, incomplete collection and
+changed native effects. Extended the actual issuer process's retained-swap
+regression through both packet variants and repeated combined reads without
+journal mutation. Unit floor 2218. Run all verification on GitHub in an
+independent stacked PR based on published primary ac2f87a, leaving full primary
+CI 38068474113 intact. No deployment, signing authority or live trade performed.
+The owner's adaptive-risk-panel discussion remains unsettled and independent
+of this collector/issuer integration fix.
