@@ -3975,3 +3975,65 @@ application, live risk inputs and execution/exits/recovery remain unfinished;
 owner limits and verified Privy delegation/funding/deployment are still needed
 before autonomous activation. The unsupported new coverage label must not be
 relabeled to make the existing native adapter accept it.
+
+
+### Protected supplied account-activity authorship review (2026-10-10)
+
+Prior CI 38023346308 at 255337c still runs its final mutation shard 1 at the
+latest inspection; other ordinary checks and shards 0/2/3 are successful. Keep
+the unpublished collector source 51ff9b9 and this independent follow-up local.
+New work is isolated on feat/account-activity-review in the native sibling,
+based on primary b9bc418. No push or CI cancellation.
+
+Add --review-account-activity to the offline protected issuer. It reads the
+configured snapshot, binds wallet/checkpoint/freshness, validates current account
+observations and opening read order, and requires the supplied known-address
+target set to match the endpoint account union. Rows bind one-to-one to supplied
+enumeration with exact reported signature/slot/outcome and interval. Supported
+static messages decode locally and verify every required signature, including
+multiple signers. Reporting targets must be nonempty/unique/known and actually
+named in signed static accounts. Header/wire count mismatch, duplicate accounts,
+unsupported lookup tables or forged signatures refuse.
+
+This is cryptographic authorship and static query membership, not financial
+effect classification or complete collection verification. The command can
+review valid supplied rows from an incomplete collector packet, without asserting
+that no rows are missing. Provider metadata, outcomes/slots, inclusion, ownership
+and economics remain unverified; output labels slots/outcomes as reported and
+does not forward arbitrary metadata. No journal write, claim release or authority.
+Three regressions cover all signers and exact bytes, malformed/duplicate/bounded
+supplied rows, and actual issuer process snapshot/target/expiry/opening guards
+without changing history. Manual faults and final scoped verification follow.
+
+Restored verification passed 221 signer tests, scoped all-target Rust 1.99
+Clippy and workspace formatting. Thirty-five deliberate logic faults were
+caught and restored: nineteen unit faults cover wire bounds, every signature,
+signer/account consistency, reporting membership and one-to-one row/interval
+binding; sixteen actual-process faults cover snapshot identity/checkpoint/time,
+native balance binding, opening order, packet identity, exact target bounds and
+read expiry. Transport/printing plumbing is not separately mutated. No fault,
+dependency, suppression or exclusion retained. Test helpers keep process cases
+within the existing function-size lint without weakening assertions.
+
+### Handback: supplied account-activity review complete locally (2026-10-10)
+
+The review is on feat/account-activity-review, based on primary b9bc418, in the
+native sibling checkout. The source commit includes this block; recover its hash
+from git log. It and collector 51ff9b9 are unpublished while CI 38023346308 at
+255337c still runs shard 1. Other ordinary checks and shards 0/2/3 are successful;
+full shard logs/final gate remain unverified. No push, cancellation or rerun.
+After successful conformance and commit, fast-forward primary locally. Inspect
+all prior CI logs and the final gate before publishing the completed follow-ups.
+A running check must finish before the next push.
+
+Autonomous trading stays off. This review writes no history and gives no signing
+authority. Next implementation is local token-effect classification with explicit
+unknown cases, followed by complete economic reconciliation and idempotent risk
+state. Independent live risk inputs, execution/exits/recovery, owner limits,
+isolated keys and verified Privy policy/delegation/funding/deployment remain.
+No live read, keys, delegation, deployment or trade occurred in this increment.
+
+All 33 repo-conformance checks passed after staging, and git diff --cached
+--check passed. The full signer suite is 72 library + 52 issuer unit + 55 issuer
+process + 31 signer process + 11 Privy boundary tests = 221. Earlier collector
+proof remains 352 CLI/on-chain tests; these sources were unchanged here.

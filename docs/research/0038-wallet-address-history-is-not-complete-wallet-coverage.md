@@ -96,3 +96,12 @@ a different coverage label from the single-wallet scan, and the existing native
 adapter must not accept it as complete wallet coverage. Historical discovery,
 local token-effect classification and independently verified economic coverage
 remain unfinished.
+
+
+The protected account-activity review follow-up now verifies supplied static
+message authorship and query membership locally, including every signer. It
+binds rows to a supplied enumeration and known opening/current account targets,
+without verifying that the provider supplied a complete enumeration. Reported
+slots/outcomes remain provider facts; raw metadata is not promoted to independently
+verified effects. This local review is implemented, not yet full-CI verified.
+Lookup-table messages and financial-effect classification remain unresolved.

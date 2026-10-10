@@ -35,6 +35,9 @@ mod native_transfers;
 #[path = "radar-issuer/cash.rs"]
 mod cash;
 
+#[path = "radar-issuer/account_activity.rs"]
+mod account_activity;
+
 #[path = "radar-issuer/account_inventory.rs"]
 mod account_inventory;
 
@@ -312,6 +315,20 @@ impl Issuer {
                 "{}",
                 serde_json::json!({"native_transfers_advanced":count,"accounting_checkpoint":self.operations.checkpoint(),
                 "portfolio_state_updated":false,"reservation_released":false})
+            );
+        } else if args == ["--review-account-activity"] {
+            let snapshot: Snapshot =
+                serde_json::from_slice(&private_read(&self.config.snapshot_path)?)
+                    .map_err(|_| "invalid trusted snapshot")?;
+            println!(
+                "{}",
+                account_activity::review(
+                    &snapshot,
+                    &self.config,
+                    self.operations.checkpoint(),
+                    self.operations.opening_inventory(),
+                    unix_now()?
+                )?
             );
         } else if args == ["--review-inventory"] {
             println!("{}", self.review_inventory()?);

@@ -1223,6 +1223,29 @@ Raw metadata and unresolved transactions are data for subsequent review; no
 portfolio update, reservation release or authority results from collection.
 Accounts never observed at either endpoint still need independent discovery.
 
+The protected offline issuer also has --review-account-activity. It reads only
+the configured protected snapshot, checks wallet/current checkpoint/freshness,
+and binds supplied known-address targets to the current/opening account union.
+Opening records newer than the observations refuse. Supplied enumeration and
+transaction rows must agree one-to-one, with unique signatures, matching reported
+slots/outcomes and the exact reviewed interval. This is supplied-row review;
+it does not authenticate provider enumeration or per-address scan completeness.
+
+For supported static messages it decodes locally, requires wire/header signer
+counts to agree, rejects duplicate accounts and verifies every required Ed25519
+signature over the exact message bytes. Each nonempty unique reporting-address
+set must lie in both the known target set and the signed static accounts. Lookup
+tables remain unsupported by the existing decoder. The output contains normalized
+signature/membership facts and explicitly reported slots/outcomes; arbitrary raw
+metadata is not forwarded. Unsupported or inconsistent rows refuse the review.
+
+Authorship and static membership do not prove execution, inclusion, account
+ownership, metadata truth or financial effects. Even a partially collected packet
+can have independently valid supplied rows, so collection completeness remains
+unverified, token/native effects unresolved and every economic/portfolio/release
+flag false. The command performs no journal write or authorization. It does not
+relabel the packet for the native-transfer accounting adapter.
+
 ## What would reverse this
 
 Nothing foreseeable reverses holding a policy locally. The specific ceilings are

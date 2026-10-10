@@ -4004,3 +4004,220 @@ fn opening_account_rows_survive_replay_and_current_account_migration() {
     assert_eq!(report["portfolio_state_updated"], false);
     assert_eq!(std::fs::read(&path).unwrap(), saved);
 }
+
+fn account_activity_fixture() -> Fixture {
+    use ed25519_dalek::{Signer as _, SigningKey};
+    let mut fixture = Fixture::new();
+    set_inventory(&mut fixture, 10, 1000);
+    let wallet: radar_types::Address =
+        serde_json::from_value(fixture.config["wallet"].clone()).unwrap();
+    let token: radar_types::Address = address(0x66).parse().unwrap();
+    let keys = [
+        SigningKey::from_bytes(&[43; 32]),
+        SigningKey::from_bytes(&[44; 32]),
+    ];
+    let mut message = vec![2, 0, 0, 4];
+    for key in &keys {
+        message.extend(key.verifying_key().to_bytes());
+    }
+    message.extend(wallet.as_bytes());
+    message.extend(token.as_bytes());
+    message.extend([9; 32]);
+    message.push(0);
+    let mut bytes = vec![2];
+    for key in &keys {
+        bytes.extend(key.sign(&message).to_bytes());
+    }
+    bytes.extend(message);
+    let signature = radar_types::Signature::new(bytes[1..65].try_into().unwrap());
+    let row = json!({"signature":signature,"slot":"1000","outcome":"failed","transaction_base64":radar_types::b64::encode(&bytes),"raw_metadata":{"private":"MUST_NOT_FORWARD_METADATA"}});
+    fixture.snapshot["wallet_evidence"]["wallet_activity"] = json!({"version":1,"authority":"read_only","commitment":"finalized",
+        "wallet":wallet,"coverage":"provider_reported_known_address_history","queried_addresses":[wallet,token],
+        "read_started_at_unix_secs":unix_now(),"read_completed_at_unix_secs":unix_now(),
+        "after_slot_exclusive":"999","through_slot_inclusive":"1000","signature_scan_finished":false,
+        "signatures":[{"signature":signature,"slot":"1000","outcome":"failed","reported_for_addresses":[wallet,token]}],"transactions":[row]});
+    fixture.save();
+    fixture
+}
+
+fn account_activity_target_bounds_and_future_opening_refuse() {
+    for count in [15, 16] {
+        let mut extra = account_activity_fixture();
+        let mut accounts = Vec::new();
+        let mut targets = vec![extra.config["wallet"].clone()];
+        for seed in 1..=count {
+            let mut row = extra.snapshot["wallet_evidence"]["token_program"]["accounts"][0].clone();
+            row["address"] = json!(address(seed));
+            targets.push(row["address"].clone());
+            accounts.push(row);
+        }
+        for read in ["token_program", "raw_token_verification"] {
+            extra.snapshot["wallet_evidence"][read]["accounts"] = json!(accounts);
+        }
+        let packet = &mut extra.snapshot["wallet_evidence"]["wallet_activity"];
+        packet["queried_addresses"] = json!(targets);
+        packet["signatures"] = json!([]);
+        packet["transactions"] = json!([]);
+        extra.save();
+        let result = extra
+            .command()
+            .arg("--review-account-activity")
+            .output()
+            .unwrap();
+        assert_eq!(
+            result.status.success(),
+            count == 15,
+            "{count}: {}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+    }
+    let mut future = account_activity_fixture();
+    let mut log =
+        radar_journal::OperationLog::open(future.dir.path().join("operations.jsonl")).unwrap();
+    log.record_opening_inventory(
+        radar_journal::OpeningInventoryRecord {
+            wallet: serde_json::from_value(future.config["wallet"].clone()).unwrap(),
+            native_lamports: 0,
+            native_slot: radar_types::Slot(1001),
+            token_program_slot: radar_types::Slot(1001),
+            token_2022_slot: radar_types::Slot(1001),
+            raw_token_slot: None,
+            read_started_at_unix_secs: unix_now(),
+            read_completed_at_unix_secs: unix_now(),
+            holdings: vec![],
+            accounts: None,
+        },
+        unix_now(),
+    )
+    .unwrap();
+    future.snapshot["accounting_checkpoint"] = json!(log.checkpoint());
+    drop(log);
+    future.save();
+    assert!(
+        !future
+            .command()
+            .arg("--review-account-activity")
+            .output()
+            .unwrap()
+            .status
+            .success()
+    );
+}
+
+fn account_activity_bad_inputs(fixture: &Fixture) -> Vec<(&'static str, Value)> {
+    vec![
+        ("/wallet_evidence/native_sol/raw_amount", json!("1")),
+        ("/wallet", json!(address(0x70))),
+        ("/accounting_checkpoint", json!("wrong")),
+        ("/observed_at_unix_secs", json!(0)),
+        (
+            "/wallet_evidence/wallet_activity/wallet",
+            json!(address(0x70)),
+        ),
+        (
+            "/wallet_evidence/wallet_activity/authority",
+            json!("untrusted"),
+        ),
+        ("/wallet_evidence/wallet_activity/version", json!(2)),
+        (
+            "/wallet_evidence/wallet_activity/commitment",
+            json!("processed"),
+        ),
+        (
+            "/wallet_evidence/wallet_activity/coverage",
+            json!("complete"),
+        ),
+        (
+            "/wallet_evidence/wallet_activity/queried_addresses",
+            json!([fixture.config["wallet"]]),
+        ),
+        (
+            "/wallet_evidence/wallet_activity/queried_addresses",
+            json!([fixture.config["wallet"], fixture.config["wallet"]]),
+        ),
+        (
+            "/wallet_evidence/wallet_activity/queried_addresses",
+            json!([
+                fixture.config["wallet"],
+                fixture.config["wallet"],
+                address(0x66)
+            ]),
+        ),
+        (
+            "/wallet_evidence/wallet_activity/after_slot_exclusive",
+            json!("1000"),
+        ),
+        (
+            "/wallet_evidence/wallet_activity/through_slot_inclusive",
+            json!("1001"),
+        ),
+        (
+            "/wallet_evidence/wallet_activity/read_started_at_unix_secs",
+            json!(0),
+        ),
+        (
+            "/wallet_evidence/raw_token_verification/authority",
+            json!("untrusted"),
+        ),
+    ]
+}
+
+#[test]
+fn account_activity_review_verifies_all_signers_without_writing_or_claiming_execution() {
+    let mut fixture = account_activity_fixture();
+    let path = fixture.dir.path().join("operations.jsonl");
+    let saved = std::fs::read(&path).unwrap();
+    let output = fixture
+        .command()
+        .arg("--review-account-activity")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(
+        report["transactions"][0]["signature_verified_locally"],
+        true
+    );
+    assert_eq!(
+        report["transactions"][0]["address_membership_verified_locally"],
+        true
+    );
+    for flag in [
+        "collection_completeness_verified",
+        "metadata_verified_independently",
+        "wallet_coverage_complete",
+        "economic_reconciliation_complete",
+        "portfolio_state_updated",
+        "reservation_released",
+    ] {
+        assert_eq!(report[flag], false);
+    }
+    assert_eq!(report["transactions"][0]["classification"], "unresolved");
+    assert!(!String::from_utf8_lossy(&output.stdout).contains("MUST_NOT_FORWARD_METADATA"));
+    assert_eq!(std::fs::read(&path).unwrap(), saved);
+    account_activity_target_bounds_and_future_opening_refuse();
+    let original = fixture.snapshot.clone();
+    for (pointer, value) in account_activity_bad_inputs(&fixture) {
+        fixture.snapshot = original.clone();
+        *fixture.snapshot.pointer_mut(pointer).unwrap() = value;
+        if pointer.ends_with("after_slot_exclusive") {
+            let packet = &mut fixture.snapshot["wallet_evidence"]["wallet_activity"];
+            packet["signatures"] = json!([]);
+            packet["transactions"] = json!([]);
+        }
+
+        fixture.save();
+        let refused = fixture
+            .command()
+            .arg("--review-account-activity")
+            .output()
+            .unwrap();
+        assert!(!refused.status.success(), "{pointer}");
+        assert_eq!(refused.stdout, Vec::<u8>::new());
+        assert_eq!(std::fs::read(&path).unwrap(), saved);
+    }
+}
