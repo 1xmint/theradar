@@ -42,6 +42,14 @@
 exclude_globs = ["crates/radar-stream/src/bin/**"]
 
 exclude_re = [
+    # The serde default returns CLOSED's Some(MicroUsd::ZERO). MicroUsd derives
+    # Default from its u64 field, so Some(Default::default()) is exactly Some(0).
+    # CI 38069556295 shard 3 applied the exact substitution at policy.rs:139:5;
+    # its baseline and mutated tests passed. The wire regression asserts both
+    # omitted-field Some(0) and explicit-null None. Keep the None replacement
+    # and kernel comparison mutations tested; only this identical value is exempt.
+    'replace zero_daily_loss_cap -> Option<MicroUsd> with Some\(Default::default\(\)\)',
+
     # `known_files`: inverting the emptiness guard makes a successful
     # `git ls-files` fall through to walking the tree instead of returning what
     # git said. Both produce a usable list. The branches differ only in

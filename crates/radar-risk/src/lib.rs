@@ -34,7 +34,7 @@
 //!     max_position: MicroUsd::from_dollars(50.0),
 //!     max_deployed: MicroUsd::from_dollars(200.0),
 //!     max_per_creator: MicroUsd::from_dollars(50.0),
-//!     max_daily_loss: MicroUsd::from_dollars(25.0),
+//!     max_daily_loss: Some(MicroUsd::from_dollars(25.0)),
 //!     max_round_trip_cost_bps: 900,
 //!     max_canary: MicroUsd::from_dollars(1.0),
 //!     max_input_staleness: SlotDelta(150),

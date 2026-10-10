@@ -8,6 +8,36 @@ use std::process::{Child, Command, Stdio};
 const SEED: [u8; 32] = [0x6B; 32];
 
 #[test]
+fn issuer_uses_explicit_optional_daily_cap_without_bypassing_halt() {
+    for (cap, halted, expected) in [
+        (Some(json!(null)), false, "issued"),
+        (Some(json!(10_000_000)), false, "refused"),
+        (None, false, "refused"),
+        (Some(json!(null)), true, "refused"),
+    ] {
+        let mut fixture = Fixture::new();
+        match cap {
+            Some(value) => fixture.config["policy"]["max_daily_loss"] = value,
+            None => {
+                fixture.config["policy"]
+                    .as_object_mut()
+                    .unwrap()
+                    .remove("max_daily_loss");
+            }
+        }
+        fixture.snapshot["state"]["realised_loss_today"] = json!(100_000_000);
+        fixture.snapshot["state"]["halted"] = json!(halted);
+        fixture.save();
+        let mut issuer = fixture.start();
+        assert_eq!(issuer.ask(&fixture.candidate)["outcome"], expected);
+        drop(issuer);
+        let log =
+            radar_journal::OperationLog::open(fixture.dir.path().join("operations.jsonl")).unwrap();
+        assert_eq!(log.outstanding().count(), usize::from(expected == "issued"));
+    }
+}
+
+#[test]
 fn issued_history_retains_the_typed_reviewed_proposal_without_unreviewed_fields() {
     let mut fixture = Fixture::new();
     let expected = fixture.snapshot["proposal"].clone();
@@ -3067,7 +3097,7 @@ impl Fixture {
                 max_position:radar_types::MicroUsd(50_000_000),
                 max_deployed:radar_types::MicroUsd(100_000_000),
                 max_per_creator:radar_types::MicroUsd(100_000_000),
-                max_daily_loss:radar_types::MicroUsd(10_000_000),
+                max_daily_loss:Some(radar_types::MicroUsd(10_000_000)),
                 max_round_trip_cost_bps:100, max_canary:radar_types::MicroUsd::ZERO,
                 max_input_staleness:radar_types::SlotDelta(10), max_consecutive_failures:2
             },
