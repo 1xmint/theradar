@@ -235,6 +235,7 @@ pub(super) fn review(log: &OperationLog, config: &Config) -> Result<Value, Strin
     let mut failed_fees = Vec::new();
     let mut sales = Vec::new();
     let mut cash_flows = Vec::new();
+    let mut settlements = Vec::new();
     for (id, entry) in log.entries() {
         if matches!(
             entry.state,
@@ -260,6 +261,12 @@ pub(super) fn review(log: &OperationLog, config: &Config) -> Result<Value, Strin
             id.as_str(),
             config.wallet,
         )?);
+        settlements.push(
+            log.valuation(id)
+                .ok_or("missing settlement")?
+                .settlement
+                .clone(),
+        );
         match reviewed {
             HistoricalEffect::Acquisition(lot) => lots.push(lot),
             HistoricalEffect::FailedFee(fee) => failed_fees.push(fee),
@@ -280,6 +287,7 @@ pub(super) fn review(log: &OperationLog, config: &Config) -> Result<Value, Strin
         "failed_execution_fees":failed_fees,"recorded_failed_fee_totals":fees,
         "sales":sales,"recorded_disposal_accounting":accounting,
         "recorded_native_cash_flows":cash_flows,
+        "recorded_settlements":settlements,
         "unsubmitted_operations":unsubmitted,
         "wallet_inventory_complete":false,"current_exposure_micro_usd":null,
         "realised_loss_today_micro_usd":null,"portfolio_state_updated":false,

@@ -199,6 +199,69 @@ fn collected(packet: &Value, native_slot: u64) -> Result<Value, String> {
     Ok(normalized)
 }
 
+// History is produced by acquisitions::review after replaying each retained
+// valuation and verifying its signed binding. Recognizing an exact recorded
+// operation avoids treating a swap as an external plain transfer a second time.
+fn recorded(row: &Value, history: &Value) -> Result<bool, String> {
+    let Some(signature) = row.get("collected_signature") else {
+        return Ok(false);
+    };
+    let Some(records) = history["recorded_settlements"].as_array() else {
+        return Ok(false);
+    };
+    let Some(record) = records
+        .iter()
+        .find(|record| record["review"]["signature"] == *signature)
+    else {
+        return Ok(false);
+    };
+    let review = &record["review"];
+    if row["transaction_base64"] != record["signed_transaction"]
+        || row["slot"] != review["slot"]
+        || row["outcome"] != review["outcome"]
+        || row["network_fee_lamports"] != review["network_fee_lamports"]
+    {
+        return Err("collected operation differs from retained settlement".into());
+    }
+    let effects = review["native_account_effects"]
+        .as_array()
+        .ok_or("recorded native effects missing")?;
+    for (field, retained) in [
+        ("pre_balances", "pre_lamports"),
+        ("post_balances", "post_lamports"),
+    ] {
+        let expected: Vec<_> = effects
+            .iter()
+            .map(|effect| effect[retained].clone())
+            .collect();
+        if row[field] != json!(expected) {
+            return Err(
+                "collected operation native balances differ from retained settlement".into(),
+            );
+        }
+    }
+    for field in ["pre_token_balances", "post_token_balances"] {
+        let tokens = row[field]
+            .as_array()
+            .ok_or("collected operation token balances missing")?;
+        let normalized: Vec<_> = tokens
+            .iter()
+            .map(|token| {
+                json!({
+            "account_index":token["accountIndex"],"mint":token["mint"],"owner":token["owner"],
+            "program_id":token["programId"],"raw_amount":token["uiTokenAmount"]["amount"],
+            "decimals":token["uiTokenAmount"]["decimals"]})
+            })
+            .collect();
+        if json!(normalized) != review[field] {
+            return Err(
+                "collected operation token balances differ from retained settlement".into(),
+            );
+        }
+    }
+    Ok(true)
+}
+
 pub(super) fn capture(
     current: &Value,
     history: &Value,
@@ -230,9 +293,10 @@ pub(super) fn capture(
     }
     super::read_evidence_expiry(packet, config, now)?;
     let mut seen = BTreeSet::new();
+    let mut owned = BTreeSet::new();
     if let Some(flows) = history["recorded_native_cash_flows"].as_array() {
         for flow in flows {
-            seen.insert(
+            owned.insert(
                 flow["signature"]
                     .as_str()
                     .ok_or("retained cash signature missing")?
@@ -245,52 +309,68 @@ pub(super) fn capture(
         .as_array()
         .ok_or("native transfer transactions missing")?;
     rows.iter()
-        .map(|row| {
-            let reviewed = transaction(row, config.wallet)?;
-            let signature = reviewed["signature"]
-                .as_str()
-                .ok_or("native transfer signature missing")?;
-            if row
-                .get("collected_signature")
-                .is_some_and(|value| value != signature)
-            {
-                return Err("collected signature differs from verified wire signature".into());
+        .filter_map(|row| {
+            match recorded(row, history) {
+                Ok(true) => {
+                    let signature = row["collected_signature"].as_str().unwrap_or("");
+                    if !owned.contains(signature) || !seen.insert(signature.to_owned()) {
+                        return Some(Err(
+                            "recorded activity is duplicated or lacks cash history".into()
+                        ));
+                    }
+                    return None;
+                }
+                Ok(false) => {}
+                Err(error) => return Some(Err(error)),
             }
-            if !seen.insert(signature.to_owned())
-                || integer(&reviewed, "execution_slot")? > native_slot
-            {
-                return Err(
-                    "native transfer is duplicated or newer than native observation".into(),
+            Some((|| {
+                let reviewed = transaction(row, config.wallet)?;
+                let signature = reviewed["signature"]
+                    .as_str()
+                    .ok_or("native transfer signature missing")?;
+                if row
+                    .get("collected_signature")
+                    .is_some_and(|value| value != signature)
+                {
+                    return Err("collected signature differs from verified wire signature".into());
+                }
+                if owned.contains(signature)
+                    || !seen.insert(signature.to_owned())
+                    || integer(&reviewed, "execution_slot")? > native_slot
+                {
+                    return Err(
+                        "native transfer is duplicated or newer than native observation".into(),
+                    );
+                }
+                let mut evidence = json!({});
+                for field in [
+                    "transaction_base64",
+                    "slot",
+                    "outcome",
+                    "network_fee_lamports",
+                    "pre_balances",
+                    "post_balances",
+                    "pre_token_balances",
+                    "post_token_balances",
+                ] {
+                    evidence[field] = row[field].clone();
+                }
+                let signed = b64::encode(
+                    &b64::decode(
+                        row["transaction_base64"]
+                            .as_str()
+                            .ok_or("native transaction missing")?,
+                    )
+                    .ok_or("native transaction base64 invalid")?,
                 );
-            }
-            let mut evidence = json!({});
-            for field in [
-                "transaction_base64",
-                "slot",
-                "outcome",
-                "network_fee_lamports",
-                "pre_balances",
-                "post_balances",
-                "pre_token_balances",
-                "post_token_balances",
-            ] {
-                evidence[field] = row[field].clone();
-            }
-            let signed = b64::encode(
-                &b64::decode(
-                    row["transaction_base64"]
-                        .as_str()
-                        .ok_or("native transaction missing")?,
-                )
-                .ok_or("native transaction base64 invalid")?,
-            );
-            evidence["transaction_base64"] = json!(signed);
-            Ok(radar_journal::NativeTransferRecord {
-                wallet: config.wallet,
-                signed_transaction: signed,
-                evidence,
-                review: reviewed,
-            })
+                evidence["transaction_base64"] = json!(signed);
+                Ok(radar_journal::NativeTransferRecord {
+                    wallet: config.wallet,
+                    signed_transaction: signed,
+                    evidence,
+                    review: reviewed,
+                })
+            })())
         })
         .collect()
 }
@@ -443,6 +523,111 @@ mod tests {
             "coverage":"provider_reported_address_history","signature_scan_finished":true,
             "transaction_fetch_finished":true,"after_slot_exclusive":"42","through_slot_inclusive":"44",
             "signatures":[{"signature":signature,"slot":"43","outcome":tx["outcome"]}],"transactions":[row]}})
+    }
+
+    #[test]
+    fn collected_recorded_operations_are_not_external_transfers() {
+        let mut current = activity(true);
+        let row = &mut current["wallet_activity"]["transactions"][0];
+        let opaque = edit(row, |bytes| bytes[133] = 6, true);
+        row["transaction_base64"] = opaque["transaction_base64"].clone();
+        let bytes = b64::decode(row["transaction_base64"].as_str().unwrap()).unwrap();
+        let signature = json!(Signature::new(bytes[1..65].try_into().unwrap()));
+        row["signature"] = signature.clone();
+        let history = json!({"recorded_native_cash_flows":[{"signature":signature}],
+            "recorded_settlements":[{"signed_transaction":row["transaction_base64"],"review":{
+            "signature":signature,"slot":"43","outcome":"succeeded","network_fee_lamports":"2",
+            "native_account_effects":[{"pre_lamports":"100","post_lamports":"91"},
+            {"pre_lamports":"10","post_lamports":"17"},{"pre_lamports":"1","post_lamports":"1"}],
+            "pre_token_balances":[],"post_token_balances":[]}}]});
+        current["wallet_activity"]["signatures"][0]["signature"] = signature;
+        assert!(capture(&current, &json!({}), &config(), 11).is_err());
+        assert!(
+            capture(&current, &history, &config(), 11)
+                .unwrap()
+                .is_empty()
+        );
+        let mut missing = history.clone();
+        missing["recorded_native_cash_flows"] = json!([]);
+        assert!(capture(&current, &missing, &config(), 11).is_err());
+        let mut mixed = current.clone();
+        let mut extra = activity(false);
+        extra["wallet_activity"]["transactions"][0]["slot"] = json!("44");
+        extra["wallet_activity"]["signatures"][0]["slot"] = json!("44");
+        mixed["wallet_activity"]["signatures"]
+            .as_array_mut()
+            .unwrap()
+            .push(extra["wallet_activity"]["signatures"][0].clone());
+        mixed["wallet_activity"]["transactions"]
+            .as_array_mut()
+            .unwrap()
+            .push(extra["wallet_activity"]["transactions"][0].clone());
+        let external = capture(&mixed, &history, &config(), 11).unwrap();
+        assert_eq!(external.len(), 1);
+        assert_eq!(external[0].review["execution_slot"], "44");
+        assert_eq!(external[0].review["outcome"], "failed");
+        assert_eq!(external[0].review["net_change_lamports"], "-2");
+        let entry = current["wallet_activity"]["signatures"][0].clone();
+        let row = current["wallet_activity"]["transactions"][0].clone();
+        current["wallet_activity"]["signatures"]
+            .as_array_mut()
+            .unwrap()
+            .push(entry);
+        current["wallet_activity"]["transactions"]
+            .as_array_mut()
+            .unwrap()
+            .push(row);
+        assert!(capture(&current, &history, &config(), 11).is_err());
+    }
+
+    #[test]
+    fn recorded_activity_requires_exact_wire_outcome_fee_and_every_balance() {
+        let current = activity(true);
+        let normalized = collected(&current["wallet_activity"], 44).unwrap();
+        let mut row = normalized["transactions"][0].clone();
+        let token = json!({"accountIndex":1,"mint":payer(),"owner":payer(),"programId":payer(),
+            "uiTokenAmount":{"amount":"7","decimals":6}});
+        row["pre_token_balances"] = json!([token]);
+        row["post_token_balances"] = json!([token]);
+        let retained_token = json!({"account_index":1,"mint":payer(),"owner":payer(),
+            "program_id":payer(),"raw_amount":"7","decimals":6});
+        let history = json!({"recorded_settlements":[{"signed_transaction":row["transaction_base64"],"review":{
+            "signature":row["collected_signature"],"slot":"43","outcome":"succeeded","network_fee_lamports":"2",
+            "native_account_effects":[{"pre_lamports":"100","post_lamports":"91"},
+            {"pre_lamports":"10","post_lamports":"17"},{"pre_lamports":"1","post_lamports":"1"}],
+            "pre_token_balances":[retained_token],"post_token_balances":[retained_token]}}]});
+        assert!(recorded(&row, &history).unwrap());
+        for (path, bad) in [
+            ("/transaction_base64", json!("changed")),
+            ("/slot", json!("44")),
+            ("/outcome", json!("failed")),
+            ("/network_fee_lamports", json!("3")),
+            ("/pre_balances/1", json!("11")),
+            ("/post_balances/2", json!("2")),
+            (
+                "/pre_token_balances/0/owner",
+                json!(Address::SYSTEM_PROGRAM),
+            ),
+            ("/post_token_balances/0/uiTokenAmount/amount", json!("8")),
+            ("/pre_token_balances", Value::Null),
+            ("/post_token_balances", json!([])),
+        ] {
+            let mut bad_row = row.clone();
+            *bad_row.pointer_mut(path).unwrap() = bad;
+            assert!(recorded(&bad_row, &history).is_err(), "{path}");
+        }
+        let mut unknown = row.clone();
+        unknown["collected_signature"] = json!("unknown");
+        assert!(!recorded(&unknown, &history).unwrap());
+        unknown
+            .as_object_mut()
+            .unwrap()
+            .remove("collected_signature");
+        assert!(!recorded(&unknown, &history).unwrap());
+        assert!(!recorded(&row, &json!({})).unwrap());
+        let mut missing = history.clone();
+        missing["recorded_settlements"][0]["review"]["native_account_effects"] = Value::Null;
+        assert!(recorded(&row, &missing).is_err());
     }
 
     #[test]

@@ -4515,3 +4515,22 @@ verification must still incorporate it after that current run finishes. No live
 deployment, policy grant or trade. Future agent-selected numbers must become
 explicit wallet-derived bounds enforced by the independent kernel/signer, with
 durable loss/recovery state; the model cannot directly write signing authority.
+
+### Mixed recorded/external wallet activity (2026-10-10)
+
+Found an execution-path gap: native transfer capture rejects a collected swap
+even when that exact transaction has already been verified and valued in the
+owned journal. Acquisition review now exposes its replayed settlement records.
+Collected activity recognizes those exact signed bytes, signature, slot,
+outcome, fee and every native/token balance before leaving the existing trade
+in history and collecting only external plain transfers. Duplicate recorded
+rows and changed metadata refuse; manually supplied transfers keep their prior
+duplicate refusal. Unknown activity remains unsupported, and address history
+completion still does not assert complete wallet coverage or release capital.
+
+Added two unit regressions for mixed known/unknown activity and exact metadata
+matching, and a process regression exercising --record-native-transfers against
+a real replayed recorded swap with repeated reads and conflicting token data.
+Unit floor 2217. Publish on an independent branch based on verified per-option
+controls while primary run 38065819742 finishes; all test/build/lint/mutation
+verification stays on GitHub. No production deployment, signing grant or trade.
