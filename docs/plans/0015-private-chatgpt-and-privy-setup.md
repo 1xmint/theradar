@@ -4245,3 +4245,17 @@ rerun or substitute broad local run performed. Completed sources through
 5a65043 remain local, awaiting fresh full CI before deployment. Autonomous
 execution remains off and the earlier economic/risk/execution/owner setup
 gaps remain open. Resume with the owner's timeout decision.
+
+### Owner-approved GitHub verification handback (2026-10-10)
+
+Owner approved increasing the mutation job timeout to 60 minutes and instructed
+that tests and jobs run on GitHub. Recorded that preference in AGENTS section 6;
+it overrides the earlier local test-loop guidance. Changed only the mutation
+job's timeout in CI; all four shards, baseline checks and required final gate
+remain enabled. No local Cargo, test or build job was run for this update.
+Prior CI attempt 2 is complete, so publish the accumulated completed sources
+with this workflow change for fresh full CI on the actual branch head. Inspect
+all job results, each shard's baseline and mutation summary, and the final gate
+before treating these sources as verified or deploying. Do not push over the
+new run. Autonomous execution remains off pending the previously recorded
+economic coverage, risk-state, live input, execution and owner setup work.

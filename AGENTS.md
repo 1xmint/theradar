@@ -240,6 +240,11 @@ rule *currently reaches* is status, and status is in
 
 ## 6. Verification and iteration
 
+- **Owner preference (2026-10-10): run tests and jobs on GitHub.** Use GitHub
+  Actions for test, build, lint and mutation verification rather than running
+  those jobs on the workstation. Inspect the results before claiming success.
+  Local source inspection and lightweight diff checks remain appropriate.
+
 - Validate with the most relevant evidence available — tests, builds, linters,
   runtime behaviour — proportional to risk. Skip ceremonial checks that add no
   confidence.
