@@ -12,9 +12,11 @@ fn transaction(row: &Value, reported: &[Address]) -> Result<Value, String> {
         .and_then(b64::decode)
         .ok_or("invalid account activity bytes")?;
     let count = usize::from(*bytes.first().ok_or("empty account activity bytes")?);
-    if bytes.len() > 1232 || count == 0 || bytes.len() < 1 + 64 * count + 3 {
+    if bytes.len() > 1232 || count == 0 {
         return Err("unsupported account activity signature extent".into());
     }
+    // The shared decoder checks the signature extent and every message field;
+    // duplicating its minimum-length arithmetic adds no rejection guarantee.
     let message =
         radar_signer::tx::decode(&bytes).map_err(|_| "unsupported account activity message")?;
     if usize::from(message.required_signatures) != count
@@ -218,6 +220,29 @@ mod tests {
         result["signature"] = json!(Signature::new(bytes[1..65].try_into().unwrap()));
         result["transaction_base64"] = json!(b64::encode(&bytes));
         result
+    }
+    #[test]
+    fn a_single_signer_account_is_valid_but_truncation_never_is() {
+        let key = SigningKey::from_bytes(&[1; 32]);
+        let address = Address::new(key.verifying_key().to_bytes());
+        let mut message = vec![1, 0, 0, 1];
+        message.extend(address.as_bytes());
+        message.extend([4; 32]);
+        message.push(0);
+        let signature = Signature::new(key.sign(&message).to_bytes());
+        let mut bytes = vec![1];
+        bytes.extend(signature.as_bytes());
+        bytes.extend(message);
+        let row = json!({"signature":signature,"transaction_base64":b64::encode(&bytes),
+            "slot":"43","outcome":"succeeded"});
+        let review = transaction(&row, &[address]).unwrap();
+        assert_eq!(review["signature_verified_locally"], true);
+        assert_eq!(review["execution_effects_verified"], false);
+        for length in 0..bytes.len() {
+            let mut truncated = row.clone();
+            truncated["transaction_base64"] = json!(b64::encode(&bytes[..length]));
+            assert!(transaction(&truncated, &[address]).is_err(), "{length}");
+        }
     }
     #[test]
     fn every_signer_and_reported_static_address_must_match_exact_bytes() {

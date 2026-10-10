@@ -4376,3 +4376,18 @@ economic coverage and durable idempotent portfolio/risk application, independent
 live risk inputs, execution/exits/recovery/scheduling, and owner limits,
 isolated issuer/signer deployment, Privy policy/delegation and funding validation.
 Autonomous execution remains off; keep the full goal active.
+
+### Account activity mutation boundary follow-up (2026-10-10)
+
+Older full-branch run 38063256175 shard 3 completed with seven survivors at
+account_activity.rs:15:56, :15:73, :15:60, :15:65 and :21:35. Removed redundant
+minimum signature-length arithmetic: tx::decode already bounds-checks every
+signature and message field before any slicing. Kept the packet-size and
+nonzero-signature restrictions. Added a valid single-signer/single-account
+transaction (the missing equality boundary) and refusal for every truncated
+prefix. This addresses the actual reported checks without broad mutation
+exclusions. Unit floor is 2210 on this separate branch over PR 335; verification
+is pending GitHub Actions, with no local test/build/lint/mutation jobs. No live
+deployment or authority changed. PR 337 separately contains the retained-risk
+guard; its first GitHub baseline found two older nonzero-opening fixtures that
+must be constructed as historical journal entries, not newly authorized trades.
