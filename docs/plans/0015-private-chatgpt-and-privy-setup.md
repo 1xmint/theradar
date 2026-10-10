@@ -3876,3 +3876,29 @@ harness newline conversion and a multiline-pattern assertion stopped before
 valid fault execution; byte-preserving writes and scoped pattern fixed the
 harness. All production sources restored. All 33 conformance checks passed
 after staging the new module. New-source full CI still required.
+
+
+### Handback: opening accounts published; new full CI pending (2026-10-10)
+
+Source 255337cdaae621a5e044aa54fbd3a042e916c5a0 is pushed to
+fix/wallet-signin-diagnostics and PR 334. Prior f3e7f59 full CI 38017286781
+was successful before the push, including all four mutation shards and final
+gate. New CI 38023346308 runs at 255337c: initial site/deny/licence/fmt passed;
+other ordinary checks and four mutation shards remain in progress. Inspect all
+completed jobs and final gate before another push. No CI cancellation, timeout,
+workflow, dependency, exclusion or authority change. PR description is current.
+
+Local evidence is 273 scoped tests, 33 conformance checks, scoped all-target
+Rust 1.99 Clippy/formatting and 16 faults caught/restored. The protected migration
+process was rerun successfully after the final capture fault was restored.
+This handback commit stays local while CI runs. No Cargo/rustc processes remained
+at inspection. No live reads, secrets, money limits, keys, delegation, deployment
+or trading in this increment; autonomous execution remains off.
+
+Next: inspect CI, then consume known opening/current account targets in bounded
+activity collection and resolve historical account discovery, independent
+metadata provenance and economic reconciliation before idempotent risk-state
+application. Independent live risk inputs, execution/exits/recovery/scheduling
+and owner limits/isolated keys/verified Privy policy/delegation/funding/bounded
+deployment validation remain activation requirements. Opening/current account
+union is not exhaustive wallet history and must not soften those refusals.
