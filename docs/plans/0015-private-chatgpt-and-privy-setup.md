@@ -5305,3 +5305,11 @@ Integrated 896009c release 38083555818 has now been downloaded; all six SHA256
 hashes matched BUILD-INFO.txt. Its CI 38083559773 also passed. Nothing deployed.
 Let the initial sale run finish, inspect remaining results, then publish this
 correction and require a fresh full GitHub run. Goal active; live signing closed.
+
+Sale correction CI 38084228108 at 94f3a01 passed every mutation shard: 30
+mutants, 16 caught and 14 unviable, none missed. Downloaded diagnostics confirm
+the real issuer completion paths and credit-unit check are caught, while compiler
+refusals remain labeled unviable. Lint then reached two new test assignments and
+required their trailing semicolons; corrected both. Wait for the remaining test
+job before publication, then require a fresh complete run. No local jobs or live
+changes. Protected exit issuance remains the next feature after this gate.

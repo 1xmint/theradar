@@ -1464,13 +1464,13 @@ fn replay_refuses_completed_spends_that_change_or_exceed_the_recorded_reservatio
                         1,
                         radar_types::Decimals::from_mint_account(6).unwrap(),
                     ),
-                })
+                });
             }
             7 => {
                 entry.state = OperationState::Confirmed(Settlement::CompletedCashFlow {
                     spent: TokenQuantity::lamports(CLAIM + 1),
                     received: TokenQuantity::lamports(CLAIM + 100),
-                })
+                });
             }
             8 => {
                 entry.state = OperationState::Reconciled(Settlement::CompletedCashFlow {
