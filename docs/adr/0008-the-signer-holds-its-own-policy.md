@@ -1297,6 +1297,29 @@ does not implement sale completion, dropped-transaction recovery, current market
 valuation, a live supervisor, delegation or adaptive trading. Live activation
 remains closed. GitHub process regressions must verify the command before use.
 
+## Explicit native spend units
+
+For the private autonomous implementation, retain USD capital and position
+limits and add max_native_spend_lamports to the protected Policy. This is an
+independent physical instruction-spend ceiling, not a price feed or a replacement
+for USD exposure checks. A fresh issuer configuration requires a positive value.
+The issuer converts authorized micro-USD using its protected SOL upper-price
+evidence, rounds down and takes the smaller of that amount and its native policy.
+Its proof binds the resulting max_lamports, exact transaction and authorization.
+The isolated signer independently clamps decoded outgoing instruction lamports
+against its own native policy and the proven conversion. USD authorization and
+canary limits remain checked in USD. Network fee reservations remain separate.
+
+For old serialized policies the optional field is absent, and the previous
+restrictive USD-count-as-lamport ceiling is retained. That is explicitly a legacy
+restriction, not a conversion: upgrades do not silently increase existing
+signing authority. Zero explicitly permits no outgoing native instruction spend.
+Installing the verified native configuration is an operator step, not something
+the model can do. The library and unauthenticated local lane cannot authenticate
+price provenance; only the Privy process verifies issuer proof. Live evidence
+production, exit token quantities, mint/account roles and recovery remain required
+before activation. No production configuration is opened by this change.
+
 ## What would reverse this
 
 Nothing foreseeable reverses holding a policy locally. The specific ceilings are

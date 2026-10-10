@@ -22,6 +22,7 @@ fn policy() -> Policy {
         max_round_trip_cost_bps: 900,
         max_canary: MicroUsd::from_dollars(1.0),
         max_input_staleness: SlotDelta(150),
+        max_native_spend_lamports: None,
         max_consecutive_failures: 3,
     }
 }
@@ -671,6 +672,7 @@ fn a_proposal_exactly_at_every_limit_is_authorised() {
         max_daily_loss: Some(MicroUsd::from_dollars(25.0)),
         max_round_trip_cost_bps: 900,
         max_input_staleness: SlotDelta(150),
+        max_native_spend_lamports: None,
         max_consecutive_failures: 3,
     };
     let at_the_limit = Proposal {

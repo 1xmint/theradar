@@ -158,6 +158,7 @@ fn policy() -> impl Strategy<Value = Policy> {
                 max_deployed,
                 max_per_creator,
                 max_daily_loss,
+                max_native_spend_lamports: None,
                 max_consecutive_failures: max_failures,
                 max_round_trip_cost_bps: cost_bps,
                 max_input_staleness: SlotDelta(staleness),
@@ -392,6 +393,7 @@ proptest! {
             max_deployed: MicroUsd(u64::MAX),
             max_per_creator: MicroUsd(u64::MAX),
             max_daily_loss: Some(MicroUsd(u64::MAX)),
+            max_native_spend_lamports: None,
             max_consecutive_failures: u32::MAX,
             // One basis point: a cost of one micro-dollar would be too much.
             max_round_trip_cost_bps: 1,

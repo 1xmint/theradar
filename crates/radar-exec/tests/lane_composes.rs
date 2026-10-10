@@ -151,6 +151,7 @@ fn capped() -> Policy {
         max_round_trip_cost_bps: 1_000,
         max_canary: MicroUsd::from_dollars(1.0),
         max_input_staleness: SlotDelta(6_000),
+        max_native_spend_lamports: None,
         max_consecutive_failures: 3,
     }
 }

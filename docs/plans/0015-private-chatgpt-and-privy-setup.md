@@ -4855,3 +4855,32 @@ Inspect and close that concrete mismatch before enabling live exits. This is
 required execution work, not a replacement objective or readiness claim. Live
 snapshot/reconciliation coverage, adaptive supervisor/chat, isolated delegation
 and canary/recovery verification remain open.
+
+### Native spend units implementation (2026-10-10)
+
+Previous goal turn made progress correcting an erroneous process-test nonce
+expectation and publishing GitHub verification. Current turn observed direction
+run 38078931338 at 5dc2cbe fully green. Work continues on a separate branch from
+verified integrated 63e66e6 so physical-unit work cannot cancel or depend on the
+direction test run. Preserve and integrate that verified direction separately.
+
+Actual callers are radar_signer::check and radar-issuer::prepare. Explicit
+protected native policy separates chain units from USD exposure. Issuer refuses
+missing/zero native configuration, converts the authorized USD amount with the
+protected SOL upper price, clamps to its native cap and proves the resulting
+max_lamports. Signer independently clamps in native units; missing old fields
+retain the prior restriction and do not silently gain authority. The model
+cannot write either protected policy. Fee reservation stays additional.
+
+Added actual Privy process cases for a $50 / $200-per-SOL conversion, exact native
+boundary, independent signer/caller limits, USD overauthorization, zero and
+legacy fallback, and proof tampering. An actual issuer-process curve buy verifies
+250m lamports under $50 authorization, smaller protected cap, refusals beyond
+either cap, retained proof and absence of reservations after refusal. Startup
+refuses null/zero caps. A wire regression covers explicit native units and old
+policy compatibility. Unit floor 2221 on this branch (direction integration adds
+its separate test). GitHub verification required; no local jobs or live changes.
+
+Still open: live complete portfolio/evidence adapter, token-bounded exits and
+mint/account roles, routing, adaptive supervisor/chat, isolated deployment and
+end-to-end recovery/canary evidence. Goal remains fully autonomous trading.
