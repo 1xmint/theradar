@@ -4543,3 +4543,20 @@ the workflow's server deployment example to the fixed radar-deploy procedure;
 that procedure does not install or activate the separate issuer/signer. Verify
 the release build and its artifact on GitHub before claiming this deployment gap
 closed. No server files, service settings, delegation or funds changed.
+
+PR 342 source 9e43e11 passed every CI job in run 38067700927. Its diff against
+the verified per-option branch contains only release YAML and plan prose, so
+the four mutation jobs have no changed Rust behavior to mutate. Fast-forwarded
+local primary to 9e43e11; release run 38067699398 remains live and artifact
+inclusion/hash verification is still pending. Do not publish over primary run
+38065819742: shard 1 remains live. Shard 2 passed baseline and tested 405 mutants
+(354 caught, 51 unviable); shard 3 passed baseline and tested 402 (324 caught,
+75 unviable, three missed). Its exact survivors are the same risk_floor.rs
+121:16 < to <=, 121:64 / to %, and 151:57 || to && already corrected and verified
+at f39d8d7 in PR 339. No additional speculative risk changes needed.
+
+PR 341 correction 7643dd8 run 38067797787 now passes lint, four baselines and
+all mutation shards (25 mutants: 20 caught, five unviable), with build/tests
+still live at inspection. Inspect terminal results before integration and
+publish the combined primary only after its existing full run finishes. No
+local test/build/lint/mutation jobs or deployment occurred in this handback.
