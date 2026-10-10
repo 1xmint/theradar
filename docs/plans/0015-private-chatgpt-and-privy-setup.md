@@ -3806,3 +3806,29 @@ I/O fault because formatting split the match arm; scope to the category literal
 and completed all four remaining faults. No fault is retained. Formatting and
 all 33 conformance checks passed before commit. Retention source 6ad039f and this
 follow-up still require new-source full CI. No deployment or live authority.
+
+
+### Handback: retention and diagnostics published; fresh CI pending (2026-10-09)
+
+Source f3e7f596d69feb0e9ac1bef6cba0babea9095e48 is fast-forwarded from the
+isolated diagnostics worktree into fix/wallet-signin-diagnostics and pushed to
+PR 334, including retention source 6ad039f. Previous CI 38004462702 fully
+completed successfully before this push; no running check was cancelled.
+PR description now reflects durable evidence, safe history diagnostics and the
+remaining portfolio/coverage gaps. New full CI 38017286781 is in progress at
+f3e7f59, not yet verified. Inspect every ordinary job, all four mutation shards
+and final gate before another push; do not claim this source green yet.
+
+Local proof for diagnostics: 214 signer tests, 33 conformance checks, scoped
+all-target Rust 1.99 Clippy, formatting and five manual faults caught/restored.
+Retention proof remains 504 scoped tests, 33 conformance checks and 26 faults.
+The old generic history failure remains unexplained; one unchanged-source
+rerun passed. New categories improve evidence for a repeat, not root-cause proof.
+
+This handback is a local documentation commit, deliberately not pushed over the
+new CI run. No live read, secrets, limits, keys, delegation, deployment or trade
+in this increment. Autonomous execution remains off. Next work: inspect new CI,
+then complete economic reconciliation and idempotent portfolio application;
+independent live risk inputs and execution/exits/recovery/scheduling remain.
+Activation also requires owner money limits, isolated keys, verified Privy
+policy/delegation, funding and bounded deployment validation.
