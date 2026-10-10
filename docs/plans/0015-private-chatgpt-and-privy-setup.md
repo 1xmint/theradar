@@ -5126,3 +5126,15 @@ combine verified source. Download/check the verified integrated release for late
 protected installation. Live quote provenance/slippage policy, holdings/exit
 issuance/construction/reconciliation, portfolio accounting/recovery, adaptive
 supervisor/chat and protected website handover remain before goal completion.
+
+Output-bound initial CI 38082644735 at 6df0d00 found two issuer-helper lint
+findings (boolean spelling and method closure), corrected without changing its
+meaning. Shard 0 reported the exact execution_output.rs:8:13 && to || mutant
+survived: existing issuer tests had no foreign-program trade payload or known
+curve nontrade. Added both accepted legacy no-output-promise cases in the actual
+issuer process; that mutant wrongly requires a curve floor for them. This is
+classification coverage, not proof of arbitrary program execution semantics.
+Floor now 2233; combined builder floor will be 2235. Let the old run finish before
+publishing; require the fresh GitHub mutation run to prove the exact guard.
+Integrated CI/release 38082045246/38082041644 passed, and every one of the six
+downloaded binary SHA256 hashes matched BUILD-INFO.txt at 33cbe0f. No live change.

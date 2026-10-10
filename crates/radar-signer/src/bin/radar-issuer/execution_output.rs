@@ -9,9 +9,9 @@ pub(super) fn review(bytes: &[u8], floor: Option<u64>) -> Result<Option<u64>, St
                 .known()
                 .copied()
                 .and_then(radar_decode::Instruction::pumpfun)
-                .is_some_and(|known| known.is_trade())
+                .is_some_and(radar_decode::pumpfun::Instruction::is_trade)
     });
-    if has_trade && !floor.is_some_and(|raw| raw > 0) {
+    if has_trade && floor.is_none_or(|raw| raw == 0) {
         return Err("curve trade requires a positive protected output floor".into());
     }
     Ok(floor)

@@ -114,6 +114,46 @@ fn issuer_requires_protected_curve_output_floor_before_reserving_or_attesting() 
     }
 }
 
+#[test]
+fn issuer_distinguishes_nontrades_and_foreign_program_trade_bytes() {
+    for foreign in [false, true] {
+        let mut fixture = Fixture::new();
+        set_curve_buy(&mut fixture, 1_000_000);
+        let mut bytes =
+            radar_types::b64::decode(fixture.candidate["transaction"].as_str().unwrap()).unwrap();
+        if foreign {
+            let program = radar_types::Address::new([0x11; 32]);
+            bytes[133..165].copy_from_slice(program.as_bytes());
+            fixture.config["programs"] = json!([program]);
+        } else {
+            // The helper's seven instruction accounts end at 207; next are
+            // its data length and payload. A nontrade has just a discriminator.
+            bytes[207] = 8;
+            bytes.truncate(216);
+            bytes[208..216].copy_from_slice(
+                radar_decode::pumpfun::Instruction::CollectCreatorFee
+                    .discriminator()
+                    .as_bytes(),
+            );
+        }
+        let encoded = radar_types::b64::encode(&bytes);
+        fixture.candidate["transaction"] = json!(encoded);
+        fixture.snapshot["transaction"] = json!(encoded);
+        fixture.snapshot["transaction_evidence"]["transaction_base64"] = json!(encoded);
+        fixture.snapshot["transaction_evidence"]["message_base64"] =
+            json!(radar_types::b64::encode(&bytes[65..]));
+        fixture.snapshot["min_output_raw"] = Value::Null;
+        fixture.save();
+        let answer = fixture.start().ask(&fixture.candidate);
+        assert_eq!(answer["outcome"], "issued", "foreign={foreign}: {answer}");
+        assert!(
+            answer["intent"]["authorization"]
+                .get("min_output_raw")
+                .is_none()
+        );
+    }
+}
+
 fn reconciliation_fixture() -> (Fixture, radar_journal::OperationId) {
     let mut fixture = inventory_fixture_opening(Some(0));
     let log =
