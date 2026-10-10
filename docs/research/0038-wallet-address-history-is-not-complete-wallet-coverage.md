@@ -115,3 +115,12 @@ remain explicit unresolved rows in original order. Token-2022, CPI, multisig,
 account writability, mint truth, balances and economic effects are not inferred.
 The whole transaction classification stays unresolved and all existing authority
 and portfolio flags remain false.
+
+Provider token-balance comparison is now implemented locally for transactions
+whose top-level intents are all supported TransferChecked and whose metadata
+explicitly reports no inner activity. Exact paired identities, ordered checked
+debits/credits, unchanged failed-transaction token balances and fee-only native
+changes must all agree. Other supplied token rows cannot change unexplained.
+This comparison can expose inconsistent provider metadata but cannot authenticate
+consistent invented metadata. Output retains that distinction, no ownership or
+execution guarantee, and no risk-state update. Full CI is still pending.

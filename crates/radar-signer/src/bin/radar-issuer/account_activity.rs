@@ -49,12 +49,14 @@ fn transaction(row: &Value, reported: &[Address]) -> Result<Value, String> {
     {
         return Err("account activity signature or query membership differs".into());
     }
+    let intents = super::token_intents::review(&message);
+    let effects = super::token_effects::review(&message, row, &intents);
     Ok(
         json!({"signature":signature,"reported_slot":row["slot"],"reported_outcome":row["outcome"],
         "reported_for_addresses":reported,"signature_verified_locally":true,"address_membership_verified_locally":true,
         "message_decoded_locally":true,"versioned_message":message.versioned,
         "classification":"unresolved","execution_effects_verified":false,
-        "top_level_instruction_intents":super::token_intents::review(&message)}),
+        "top_level_instruction_intents":intents,"reported_effect_review":effects}),
     )
 }
 

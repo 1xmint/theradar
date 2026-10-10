@@ -41,6 +41,9 @@ mod account_activity;
 #[path = "radar-issuer/token_intents.rs"]
 mod token_intents;
 
+#[path = "radar-issuer/token_effects.rs"]
+mod token_effects;
+
 #[path = "radar-issuer/account_inventory.rs"]
 mod account_inventory;
 

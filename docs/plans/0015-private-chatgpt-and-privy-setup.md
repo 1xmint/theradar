@@ -4121,3 +4121,64 @@ and C: had 59,410,722,816 bytes free. Latest CI inspection still showed attempt 
 shard 1 running; no push or deployment. Preserve these local commits and inspect
 the prior completed rerun before publishing them. No further CI polling or local
 build remains running for this handback.
+
+### Provider-reported token balance consistency (2026-10-10)
+
+Independent work on feat/token-balance-consistency is based on primary a6f2944
+in the sibling checkout while prior CI 38023346308 attempt 2 runs. Caller is
+protected account-activity review after signature/membership checks, using its
+locally decoded TransferChecked intents. No signing or journal write is added.
+
+For nonempty all-supported intents and explicitly empty innerInstructions,
+compare reported outcome/error, fee identity and exact native fee-only changes.
+Parse token balances with bounded unique static account indices and exact u64
+amounts, mint/program/owner/decimal identities. Require paired account sets and
+stable identities. Apply ordered signed debits/credits with intermediate checked
+arithmetic; self-transfer must fund the debit. Reported failed execution requires
+unchanged token balances. Every supplied token row, including unrelated rows,
+must match the expected final balance. Account creation/closure, unknown CPI,
+unsupported instructions, incomplete identities or unexplained changes remain
+unresolved without discarding the valid signature/membership review.
+
+Output says consistent_with_signed_transfer_intents only for this bounded
+provider-data comparison. Execution effects, ownership, independent metadata
+provenance and portfolio updates remain unverified/false; root classification
+stays unresolved. The comparison does not prove runtime account writability,
+historical owner authority, inclusion or exhaustive history. It is not risk-state
+application. Official RPC metadata shapes checked at
+https://solana.com/docs/rpc/json-structures.
+
+Two new unit regressions cover cumulative and failed transfers, intermediate
+self-transfer debit/overflow, paired identities/index/extent failures and unknown
+activity. The actual protected issuer process checks matching failed-transfer
+balances and a changed balance returning unresolved while retaining verified
+signatures and leaving history untouched. Final proof and faults follow.
+
+Restored checks passed 225 signer tests, scoped all-target Rust 1.99 Clippy and
+workspace formatting. Twenty-six deliberate faults were caught/restored: token
+index bounds/duplicates, exact native extents, payer/fee arithmetic and equality,
+empty/unsupported intents, inner activity, succeeded/failed outcome branches,
+fee binding, token extent, signed mint/program/units, debit/credit arithmetic,
+stable post mint/owner/program/units, final token equality, change sign and actual
+protected issuer effect-review dispatch. Unchanged JSON/iterator plumbing was
+not separately mutated. No dependency, exclusion or suppression was added.
+The expanded negative test exceeded the function-size lint; extracted paired
+identity/index cases into a borrowed helper and reran lint and full scoped tests.
+
+### Handback: reported token balance consistency complete locally (2026-10-10)
+
+This source commit on feat/token-balance-consistency includes the handback; find
+its hash in git log. After staged conformance/full diff review, integrate primary
+locally. Prior CI 38023346308 attempt 2 still ran at last inspection; do not push
+over it. The unpublished collector/signature/intent/consistency sources need
+fresh full CI together after prior-run completion. Inspect every shard baseline,
+summary and final gate; a repeated timeout needs an owner CI tradeoff decision.
+
+Autonomous execution stays off. No journal or risk state was changed by this
+review, and no live read, key provisioning, funding, delegation, deployment or
+trade occurred. Next is establishing complete economic coverage and durable,
+idempotent risk-state application; provider-data consistency cannot establish
+independent metadata truth. Independent live risk inputs, execution/exits/recovery
+and owner limits/Privy policy/delegation/funding/deployment remain unfinished.
+
+All 33 staged repo-conformance checks and git diff --cached --check passed.

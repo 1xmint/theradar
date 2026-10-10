@@ -4037,7 +4037,11 @@ fn account_activity_fixture() -> Fixture {
     }
     bytes.extend(message);
     let signature = radar_types::Signature::new(bytes[1..65].try_into().unwrap());
-    let row = json!({"signature":signature,"slot":"1000","outcome":"failed","transaction_base64":radar_types::b64::encode(&bytes),"raw_metadata":{"private":"MUST_NOT_FORWARD_METADATA"}});
+    let balance = |index, amount: &str| json!({"accountIndex":index,"mint":radar_types::Address::new([7;32]),"owner":wallet,"programId":program,"uiTokenAmount":{"amount":amount,"decimals":6}});
+    let row = json!({"signature":signature,"slot":"1000","outcome":"failed","transaction_base64":radar_types::b64::encode(&bytes),"network_fee_lamports":"2",
+        "raw_metadata":{"private":"MUST_NOT_FORWARD_METADATA","err":{"InstructionError":[0,1]},"fee":2,"innerInstructions":[],
+        "preBalances":[100,0,0,0,0,0],"postBalances":[98,0,0,0,0,0],
+        "preTokenBalances":[balance(3,"10"),balance(2,"3")],"postTokenBalances":[balance(3,"10"),balance(2,"3")]}});
     fixture.snapshot["wallet_evidence"]["wallet_activity"] = json!({"version":1,"authority":"read_only","commitment":"finalized",
         "wallet":wallet,"coverage":"provider_reported_known_address_history","queried_addresses":[wallet,token],
         "read_started_at_unix_secs":unix_now(),"read_completed_at_unix_secs":unix_now(),
@@ -4210,10 +4214,37 @@ fn account_activity_review_verifies_all_signers_without_writing_or_claiming_exec
     assert_eq!(intent["requested_decimals"], 6);
     assert_eq!(intent["source_account"], json!(address(0x66)));
     assert_eq!(intent["execution_effects_verified"], false);
+    assert_eq!(
+        report["transactions"][0]["reported_effect_review"]["status"],
+        "consistent_with_signed_transfer_intents"
+    );
+    assert_eq!(
+        report["transactions"][0]["reported_effect_review"]["execution_effects_verified"],
+        false
+    );
     assert!(!String::from_utf8_lossy(&output.stdout).contains("MUST_NOT_FORWARD_METADATA"));
     assert_eq!(std::fs::read(&path).unwrap(), saved);
     account_activity_target_bounds_and_future_opening_refuse();
     let original = fixture.snapshot.clone();
+    fixture.snapshot["wallet_evidence"]["wallet_activity"]["transactions"][0]["raw_metadata"]["postTokenBalances"]
+        [0]["uiTokenAmount"]["amount"] = json!("11");
+    fixture.save();
+    let changed = fixture
+        .command()
+        .arg("--review-account-activity")
+        .output()
+        .unwrap();
+    assert!(changed.status.success());
+    let changed: Value = serde_json::from_slice(&changed.stdout).unwrap();
+    assert_eq!(
+        changed["transactions"][0]["signature_verified_locally"],
+        true
+    );
+    assert_eq!(
+        changed["transactions"][0]["reported_effect_review"]["status"],
+        "unresolved"
+    );
+    assert_eq!(std::fs::read(&path).unwrap(), saved);
     for (pointer, value) in account_activity_bad_inputs(&fixture) {
         fixture.snapshot = original.clone();
         *fixture.snapshot.pointer_mut(pointer).unwrap() = value;

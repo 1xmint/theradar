@@ -1254,6 +1254,22 @@ execution. Token-2022, multisig, CPI and other forms stay explicit unresolved
 rows. This does not establish writability, mint/account truth, ownership or
 executed economic effects; the transaction classification remains unresolved.
 
+The same signature-verified review compares provider-reported balances for
+nonempty transactions containing only supported TransferChecked intents and
+explicitly empty inner activity. It binds reported outcome/error and fee,
+requires exact fee-only native changes, unique bounded paired token-account
+indices, and stable mint/program/owner/decimal identities. Ordered token
+debits/credits use checked intermediate amounts, including self-transfer funding;
+reported failed transactions must leave tokens unchanged. Every supplied token
+row must match. Missing evidence, unsupported activity or unexplained changes
+produce an unresolved effect review while retaining verified authorship.
+
+The result is only consistency with signed intent under provider-reported data.
+It does not independently verify inclusion, metadata, historical ownership,
+runtime validity or completeness. All execution/ownership/portfolio flags stay
+false and the root classification stays unresolved. It writes no journal and
+cannot satisfy live reconciliation or authorize capital.
+
 ## What would reverse this
 
 Nothing foreseeable reverses holding a policy locally. The specific ceilings are
