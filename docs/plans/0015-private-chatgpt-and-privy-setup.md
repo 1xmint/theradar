@@ -5138,3 +5138,26 @@ Floor now 2233; combined builder floor will be 2235. Let the old run finish befo
 publishing; require the fresh GitHub mutation run to prove the exact guard.
 Integrated CI/release 38082045246/38082041644 passed, and every one of the six
 downloaded binary SHA256 hashes matched BUILD-INFO.txt at 33cbe0f. No live change.
+
+### Verified builder and output-regression publication handback (2026-10-10)
+
+This goal turn progressed verification and publication, not live activation.
+Builder PR 353 at f18f368 passed full GitHub CI 38082687122: every job green,
+including 13 mutants (11 caught, two unviable, none missed). Its PR description
+now records exact evidence. It is ready to integrate once the parallel output
+branch has finished against its existing base.
+
+Output initial CI 38082644735 completed: tests/build/MSRV passed, with only the
+previously identified lint and classification-mutation failures. Published the
+committed f2fa79e correction after that run was terminal. Fresh GitHub CI
+38082995334 is in progress; lint and the formerly failing shard 0 now pass.
+Do not claim full success or push over this run. PR 354 records the pending run.
+No local tests/build/lint/mutation jobs, live service or wallet changes occurred.
+
+Next: inspect terminal CI 38082995334 and its exact mutation results; integrate
+verified builder/output source, resolving appended plan/test-floor differences,
+then require full combined GitHub CI/release. Continue protected holdings-derived
+exit authority and actual bidirectional construction/reconciliation, live marked
+portfolio/evidence, adaptive supervisor/research chat, recovery and protected
+site handover. Existing checklist decisions remain settled; do not ask for chat
+limits again. Autonomous trading remains off and the goal remains active.
