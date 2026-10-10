@@ -344,7 +344,7 @@ mod tests {
             .find(|row| row["name"] == "buy_exact_sol_in")
             .unwrap();
         assert!(row["execution_error"].is_null());
-        let captured = radar_types::b64::decode(row["data_base64"].as_str().unwrap()).unwrap();
+        let packet = radar_types::b64::decode(row["data_base64"].as_str().unwrap()).unwrap();
         let built = Trade::BuyExactSolIn {
             lamports: 654_301_622,
             min_tokens_out: 2_202_113_837_114,
@@ -354,8 +354,8 @@ mod tests {
         .unwrap();
         // This accepted capture omits trailing flags. Only its discriminator
         // and two quantity arguments are an execution-backed layout anchor.
-        assert_eq!(captured.len(), 24);
-        assert_eq!(&built[..24], captured);
+        assert_eq!(packet.len(), 24);
+        assert_eq!(&built[..24], packet);
     }
 
     #[test]

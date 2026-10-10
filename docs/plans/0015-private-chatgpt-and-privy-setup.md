@@ -5096,3 +5096,8 @@ quote freshness/provenance or independent authorized minimum-output enforcement.
 Those, live holdings/exit authority, supported sell construction and reconciliation,
 portfolio accounting/recovery, adaptive supervisor/research chat and protected
 site handover/deployment still remain. Goal stays fully autonomous trading.
+
+Exact-SOL run 38081913177 at fe1da36 found a lint naming collision in the new
+capture test (captures/captured). Rename the payload packet. All mutation shards
+passed; let remaining jobs finish before publishing the correction. Require a
+fresh full GitHub run rather than treating a naming-only fix as already verified.
