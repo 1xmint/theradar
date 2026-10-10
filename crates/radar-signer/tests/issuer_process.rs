@@ -234,7 +234,7 @@ fn issuer_reconciles_failed_network_fee_once_and_keeps_loss_and_failure_history(
     assert!(reconcile_operation(&fixture, id.as_str()).status.success());
     assert_eq!(std::fs::read(&path).unwrap(), saved);
     let report: Value = serde_json::from_slice(&acquisition_report(&fixture).stdout).unwrap();
-    assert_eq!(report["lots"].as_array().unwrap().as_slice(), []);
+    assert_eq!(report["lots"], json!([]));
     assert_eq!(report["failed_execution_fees"].as_array().unwrap().len(), 1);
     assert_eq!(
         report["recorded_failed_fee_totals"]["network_fee_micro_usd"],

@@ -4825,3 +4825,11 @@ checkpoint/cash mismatch. Remove the redundant asset guard: the only supplied
 portfolio holding is native SOL, and rehold already refuses any other asset.
 The sale guard remains explicit. No mutation exclusions or check weakening.
 Reverify the corrections on GitHub after the previous run is terminal.
+
+
+Corrected-source run 38077523601 at ed85334 found a test compilation error,
+not a new behavioral result: serde_json::Value's multiple PartialEq types make
+the suggested empty array RHS ambiguous (E0282, issuer_process.rs:237). Compare
+the JSON array directly to json!([]). Mutation baselines could not build, so
+none of this run's mutation outcomes count as verification. Preserve the run
+until terminal, then publish this test-only correction and reverify all checks.
