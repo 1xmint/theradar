@@ -36,15 +36,19 @@ fn existing_kernel_decisions_do_not_invent_token_debit_authority() {
     let verdict = evaluate(&buy(10.0), &PortfolioState::flat(Slot(1_000)), &policy());
     let authorization = verdict.authorisation().expect("valid buy");
     assert_eq!(authorization.max_token_debit_raw, None);
+    assert_eq!(authorization.min_output_raw, None);
     let old_wire = serde_json::to_value(authorization).unwrap();
     assert!(old_wire.get("max_token_debit_raw").is_none());
+    assert!(old_wire.get("min_output_raw").is_none());
     let parsed: radar_risk::Authorization = serde_json::from_value(old_wire.clone()).unwrap();
     assert_eq!(parsed, *authorization);
     for limit in [0, 10, u64::MAX] {
         let mut bounded = old_wire.clone();
         bounded["max_token_debit_raw"] = serde_json::json!(limit);
+        bounded["min_output_raw"] = serde_json::json!(limit);
         let parsed: radar_risk::Authorization = serde_json::from_value(bounded.clone()).unwrap();
         assert_eq!(parsed.max_token_debit_raw, Some(limit));
+        assert_eq!(parsed.min_output_raw, Some(limit));
         assert_eq!(serde_json::to_value(parsed).unwrap(), bounded);
     }
 }

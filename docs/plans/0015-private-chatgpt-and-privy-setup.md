@@ -5091,3 +5091,38 @@ naming-only lint correction committed as 72f296a, awaiting terminal old run befo
 publication. Do not integrate it as verified yet. Authorized output floors, live
 holdings/exit issuance and reconciliation, portfolio inputs, adaptive supervisor/
 research chat, recovery and protected site handover remain goal work.
+
+### Issuer-bound output protection and handback (2026-10-10)
+
+Previous goal turn made source progress on the builder-unit correction and
+verified-source integration. This turn inspected initial PR 353 failures, fixed
+its LEARNINGS metadata and published the correction. GitHub retargeted PR 353
+after its executor base was integrated: it now conflicts only in appended plan
+text against integrated 33cbe0f, so it has no fresh run until resolved. Do not
+mistake missing checks for a running verification handle.
+
+Started feat/signer-output-floor from verified f90b058 and fast-forwarded its
+base to integrated 33cbe0f (documentation-only difference). Integrated CI
+38082045246 and release 38082041644 have both now passed. No live change.
+
+Actual caller: radar_signer::check and the protected issuer prepare path. Added
+optional min_output_raw authority, checked aggregate encoded trade-output floors
+and refusal for zero/insufficient/overflow guarantees and unsupported suffixes.
+Current first-party IDL includes partial-fill options, so do not assume the first
+two u64 fields alone guarantee the named output with arbitrary trailing arguments.
+The protected issuer requires a positive floor for known curve trades, drawn from
+its private snapshot rather than stdin. Legacy absent library/wire authority
+retains no output guarantee; kernel decisions invent no quote. Existing native
+issuer regression now supplies a protected floor and still isolates native units.
+
+Four actual-process regressions cover all variants/units, split floors/overflow,
+proof tampering, foreign/nontrade discriminators, optional suffixes, and issuer
+refusal before reservation. Extended wire compatibility; floor 2232 on this branch
+(and 2234 once the two builder regressions are integrated). No local jobs or live
+signing/deployment. Publish for GitHub tests/build/lint/mutation verification.
+
+Next: resolve PR 353's retargeted-base conflict, inspect both fresh runs, then
+combine verified source. Download/check the verified integrated release for later
+protected installation. Live quote provenance/slippage policy, holdings/exit
+issuance/construction/reconciliation, portfolio accounting/recovery, adaptive
+supervisor/chat and protected website handover remain before goal completion.

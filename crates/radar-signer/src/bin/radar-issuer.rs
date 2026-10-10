@@ -33,6 +33,9 @@ mod acquisitions;
 #[path = "radar-issuer/reconciliation.rs"]
 mod reconciliation;
 
+#[path = "radar-issuer/execution_output.rs"]
+mod execution_output;
+
 #[path = "radar-issuer/native_transfers.rs"]
 mod native_transfers;
 
@@ -84,6 +87,10 @@ struct Config {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Snapshot {
+    // Protected operator-reviewed raw output floor; never accepted from stdin.
+    // Required for known curve trades. This is not independently live-quoted.
+    #[serde(default)]
+    min_output_raw: Option<u64>,
     wallet: Address,
     observed_at_unix_secs: u64,
     sol_lamports: u64,
@@ -504,6 +511,7 @@ impl Issuer {
             .ok_or("fee reservation overflow")?;
         let bytes = radar_types::b64::decode(&candidate.transaction)
             .ok_or("invalid transaction encoding")?;
+        authorization.min_output_raw = execution_output::review(&bytes, snapshot.min_output_raw)?;
         let allowlist = radar_signer::Allowlist {
             programs: self.config.programs.iter().map(|a| *a.as_bytes()).collect(),
         };

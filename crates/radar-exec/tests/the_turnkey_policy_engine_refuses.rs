@@ -211,6 +211,7 @@ fn a_transaction_outside_the_authorisation_never_reaches_turnkey() {
         max_notional: MicroUsd(50_000_000),
         expires_after: Slot(1_150),
         max_token_debit_raw: None,
+        min_output_raw: None,
         needs_operator_signature: false,
     };
 
@@ -257,6 +258,7 @@ fn the_shipped_policy_refuses_before_any_request_is_made() {
         max_notional: MicroUsd(50_000_000),
         expires_after: Slot(1_150),
         max_token_debit_raw: None,
+        min_output_raw: None,
         needs_operator_signature: false,
     };
 

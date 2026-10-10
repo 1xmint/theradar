@@ -1391,6 +1391,35 @@ writability, verify arbitrary allowed-program semantics, or provide live holding
 coverage. Exit issuance, routing and accounting remain required. No deployment,
 signing permission or live wallet authority is changed by this source update.
 
+## Protected output floors
+
+Authorization.min_output_raw is an optional wire field independent of outgoing
+native spend and sale token quantities. When supplied it must be positive. For
+known curve trades the signer sums encoded guaranteed output with checked raw
+arithmetic: authorized-mint tokens for buys, native lamports for sales. Too little
+output, overflow or unreviewed argument suffixes refuse. Only captured 24-byte
+quantity layouts and the older buy/BuyExactSolIn track-volume bool are admitted
+under an output promise. Current first-party interfaces add partial-fill options;
+their effects are not assumed from the first two amounts. Other quote assets
+remain refused by the independent role/quote check. Nontrade or foreign-program
+bytes cannot satisfy an output promise, even with matching discriminators.
+
+Legacy absent fields preserve their serialized shape and provide no output
+promise in the direct library/local lane. The protected offline issuer now
+requires a positive protected Snapshot.min_output_raw for every known curve
+trade, copies it into authority, checks the exact transaction and binds it in
+issuer proof before persisting a reservation. Stdin cannot supply this floor.
+Missing/zero floor or a transaction that weakens it refuses before reservation.
+This remains an operator-reviewed floor, not independent quote provenance or an
+automatic slippage policy. The pure kernel invents no output quote or guarantee.
+
+The actual Privy process regressions cover all six variants, exact/insufficient/
+zero floors, split totals, overflow, proof tampering and optional suffixes. The
+actual issuer regression covers missing/zero/exact/excess protected floors and
+no-reservation refusals. These instruction guarantees do not prove final net
+wallet credits, current liquidity, token-account ownership, complete execution
+semantics or live fill/accounting. Live sales remain unissued and closed.
+
 ## What would reverse this
 
 Nothing foreseeable reverses holding a policy locally. The specific ceilings are

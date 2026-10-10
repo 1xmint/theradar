@@ -147,6 +147,7 @@ fn authorisation_for(mint: &Address) -> Authorization {
         max_notional: MicroUsd(SPEND_LAMPORTS),
         expires_after: Slot(1_100),
         max_token_debit_raw: None,
+        min_output_raw: None,
         needs_operator_signature: false,
     }
 }

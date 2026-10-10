@@ -17,28 +17,7 @@ fn issuer_converts_usd_to_native_units_then_clamps_and_proves_the_native_policy(
     ] {
         let mut fixture = Fixture::new();
         fixture.config["policy"]["max_native_spend_lamports"] = json!(limit);
-        let pump = radar_decode::pumpfun::PROGRAM_ID;
-        fixture.config["programs"] = json!([pump]);
-        let mut bytes =
-            radar_types::b64::decode(fixture.candidate["transaction"].as_str().unwrap()).unwrap();
-        // Three static accounts, then blockhash; replace the synthetic venue
-        // with a real curve-buy discriminator and a readable native size.
-        bytes[133..165].copy_from_slice(pump.as_bytes());
-        bytes.truncate(197);
-        let mut data = radar_decode::pumpfun::Instruction::BuyExactSolIn
-            .discriminator()
-            .as_bytes()
-            .to_vec();
-        data.extend(spend.to_le_bytes());
-        data.extend(1_u64.to_le_bytes());
-        bytes.extend([1, 2, 7, 1, 1, 1, 1, 1, 1, 0, 24]);
-        bytes.extend(data);
-        let encoded = radar_types::b64::encode(&bytes);
-        fixture.candidate["transaction"] = json!(encoded);
-        fixture.snapshot["transaction"] = json!(encoded);
-        fixture.snapshot["transaction_evidence"]["transaction_base64"] = json!(encoded);
-        fixture.snapshot["transaction_evidence"]["message_base64"] =
-            json!(radar_types::b64::encode(&bytes[65..]));
+        set_curve_buy(&mut fixture, spend);
         fixture.save();
         let answer = fixture.start().ask(&fixture.candidate);
         assert_eq!(
@@ -65,6 +44,72 @@ fn issuer_converts_usd_to_native_units_then_clamps_and_proves_the_native_policy(
             assert!(issuer.check(&intent, unix_now()).is_ok());
         } else {
             assert_eq!(answer["reason"], "transaction refused");
+        }
+    }
+}
+
+fn set_curve_buy(fixture: &mut Fixture, spend: u64) {
+    let pump = radar_decode::pumpfun::PROGRAM_ID;
+    fixture.config["programs"] = json!([pump]);
+    let mut bytes =
+        radar_types::b64::decode(fixture.candidate["transaction"].as_str().unwrap()).unwrap();
+    // Three static accounts, then blockhash; replace the synthetic venue
+    // with a real curve-buy discriminator and a readable native size.
+    bytes[133..165].copy_from_slice(pump.as_bytes());
+    bytes.truncate(197);
+    let mut data = radar_decode::pumpfun::Instruction::BuyExactSolIn
+        .discriminator()
+        .as_bytes()
+        .to_vec();
+    data.extend(spend.to_le_bytes());
+    data.extend(1_u64.to_le_bytes());
+    bytes.extend([1, 2, 7, 1, 1, 1, 1, 1, 1, 0, 24]);
+    bytes.extend(data);
+    let encoded = radar_types::b64::encode(&bytes);
+    fixture.candidate["transaction"] = json!(encoded);
+    fixture.snapshot["transaction"] = json!(encoded);
+    fixture.snapshot["transaction_evidence"]["transaction_base64"] = json!(encoded);
+    fixture.snapshot["transaction_evidence"]["message_base64"] =
+        json!(radar_types::b64::encode(&bytes[65..]));
+    fixture.snapshot["min_output_raw"] = json!(1);
+}
+
+#[test]
+fn issuer_requires_protected_curve_output_floor_before_reserving_or_attesting() {
+    for floor in [None, Some(0), Some(1), Some(2)] {
+        let mut fixture = Fixture::new();
+        set_curve_buy(&mut fixture, 1_000_000);
+        fixture.snapshot["min_output_raw"] = json!(floor);
+        fixture.save();
+        let answer = fixture.start().ask(&fixture.candidate);
+        let allowed = floor == Some(1);
+        assert_eq!(
+            answer["outcome"],
+            if allowed { "issued" } else { "refused" }
+        );
+        let log =
+            radar_journal::OperationLog::open(fixture.dir.path().join("operations.jsonl")).unwrap();
+        assert_eq!(log.outstanding().count(), usize::from(allowed));
+        if allowed {
+            assert_eq!(answer["intent"]["authorization"]["min_output_raw"], 1);
+            let mut intent: radar_signer::protocol::PrivyAuthorization =
+                serde_json::from_value(answer["intent"].clone()).unwrap();
+            let key = ed25519_dalek::SigningKey::from_bytes(&SEED);
+            let issuer = radar_signer::attestation::Issuer::new(
+                &radar_types::Address::new(key.verifying_key().to_bytes()),
+                60,
+            )
+            .unwrap();
+            assert!(issuer.check(&intent, unix_now()).is_ok());
+            intent.authorization.min_output_raw = Some(2);
+            assert!(issuer.check(&intent, unix_now()).is_err());
+        } else if floor == Some(2) {
+            assert_eq!(answer["reason"], "transaction refused");
+        } else {
+            assert_eq!(
+                answer["reason"],
+                "curve trade requires a positive protected output floor"
+            );
         }
     }
 }

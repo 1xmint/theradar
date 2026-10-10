@@ -39,6 +39,23 @@ pub const SYSTEM_PROGRAM: [u8; 32] = [0u8; 32];
 /// ever going to be signable.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, thiserror::Error)]
 pub enum Rejection {
+    /// An explicit output promise must be positive.
+    #[error("minimum output authority must be positive")]
+    InvalidOutputFloor,
+    /// Guaranteed output quantities overflow their raw-unit range.
+    #[error("aggregate minimum output overflows")]
+    OutputFloorOverflow,
+    /// Optional trade arguments can alter fill semantics and need review.
+    #[error("output guarantee has unsupported arguments for {0}")]
+    UnreadableOutputGuarantee(String),
+    /// The encoded transaction permits less output than authorized.
+    #[error("transaction guarantees {guaranteed} output units, below required {required}")]
+    OutputFloorNotMet {
+        /// Total encoded guaranteed output, not a quote or realized fill.
+        guaranteed: u64,
+        /// Minimum authorized output.
+        required: u64,
+    },
     /// A known curve instruction names a different or missing mint/trader, or
     /// a v2 quote asset whose units this native-SOL signer cannot authorize.
     #[error("trade {instruction} has a missing or mismatched {role} role")]
@@ -340,6 +357,7 @@ pub fn check(
         authorization,
         signing_wallet,
     ));
+    rejections.extend(crate::output_bounds::check(&message, authorization));
 
     // Every action gets a ceiling on outgoing lamports, and until 2026-08-31
     // only `Buy` did.
@@ -630,6 +648,7 @@ pub mod tests_support {
             max_notional: MicroUsd(50_000_000),
             expires_after: Slot(1_150),
             max_token_debit_raw: None,
+            min_output_raw: None,
             needs_operator_signature: false,
         };
         check(
@@ -700,6 +719,7 @@ mod tests {
             max_notional: MicroUsd(50_000_000),
             expires_after: Slot(1_150),
             max_token_debit_raw: None,
+            min_output_raw: None,
             needs_operator_signature: false,
         }
     }

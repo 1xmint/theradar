@@ -21,6 +21,7 @@
 pub mod attestation;
 pub mod canonical;
 pub mod key;
+mod output_bounds;
 pub mod privy;
 pub mod protocol;
 pub mod replay;
