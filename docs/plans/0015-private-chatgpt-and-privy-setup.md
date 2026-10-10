@@ -4436,3 +4436,28 @@ is pending GitHub Actions, with no local test/build/lint/mutation jobs. No live
 deployment or authority changed. PR 337 separately contains the retained-risk
 guard; its first GitHub baseline found two older nonzero-opening fixtures that
 must be constructed as historical journal entries, not newly authorized trades.
+
+PR 338 run 38065557483 passed each nonempty mutation baseline but reported one
+new survivor at account_activity.rs:15:20, changing packet length >1232 to
+>=1232. Added a correctly signed, decodable packet of exactly 1232 bytes with an
+opaque instruction; trailing bytes would not test this boundary because the
+decoder refuses them independently. Ordinary jobs were still finishing at last
+inspection. Wait for terminal status before publishing this test correction;
+all verification remains on GitHub. No exclusions or production guard changes.
+
+### Integrated primary verification handback (2026-10-10)
+
+Primary now integrates PR 335's proven owner/token sources, PR 337's risk guard
+and historical fixture correction (285b7f7), and PR 338's packet-boundary fix
+(f186b11). Resolved only plan append conflicts and combined unit floor to 2213.
+Reviewed the full staged changes before committing. PR 338 first run finished:
+every ordinary job passed, only its packet-equality mutant and final gate failed;
+the exact-boundary correction is published for fresh GitHub verification.
+The risk correction's run 38065674814 is also live. Publish integrated primary
+now that its prior full-branch run is terminal and all failure logs/annotations
+were inspected. Fresh full-branch GitHub tests and all four mutation shards must
+verify this combined source; stacked checks alone cannot prove that scope.
+Do not push over these live runs. No local test/build/lint/mutation jobs,
+deployment or trades. Continue with any reported failures, then complete live
+risk coverage, durable application/recovery, execution/exits, limits, signer
+isolation, delegation and funding before turning autonomous execution on.

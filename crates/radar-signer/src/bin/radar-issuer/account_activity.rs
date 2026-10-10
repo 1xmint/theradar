@@ -243,6 +243,19 @@ mod tests {
             truncated["transaction_base64"] = json!(b64::encode(&bytes[..length]));
             assert!(transaction(&truncated, &[address]).is_err(), "{length}");
         }
+        // A valid packet at the exact network limit must be accepted. Use an
+        // opaque instruction to reach the boundary without trailing garbage.
+        let mut message = bytes[65..].to_vec();
+        message.pop();
+        message.extend([1, 0, 0, 0xC6, 8]);
+        message.extend([0; 1094]);
+        let signature = Signature::new(key.sign(&message).to_bytes());
+        let mut packet = vec![1];
+        packet.extend(signature.as_bytes());
+        packet.extend(message);
+        assert_eq!(packet.len(), 1232);
+        let at_limit = json!({"signature":signature,"transaction_base64":b64::encode(&packet)});
+        assert!(transaction(&at_limit, &[address]).is_ok());
     }
     #[test]
     fn every_signer_and_reported_static_address_must_match_exact_bytes() {
