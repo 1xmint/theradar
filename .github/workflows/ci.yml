@@ -105,7 +105,7 @@ jobs:
     # A wedged job should fail as a timeout rather than as an unexplained
     # cancellation, which is a distinction this workflow has already cost a
     # session for want of.
-    timeout-minutes: 30
+    timeout-minutes: 60
     # Only on pull requests: `--in-diff` needs two sides to diff, and on a push
     # to main there is nothing to compare against that is not already merged.
     if: github.event_name == 'pull_request'

@@ -51,6 +51,9 @@ const KEY_PREFIX: &str = "wallet-auth:";
 /// Why an authorization signature could not be produced.
 #[derive(Clone, PartialEq, Eq, Debug, thiserror::Error)]
 pub enum NotAuthorised {
+    /// The request does not target the configured wallet and signing operation.
+    #[error("the Privy request is outside the configured wallet scope")]
+    OutsideScope,
     /// The kernel's bounds refuse this transaction.
     ///
     /// A refusal is a normal outcome, not an error — the signer refusing is the
@@ -77,6 +80,64 @@ pub enum NotAuthorised {
     /// The key could not sign.
     #[error("the authorization key could not sign: {0}")]
     KeyFailed(String),
+}
+
+/// Trusted configuration loaded by the signer, never from a signing request.
+pub struct WalletScope {
+    app_id: String,
+    rpc_url: String,
+    wallet: Address,
+}
+
+impl WalletScope {
+    /// Binds the Privy wallet ID to its independently configured Solana address.
+    ///
+    /// # Errors
+    /// Returns [`NotAuthorised::OutsideScope`] for an empty ID or URL metacharacters.
+    pub fn new(app_id: &str, wallet_id: &str, wallet: Address) -> Result<Self, NotAuthorised> {
+        for id in [app_id, wallet_id] {
+            if id.is_empty()
+                || !id
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+            {
+                return Err(NotAuthorised::OutsideScope);
+            }
+        }
+        Ok(Self {
+            app_id: app_id.to_owned(),
+            rpc_url: format!("https://api.privy.io/v1/wallets/{wallet_id}/rpc"),
+            wallet,
+        })
+    }
+
+    /// The wallet address this signer is configured to serve.
+    #[must_use]
+    pub const fn wallet(&self) -> &Address {
+        &self.wallet
+    }
+
+    fn check(&self, request: &PrivyRequest) -> Result<(), NotAuthorised> {
+        if request.method != "POST"
+            || request.url != self.rpc_url
+            || request.headers.get("privy-app-id").and_then(Value::as_str)
+                != Some(self.app_id.as_str())
+            || request.body.get("method").and_then(Value::as_str) != Some("signTransaction")
+            || request
+                .body
+                .get("params")
+                .and_then(|p| p.get("encoding"))
+                .and_then(Value::as_str)
+                != Some("base64")
+            || request
+                .body
+                .get("chain_type")
+                .is_some_and(|chain| chain != "solana")
+        {
+            return Err(NotAuthorised::OutsideScope);
+        }
+        Ok(())
+    }
 }
 
 /// A Privy JSON-RPC request, as it will be sent.
@@ -186,7 +247,7 @@ pub fn authorise(
     key: &AuthorizationKey,
     request: &PrivyRequest,
     authorization: &Authorization,
-    signing_wallet: &Address,
+    scope: &WalletScope,
     allowlist: &Allowlist,
     policy: &Policy,
     bounds: crate::verify::CallerBounds,
@@ -195,6 +256,9 @@ pub fn authorise(
     // caller able to supply one transaction for checking and another for
     // signing would make this whole function decorative.
     let encoded = request.transaction().ok_or(NotAuthorised::NoTransaction)?;
+    // Signing a different RPC operation or destination could authorize effects
+    // unrelated to the transaction we decoded. Bind these before using the key.
+    scope.check(request)?;
     let bytes = radar_types::b64::decode(encoded).ok_or_else(|| {
         NotAuthorised::NotBase64("the transaction is not valid base64".to_owned())
     })?;
@@ -202,7 +266,7 @@ pub fn authorise(
     crate::verify::check(
         authorization,
         &bytes,
-        signing_wallet,
+        scope.wallet(),
         allowlist,
         policy,
         bounds,

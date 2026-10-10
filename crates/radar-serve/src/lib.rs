@@ -14,6 +14,7 @@
 pub mod access;
 pub mod admission;
 pub mod api;
+mod automation;
 pub mod cache;
 pub mod challenges;
 pub mod chat;
@@ -304,6 +305,7 @@ impl Drop for VisitorGuard {
 /// deployment returns 404 for them rather than serving intelligence for free.
 pub fn app(state: Arc<AppState>) -> Router {
     let mut router = Router::new()
+        .merge(automation::routes())
         // The interface, embedded in this binary. The server-rendered ops page
         // stays at /ops as the no-JavaScript fallback: it is what answers when
         // somebody is debugging with curl, and it needs no build to exist.
@@ -380,11 +382,11 @@ pub fn app(state: Arc<AppState>) -> Router {
         // paywall that admits its own shape is halfway to one that fails open.
         .fallback(interface);
 
+    // Linking a subscription precedes giving inference a spending budget.
+    // Named even when unconfigured, so GET returns JSON rather than the SPA.
+    router = router.route("/v1/link", post(link::begin).get(link::status));
     if state.chat.is_some() {
-        router = router
-            .route("/v1/chat", post(chat::ask))
-            .route("/v1/link", post(link::begin))
-            .route("/v1/link", get(link::status));
+        router = router.route("/v1/chat", post(chat::ask));
     }
 
     if state.x402.is_some() {

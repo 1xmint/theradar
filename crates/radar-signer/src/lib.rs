@@ -10,17 +10,20 @@
 //!
 //! # What this defends against
 //!
-//! Not a bug in the executor — a *replaced* executor. Assume it can build any
-//! transaction and describe it any way it likes. The two things it cannot do
-//! are forge an [`radar_risk::Authorization`] the kernel never issued, and
-//! change the bytes between this module reading them and the signature covering
-//! them. Every check is against the decoded bytes; nothing the caller says
-//! about a transaction is an input.
+//! The transaction must match the caller-supplied authorization and this
+//! signer's policy. The Privy process additionally verifies a configured issuer's
+//! signature over the exact intent, checks its own clock and consumes the nonce
+//! persistently. The library signing methods alone do not enforce these guards.
+//! The separate offline `radar-issuer` binary evaluates operator-provisioned
+//! evidence and persists reservations. Live trusted snapshots and settlement
+//! reconciliation are absent; authenticated provenance alone proves neither.
 
+pub mod attestation;
 pub mod canonical;
 pub mod key;
 pub mod privy;
 pub mod protocol;
+pub mod replay;
 pub mod turnkey;
 pub mod tx;
 pub mod verify;

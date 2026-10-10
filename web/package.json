@@ -3,6 +3,9 @@
   "private": true,
   "version": "0.0.1",
   "type": "module",
+  "overrides": {
+    "ws@>=8.0.0 <8.21.0": "8.21.0"
+  },
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
@@ -11,6 +14,11 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@privy-io/react-auth": "3.47.0",
+    "@solana-program/memo": "0.15.0",
+    "@solana-program/system": "0.15.0",
+    "@solana-program/token": "0.17.0",
+    "@solana/kit": "8.4.0",
     "@solana/web3.js": "^1.99.0",
     "lightweight-charts": "^5.2.1",
     "react": "^19.3.0",

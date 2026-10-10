@@ -13,8 +13,8 @@ benefit of the doubt on everything else.
 
 ## Index
 
-**26 of these 36 name something mechanical that would catch a
-recurrence. 10 name only a habit, and say so** — which is this file's opening
+**43 of these 57 name something mechanical that would catch a
+recurrence. 14 name only a habit, and say so** — which is this file's opening
 standard rather than a gap in it. The habit-only rows are the ones worth reading
 twice; nothing will stop those repeating except somebody remembering.
 
@@ -62,6 +62,26 @@ quietly absent.
 | [35](#35-a-measured-zero-was-read-as-a-verdict-and-a-first-reaction-was-filed-as-doctrine) | A measured zero was read as a verdict, and a first reaction was filed as doctrine | habit only, and it says so |
 | [36](#36-a-freshness-check-tested-the-wrong-property-and-a-wrong-horizon-hid-behind-it) | A freshness check tested the wrong property, and a wrong horizon hid behind it | `the_six_hour_label_is_always_refused_for_overlapping_its_own_entry`,… |
 | [37](#37-a-query-window-that-grew-with-the-stores-age-crossed-a-vendor-limit-nobody-chose-and-a-health-check-that-could-not-see-its-own-age-said-ok-through-285-failed-runs) | A query window that grew with the store's age crossed a vendor limit nobody chose, and a health check that could not see its own age said `ok` through 285 failed runs | `earliest_due_slot_ignores_launches_that_are_not_due`,… |
+| [38](#38-every-wallet-exception-was-reported-as-cancellation) | Every wallet exception was reported as cancellation | `siws.test.ts` and `Wallet.test.tsx` preserve technical errors and retry |
+| [39](#39-local-tool-versions-gave-a-different-answer-from-ci) | Local tool versions gave a different answer from CI | CI's locked npm install and workspace lint gate |
+| [40](#40-a-sudo-wrapper-conflicted-with-the-services-hardening) | A sudo wrapper conflicted with the service's hardening | the fixed-command bridge tests under NoNewPrivileges |
+| [41](#41-an-installer-refused-valid-repeated-environment-settings) | An installer refused valid repeated environment settings | setup fixtures for last-value selection and salt preservation |
+| [42](#42-a-new-operator-page-was-not-added-to-the-edge-login-gate) | A new operator page was not added to the edge login gate | habit only: verify each new page's login redirect and audience |
+| [43](#43-terminal-colors-hid-the-device-login-prompt) | Terminal colors hid the device login prompt | `the_installed_cli_colored_device_prompt_is_recognised` |
+| [44](#44-waiting-for-a-cli-before-draining-its-pipes-deadlocked-inference) | Waiting for a CLI before draining its pipes deadlocked inference | `verbose_subprocess_finishes_without_exposing_stderr` |
+| [45](#45-a-creator-query-retained-every-creators-launch-history) | A creator query retained every creator's launch history | habit only: exercise the retained production dataset under its service memory cap |
+| [46](#46-an-unreadable-wallet-was-reported-as-absent) | An unreadable wallet was reported as absent | nullable-ID and malformed-response wallet regressions; pending-creation UI regression |
+| [47](#47-strict-history-opening-exposed-shared-fixtures-and-clock-dependent-tampering) | Strict history opening exposed shared fixtures and clock-dependent tampering | isolated caller fixtures and deterministic issuer-tampering regression |
+| [48](#48-valid-proofs-left-durable-links-and-input-boundaries-untested) | Valid proofs left durable links and input boundaries untested | issuer process correlation and exact-boundary regressions |
+| [49](#49-a-fee-rate-bound-did-not-bound-rounded-component-costs) | A fee rate bound did not bound rounded component costs | component-rounding and process quote regressions |
+| [50](#50-a-byte-check-left-the-encoded-request-unchanged) | A byte check left the encoded request unchanged | canonical Privy request process regression |
+| [51](#51-an-ordinary-supply-bound-refused-wrapped-sol) | An ordinary supply bound refused wrapped SOL | captured native mint and constrained wrapping regressions |
+| [52](#52-a-yielded-command-was-mistaken-for-a-completed-check) | A yielded command was mistaken for a completed check | habit only: confirm the parent command exit before the next Cargo |
+| [53](#53-a-test-reacquired-journal-ownership-it-already-had) | A test reacquired journal ownership it already had | habit only: retain ownership through one fixture transition |
+| [54](#54-a-new-classification-returned-before-shared-reservation-checks) | A new classification returned before shared reservation checks | sale helper and valuation dispatcher boundary regressions |
+| [55](#55-observation-tests-skipped-the-accepted-equality-boundary) | Observation tests skipped the accepted equality boundary | exact-slot native and token inventory process regression |
+| [56](#56-a-self-transfer-hid-an-impossible-intermediate-debit) | A self-transfer hid an impossible intermediate debit | native transfer intermediate-balance regression |
+| [57](#57-malformed-packet-tests-failed-at-a-different-guard) | Malformed packet tests failed at a different guard | signed malformed-header and balance-consistent duplicate-account regressions |
 
 ---
 
@@ -1821,3 +1841,529 @@ next to it fail if the health check goes back to reporting a count instead of an
 age. The general lesson: a window that grows with the store's age will cross
 someone else's limit on a date nobody chose, and a health check that reports a
 count without its age cannot see a stopped pass.
+
+## 38. Every wallet exception was reported as cancellation
+
+**2026-10-06.** The owner saw "Connect walletSign-in cancelled." Both wallet
+connection and message-signing catches converted every exception into a user
+decline. A locked extension, pending request or invalid sign-in message therefore
+looked like the owner had dismissed a prompt. The reported exception was lost,
+so the actual cause of this owner's failure remains unknown.
+
+A live challenge also exposed nonstandard SIWS fields: epoch seconds instead
+of an ISO timestamp, and base64url nonces containing punctuation where the
+specification requires alphanumeric characters. Format those fields using the
+existing civil timestamp helper and 32 random bytes encoded as hex. These are
+verified format defects, not proof of the owner's exact wallet exception.
+
+Only the wallet's explicit 4001 rejection code now means cancellation. Other
+exceptions retain their code, stage and message; the UI gives a retry path and
+separates feedback from the header button. Malformed server responses also end
+the pending state without creating a session.
+
+**What catches a recurrence:** `siws.test.ts` distinguishes rejected prompts from
+connection and signing failures; `Wallet.test.tsx` checks technical feedback and
+retry. Reversing the 4001 comparison by hand failed four regressions.
+The customer timestamp test and HTTP challenge bootstrap test cover the fields
+the old server-only signature round trip accepted without involving a wallet.
+
+## 39. Local tool versions gave a different answer from CI
+
+**2026-10-06.** Updating source-map-js with npm 11 also removed a nested
+TypeScript peer. Local npm ci passed, but CI's npm 10 refused the lockfile.
+Restore the original peer entry and verify the install with npm 10.9.9.
+The local stable Rust alias was 1.97 while CI had advanced to 1.99; its new
+empty-collection assertion lint then rejected existing tests across the
+workspace. Preserve each predicate while comparing against a typed empty
+value, and correct the module paths in the compiler's automatic suggestions.
+
+**What catches a recurrence:** CI's locked npm install and workspace lint gate.
+A local pass under a different tool version is evidence for that version only;
+it cannot stand in for the required CI result. Rust 1.99 workspace clippy passed
+after these test-only corrections.
+
+**Recurrence, 2026-10-07 (CI 37697528963):** a new fee-extension test used
+`assert!(parsed.stable.is_empty())`, passing local Rust 1.97 lint but failing
+Rust 1.99's assert_is_empty. Replaced it with `assert_eq!(parsed.stable, [])`;
+the parser predicate and behavior are unchanged. The required Linux lint gate
+remains the verification of this correction; no suppression was added.
+
+## 40. A sudo wrapper conflicted with the service's hardening
+
+**2026-10-06.** The CLI isolation runbook used sudo to switch to radar-agent,
+while the deployed Radar service had `NoNewPrivileges=yes`. Both instructions
+were individually reasonable, and the wrapper could not work inside that
+service. Check the live service's restrictions before presenting its admin setup
+as ready. The first setup script was replaced with a refusing placeholder before
+preparing a socket service that retains Radar's hardening.
+
+The client now reaches a socket-activated process already running as radar-agent.
+It supplies three fixed vendor commands, checks the peer UID, bounds transport
+input/output, and cleans up a CLI when its client disconnects. No sudo rule or
+privilege change is part of a Radar request.
+
+**What catches a recurrence:** `just private-setup` runs the fixed-command bridge
+tests with `setpriv --no-new-privs`. The process invocation check requires the
+vendor CLI directly, and the peer-boundary test fails with the refusal removed.
+Actual installed service compatibility remains a deployment check, not a claim
+from those fake-CLI tests.
+
+## 41. An installer refused valid repeated environment settings
+
+**2026-10-06.** The private connection installer rejected a repeated
+RADAR_CUSTOMER_SALT before making any changes. EnvironmentFile permits repeated
+assignments and uses the last value; requiring unique names imposed a new rule
+on an existing service configuration. Read settings with the same last-value
+behavior, and preserve unrelated lines when saving connection settings. Both
+salt assignments remain in place, so this change does not rotate the effective salt.
+
+**What catches a recurrence:** the two setup fixture tests select the last
+assignment and preserve both salt lines while replacing connection settings.
+Reapplying the duplicate refusal fails both tests. No live salt value was read
+or printed to construct those fixtures.
+
+## 42. A new operator page was not added to the edge login gate
+
+**2026-10-06.** The new `/automation` page correctly required an operator token
+at the origin, but its path was absent from Cloudflare Access. An anonymous
+request reached Radar directly and returned "no Cloudflare Access assertion"
+instead of entering a login flow. Earlier public-route and origin checks did
+not establish that the owner could reach this new page.
+
+The existing `/v1/link` Access application also had a different audience from
+the main Radar application the origin trusts. A shared owner policy does not
+make two applications issue interchangeable tokens. Put cooperating pages and
+APIs in the same trusted application. Cloudflare refuses duplicate destinations
+across applications; moving a route requires retiring its previous application
+or removing that destination first.
+
+**What catches a recurrence:** habit only. Verify each new operator page and API
+through the edge without a session: a login redirect must carry the configured
+audience. Then exercise the authenticated page and its API together. Unit tests
+cannot establish the current dashboard's external route configuration.
+
+## 43. Terminal colors hid the device login prompt
+
+**2026-10-06.** After Access login worked, Connect ChatGPT stayed at Starting
+while Radar waited for a recognizable device prompt. Capturing the installed
+Codex 0.131.0 through the isolated socket client proved it printed a prompt
+immediately on stdout, with ANSI SGR sequences attached to the URL and code.
+The parser expected a token starting with `https://` and missed that output.
+Remove numeric SGR formatting before looking for the two fields. Preserve the
+vendor-owned credential flow and the existing prompt deadline.
+
+**What catches a recurrence:** `the_installed_cli_colored_device_prompt_is_recognised`
+uses the captured format with a fictitious code, including combined SGR
+parameters, resets and unfinished escapes. Manually restoring the old parser
+makes that test fail with None instead of the expected URL and code.
+
+## 44. Waiting for a CLI before draining its pipes deadlocked inference
+
+**2026-10-06.** Login and a direct isolated-client call succeeded, but the
+authenticated Radar question timed out after 90 seconds. The model caller
+polled for child exit before reading stdout and stderr. A verbose CLI filled
+its pipe and blocked writing; Radar waited for a process that could not exit.
+The direct diagnostic used communicate, which drains both streams and hid this
+caller difference. Health also waited behind the investigation's meter lock.
+
+Drain both streams concurrently while retaining only stdout as the answer.
+Discard credential-adjacent stderr; keep the child deadline and cleanup.
+
+**What catches a recurrence:** `verbose_subprocess_finishes_without_exposing_stderr`
+runs a portable subprocess fixture that fills both pipes beyond their usual
+capacity before emitting READY. The fixed caller completes and exposes no
+stderr. Restoring the old wait-before-read function times out at five seconds.
+
+## 45. A creator query retained every creator's launch history
+
+**2026-10-06.** The first ChatGPT site answer completed after the pipe repair.
+A specific-address question then stalled while gathering creator evidence,
+before the CLI started. The service retained all launch events before filtering
+for the supplied creator. Its launch partitions occupied 668M on disk;
+MemoryCurrent reached 805044224 bytes against MemoryMax 805306368. Restarted
+through the fixed deploy procedure to restore service, without raising the cap.
+
+Reader::read_matching applies the watermark and caller predicate during row
+decode. Both creator tools use it, retaining only matching launch events.
+The live repeat then exposed the same retention in the 282M outcomes table:
+MemoryPeak reached the 805306368-byte cap before inference. Restored service
+again through fixed deployment. Track-record now applies a matching outcome
+predicate during decode as well. Matching rows still occupy memory; this is not a
+constant-memory guarantee for arbitrarily large results.
+
+**What catches a recurrence:** habit only for the resource regression. Repeat
+a real creator query against the retained production dataset under the existing
+memory cap and record its peak. The new matching-read test checks admitted rows,
+empty results and event-table rejection, not instrument peak memory. Bypassing
+the decoder predicate fails that test with four rows instead of one; restoring
+it passes. Reverting the instruments to full reads could preserve their outputs
+while reintroducing excess retention, so logical tests alone cannot prove this
+resource fix.
+The outcome predicate regression also checks that callbacks never see future
+measurements. Removing its retention filter fails the selected-row assertion.
+
+The complete memory-filtered live query stayed below the cap (MemoryPeak
+674140160, process RSS about 289000 KiB at completion), but the browser showed no
+answer after a multi-minute scan. The nominal ledger increased by one model
+call, so health's completed-investigation status alone was not the useful
+proof. The remaining launch scan decoded every unrelated signature and address
+before rejecting it. A creator-column query now selects rows before event
+decode; only selected rows are decoded, and their watermark remains enforced.
+The new mixed-creator regression rejects another creator and future rows;
+bypassing the creator comparison makes its selected count fail. This logical
+check does not impose a performance guarantee; the live repeat is still required.
+
+The final live repeat at 2ddbc25 rendered both actual creator-tool citations in
+roughly 90 seconds. MemoryPeak 736034816 stayed below unchanged MemoryMax
+805306368. The supplied address was a mint with unknown creator identity;
+the answer correctly limited zero rows to the supplied lookup, not a judgment
+about the actual creator. This proves that concrete path, not an arbitrary
+result-size or latency bound. Complete CI, including all mutation shards, passed.
+
+## 46. An unreadable wallet was reported as absent
+
+**Found:** 2026-10-07, after the owner created a Solana wallet and the site still
+said none existed. The owner confirms its presence in Privy's dashboard. The
+exact production linked-account response has not yet been captured, so the
+following parser defect is independently verified, not a proven diagnosis of
+that live report.
+
+Radar's Privy reader returned Option, converting both an absent embedded wallet
+and missing fields in a matching account into NoWallet. The installed vendor
+SDK explicitly allows a null wallet ID. Address reads do not require a signing
+endpoint ID. The reader now returns errors for malformed responses and preserves
+embedded Solana wallets with optional IDs; the private page can display these
+verified addresses. It also stops offering another creation after the SDK
+creation call completes while backend lookup still reports absent. No signing
+authority is inferred from either event.
+
+**What catches a recurrence:**
+`a_device_wallet_without_a_server_id_is_present_and_not_signing_authority` fails
+when the missing-ID branch again returns NoWallet. The malformed-response
+regression distinguishes unknown data from absent wallets. The UI nullable-ID
+and pending-creation tests fail when the old ID requirement and cleared creation
+state are restored. All mutations were removed and the focused tests pass.
+
+## 47. Strict history opening exposed shared fixtures and clock-dependent tampering
+
+**Found:** 2026-10-07, CI 37646978006. Operation history now requires an existing
+state directory and exclusive ownership. Two CLI tests still used the fixed
+production path, so the Linux tests and one mutation baseline failed. Scoped
+journal checks did not cover that actual caller. Inventory now receives its
+history path explicitly, with the fixed path supplied at runtime and isolated
+temporary directories in tests. A caller regression checks refusal for an
+already owned history and a missing parent directory.
+
+A separate mutation baseline exposed a signer test flake: an expiry constructed
+from a later clock read could equal the original signed expiry across a second
+boundary. The test then expected an authentic unchanged proof to be refused.
+Tampered timestamps now derive from the original signed values, ensuring they
+change regardless of clock timing. Production clock and signature guards are
+unchanged. Caller tests belong in validation when changing a shared boundary;
+tampering tests must prove a value was changed, not infer it from time passing.
+
+**What catches a recurrence:** `unavailable_reservation_history_refuses_inventory`
+checks the caller's refusal; the CLI suite exercises isolated valid histories.
+`the_process_refuses_a_forged_or_modified_issuer_intent` changes original signed
+timestamps directly. Reapplying an unchanged expiry reproduces CI's assertion
+failure; restoring the subtraction passes.
+
+## 48. Valid proofs left durable links and input boundaries untested
+
+**Found:** 2026-10-07, CI 37652941215. The offline issuer's valid-proof tests
+did not inspect the proposal's journal nonce/mint links, exercise a proposal
+observed exactly at the current slot, or distinguish complete maximum-size
+input from a truncated or unterminated line. The final shard also exposed the
+maximum private-file boundary: an exact 1 MiB valid configuration must load.
+Seven mutations of those behaviors
+survived even though proof verification and outstanding-capital checks passed.
+The proof is one output; its durable correlation and the framing boundary are
+other outputs, and each must be observed where it matters.
+
+An eighth survivor was redundant: startup rejects every policy requiring
+operator approval, so the kernel cannot return an operator-required decision.
+The duplicate match guard was removed rather than adding an exclusion or a
+test for an unreachable condition. Linux CI also ran Rust 1.99.0 while the
+local GNU Windows toolchain was 1.97.1 and flagged three assertion-style lints;
+that repeats learning 39, and the assertions now show lengths on failure.
+
+**What catches a recurrence:**
+`issuance_runs_the_kernel_and_reserves_before_a_verifiable_proof_leaves` checks
+the current-slot decision and journal correlation; subsequent operation events
+link to the proposing event instead of repeating its nonce and mint.
+`the_input_size_boundary_accepts_a_complete_line_and_refuses_truncation` checks
+both exact line-size boundaries and missing newline; the private-file test
+loads an exact maximum-size valid configuration. Reapplying each of the seven
+reported mutations fails the corresponding test. Required CI checks the code
+against the runner's actual compiler; local lint alone is not that check.
+
+**Recurrence, fee extension (CI 37697528963):** mutation
+`crates/radar-pumpfun/src/fee_schedule.rs:45:13` changed the preliminary row
+bound from division to multiplication. All four focused parser tests still
+passed when that exact mutation was applied: later bounded field reads reject
+truncation independently. Removed the redundant calculation and changed the
+vector to grow only after reading a complete row, avoiding reservation from the
+claimed count altogether. Truncation/oversized-count regressions still refuse;
+full mutation CI checks the remaining parser behavior. No exclusion was added.
+
+**Recurrence, process fixture:** on Windows the accepted TCP socket inherited
+nonblocking mode from the polling listener. A wallet-read header read raced
+request arrival and failed with WouldBlock. Explicitly restore blocking mode on
+the accepted socket, retaining the read timeout and accept deadline. The actual
+wallet/curve process regressions exercise this shared fixture; their repeated
+Windows run caught the race. Production RPC behavior was unaffected.
+
+## 49. A fee rate bound did not bound rounded component costs
+
+**Found:** 2026-10-07, review after adding the captured fee extension. The CLI
+selected the largest total bps row and rounded its combined fee up. Pump's
+published buy formula rounds protocol and creator fees separately. That is not
+proof of the sell implementation, but the exit bound must also cover that
+rounding: at gross 32 lamports, 95 and 30 bps can cost two lamports when rounded
+separately, versus one when combined. A row with smaller total bps can therefore
+cost more than the largest-rate row for a small amount. The initial live output
+of fee 1/net 31 was an optimistic bound under component rounding, not a trade.
+
+The complete schedule now computes a ceiling for each observed LP/protocol/
+creator component, sums within each row and selects the largest cost across
+all rows. Cost arithmetic uses u128 and clamps to gross; exhausted exits refuse.
+The maximum bps remains a separate rate bound. This does not establish network
+costs, future fee changes or exact sell fee classification. Historical prefix
+callers using `Fees::charge` retain their combined-fee semantics.
+
+**What catches a recurrence:**
+`component_rounding_bounds_cost_even_when_the_largest_bps_row_is_different`
+checks separate rounding, the rate/cost ordering difference, all three components,
+zero, exact divisibility, overflow and exhaustion. Restoring combined rounding
+fails at Some(1) versus Some(2). Actual-process quotes inspect exact revised
+fees and proceeds for captured and larger exotic schedules. No key or trade
+was involved in discovering or repairing this bound.
+
+## 50. A byte check left the encoded request unchanged
+
+**Found:** 2026-10-07, review after integrating transaction-read evidence into
+the issuer. Evidence matched the Checked bytes, but the Privy request still
+copied the original provisioned base64 string. The existing shared decoder
+deliberately ignores whitespace and input after padding. A fixture with an
+ignored suffix therefore passed byte checks while forwarding that suffix to
+the provider. This could cause a later provider refusal after capital was
+reserved; that consequence was not tested against Privy and no live trade ran.
+
+Encode the request from Checked bytes, without changing shared decoder
+compatibility. The proof now binds the same canonical payload as the read
+evidence. The correction required another full source CI run.
+
+**What catches a recurrence:**
+`the_privy_request_encodes_checked_bytes_even_when_the_provisioned_spelling_is_lenient`
+supplies an equivalent lenient spelling, asserts canonical request output and
+verifies the resulting attestation. Restoring original-string forwarding fails
+that assertion. The test uses temporary fixture credentials only.
+
+## 51. An ordinary supply bound refused wrapped SOL
+
+**Found:** 2026-10-09, before pushing raw wallet verification. The initial
+same-mint total check required holdings not to exceed mint supply for every
+mint. Radar's captured classic native mint reports supply zero, so that check
+would refuse a valid wrapped-SOL holding. This was caught locally; no live
+wallet measurement or trade established the mistake.
+
+Bind the exception to the canonical native mint under classic SPL Token and
+require the native-account flag, nine decimals, zero mint supply and absent
+mint/freeze authorities. Keep checked quantity addition. Other native identities
+and inconsistent wrapping metadata refuse; a reserve is not extra native cash.
+
+**What catches a recurrence:**
+`captured_classic_native_mint_has_zero_supply_without_zero_wrapped_balance`
+uses the captured mint bytes with a synthetic wallet-owned account. Restoring
+the unconditional supply bound fails that regression. Disabling each wrapping
+identity, program, flag or canonical metadata check also fails its negative
+cases, including matching raw/listed decimals that incorrectly redefine native
+units. Source was restored and the scoped suites passed.
+
+## 52. A yielded command was mistaken for a completed check
+
+**Found:** 2026-10-09, local opening-inventory verification. A poll printed a
+completed test suite but still returned a running session for its following
+Clippy step. Another Cargo command was queued before that parent exit was
+confirmed, contrary to the workstation's one-Cargo rule. Both sessions later
+exited successfully; the affected CLI lint was repeated after source restoration.
+
+**What catches a recurrence:** habit only. Before starting another Cargo or
+mutating source under its check, require the previous shell session's final
+exit code. A finished child or yielded output does not establish parent completion.
+CI cannot enforce this local orchestration rule.
+
+## 53. A test reacquired journal ownership it already had
+
+**Found:** 2026-10-09, mixed-history CI 37948602727. Mutation shard 3 failed
+its unmodified baseline at issuer_process.rs:977:68: the terminal-cost fixture
+received WouldBlock opening operations.jsonl.lock. Local full tests had passed.
+The fixture released its existing history handle and immediately reopened it
+to add its terminal record. Which process held the Unix lock was not captured;
+a fork/inherited-descriptor window is an inference, not an established cause.
+
+Keep the terminal fixture transition under the existing owned OperationLog.
+The first repair f24e968 still failed CI 37951658678: ordinary tests and shard 1
+hit WouldBlock at issuer_process.rs:845:10, where the invalid-evidence copy
+helper reopened the journal. Fix that helper to borrow the existing owner too.
+The first repair was incomplete; moving one reopen did not establish resolution.
+
+Mixed-sale source 3b99e8b CI 37973753478 later failed shard 3's unmodified
+baseline at issuer_process.rs:330:63 in disposal_fixture. The signed source
+fixture released its owner before the disposal helper immediately reopened it.
+Return the known owner through a shared fixture helper and use that same handle
+for disposal construction. No lock retry or test serialization; Linux CI must
+verify this additional fixture repair. The lock holder was again not captured.
+
+Native-transfer source 6d62b4b CI 37993754272 later failed shard 1's unmodified
+baseline at issuer_process.rs:1482:60 in append_failed_history, called by the
+mixed invalid-fee history regression. The inventory fixture already owned the
+journal to set its checkpoint, then dropped it before this immediate reopen.
+Pass that owner through inventory_fixture_owned into append_failed_history_owned
+for both mixed-history setups. The actual valuation subprocess still requires
+a release; its completed output precedes the necessary later open. No retries,
+serialization or production lock changes. The contending holder was not captured;
+complete repaired Linux CI is required, not a local Windows pass alone.
+
+Repair 3baa4cc CI 37995345383 failed another unmodified shard-1 baseline at
+issuer_process.rs:1321:60: the native-cash regression immediately reopened the
+inventory fixture owner. Carry that owner into its first checkpoint read and
+return the failed-history owner for the next read. Pass the existing inventory
+owner into all four immediate sale-history setups as well. The prior repair
+was incomplete. Actual contending holder remains unknown; subprocess boundaries
+still require release and completed output before a later open. Linux CI must
+verify this additional fixture-only repair.
+
+No release/reacquire is needed for these fixture transitions; production locking remains
+nonblocking with no retry, deletion or weaker refusal. Terminal consistency and
+facts signature/operation regressions still fail when their guards are disabled.
+The full fixture repair needs complete Linux CI; a Windows pass alone does not
+establish resolution of the observed failures.
+
+**What catches a recurrence:** habit only. Keep a fixture's known owner through
+one transition when it already has the handle. The baseline CI exposed contention
+but no deterministic test reproduces this particular ownership window locally.
+
+Follow-up 2026-10-10: CI 38063256175 failed the repeated valuation subprocess
+assertion, without its stderr. The actual holder is still unknown. Rust's File
+documentation and Linux flock semantics establish that duplicated/inherited
+descriptors retain the lock until all close unless explicitly unlocked. The
+fix/journal-owner-release branch adds a private owner guard that explicitly
+unlocks when dropped in its acquiring process, including on replay failure.
+An inherited wrapper dropped in another PID must not unlock its parent's lock.
+A Unix regression keeps a duplicate alive across log drop, simulates the foreign
+PID destructor and checks that closing a stale duplicate cannot unlock a new
+owner. This deterministically models descriptor lifetime, not the unknown CI
+holder. GitHub must verify it and the existing idempotency tests. No retry,
+serialization, lock-file deletion or weaker acquisition refusal is introduced.
+References: https://doc.rust-lang.org/std/fs/struct.File.html#method.lock and
+https://man7.org/linux/man-pages/man2/flock.2.html.
+
+
+## 54. A new classification returned before shared reservation checks
+
+**Found:** 2026-10-09, follow-up review of sale proceeds source 4595042 while
+its initial CI was running. The sale branch returned before debit-only valuation
+checked native reservation bounds. Protected settlement recording already
+checks them, but a generic journal caller can retain inconsistent facts; the
+valuation boundary must refuse those too. This was a source review finding,
+not a live trade or a failure observed on the network.
+
+Pass the recorded reservation to sale review. Require retained network fee and
+any net wallet debit to fit it, preserving valid credit/zero and fee-dominated
+sales. Test exact bounds in both the helper and the actual valuation dispatcher.
+Disabling each bound or forwarding u64::MAX makes the corresponding regression
+fail. No live authority is enabled. Await the initial CI fully before repair
+push, then require whole CI on the repaired source.
+
+**What catches a recurrence:** sale reservation boundary tests in
+`crates/radar-signer/src/bin/radar-issuer/sale_proceeds.rs` and the dispatcher
+regression in `crates/radar-signer/src/bin/radar-issuer/valuation.rs`. These catch
+this bypass mechanically; reviewing shared checks before introducing any new
+classification remains a habit, not a general static proof.
+
+
+## 55. Observation tests skipped the accepted equality boundary
+
+**Found:** 2026-10-09, FIFO CI 37981032392. The new process regression
+accepted wallet observations newer than the sale and refused older ones, but
+never tested equality. Mutation shard 3 reported two survivors at inventory.rs:
+180:17 and 180:35, changing either sale observation comparison from > to >=.
+Production comparisons were already correct; the tests did not protect the
+accepted boundary. A follow-up review added equality while CI was still running,
+then the completed shard established the exact survivor positions.
+
+**What catches a recurrence:**
+`protected_fifo_history_compares_remaining_inventory_without_releasing_claims`
+accepts both native and token observations at the sale slot and at a later slot,
+then independently refuses older native/classic/Token-2022 observations. Both
+reported mutations were reapplied at those exact file:line:column positions and
+each failed that regression; source restored. Whole repaired CI remains required.
+No live snapshot or trade exhibited this test gap.
+
+
+## 56. A self-transfer hid an impossible intermediate debit
+
+**Found:** 2026-10-09, local source review before the first native-transfer
+push. The new classifier compared signed transfer totals plus fee against every
+final native balance. A successful self-transfer cancelled its own debit and
+credit, so an amount exceeding the payer balance after fees could pass that
+final equation. Supplied success metadata must not rescue an impossible debit.
+This was an unfinished local classifier, not an observed network execution.
+
+Require every successful transfer amount to fit the payer's intermediate
+balance after the fee and preceding transfers, before applying its debit and
+credit. Preserve exact equality and fee-only failed execution. Keep external
+coverage incomplete and signing authority closed.
+
+**What catches a recurrence:** the native transfer balance regression in
+`crates/radar-signer/src/bin/radar-issuer/native_transfers.rs` accepts the exact
+post-fee self-transfer boundary and refuses excess before or after a preceding
+transfer. Reapplying the missing guard, ignoring prior effects or treating the
+boundary as exclusive must fail these tests. All-account final balance checks
+remain separate. This catches the concrete classification bug mechanically.
+
+
+## 57. Malformed packet tests failed at a different guard
+
+**Found:** 2026-10-09, native-transfer CI 37993754272 shard 3. Two || to &&
+mutations survived at native_transfers.rs:32:58 and :38:9. The production guards
+were correct, but malformed-header tests invalidated the message signature and
+the duplicate-account test retained balances that failed a separate equation.
+Those packets still refused when the intended guard was weakened.
+
+A follow-up review added correctly signed unsupported headers while initial CI
+was running. Give the duplicate-account packet balances that satisfy the later
+per-index equation, so duplicate identity is what must refuse it. The goal is
+not a malformed packet in general; it is reaching the guard being tested.
+
+**What catches a recurrence:** signed unsupported-header and balance-consistent
+duplicate-account cases in the native transfer unit regression in
+`crates/radar-signer/src/bin/radar-issuer/native_transfers.rs`. Both reported
+mutations were reapplied at their exact file:line:column and failed these
+regressions, then restored. Repaired whole CI remains required. No live chain
+transaction exhibited this test gap.
+
+Repair CI 37995345383 exposed the other OR on the same line, :32:28. The
+oversize test appended trailing garbage, which the decoder rejected after the
+size guard was weakened. Use a correctly signed, otherwise decodable 1249-byte
+message containing one extra complete zero transfer. The exact :32:28 mutant
+now fails the size regression; restore the production guard. This extends the
+same masked-guard failure, not a new production defect.
+
+
+The collected-activity adapter's first local fault check also exposed an interval
+boundary test gap. A nonempty equal-bound packet failed its row filter even with
+the interval equality guard weakened; the intended empty-packet assertion had
+not been inserted because a text replacement no longer matched formatted code.
+Use a complete empty packet with equal bounds to isolate that guard. Verify the
+edit exists, not just that the editing script exited successfully. Reapplying
+the greater-or-equal to greater-than fault now fails the boundary regression.
+Production behavior was restored; this was an offline test gap.
+
+
+The native-transfer storage regression initially changed an artifact after that
+signature was already recorded, so the immutability refusal masked the wire-to-
+evidence identity guard. Add malformed first-insert cases in an otherwise empty
+journal. Reapplying the artifact and signature guard removals now fails those
+cases. Identical-repeat and conflicting-repeat tests remain separate.

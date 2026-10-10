@@ -52,6 +52,11 @@
 //! A [`Settlement::PartiallyFilled`] leaves the remainder **reserved**. It is
 //! not free: the operation is not over, and a second proposal spending it would
 //! be spending against a claim that still exists.
+//!
+//! A [`Settlement::Completed`] instead records the measured final spend. It
+//! debits that amount and frees the unused ceiling because the operation is
+//! established as over. Its caller must establish completion; this vocabulary
+//! neither observes a transaction nor values its economic outcome.
 
 use std::collections::BTreeMap;
 
@@ -525,6 +530,10 @@ pub enum Settlement {
     /// amount given equals what was outstanding, which is a fill by another
     /// name.
     PartiallyFilled(TokenQuantity),
+    /// The operation finished spending this amount of the outstanding claim.
+    /// Debit the measured amount and release the unused remainder. This is not
+    /// a partial operation, nor a statement about USD loss or exposure.
+    Completed(TokenQuantity),
     /// Nothing further was spent. The claim closes and its outstanding units
     /// become free again.
     Abandoned,
@@ -839,7 +848,7 @@ impl Portfolio {
 
         let spent = match outcome {
             Settlement::Filled => claim.outstanding,
-            Settlement::PartiallyFilled(filled) => {
+            Settlement::PartiallyFilled(filled) | Settlement::Completed(filled) => {
                 match claim.outstanding.checked_cmp(filled) {
                     None => return Err(PortfolioError::UnitMismatch { asset: claim.asset }),
                     Some(core::cmp::Ordering::Less) => {
@@ -869,7 +878,7 @@ impl Portfolio {
                 outstanding: claim.outstanding,
                 filled: spent,
             })?;
-        if remaining.is_zero() {
+        if remaining.is_zero() || matches!(outcome, Settlement::Completed(_)) {
             self.reservations.remove(&id);
             return Ok(());
         }
@@ -1368,6 +1377,63 @@ mod tests {
             portfolio.settle(filled, Settlement::Abandoned),
             Err(PortfolioError::NoSuchReservation(_)),
         ));
+    }
+
+    #[test]
+    fn a_completed_spend_releases_only_unused_capital_and_preserves_other_claims() {
+        let mut portfolio = with_cash(100_000_000);
+        let claim = portfolio
+            .reserve(Asset::Usdc, usdc(60_000_000), NOW)
+            .expect("claim");
+        let other = portfolio
+            .reserve(Asset::Usdc, usdc(20_000_000), NOW)
+            .expect("other");
+        portfolio
+            .settle(claim, Settlement::PartiallyFilled(usdc(25_000_000)))
+            .expect("partial");
+        assert_eq!(portfolio.reservations().count(), 2);
+        portfolio
+            .settle(claim, Settlement::Completed(usdc(10_000_000)))
+            .expect("completed remainder");
+        assert_eq!(
+            portfolio
+                .reservations()
+                .map(super::Reservation::id)
+                .collect::<Vec<_>>(),
+            vec![other]
+        );
+        assert_eq!(portfolio.free(Asset::Usdc).expect("free"), usdc(45_000_000));
+        assert_eq!(
+            portfolio.holdings().next().expect("holding").1.balance,
+            Balance::Counted(usdc(65_000_000))
+        );
+    }
+
+    #[test]
+    fn completed_spends_accept_zero_and_exact_ceiling_but_refuse_wrong_units_or_overruns() {
+        for spent in [0, 5_000_000, 10_000_000] {
+            let mut portfolio = with_cash(100_000_000);
+            let claim = portfolio
+                .reserve(Asset::Usdc, usdc(10_000_000), NOW)
+                .expect("claim");
+            let before = portfolio.clone();
+            for invalid in [usdc(10_000_001), TokenQuantity::lamports(spent)] {
+                assert!(
+                    portfolio
+                        .settle(claim, Settlement::Completed(invalid))
+                        .is_err()
+                );
+                assert_eq!(portfolio, before);
+            }
+            portfolio
+                .settle(claim, Settlement::Completed(usdc(spent)))
+                .expect("completed");
+            assert_eq!(
+                portfolio.free(Asset::Usdc).expect("free"),
+                usdc(100_000_000 - spent)
+            );
+            assert_eq!(portfolio.reservations().count(), 0);
+        }
     }
 
     #[test]

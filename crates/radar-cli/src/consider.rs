@@ -51,9 +51,8 @@ const PAID_TIER_CAP: usize = 25;
 ///
 /// Alongside the analyst's journal rather than inside it: the two are read by
 /// different commands and one of them is on the money path. Nothing writes this
-/// file yet — execution is shut — and an absent one opens as a log with nothing
-/// outstanding, which is the honest reading for an instance that has never
-/// operated.
+/// file yet — execution is shut. An absent file opens empty only within an
+/// already prepared state directory; ownership/history failures refuse the pass.
 const OPERATIONS_JOURNAL: &str = "data/execution/operations.jsonl";
 
 /// Runs the lane, and keeps a record of having run it.
@@ -170,7 +169,7 @@ pub fn run(
     // Read whatever the outcome, because the report needs the account even on a
     // pass that proposes nothing -- but propagated only where it always was, so
     // an unreadable inventory still stops the *sizing* and only the sizing.
-    let inventory = inventory(reader, watermark);
+    let inventory = inventory(reader, watermark, std::path::Path::new(OPERATIONS_JOURNAL));
     note_account(&mut session, &inventory);
 
     let verdicts_by_mint = verdicts(&pass.proposals, &inventory)?;
@@ -795,6 +794,7 @@ recorded {} decision(s) to {dir}/decisions",
 fn inventory(
     reader: &Reader,
     watermark: radar_types::Slot,
+    operations_path: &std::path::Path,
 ) -> Result<(Portfolio, PortfolioState), String> {
     let rows = reader
         .read_positions(AsOf::at(watermark))
@@ -814,11 +814,11 @@ fn inventory(
     // about to spend.
     //
     // The file does not exist on any instance today, and an operations journal
-    // that was never written to opens empty — nothing outstanding, nothing
-    // re-taken. That is a measurement rather than a silence: the log
-    // distinguishes it from a file it could not read, which is an error here.
-    let mut operations = radar_journal::OperationLog::open(OPERATIONS_JOURNAL).map_err(|e| {
-        format!("the operations journal at {OPERATIONS_JOURNAL} cannot be read, so what is already claimed is unknown: {e}")
+    // that was never written to opens empty only inside an existing writable
+    // state directory. Ownership and intact history are checked before replay;
+    // missing directories are not silently recreated after possible state loss.
+    let mut operations = radar_journal::OperationLog::open(operations_path).map_err(|e| {
+        format!("the operations journal at {} cannot be exclusively opened and verified, so what is already claimed is unknown: {e}", operations_path.display())
     })?;
     operations.rehold(&mut portfolio).map_err(|e| {
         format!(
@@ -3304,7 +3304,7 @@ mod tests {
             None,
         );
         assert_eq!(record.kernel_outcome, None);
-        assert!(record.kernel_reasons.is_empty());
+        assert_eq!(record.kernel_reasons, [] as [String; 0]);
     }
 
     #[test]
@@ -3602,8 +3602,8 @@ mod tests {
         // The store is empty, which is fine and is the point: the kernel is pure
         // (rule 2), so a verdict does not depend on there being history. What is
         // asserted is that every proposal handed in comes back out with one.
-        let store = std::env::temp_dir().join("radar-verdicts-test");
-        let reader = Reader::open(&store);
+        let store = tempfile::tempdir().expect("tempdir");
+        let reader = Reader::open(store.path());
 
         let mints = [Address::new([1u8; 32]), Address::new([2u8; 32])];
         let proposals: Vec<radar_risk::Proposal> = mints
@@ -3623,8 +3623,15 @@ mod tests {
             })
             .collect();
 
-        let by_mint = verdicts(&proposals, &inventory(&reader, radar_types::Slot(1_000)))
-            .expect("a readable, empty store");
+        let by_mint = verdicts(
+            &proposals,
+            &inventory(
+                &reader,
+                radar_types::Slot(1_000),
+                &store.path().join("operations.jsonl"),
+            ),
+        )
+        .expect("a readable, empty store");
 
         assert_eq!(by_mint.len(), proposals.len(), "one verdict per proposal");
         for mint in &mints {
@@ -4014,7 +4021,7 @@ mod tests {
             1,
             "and the refusal is still recorded"
         );
-        assert!(pass.proposals.is_empty());
+        assert_eq!(pass.proposals, [] as [radar_risk::Proposal; 0]);
     }
 
     #[test]
@@ -4228,8 +4235,12 @@ mod tests {
         // Re-apply the bug -- put `.unwrap_or_default()` back in `inventory` in
         // place of the `?` -- and this returns a healthy empty portfolio.
         let dir = store_with_an_unreadable_positions_file();
-        let refused = inventory(&Reader::open(dir.path()), radar_types::Slot(20_000))
-            .expect_err("an unreadable inventory must refuse");
+        let refused = inventory(
+            &Reader::open(dir.path()),
+            radar_types::Slot(20_000),
+            &dir.path().join("operations.jsonl"),
+        )
+        .expect_err("an unreadable inventory must refuse");
         assert!(
             refused.contains("positions unreadable"),
             "and says what it could not read: {refused}"
@@ -4255,7 +4266,11 @@ mod tests {
         };
         let outcome = verdicts(
             std::slice::from_ref(&proposal),
-            &inventory(&Reader::open(dir.path()), radar_types::Slot(20_000)),
+            &inventory(
+                &Reader::open(dir.path()),
+                radar_types::Slot(20_000),
+                &dir.path().join("operations.jsonl"),
+            ),
         );
         assert!(
             outcome.is_err(),
@@ -4264,13 +4279,35 @@ mod tests {
     }
 
     #[test]
+    fn unavailable_reservation_history_refuses_inventory() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let reader = Reader::open(dir.path());
+        let path = dir.path().join("operations.jsonl");
+        let owner = radar_journal::OperationLog::open(&path).expect("owner");
+        for unavailable in [path.clone(), dir.path().join("missing/operations.jsonl")] {
+            let refusal = inventory(&reader, radar_types::Slot(20_000), &unavailable)
+                .expect_err("unknown outstanding claims must refuse inventory");
+            assert!(
+                refusal.contains("cannot be exclusively opened and verified"),
+                "{refusal}"
+            );
+        }
+        drop(owner);
+        inventory(&reader, radar_types::Slot(20_000), &path).expect("released intact history");
+    }
+
+    #[test]
     fn an_empty_store_is_a_portfolio_that_holds_nothing_and_says_so() {
         // The state every deployment is in today, and the reason the refusal
         // above is not a check that fires on the normal case: a readable store
         // with no positions is a complete account of holding nothing.
         let dir = tempfile::tempdir().expect("tempdir");
-        let (portfolio, state) = inventory(&Reader::open(dir.path()), radar_types::Slot(20_000))
-            .expect("an empty store is readable");
+        let (portfolio, state) = inventory(
+            &Reader::open(dir.path()),
+            radar_types::Slot(20_000),
+            &dir.path().join("operations.jsonl"),
+        )
+        .expect("an empty store is readable");
         assert_eq!(portfolio.incompleteness(), None);
         assert_eq!(portfolio.holdings().count(), 0);
         assert_eq!(portfolio.wallet(), None, "no wallet is invented");

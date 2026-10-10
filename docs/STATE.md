@@ -896,6 +896,28 @@ cleanly are different facts.
 
 ## What is live on radar.heyvera.org
 
+Latest limited inspection: 2026-10-10 around 05:00 UTC. Public `/health`
+returned status ok, build `3f38ee0ffaf2d1e349f54b43475f36c010bb335d`,
+`agent.configured=true`, provider `codex`, last model call `never`, and
+`policyClosed=true`. `/automation` returned HTTP 302 without credentials.
+The health field `trading=true` reports a configured trading component, not
+autonomous execution authority. The private wallet settings remain drafts.
+
+SSH to guardian-vps-tail timed out. Local Tailscale reported Running, no health
+warnings and self online; the peer at 100.105.198.39 (`clawguard`) was offline,
+last seen 2026-10-07T17:22:48.1Z. This does not mean the public service is down.
+Current host files, issuer provisioning, delegation and funding were not checked.
+
+Locally committed source through `5a65043` adds known-account history collection,
+signature/static-membership review, signed TransferChecked intents and reported
+balance consistency. Those follow-ups are unpublished and undeployed while
+CI 38023346308 attempt 2 reruns its timed-out prior-source mutation shard. Local
+proof is in [plan 0015](plans/0015-private-chatgpt-and-privy-setup.md); full new-source
+CI, complete economic reconciliation, live risk inputs and execution/recovery
+remain open. Autonomous execution remains off.
+
+### Historical September deployment snapshot
+
 As of 2026-09-27 (~15:20 UTC; build line refreshed 2026-09-28 03:07 UTC),
 checked directly rather than recalled. This replaces the 2026-09-26 snapshot
 point for point; the trading switch changed under it.

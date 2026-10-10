@@ -76,6 +76,7 @@ pub struct InFlight {
 #[derive(Debug, Default)]
 pub struct Linker {
     inner: Mutex<Option<InFlight>>,
+    provider: Option<radar_model::Codex>,
 }
 
 /// What the interface is told.
@@ -111,6 +112,21 @@ impl Linker {
     pub const fn new() -> Self {
         Self {
             inner: Mutex::new(None),
+            provider: None,
+        }
+    }
+
+    /// Linking needs a provider, but does not need permission to spend on inference.
+    /// Reject contradictory provider configuration just as the inference route does.
+    #[must_use]
+    pub fn from_vars(get: &impl Fn(&str) -> Option<String>) -> Self {
+        let provider = radar_model::from_vars(get)
+            .ok()
+            .filter(|provider| provider.name() == "codex")
+            .and_then(|_| radar_model::codex_from_vars(get));
+        Self {
+            inner: Mutex::new(None),
+            provider,
         }
     }
 
@@ -179,15 +195,17 @@ impl Linker {
 /// Never returns `Err`; every failure is a status and a JSON body, because this
 /// is answering a browser.
 pub async fn begin(State(state): State<Arc<AppState>>) -> Response {
-    let Some(chat) = state.chat.as_ref() else {
-        return (StatusCode::NOT_FOUND, Json(json!({ "error": "not found" }))).into_response();
-    };
-    let Some(codex) = chat.linkable.as_ref() else {
+    let Some(codex) = state
+        .linker
+        .provider
+        .as_ref()
+        .or_else(|| state.chat.as_ref().and_then(|chat| chat.linkable.as_ref()))
+    else {
         // The API-key path has nothing to link. Saying so beats a generic
         // failure, because the button should not have been shown at all.
         return (
-            StatusCode::CONFLICT,
-            Json(json!({ "error": "this provider is configured with a key, not a subscription" })),
+            StatusCode::NOT_FOUND,
+            Json(json!({ "error": "no subscription provider is configured" })),
         )
             .into_response();
     };
@@ -231,8 +249,18 @@ pub async fn begin(State(state): State<Arc<AppState>>) -> Response {
 
 /// Reports the current flow.
 pub async fn status(State(state): State<Arc<AppState>>) -> Response {
-    if state.chat.is_none() {
-        return (StatusCode::NOT_FOUND, Json(json!({ "error": "not found" }))).into_response();
+    if state.linker.provider.is_none()
+        && state
+            .chat
+            .as_ref()
+            .and_then(|chat| chat.linkable.as_ref())
+            .is_none()
+    {
+        return (
+            StatusCode::NOT_FOUND,
+            Json(json!({ "error": "no subscription provider is configured" })),
+        )
+            .into_response();
     }
     Json(state.linker.progress()).into_response()
 }
@@ -240,6 +268,16 @@ pub async fn status(State(state): State<Arc<AppState>>) -> Response {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn subscription_linking_refuses_ambiguous_provider_configuration() {
+        let linker = Linker::from_vars(&|key| match key {
+            "RADAR_MODEL_CODEX" => Some("codex".to_owned()),
+            "RADAR_MODEL_OPENAI_KEY" => Some("not-a-real-key".to_owned()),
+            _ => None,
+        });
+        assert!(linker.provider.is_none());
+    }
 
     #[test]
     fn an_idle_linker_says_so_rather_than_pretending_to_wait() {

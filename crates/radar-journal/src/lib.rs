@@ -22,6 +22,12 @@
 //! which is how a reservation frees itself while the transaction is still
 //! landing.
 //!
+//! `OperationLog::open` now holds exclusive cooperative process ownership and
+//! verifies an intact chain before replay. Broken or torn operation history
+//! refuses until reconciled; general journal audit can still read it. This is
+//! not rollback protection: an administrator can replace the file or sidecar,
+//! and a complete valid prefix needs a trusted checkpoint to detect truncation.
+//!
 //! [ADR 0017](https://github.com/hey-vera/radar/blob/main/docs/adr/0017-the-journal-records-intent-before-effect-and-replay-proves-only-the-decision.md).
 //!
 //! # The one rule
@@ -55,7 +61,11 @@ mod event;
 mod file;
 mod operation;
 
-pub use event::{Correlation, Event, MAX_REDACTED, Outcome, Recorded, SCHEMA_VERSION, Stage};
+pub use event::{
+    Correlation, Event, ExecutionBinding, MAX_REDACTED, NativeTransferRecord,
+    OpeningInventoryRecord, OpeningTokenAccount, OpeningTokenHolding, Outcome, Recorded,
+    SCHEMA_VERSION, SettlementRecord, Stage, ValuationRecord,
+};
 pub use file::{Journal, JournalError, Verified};
 pub use operation::{
     Applied, Intent, OperationEntry, OperationError, OperationId, OperationLog, OperationState,

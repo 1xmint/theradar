@@ -98,7 +98,7 @@ fn the_watermark_applies_to_positions_the_way_it_applies_to_everything() {
     assert_eq!(all.len(), 3);
 
     let before_everything = reader.read_positions(AsOf::at(Slot(1))).expect("read");
-    assert!(before_everything.is_empty());
+    assert_eq!(before_everything, [] as [radar_store::Position; 0]);
 }
 
 #[test]
@@ -177,7 +177,7 @@ fn an_empty_store_holds_no_positions_rather_than_failing() {
     let read = Reader::open(dir.path())
         .read_positions(AsOf::at(Slot(10_000)))
         .expect("an empty store is readable");
-    assert!(read.is_empty());
+    assert_eq!(read, [] as [radar_store::Position; 0]);
 }
 
 #[test]

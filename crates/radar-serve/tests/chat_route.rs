@@ -18,6 +18,10 @@ use tower::ServiceExt;
 
 /// A server with no model provider — the shipped state.
 fn unconfigured() -> axum::Router {
+    with_linker(radar_serve::link::Linker::new())
+}
+
+fn with_linker(linker: radar_serve::link::Linker) -> axum::Router {
     let mut registry = Registry::new();
     registry.register(CreatorHistory);
     app(Arc::new(AppState {
@@ -33,7 +37,7 @@ fn unconfigured() -> axum::Router {
         customer: radar_serve::customer::Mode::Off,
         customer_keys: radar_serve::customer::KeyCache::new(),
         privy: None,
-        linker: radar_serve::link::Linker::new(),
+        linker,
         scoreboard: radar_serve::cache::Cache::new(),
         token: radar_serve::cache::Cache::new(),
         challenges: None,
@@ -50,6 +54,60 @@ fn unconfigured() -> axum::Router {
         )),
         market_visitors: std::sync::Arc::default(),
     }))
+}
+
+#[tokio::test]
+async fn a_subscription_can_be_linked_before_an_inference_budget_exists() {
+    let router = with_linker(radar_serve::link::Linker::from_vars(&|key| {
+        (key == "RADAR_MODEL_CODEX").then(|| "codex".to_owned())
+    }));
+    let response = router
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/v1/link")
+                .body(Body::empty())
+                .expect("request"),
+        )
+        .await
+        .expect("response");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response
+        .into_body()
+        .collect()
+        .await
+        .expect("body")
+        .to_bytes();
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&body).expect("JSON"),
+        serde_json::json!({"state": "idle"})
+    );
+    let (status, _) = post(router, "/v1/chat", r#"{"question":"hello"}"#).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn an_unconfigured_subscription_status_is_json_not_the_application_shell() {
+    let response = unconfigured()
+        .oneshot(
+            Request::builder()
+                .uri("/v1/link")
+                .body(Body::empty())
+                .expect("request"),
+        )
+        .await
+        .expect("response");
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    let body = response
+        .into_body()
+        .collect()
+        .await
+        .expect("body")
+        .to_bytes();
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&body).expect("JSON")["error"],
+        "no subscription provider is configured"
+    );
 }
 
 async fn post(router: axum::Router, path: &str, body: &str) -> (StatusCode, String) {

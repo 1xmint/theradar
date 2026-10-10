@@ -184,6 +184,15 @@ means any token from any application in the team opens Radar — with a signatur
 that verifies perfectly, which is why the audience check is the one worth
 getting right.
 
+When adding an operator page, add its hostname/path to the **same Access
+application** whose AUD Radar verifies. The `/automation` page and `/v1/link`
+must use that application and its existing owner policy. Creating separate
+applications for each path produces different audiences that Radar will refuse.
+Verify each changed operator path through Cloudflare without a session: it must
+redirect to Access login, with the configured AUD in the redirect's `kid`.
+Then verify the page and API together in the owner's authenticated browser.
+An origin-side refusal alone does not prove the edge offers a login flow.
+
 Radar verifies the **signature** on `Cf-Access-Jwt-Assertion` against
 Cloudflare's published keys. It does **not** read
 `Cf-Access-Authenticated-User-Email`: that header is a claim by whoever sent the
@@ -326,6 +335,29 @@ The startup log says which state it is in, every start:
 
 ### The reading assistant, when you want it
 
+For the initial private setup on the existing `guardian` VPS, use
+[`setup-private-connections.py`](setup-private-connections.py):
+
+```sh
+sudo python3 /tmp/radar-private-setup.py cmthhkznr0a3u0cl86prxlb7x
+```
+
+Upload that script and the adjacent `radar-codex-bridge.py`, `radar-codex.socket`
+and `radar-codex.service` files from this checkout first. It requires the existing
+`radar-agent` account and vendor CLI, prompts for a missing Privy app secret
+with hidden input, and retains root-only backups before replacing files. It
+installs a root-owned Codex client and a socket-activated service allowing only
+device login, login status, and a fixed stdin-only, read-only inference command.
+The CLI runs from its isolated home with a cleared environment. No sudo rule is
+added: Radar's `NoNewPrivileges` protection remains enabled.
+
+The script configures the supplied Privy app and closes customer admission.
+It does not configure wallet delegation, a signer, money limits or an inference
+allowance, and refuses an existing active inference configuration for review.
+It does not restart the service: apply with the verified artifact and fixed
+`radar-deploy` procedure below. Then use `/automation` for ChatGPT login. Privy
+embedded-wallet login and the owner's admission allowlist remain separate steps.
+
 Off unless a provider *and* a budget are configured, and it holds no credential
 of its own. The subscription path spawns the vendor CLI, which owns `auth.json`
 and its own refresh; Radar has no code that reads, writes or stores a token.
@@ -339,39 +371,36 @@ sudo useradd --system --create-home --home-dir /var/lib/radar-agent      --shell
 sudo install -d -o radar-agent -g radar-agent -m700 /var/lib/radar-agent/.codex
 ```
 
-Seed the credential once, interactively. This is the only step that needs a
-human, and it needs the vendor CLI installed on the box first — check with
-`which codex`:
+The setup script installs the local socket service as that user. A `sudo`
+wrapper cannot work inside the hardened `radar-serve.service`, because
+`NoNewPrivileges=true` prevents its change of user. Disabling that protection
+would let every other child change privilege too.
 
-```
-sudo -u radar-agent env CODEX_HOME=/var/lib/radar-agent/.codex      codex login --device-auth
-```
+Systemd owns `/run/radar-codex.sock`, with mode 0660 and group `guardian`.
+The service also checks Linux peer credentials for guardian's UID. It accepts
+three exact operations; no caller chooses an executable, cwd, environment,
+config override or CLI flags. Requests and output are bounded, and a disconnected
+client terminates the CLI's process group. Calls are serialized, including
+refresh and login. The 128 KiB prompt cap is a transport limit, not a money limit.
 
-Then a wrapper that drops to that user, so `radar-serve` never runs the CLI as
-itself. **It must pass its arguments through**, because Radar supplies the
-subcommand: `exec -` to ask a question and `login --device-auth` to link the
-credential.
-
-```
-sudo tee /usr/local/bin/radar-codex >/dev/null <<'SH'
-#!/bin/sh
-exec sudo -n -u radar-agent env CODEX_HOME=/var/lib/radar-agent/.codex codex "$@"
-SH
-sudo chmod 755 /usr/local/bin/radar-codex
-```
-
-`guardian` needs `NOPASSWD` for exactly that one command and nothing else. Radar
-clears the child's environment and passes only `PATH`, `HOME`, `CODEX_HOME`,
-`LANG`, `LC_ALL` and `TMPDIR`, so nothing else in `/etc/radar/radar.env` reaches
-the CLI, and the prompt goes in on stdin rather than as an argument — arguments
-are visible in `ps` to every user on the box.
+The client forwards `exec -`, `login --device-auth`, or `login status` to that
+service. The service supplies a cleared environment and read-only inference
+sandbox, and the prompt still reaches the CLI on stdin. Nothing in
+`/etc/radar/radar.env` reaches the vendor process. The broker never opens its
+credential file; the vendor CLI continues to own it.
 
 ### Linking is a button, not an SSH session
 
-Once the wrapper is in place, **the interface links the credential itself**.
-Sign in, press **Link**, and the page shows a verification URL and a short code
+Once the wrapper is in place and `RADAR_MODEL_CODEX` names it, **the interface
+links the credential itself** at `/automation`. Sign in as the operator, press
+**Connect ChatGPT**, and the page shows a verification URL and a short code
 to enter in a browser. Neither is a credential — that is what device
 authorisation is — so nothing secret crosses the page.
+
+Linking does not require an inference budget. Leave `RADAR_MODEL_DAILY_USD`
+unset until an allowance is chosen: `/v1/link` still works, while `/v1/chat`
+remains unavailable. An idle linking flow says nothing about an existing stored
+credential; only successful completion of this attempt is reported as linked.
 
 The seeding command below still works and is the fallback when the interface is
 not reachable. The button matters most for the case nobody plans for: the
@@ -379,7 +408,7 @@ refresh token expires after roughly 14–30 days of inactivity, and re-linking
 should be a click rather than a procedure somebody has to remember.
 
 ```
-sudo -u radar-agent env CODEX_HOME=/var/lib/radar-agent/.codex      codex login --device-auth
+/usr/local/bin/radar-codex login --device-auth
 ```
 
 Only one flow runs at a time. The credential is single-writer, so a second
@@ -398,6 +427,29 @@ RADAR_MODEL_DAILY_USD=2.00
 RADAR_STATE_DIR=/home/guardian/radar/data/state
 RADAR_MODEL_CODEX=/usr/local/bin/radar-codex
 ```
+
+For an explicitly selected ChatGPT subscription with no Radar daily call cap,
+set `RADAR_MODEL_DAILY_USD=unlimited`. This literal is accepted only with the
+Codex provider; missing or conflicting provider settings and paid API providers
+cannot use it. The saturating meter uses its maximum counter value to represent
+unlimited usage, continues recording calls, and startup reports unlimited
+subscription calls instead of a dollar ceiling. OpenAI's plan limits still apply.
+Per-investigation turn limits, deadlines and read-only tools still apply.
+An explicitly configured `RADAR_MODEL_PER_CALL_USD` retains its separate limit.
+
+After the matching server release is installed, the existing administrator
+setup script can apply this choice without re-entering Privy secrets:
+
+```powershell
+ssh -t guardian-vps-tail "sudo python3 /tmp/radar-private-setup.py --unlimited-subscription"
+```
+
+Upload the current `deploy/setup-private-connections.py` to that temporary path
+first and verify its hash. This mode requires the isolated Codex client, refuses
+paid API settings, preserves unrelated identity settings and uses the existing
+ledger directory (or the already-existing default state directory). Apply the
+saved settings through the verified artifact and fixed `sudo radar-deploy`
+procedure. It grants no wallet or trading authority.
 
 The startup log says which mode it is in. `radar-serve` prints `access` and
 `agent` lines on every start, and an instance serving without a check says so

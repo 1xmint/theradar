@@ -744,7 +744,7 @@ mod tests {
             Search::DEFAULT,
         );
         assert_eq!(report.capacity_lamports(100), None);
-        assert!(!report.no_route_at.is_empty());
+        assert_ne!(report.no_route_at, [] as [u64; 0]);
     }
 
     #[test]
@@ -835,7 +835,7 @@ mod tests {
             Search::DEFAULT,
         );
         assert_eq!(report.confidence, Confidence::Unknown);
-        assert!(report.curve.is_empty());
+        assert_eq!(report.curve, [] as [crate::exit::QuotePoint; 0]);
     }
 
     #[test]
@@ -931,7 +931,7 @@ mod tests {
         assert_eq!(report.confidence, Confidence::Measured);
         assert!(report.is_exitable());
         assert_eq!(report.curve.len(), PROBE_MULTIPLES.len());
-        assert!(report.no_route_at.is_empty());
+        assert_eq!(report.no_route_at, [] as [u64; 0]);
     }
 
     #[test]

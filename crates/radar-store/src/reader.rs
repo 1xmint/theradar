@@ -138,6 +138,48 @@ impl Reader {
         from: Option<Slot>,
         to: Option<Slot>,
     ) -> Result<Vec<Event>, StoreError> {
+        self.read_range_matching(table, as_of, from, to, &|_| true, None)
+    }
+
+    /// Reads only matching events, retaining them while decoding each batch.
+    ///
+    /// Applies the watermark before the predicate. Unlike filtering `read`'s
+    /// result, this does not retain unrelated history in memory.
+    ///
+    /// # Errors
+    /// Returns [`StoreError`] if a file cannot be read or a row is malformed.
+    pub fn read_matching(
+        &self,
+        table: Table,
+        as_of: AsOf,
+        keep: &impl Fn(&Event) -> bool,
+    ) -> Result<Vec<Event>, StoreError> {
+        self.read_range_matching(table, as_of, None, None, keep, None)
+    }
+
+    /// Reads a creator's launches, checking the stored creator column before
+    /// decoding unrelated envelopes. Only selected rows are decoded as events.
+    /// The normal watermark gate still applies to every returned launch.
+    ///
+    /// # Errors
+    /// Returns [`StoreError`] if a file cannot be read or a selected row is malformed.
+    pub fn read_creator_launches(
+        &self,
+        creator: &str,
+        as_of: AsOf,
+    ) -> Result<Vec<Event>, StoreError> {
+        self.read_range_matching(Table::Launches, as_of, None, None, &|_| true, Some(creator))
+    }
+
+    fn read_range_matching(
+        &self,
+        table: Table,
+        as_of: AsOf,
+        from: Option<Slot>,
+        to: Option<Slot>,
+        keep: &impl Fn(&Event) -> bool,
+        creator: Option<&str>,
+    ) -> Result<Vec<Event>, StoreError> {
         // Fail with the reason rather than with "no `slot` column", which is
         // what the caller actually sees otherwise and which says nothing about
         // what to do instead.
@@ -156,15 +198,12 @@ impl Reader {
             {
                 continue;
             }
-            for event in read_file(&path, table)? {
-                if !as_of.admits(event.slot()) {
-                    continue;
-                }
-                if from.is_some_and(|f| event.slot() < f) || to.is_some_and(|t| event.slot() > t) {
-                    continue;
-                }
-                out.push(event);
-            }
+            out.extend(read_file(&path, table, creator, &|event| {
+                as_of.admits(event.slot())
+                    && from.is_none_or(|f| event.slot() >= f)
+                    && to.is_none_or(|t| event.slot() <= t)
+                    && keep(event)
+            })?);
         }
         out.sort_by_key(|e| {
             let env = e.envelope();
@@ -300,6 +339,19 @@ impl Reader {
     ///
     /// Returns [`StoreError`] if a file cannot be read or a row is malformed.
     pub fn read_outcomes(&self, as_of: AsOf) -> Result<Vec<Outcome>, StoreError> {
+        self.read_outcomes_matching(as_of, &|_| true)
+    }
+
+    /// Reads matching outcome measurements without retaining unrelated rows.
+    /// The measurement watermark is applied before the caller predicate.
+    ///
+    /// # Errors
+    /// Returns [`StoreError`] if a file cannot be read or a row is malformed.
+    pub fn read_outcomes_matching(
+        &self,
+        as_of: AsOf,
+        keep: &impl Fn(&Outcome) -> bool,
+    ) -> Result<Vec<Outcome>, StoreError> {
         let mut out = Vec::new();
         for path in self.files(Table::Outcomes)? {
             if start_slot_of(&path).is_some_and(|start| start > as_of.slot().get()) {
@@ -341,7 +393,7 @@ impl Reader {
                     if !as_of.admits(measured_at) {
                         continue;
                     }
-                    out.push(Outcome {
+                    let outcome = Outcome {
                         mint: parse(mint.value(i), "mint")?,
                         measured_at,
                         launch_slot: Slot(launch.value(i)),
@@ -361,7 +413,10 @@ impl Reader {
                         window_trough_price: cell(window_trough, i),
                         vwap: cell(vwap, i),
                         fills: cell(fills, i).unwrap_or(0),
-                    });
+                    };
+                    if keep(&outcome) {
+                        out.push(outcome);
+                    }
                 }
             }
         }
@@ -796,7 +851,12 @@ fn slots_in(path: &Path, column: &'static str) -> Result<Vec<Slot>, StoreError> 
     Ok(out)
 }
 
-fn read_file(path: &Path, table: Table) -> Result<Vec<Event>, StoreError> {
+fn read_file(
+    path: &Path,
+    table: Table,
+    creator: Option<&str>,
+    keep: &impl Fn(&Event) -> bool,
+) -> Result<Vec<Event>, StoreError> {
     let file = fs::File::open(path)?;
     let reader = ParquetRecordBatchReaderBuilder::try_new(file)?.build()?;
     let mut out = Vec::new();
@@ -813,10 +873,15 @@ fn read_file(path: &Path, table: Table) -> Result<Vec<Event>, StoreError> {
         let instruction = str_col(&batch, "instruction")?;
         let known = bool_col(&batch, "known")?;
         let mint = str_col(&batch, "mint")?;
+        let creators = creator.map(|_| str_col(&batch, "creator")).transpose()?;
 
         for i in 0..batch.num_rows() {
-            // Through `from_stored` rather than field by field, because the
-            // two pre-2026-09-07 sentinels are coupled: a row with no resolved
+            if let (Some(wanted), Some(stored)) = (creator, creators)
+                && stored.value(i) != wanted
+            {
+                continue;
+            }
+            // The pre-2026-09-07 sentinels are coupled: a row with no resolved
             // position also has no resolved success, and translating one
             // without the other keeps reporting an unresolved row as a
             // successful one.
@@ -834,8 +899,7 @@ fn read_file(path: &Path, table: Table) -> Result<Vec<Event>, StoreError> {
                 known: known.value(i),
             };
             let mint = parse(mint.value(i), "mint")?;
-
-            out.push(match table {
+            let event = match table {
                 Table::Launches => {
                     let dev = u64_col(&batch, "dev_buy_lamports")?;
                     Event::Launch(Box::new(Launch {
@@ -872,16 +936,7 @@ fn read_file(path: &Path, table: Table) -> Result<Vec<Event>, StoreError> {
                                 other => other,
                             }
                         },
-                        side: match side {
-                            "buy" => Side::Buy,
-                            "sell" => Side::Sell,
-                            other => {
-                                return Err(StoreError::Malformed {
-                                    field: "side",
-                                    value: other.to_owned(),
-                                });
-                            }
-                        },
+                        side: parse_side(side)?,
                         realised_lamports: rl.is_valid(i).then(|| rl.value(i)),
                         realised_tokens: rt.is_valid(i).then(|| rt.value(i)),
                         requested_amount: u64_col(&batch, "requested_amount")?.value(i),
@@ -904,10 +959,24 @@ fn read_file(path: &Path, table: Table) -> Result<Vec<Event>, StoreError> {
                         "not events; read by read_outcomes / read_decisions / read_positions /                          read_market_trades"
                     )
                 }
-            });
+            };
+            if keep(&event) {
+                out.push(event);
+            }
         }
     }
     Ok(out)
+}
+
+fn parse_side(side: &str) -> Result<Side, StoreError> {
+    match side {
+        "buy" => Ok(Side::Buy),
+        "sell" => Ok(Side::Sell),
+        other => Err(StoreError::Malformed {
+            field: "side",
+            value: other.to_owned(),
+        }),
+    }
 }
 
 fn parse<T: std::str::FromStr>(s: &str, field: &'static str) -> Result<T, StoreError> {

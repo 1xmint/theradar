@@ -48,10 +48,15 @@
 #![forbid(unsafe_code)]
 
 pub mod budget;
+pub mod curve_market;
 pub mod dossier;
 pub mod launch;
+pub mod preflight;
 pub mod reserves;
 pub mod rpc;
+pub mod settlement;
+pub mod wallet_activity;
+pub mod wallet_inventory;
 
 pub use budget::{Budget, Count, Exhausted};
 pub use dossier::{CurveFacts, Dossier, Unavailable, build};

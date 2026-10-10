@@ -22,6 +22,18 @@ Josh has decided the direction: build, privately use, measure and improve a trad
 before selling it; cover the Solana market, including SOL- and USDC-quoted meme
 coins beyond pump.fun; retain useful free tools and previously purchased research.
 This document recommends the architecture and experiments to pursue that decision.
+On 2026-10-06 Josh requested live wallet balances, editable capital, per-trade
+and daily-loss inputs, and an option for ChatGPT to choose wallet actions. After
+the recommendation that only the owner can change limits, Josh said to continue.
+On 2026-10-10 Josh clarified that each of capital, maximum trade and daily loss
+gets its own "Agent decides" checkbox. Unchecked means an owner-entered value
+within which the agent trades; checked means the agent chooses that option from
+the wallet balance. Mixed choices are supported. This supersedes requiring every
+numeric value from the owner or a single handover button. The site owns this
+choice; do not ask the owner to supply these numbers in chat. No numeric mandate
+was supplied. Draft preferences are not a kernel Policy or a signing grant;
+the separate signer and execution supervisor must enforce an approved Policy
+before any live execution. Wallet creation remains an explicit owner action.
 It does not record that Josh has approved a wallet, deposit, loss budget, provider
 purchase, live deployment or customer launch.
 

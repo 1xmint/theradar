@@ -126,6 +126,14 @@ impl Journal {
         self.sequence + 1
     }
 
+    /// Last complete event's digest; empty before the first event.
+    /// Advances only after a successful durable append. This identifies history,
+    /// not the correctness of a caller's accounting derived from it.
+    #[must_use]
+    pub fn checkpoint(&self) -> &str {
+        &self.previous
+    }
+
     /// Writes one event, and returns the receipt an effect needs.
     ///
     /// The sequence, the previous hash and the id are filled in here. A caller

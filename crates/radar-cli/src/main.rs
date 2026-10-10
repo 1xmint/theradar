@@ -17,8 +17,10 @@ mod brief;
 mod consider;
 mod control;
 mod cost;
+mod curve_exit;
 mod dossier;
 mod edge;
+mod evidence_read;
 mod exits;
 mod features;
 mod graduations;
@@ -27,7 +29,11 @@ mod replay;
 mod route;
 mod selection;
 mod session;
+mod settlement_read;
 mod study;
+mod transaction_read;
+mod wallet_activity_read;
+mod wallet_read;
 
 use radar_sim::{JupiterQuoter, RpcClient};
 use radar_store::{Event, Reader, Table};
@@ -110,6 +116,19 @@ commands:
   cost --from <ts> --to <ts>     what a round trip costs, bucketed by notional;
                                  re-derives the 850 bps constant and says
                                  whether it is fixed or proportional
+  wallet-read --wallet <address> --rpc <URL>
+    Finalized balances plus raw token/mint verification; no prices or authority.
+  wallet-activity-read --wallet <address> --after-slot <N> --through-slot <N> --rpc <URL> [--inventory-review <path>]
+    Bounded finalized address history and raw transactions; incomplete wallet coverage.
+  curve-exit --mint <address> --raw-tokens <N> --rpc <URL>
+    One-context curve/mint/fee read; conservative hypothetical sell, no authority.
+  transaction-read --transaction <binary-file> --min-slot <N> --rpc <URL>
+    Exact unsigned legacy simulation and message fee; JSON, no signing or sending.
+  evidence-read --wallet <address> --transaction <binary-file> --min-slot <N> --rpc <URL>
+    Collect wallet and exact transaction evidence together; no valuation or authority.
+  settlement-read --wallet <address> --transaction <signed-binary-file> --min-slot <N> --rpc <URL>
+    Exact finalized transaction and balance metadata; no claim release or USD accounting.
+
   dossier <mint> [--rpc URL] [--seconds N]
                                  everything Radar can say about one token, read
                                  from the chain on demand rather than from the
@@ -882,6 +901,12 @@ fn main() -> ExitCode {
         "study" => event_study(&args),
         "creator-index" => creator_index(&args),
         "dossier" => dossier::run(&args),
+        "wallet-read" => wallet_read::run(&args),
+        "wallet-activity-read" => wallet_activity_read::run(&args),
+        "curve-exit" => curve_exit::run(&args),
+        "transaction-read" => transaction_read::run(&args),
+        "evidence-read" => evidence_read::run(&args),
+        "settlement-read" => settlement_read::run(&args),
         "audit" => audit::run(&args),
         "model-prices" => model_prices::run(&args),
         "selection" => selection_report(&args),

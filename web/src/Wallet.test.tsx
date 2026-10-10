@@ -4,7 +4,7 @@
 //! Every branch here is a thing the customer is told, and two of them are
 //! claims about their wallet that must not be made when they are not true.
 
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { explain, looksLikePhone, storedSession, Wallet, walletBrowseLinks } from "./Wallet";
@@ -71,7 +71,8 @@ describe("explain", () => {
   it("does not call a cancelled sign-in a failure", () => {
     // Declining to connect is a normal thing to do.
     const text = explain({ kind: "declined" });
-    expect(text).toBe("Sign-in cancelled.");
+    expect(text).toContain("Sign-in cancelled.");
+    expect(text).toContain("approve both wallet prompts");
     expect(text.toLowerCase()).not.toContain("error");
     expect(text.toLowerCase()).not.toContain("failed");
   });
@@ -101,6 +102,15 @@ describe("explain", () => {
     const text = explain({ kind: "no-wallet" });
     expect(text).toContain("Phantom");
     expect(text).toContain("Solflare");
+  });
+
+  it("explains a pending request and a rejected sign-in message distinctly", () => {
+    expect(explain({ kind: "wallet-error", step: "connect", code: -32002, detail: "Pending" }))
+      .toContain("Finish or close the pending wallet request");
+    const rejected = explain({ kind: "wallet-error", step: "sign", code: -32000, detail: "Domain mismatch" });
+    expect(rejected).toContain("Domain mismatch");
+    expect(rejected).toContain("radar.heyvera.org");
+    expect(rejected).not.toContain("cancelled");
   });
 
   it("renders every kind distinctly", () => {
@@ -150,6 +160,14 @@ describe("walletBrowseLinks", () => {
 });
 
 describe("Wallet", () => {
+  it("returns to a usable connect button and exposes the actual wallet failure", async () => {
+    vi.stubGlobal("solana", { connect: vi.fn().mockRejectedValue({ code: -32002, message: "Pending approval" }) });
+    render(<Wallet />);
+    fireEvent.click(screen.getByRole("button", { name: "Connect wallet" }));
+    expect((await screen.findByRole("status")).textContent).toContain("Pending approval");
+    expect((screen.getByRole("button", { name: "Connect wallet" }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
   it("shows Connect as before when a wallet extension is present", () => {
     vi.stubGlobal("solana", {});
     render(<Wallet />);

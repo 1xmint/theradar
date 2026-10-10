@@ -462,7 +462,7 @@ fn the_shipped_policy_refuses_everything_for_reasons_that_are_all_its_own() {
     let refused = evaluate(&buy(10.0), &state(), &Policy::CLOSED);
     let (policy_bound, about_this) =
         radar_risk::partition_refusals(&refusals(&refused), &Policy::CLOSED);
-    assert!(!policy_bound.is_empty());
+    assert_ne!(policy_bound, [] as [Refusal; 0]);
     assert!(
         about_this.is_empty(),
         "under a closed policy nothing is a finding about the token: {about_this:?}"
@@ -495,7 +495,10 @@ fn an_open_policy_makes_a_real_refusal_visible_as_one() {
 fn an_open_policy_has_nothing_inevitable_about_it() {
     // If a policy would refuse a perfect proposal, it is closed in some way the
     // operator may not have intended. An open one refuses nothing a priori.
-    assert!(radar_risk::inevitable_refusals(&policy()).is_empty());
+    assert_eq!(
+        radar_risk::inevitable_refusals(&policy()),
+        [] as [Refusal; 0]
+    );
 }
 
 #[test]
@@ -527,7 +530,10 @@ fn the_classification_is_computed_so_it_cannot_drift_from_the_policy() {
         vec![Refusal::OverDeploymentLimit],
         "the newly-closed limit, and only it"
     );
-    assert!(radar_risk::inevitable_refusals(&policy()).is_empty());
+    assert_eq!(
+        radar_risk::inevitable_refusals(&policy()),
+        [] as [Refusal; 0]
+    );
 }
 
 #[test]

@@ -1096,19 +1096,25 @@ mod tests {
             one("crates/a/tests/x.rs and crates/b/tests/y.rs"),
             vec!["crates/a/tests/x.rs", "crates/b/tests/y.rs"]
         );
-        assert!(one("crates/a/tests/fixture.json").is_empty());
+        assert_eq!(
+            one("crates/a/tests/fixture.json"),
+            [] as [std::string::String; 0]
+        );
 
         // A Rust file that is not a test file. This is the case that pins the
         // `/tests/` filter itself: without it, inverting the filter still finds
         // every path, because the backward walk from any earlier position
         // expands to the same string. The rule is about test files, and a `src`
         // path must not be read as one.
-        assert!(one("crates/a/src/b.rs").is_empty());
-        assert!(one("see [x](crates/a/src/b.rs) and nothing else").is_empty());
+        assert_eq!(one("crates/a/src/b.rs"), [] as [std::string::String; 0]);
+        assert_eq!(
+            one("see [x](crates/a/src/b.rs) and nothing else"),
+            [] as [std::string::String; 0]
+        );
 
         // Prose with no path in it at all.
-        assert!(one("the tests directory").is_empty());
-        assert!(one("").is_empty());
+        assert_eq!(one("the tests directory"), [] as [std::string::String; 0]);
+        assert_eq!(one(""), [] as [std::string::String; 0]);
     }
 
     #[test]
@@ -1217,10 +1223,10 @@ mod tests {
         );
         // A comment *outside* any run block, which is where the explanation for
         // the fix actually lives.
-        assert!(
+        assert_eq!(
             one("      # this step used to run npm ci inline
-      - uses: actions/checkout@v5")
-            .is_empty()
+      - uses: actions/checkout@v5"),
+            [] as [std::string::String; 0]
         );
         // A blank line inside a block does not end it. YAML block scalars
         // allow them and a long `run:` uses them to group commands, so reading
@@ -1245,7 +1251,7 @@ mod tests {
 "),
             vec!["npm ci"]
         );
-        assert!(one("").is_empty());
+        assert_eq!(one(""), [] as [std::string::String; 0]);
     }
 
     #[test]
@@ -1754,7 +1760,7 @@ mod tests {
     let fixture = Policy::CLOSED;
 }
 ";
-        assert!(code_references(source, "Policy::CLOSED").is_empty());
+        assert_eq!(code_references(source, "Policy::CLOSED"), [] as [usize; 0]);
         assert_eq!(code_references(source, "Policy::SHIPPED"), vec![1]);
     }
 

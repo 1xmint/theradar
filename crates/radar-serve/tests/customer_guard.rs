@@ -78,10 +78,10 @@ fn valid_token() -> (String, Keys) {
 /// everyone, so a 200 would prove nothing about the customer token. Enforcing
 /// against a domain no token can match means an operator route refuses unless
 /// something else opened it — which is exactly the failure being looked for.
-fn router(keys: Keys) -> axum::Router {
+fn fixture(keys: Keys) -> AppState {
     let mut registry = Registry::new();
     registry.register(CreatorHistory);
-    app(Arc::new(AppState {
+    AppState {
         admission: radar_serve::admission::Admission::Open,
         shares: radar_serve::share::Shares::new(radar_serve::share::Allowance::per_day(100)),
         customer_salt: vec![7u8; 32],
@@ -115,7 +115,68 @@ fn router(keys: Keys) -> axum::Router {
         )),
         market_visitors: std::sync::Arc::default(),
         privy: None,
-    }))
+    }
+}
+
+fn router(keys: Keys) -> axum::Router {
+    app(Arc::new(fixture(keys)))
+}
+
+#[tokio::test]
+async fn private_wallet_requires_a_verified_privy_identity_even_after_operator_access() {
+    struct WalletTransport(Arc<std::sync::Mutex<Vec<String>>>);
+    impl radar_serve::privy::Transport for WalletTransport {
+        fn get(&self, url: &str, _: &radar_serve::privy::Credentials) -> Result<String, String> {
+            self.0.lock().unwrap().push(url.to_owned());
+            Ok(r#"{"linked_accounts":[{"type":"wallet","chain_type":"solana","connector_type":"embedded","address":"11111111111111111111111111111111","id":"owner-wallet"}]}"#.into())
+        }
+    }
+    let (token, keys) = valid_token();
+    let looked_up = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let mut state = fixture(keys);
+    state.access = radar_serve::access::Mode::Off;
+    state.admission = radar_serve::admission::Admission::Closed;
+    state.privy = Some(radar_serve::privy::Client::with_transport(
+        radar_serve::privy::Credentials::new(APP, "test-only"),
+        Box::new(WalletTransport(Arc::clone(&looked_up))),
+    ));
+    let app = app(Arc::new(state));
+    assert_eq!(
+        status_with(app.clone(), "/automation/wallet", "invalid").await,
+        StatusCode::UNAUTHORIZED
+    );
+    assert!(looked_up.lock().unwrap().is_empty());
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/automation/wallet")
+                .header("authorization", format!("Bearer {token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers()["cache-control"], "private, no-store");
+    let body = axum::body::to_bytes(response.into_body(), 8192)
+        .await
+        .unwrap();
+    let body: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(
+        body["wallet"]["address"],
+        "11111111111111111111111111111111"
+    );
+    assert_eq!(body["execution_enabled"], false);
+    assert_eq!(
+        looked_up.lock().unwrap().as_slice(),
+        ["https://api.privy.io/v1/users/did:privy:x"]
+    );
+    // No RPC reader is configured. An authenticated wallet is not a zero balance.
+    assert_eq!(
+        status_with(app, "/automation/balance", &token).await,
+        StatusCode::SERVICE_UNAVAILABLE
+    );
 }
 
 async fn status_with(router: axum::Router, path: &str, token: &str) -> StatusCode {
@@ -141,7 +202,16 @@ async fn a_valid_customer_token_never_opens_an_operator_route() {
     // debugging surface: store counts, a raw event stream, the machine
     // interface, and the instrument registry.
     let (token, keys) = valid_token();
-    for path in ["/ops", "/v1/store", "/v1/events", "/mcp", "/v1/instruments"] {
+    for path in [
+        "/ops",
+        "/v1/store",
+        "/v1/events",
+        "/mcp",
+        "/v1/instruments",
+        "/automation/wallet",
+        "/automation/balance",
+        "/automation/limits",
+    ] {
         let status = status_with(router(keys.clone()), path, &token).await;
         assert_ne!(
             status,

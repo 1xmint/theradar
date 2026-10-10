@@ -253,6 +253,11 @@ pub fn codex_from_vars(get: &impl Fn(&str) -> Option<String>) -> Option<Codex> {
     Codex::from_vars(&command, get).ok()
 }
 
+/// Explicit unlimited subscription allowance. The meter uses saturating
+/// arithmetic, so its total can never exceed this sentinel. This is a usage
+/// counter representation, not a dollar budget or a paid API allowance.
+pub const UNLIMITED_SUBSCRIPTION_DAILY: MicroUsd = MicroUsd(u64::MAX);
+
 /// Reads the day's model budget from the environment.
 ///
 /// `None` when `RADAR_MODEL_DAILY_USD` is unset, and the caller must then not
@@ -267,11 +272,22 @@ pub fn codex_from_vars(get: &impl Fn(&str) -> Option<String>) -> Option<Codex> {
 /// bill, and the direction it would be wrong in is the expensive one.
 #[must_use]
 pub fn budget_from_vars(get: &impl Fn(&str) -> Option<String>) -> Option<radar_agent::Budget> {
-    let daily = non_empty(get, "RADAR_MODEL_DAILY_USD")?
-        .parse::<f64>()
-        .ok()
-        .map(MicroUsd::from_dollars)
-        .filter(|d| *d > MicroUsd::ZERO)?;
+    let setting = non_empty(get, "RADAR_MODEL_DAILY_USD")?;
+    let daily = if setting == "unlimited" {
+        // A deliberate subscription choice must not enable unbounded API bills,
+        // including when conflicting provider settings are present.
+        let provider = from_vars(get).ok()?;
+        if provider.name() != "codex" {
+            return None;
+        }
+        UNLIMITED_SUBSCRIPTION_DAILY
+    } else {
+        setting
+            .parse::<f64>()
+            .ok()
+            .map(MicroUsd::from_dollars)
+            .filter(|d| *d > MicroUsd::ZERO)?
+    };
 
     // A per-call ceiling catches a mispriced call before the daily one does.
     // Defaulting it to the daily maximum makes it inert rather than wrong: the
@@ -437,6 +453,60 @@ mod tests {
                 "{pairs:?} is not a budget"
             );
         }
+    }
+
+    #[test]
+    fn unlimited_is_an_explicit_subscription_choice_and_keeps_recording_usage() {
+        let pairs = [
+            ("RADAR_MODEL_CODEX", "codex"),
+            ("RADAR_MODEL_DAILY_USD", "unlimited"),
+        ];
+        let budget = budget_from_vars(&vars(&pairs)).expect("explicit subscription allowance");
+        assert_eq!(budget.daily_max, UNLIMITED_SUBSCRIPTION_DAILY);
+        assert_eq!(budget.per_call_max, UNLIMITED_SUBSCRIPTION_DAILY);
+        let mut agent = radar_agent::Agent::new(
+            radar_agent::Config {
+                budget,
+                allowlist: radar_agent::Allowlist::new(),
+            },
+            1,
+        );
+        let call = agent.begin(codex::NOMINAL_CALL, 1).expect("allowed");
+        agent.settle(call, codex::NOMINAL_CALL);
+        assert_eq!(agent.ledger().spent, codex::NOMINAL_CALL.get());
+        // The saturating counter reaching its representable maximum is not a cap.
+        let call = agent
+            .begin(UNLIMITED_SUBSCRIPTION_DAILY, 1)
+            .expect("uncapped");
+        agent.settle(call, UNLIMITED_SUBSCRIPTION_DAILY);
+        assert!(agent.begin(codex::NOMINAL_CALL, 1).is_ok());
+
+        let mut per_call = pairs.to_vec();
+        per_call.push(("RADAR_MODEL_PER_CALL_USD", "0.25"));
+        assert_eq!(
+            budget_from_vars(&vars(&per_call)).unwrap().per_call_max,
+            MicroUsd(250_000)
+        );
+    }
+
+    #[test]
+    fn unlimited_refuses_api_missing_and_conflicting_providers() {
+        let mut api = full_key();
+        api.push(("RADAR_MODEL_DAILY_USD", "unlimited"));
+        assert_eq!(budget_from_vars(&vars(&api)), None);
+        api.push(("RADAR_MODEL_CODEX", "codex"));
+        assert_eq!(budget_from_vars(&vars(&api)), None);
+        assert_eq!(
+            budget_from_vars(&vars(&[("RADAR_MODEL_DAILY_USD", "unlimited")])),
+            None
+        );
+        assert_eq!(
+            budget_from_vars(&vars(&[
+                ("RADAR_MODEL_OPENAI_KEY", "fake-key"),
+                ("RADAR_MODEL_DAILY_USD", "unlimited"),
+            ])),
+            None
+        );
     }
 
     #[test]

@@ -87,6 +87,9 @@
 //! [`Reconciled`]: OperationState::Reconciled
 //! [`Portfolio`]: radar_types::Portfolio
 
+#[path = "native_transfers.rs"]
+mod native_transfers;
+
 use std::collections::BTreeMap;
 
 use radar_types::{
@@ -94,6 +97,7 @@ use radar_types::{
 };
 use serde::{Deserialize, Serialize};
 
+use crate::Verified;
 use crate::event::{Correlation, Event, Outcome};
 use crate::file::{Journal, JournalError};
 
@@ -243,9 +247,33 @@ pub struct OperationEntry {
 /// What stopped an operation.
 #[derive(Debug, thiserror::Error)]
 pub enum OperationError {
+    /// External transfer identity, association or immutable evidence conflicts.
+    #[error("native transfer record is inconsistent or duplicates an operation")]
+    NativeTransfer,
+    /// An opening record conflicts, follows other history or has the wrong stage.
+    #[error("opening inventory must be immutable genesis history")]
+    OpeningInventory,
+    /// Missing, changed or wrongly staged finalized evidence.
+    #[error("settlement record is unbound, conflicting or not awaiting reconciliation")]
+    SettlementBinding,
+    /// Reviewed costs lack an exact retained settlement or conflict with history.
+    #[error("valuation does not bind immutable retained settlement facts")]
+    ValuationBinding,
+    /// A reserved operation must reclaim its portfolio reservation after replay.
+    #[error("the operation's reservation must be reheld before settlement")]
+    ClaimNotReheld,
+    /// A completed spend in replay must fit the unchanged recorded reservation.
+    #[error("completed spend does not match the recorded operation and reservation")]
+    InvalidCompletedSettlement,
+    /// Missing, conflicting or wrongly staged protected execution metadata.
+    #[error("execution binding is missing, conflicting or not awaiting settlement")]
+    ExecutionBinding,
     /// The durable record could not be written, so nothing was done.
     #[error("the operation could not be recorded, so it did not happen: {0}")]
     Journal(#[from] JournalError),
+    /// Replaying damaged or incomplete history could lose a capital claim.
+    #[error("operation history is not intact: {0:?}; reconcile it before proceeding")]
+    HistoryNotIntact(Verified),
     /// The account refused the claim.
     #[error("the account refused the claim: {0}")]
     Portfolio(#[from] PortfolioError),
@@ -342,6 +370,9 @@ impl Released {
 #[derive(Clone, Debug)]
 struct Live {
     entry: OperationEntry,
+    execution: Option<crate::ExecutionBinding>,
+    settlement: Option<crate::SettlementRecord>,
+    valuation: Option<crate::ValuationRecord>,
     /// The portfolio handle for its claim, when this process is holding one.
     ///
     /// `None` after a replay and before [`OperationLog::rehold`]: a
@@ -352,19 +383,97 @@ struct Live {
     claim: Option<ReservationId>,
 }
 
+struct Owner {
+    file: std::fs::File,
+    process: u32,
+}
+
+impl Owner {
+    fn release(&self) {
+        // Close alone leaves flock held by descriptors inherited during a
+        // concurrent fork. End ownership here even if such a duplicate survives.
+        // A forked child's destructor must not unlock its parent's ownership.
+        // Failure remains closed: the OS still releases on the last close.
+        if self.process == std::process::id() {
+            let _ = self.file.unlock();
+        }
+    }
+}
+
+impl Drop for Owner {
+    fn drop(&mut self) {
+        self.release();
+    }
+}
+
 /// Operations, and the journal they are recorded in.
 ///
 /// The caller is `radar consider`, which reopens the log before the risk kernel
 /// sizes anything so that capital claimed by an operation still in flight is not
 /// offered to a second one.
+/// Ownership is held by a nonblocking OS lock on `<journal>.lock` until this
+/// log is dropped, when it is explicitly released even if a duplicate survives.
+/// Keep the pathname and sidecar protected and stable: deleting or replacing
+/// them can bypass cooperative ownership. Generic `Journal` readers do not take
+/// this lock and must not write operation history.
 pub struct OperationLog {
+    // Holding the OS handle holds ownership, including through replay and
+    // external submission. Never delete the lock file to release ownership.
+    _owner: Owner,
     journal: Journal,
     operations: BTreeMap<OperationId, Live>,
     build: Option<String>,
+    opening_inventory: Option<crate::OpeningInventoryRecord>,
+    native_transfers: BTreeMap<String, crate::NativeTransferRecord>,
 }
 
 impl OperationLog {
+    /// The immutable genesis observation, if this history recorded one.
+    #[must_use]
+    pub const fn opening_inventory(&self) -> Option<&crate::OpeningInventoryRecord> {
+        self.opening_inventory.as_ref()
+    }
+
+    /// Records caller-reviewed opening holdings only before all other history.
+    /// Identical repeats do not append. Persistence precedes the memory update.
+    /// This does not establish coverage, cost basis, portfolio or authority.
+    ///
+    /// # Errors
+    /// Conflicting/non-genesis input or journal persistence failure.
+    pub fn record_opening_inventory(
+        &mut self,
+        opening: crate::OpeningInventoryRecord,
+        at: u64,
+    ) -> Result<Applied, OperationError> {
+        if let Some(prior) = &self.opening_inventory {
+            return if prior == &opening {
+                Ok(Applied::AlreadySeen)
+            } else {
+                Err(OperationError::OpeningInventory)
+            };
+        }
+        if !self.checkpoint().is_empty() {
+            return Err(OperationError::OpeningInventory);
+        }
+        self.journal.record(
+            crate::Stage::Inventory,
+            Outcome::Ok,
+            at,
+            Correlation {
+                opening_inventory: Some(opening.clone()),
+                ..Correlation::default()
+            },
+            self.build.clone(),
+            vec![],
+            None,
+            None,
+        )?;
+        self.opening_inventory = Some(opening);
+        Ok(Applied::Advanced)
+    }
+
     /// Opens the log at `path` and rebuilds every operation the file records.
+    /// Acquires ownership before reading, then refuses non-intact history.
     ///
     /// The portfolio is untouched here. Rebuilding *state* and re-taking
     /// *claims* are separate steps because the terminal ones must not be
@@ -375,17 +484,71 @@ impl OperationLog {
     ///
     /// # Errors
     ///
-    /// [`OperationError::Journal`] if the file cannot be read, and
+    /// [`OperationError::Journal`] if ownership cannot be acquired or the file
+    /// cannot be read; [`OperationError::HistoryNotIntact`] for broken or torn
+    /// history; and
     /// [`OperationError::Orphan`] or [`OperationError::IllegalTransition`] if
     /// what it records is not a history an operation could have had.
     pub fn open(path: impl Into<std::path::PathBuf>) -> Result<Self, OperationError> {
-        let journal = Journal::open(path)?;
+        let path = path.into();
+        let parent = path
+            .parent()
+            .filter(|p| !p.as_os_str().is_empty())
+            .unwrap_or(std::path::Path::new("."));
+        let directory = parent.canonicalize().map_err(|source| JournalError::Io {
+            path: parent.display().to_string(),
+            source,
+        })?;
+        let name = path.file_name().ok_or_else(|| JournalError::Io {
+            path: path.display().to_string(),
+            source: std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "an operation journal needs a filename",
+            ),
+        })?;
+        let path = directory.join(name);
+        let mut lock_path = path.as_os_str().to_os_string();
+        lock_path.push(".lock");
+        let lock_path = std::path::PathBuf::from(lock_path);
+        let mut options = std::fs::OpenOptions::new();
+        options.read(true).write(true).create(true).truncate(false);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt as _;
+            options.mode(0o600);
+        }
+        let owner = options
+            .open(&lock_path)
+            .map_err(|source| JournalError::Io {
+                path: lock_path.display().to_string(),
+                source,
+            })?;
+        // Nonblocking: another owner is a refusal, never a queued stale reader.
+        owner.try_lock().map_err(|source| JournalError::Io {
+            path: lock_path.display().to_string(),
+            source: source.into(),
+        })?;
+        // Also release explicitly if replay fails after acquiring ownership.
+        let owner = Owner {
+            file: owner,
+            process: std::process::id(),
+        };
+        let journal = Journal::open(&path)?;
+        let integrity = journal.verify()?;
+        if !matches!(integrity, Verified::Intact { .. }) {
+            return Err(OperationError::HistoryNotIntact(integrity));
+        }
         let events = journal.events()?;
+        let opening_inventory = replay_opening(&events)?;
         let operations = replay(&events)?;
+        let native_transfers = native_transfers::replay(&events, &operations)?;
         Ok(Self {
+            _owner: owner,
             journal,
             operations,
             build: radar_types::build_sha().map(str::to_owned),
+            opening_inventory,
+            native_transfers,
         })
     }
 
@@ -401,6 +564,183 @@ impl OperationLog {
     #[must_use]
     pub fn entry(&self, id: &OperationId) -> Option<&OperationEntry> {
         self.operations.get(id).map(|live| &live.entry)
+    }
+
+    /// Every retained operation once, including completed and failed entries.
+    /// Digest order is deterministic, not execution chronology.
+    pub fn entries(&self) -> impl Iterator<Item = (&OperationId, &OperationEntry)> {
+        self.operations.iter().map(|(id, live)| (id, &live.entry))
+    }
+
+    /// Exact owned journal history a protected accounting snapshot must cover.
+    /// Includes every event, not only outstanding operations. Empty for genesis.
+    /// Does not verify valuations or prevent an operator rolling back the file.
+    #[must_use]
+    pub fn checkpoint(&self) -> &str {
+        self.journal.checkpoint()
+    }
+
+    /// Protected transaction metadata for this operation, including after replay.
+    #[must_use]
+    pub fn execution(&self, id: &OperationId) -> Option<&crate::ExecutionBinding> {
+        self.operations.get(id)?.execution.as_ref()
+    }
+
+    /// Retained normalized finalized facts, including after terminal replay.
+    #[must_use]
+    pub fn settlement(&self, id: &OperationId) -> Option<&crate::SettlementRecord> {
+        self.operations.get(id)?.settlement.as_ref()
+    }
+
+    /// Retained caller-reviewed costs, including after terminal replay.
+    #[must_use]
+    pub fn valuation(&self, id: &OperationId) -> Option<&crate::ValuationRecord> {
+        self.operations.get(id)?.valuation.as_ref()
+    }
+
+    /// Durably retains caller-reviewed costs against exact existing facts.
+    /// Does not settle capital or derive portfolio state. Generic callers
+    /// verify economic content; this checks stage, association and immutability.
+    ///
+    /// # Errors
+    /// Missing/conflicting settlement, wrong state or persistence failure.
+    pub fn record_valuation(
+        &mut self,
+        id: &OperationId,
+        valuation: crate::ValuationRecord,
+        at: u64,
+    ) -> Result<Applied, OperationError> {
+        let live = self
+            .operations
+            .get_mut(id)
+            .ok_or_else(|| OperationError::NoSuchOperation(id.clone()))?;
+        if live.entry.state != OperationState::SubmissionUnknown
+            || live.settlement.as_ref() != Some(&valuation.settlement)
+        {
+            return Err(OperationError::ValuationBinding);
+        }
+        if let Some(previous) = &live.valuation {
+            return if previous == &valuation {
+                Ok(Applied::AlreadySeen)
+            } else {
+                Err(OperationError::ValuationBinding)
+            };
+        }
+        self.journal.record_operation(
+            Outcome::Uncertain,
+            at,
+            Correlation {
+                operation: Some(id.0.clone()),
+                valuation: Some(valuation.clone()),
+                ..Correlation::default()
+            },
+            live.entry,
+            self.build.clone(),
+            None,
+        )?;
+        live.valuation = Some(valuation);
+        Ok(Applied::Advanced)
+    }
+
+    /// Persists caller-verified normalized facts without closing the claim.
+    /// The protected caller verifies signature, exact message, finality and
+    /// effects. The journal only checks artifact binding/stage/immutability.
+    ///
+    /// # Errors
+    /// Missing or conflicting binding, non-unknown state or persistence failure.
+    pub fn record_settlement(
+        &mut self,
+        id: &OperationId,
+        settlement: crate::SettlementRecord,
+        at: u64,
+    ) -> Result<Applied, OperationError> {
+        let live = self
+            .operations
+            .get_mut(id)
+            .ok_or_else(|| OperationError::NoSuchOperation(id.clone()))?;
+        if live.entry.state != OperationState::SubmissionUnknown
+            || live
+                .execution
+                .as_ref()
+                .and_then(|e| e.signed_transaction.as_ref())
+                != Some(&settlement.signed_transaction)
+        {
+            return Err(OperationError::SettlementBinding);
+        }
+        if let Some(previous) = &live.settlement {
+            return if previous == &settlement {
+                Ok(Applied::AlreadySeen)
+            } else {
+                Err(OperationError::SettlementBinding)
+            };
+        }
+        self.journal.record_operation(
+            Outcome::Uncertain,
+            at,
+            Correlation {
+                operation: Some(id.0.clone()),
+                settlement: Some(settlement.clone()),
+                ..Correlation::default()
+            },
+            live.entry,
+            self.build.clone(),
+            None,
+        )?;
+        live.settlement = Some(settlement);
+        Ok(Applied::Advanced)
+    }
+
+    /// Records caller-verified signed bytes without releasing the capital claim.
+    /// The caller must check the wallet signature and authorized message first.
+    ///
+    /// # Errors
+    /// Missing binding, a non-unknown operation, conflicting second bytes or write failure.
+    pub fn record_signed(
+        &mut self,
+        id: &OperationId,
+        signed: String,
+        at: u64,
+    ) -> Result<Applied, OperationError> {
+        if self
+            .native_transfers
+            .values()
+            .any(|record| record.signed_transaction == signed)
+        {
+            return Err(OperationError::NativeTransfer);
+        }
+        let live = self
+            .operations
+            .get_mut(id)
+            .ok_or_else(|| OperationError::NoSuchOperation(id.clone()))?;
+        if live.entry.state != OperationState::SubmissionUnknown {
+            return Err(OperationError::ExecutionBinding);
+        }
+        let mut execution = live
+            .execution
+            .clone()
+            .ok_or(OperationError::ExecutionBinding)?;
+        if let Some(previous) = &execution.signed_transaction {
+            return if previous == &signed {
+                Ok(Applied::AlreadySeen)
+            } else {
+                Err(OperationError::ExecutionBinding)
+            };
+        }
+        execution.signed_transaction = Some(signed);
+        self.journal.record_operation(
+            Outcome::Uncertain,
+            at,
+            Correlation {
+                operation: Some(id.0.clone()),
+                execution: Some(execution.clone()),
+                ..Correlation::default()
+            },
+            live.entry,
+            self.build.clone(),
+            None,
+        )?;
+        live.execution = Some(execution);
+        Ok(Applied::Advanced)
     }
 
     /// Re-takes every outstanding claim against `portfolio`.
@@ -450,11 +790,31 @@ impl OperationLog {
         at: u64,
         correlation: Correlation,
     ) -> Result<OperationId, OperationError> {
+        if correlation.native_transfer.is_some()
+            || correlation
+                .execution
+                .as_ref()
+                .and_then(|binding| binding.signed_transaction.as_ref())
+                .is_some_and(|signed| {
+                    self.native_transfers
+                        .values()
+                        .any(|record| &record.signed_transaction == signed)
+                })
+        {
+            return Err(OperationError::NativeTransfer);
+        }
         let entry = OperationEntry {
             intent,
             reserved: None,
             state: OperationState::Proposed,
         };
+        if correlation.settlement.is_some() {
+            return Err(OperationError::SettlementBinding);
+        }
+        if correlation.valuation.is_some() {
+            return Err(OperationError::ValuationBinding);
+        }
+        let execution = correlation.execution.clone();
         let recorded = self.journal.record_operation(
             Outcome::Ok,
             at,
@@ -464,8 +824,16 @@ impl OperationLog {
             None,
         )?;
         let id = OperationId(recorded.id().to_owned());
-        self.operations
-            .insert(id.clone(), Live { entry, claim: None });
+        self.operations.insert(
+            id.clone(),
+            Live {
+                entry,
+                claim: None,
+                execution,
+                settlement: None,
+                valuation: None,
+            },
+        );
         Ok(id)
     }
 
@@ -570,13 +938,15 @@ impl OperationLog {
     }
 
     /// Records the answer that came back, and settles the claim against it.
+    /// Checks the debit before writing completion; persistence failure changes
+    /// neither the operation nor the portfolio. Replayed claims must be reheld.
     ///
     /// # Errors
     ///
     /// [`OperationError::NoSuchOperation`],
     /// [`OperationError::IllegalTransition`] for an operation nothing was
     /// submitted for, whatever the account refuses the settlement with, and
-    /// [`OperationError::Journal`].
+    /// [`OperationError::Journal`] or [`OperationError::ClaimNotReheld`].
     pub fn confirm(
         &mut self,
         id: &OperationId,
@@ -685,14 +1055,23 @@ impl OperationLog {
             }
         }
 
+        // Validate on a copy before the durable terminal record. A rejected
+        // debit must not leave history saying the claim was closed. Apply the
+        // copy only after the write succeeds, so an I/O failure changes neither.
+        if claim.is_none() && entry.reserved.is_some() {
+            return Err(OperationError::ClaimNotReheld);
+        }
+        let mut settled = portfolio.clone();
+        if let Some(claim) = claim {
+            settled.settle(claim, settlement)?;
+        }
+
         let outcome = match next {
             OperationState::Failed => Outcome::Failed,
             _ => Outcome::Ok,
         };
         self.write(id, entry, outcome, at)?;
-        if let Some(claim) = claim {
-            portfolio.settle(claim, settlement)?;
-        }
+        *portfolio = settled;
         self.set(id, entry, None);
         Ok(Applied::Advanced)
     }
@@ -723,6 +1102,37 @@ impl OperationLog {
     }
 }
 
+/// Opening inventory is one unmixed genesis event, never a later reset.
+fn replay_opening(
+    events: &[Event],
+) -> Result<Option<crate::OpeningInventoryRecord>, OperationError> {
+    let mut opening = None;
+    for (index, event) in events.iter().enumerate() {
+        if event.stage != crate::Stage::Inventory && event.correlation.opening_inventory.is_none() {
+            continue;
+        }
+        let record = event
+            .correlation
+            .opening_inventory
+            .as_ref()
+            .ok_or(OperationError::OpeningInventory)?;
+        if index != 0
+            || event.stage != crate::Stage::Inventory
+            || event.outcome != Outcome::Ok
+            || event.operation.is_some()
+            || event.correlation
+                != (Correlation {
+                    opening_inventory: Some(record.clone()),
+                    ..Correlation::default()
+                })
+        {
+            return Err(OperationError::OpeningInventory);
+        }
+        opening = Some(record.clone());
+    }
+    Ok(opening)
+}
+
 /// Rebuilds operations from the events a journal holds.
 ///
 /// Idempotent by operation identity: a line that says what the operation
@@ -737,10 +1147,22 @@ fn replay(events: &[Event]) -> Result<BTreeMap<OperationId, Live>, OperationErro
             continue;
         };
         if entry.state == OperationState::Proposed {
+            if event.correlation.valuation.is_some() {
+                return Err(OperationError::ValuationBinding);
+            }
+            if event.correlation.settlement.is_some() {
+                return Err(OperationError::SettlementBinding);
+            }
             // The proposal *is* the identity, so it needs no correlation to
             // find itself by.
             let id = OperationId(event.id.clone());
-            operations.entry(id).or_insert(Live { entry, claim: None });
+            operations.entry(id).or_insert(Live {
+                entry,
+                claim: None,
+                execution: event.correlation.execution.clone(),
+                settlement: None,
+                valuation: None,
+            });
             continue;
         }
         let named = event
@@ -755,6 +1177,64 @@ fn replay(events: &[Event]) -> Result<BTreeMap<OperationId, Live>, OperationErro
                 event: event.id.clone(),
                 operation: id.0.clone(),
             })?;
+        if let Some(valuation) = &event.correlation.valuation {
+            if live.entry.state != OperationState::SubmissionUnknown
+                || entry != live.entry
+                || live.settlement.as_ref() != Some(&valuation.settlement)
+                || live
+                    .valuation
+                    .as_ref()
+                    .is_some_and(|previous| previous != valuation)
+            {
+                return Err(OperationError::ValuationBinding);
+            }
+            live.valuation = Some(valuation.clone());
+        }
+        if let Some(settlement) = &event.correlation.settlement {
+            if live.entry.state != OperationState::SubmissionUnknown
+                || entry != live.entry
+                || live
+                    .execution
+                    .as_ref()
+                    .and_then(|e| e.signed_transaction.as_ref())
+                    != Some(&settlement.signed_transaction)
+                || live
+                    .settlement
+                    .as_ref()
+                    .is_some_and(|previous| previous != settlement)
+            {
+                return Err(OperationError::SettlementBinding);
+            }
+            live.settlement = Some(settlement.clone());
+        }
+        if let OperationState::Confirmed(Settlement::Completed(spent))
+        | OperationState::Reconciled(Settlement::Completed(spent)) = entry.state
+            && (entry.intent != live.entry.intent
+                || entry.reserved != live.entry.reserved
+                || entry.reserved.and_then(|q| q.checked_sub(spent)).is_none())
+        {
+            return Err(OperationError::InvalidCompletedSettlement);
+        }
+        if let Some(binding) = &event.correlation.execution {
+            let previous = live
+                .execution
+                .as_ref()
+                .ok_or(OperationError::ExecutionBinding)?;
+            if live.entry.state != OperationState::SubmissionUnknown
+                || entry != live.entry
+                || binding.wallet != previous.wallet
+                || binding.transaction != previous.transaction
+                || binding.reviewed_proposal != previous.reviewed_proposal
+                || binding.signed_transaction.is_none()
+                || previous
+                    .signed_transaction
+                    .as_ref()
+                    .is_some_and(|signed| binding.signed_transaction.as_ref() != Some(signed))
+            {
+                return Err(OperationError::ExecutionBinding);
+            }
+            live.execution = Some(binding.clone());
+        }
         if live.entry.state == entry.state {
             continue;
         }
@@ -768,6 +1248,42 @@ fn replay(events: &[Event]) -> Result<BTreeMap<OperationId, Live>, OperationErro
 mod tests {
     use super::{OperationError, OperationState};
     use radar_types::{Decimals, Settlement, TokenQuantity};
+
+    #[cfg(unix)]
+    #[test]
+    fn dropping_owner_releases_ownership_even_with_a_duplicated_descriptor() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("operations.jsonl");
+        let file = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(dir.path().join("operations.jsonl.lock"))
+            .unwrap();
+        file.try_lock().unwrap();
+        // dup shares the same open file description as a fork-inherited fd.
+        // Keep it alive to deterministically test the lifetime, without a race.
+        let duplicate = file.try_clone().unwrap();
+        let owner = super::Owner {
+            file,
+            process: std::process::id(),
+        };
+        // Simulate the inherited wrapper's destructor running in another PID.
+        // It must close its duplicate without explicitly unlocking the parent.
+        drop(super::Owner {
+            file: duplicate.try_clone().unwrap(),
+            process: std::process::id().wrapping_add(1),
+        });
+        assert!(super::OperationLog::open(&path).is_err());
+        drop(owner);
+        let next = super::OperationLog::open(&path).expect("dropped owner releases lock");
+        // The stale duplicate closing must not release the new owner's lock.
+        drop(duplicate);
+        assert!(super::OperationLog::open(&path).is_err());
+        drop(next);
+        assert!(super::OperationLog::open(&path).is_ok());
+    }
 
     fn some() -> Settlement {
         Settlement::PartiallyFilled(TokenQuantity::new(1, Decimals::NATIVE_SOL))

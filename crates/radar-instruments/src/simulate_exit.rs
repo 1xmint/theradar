@@ -316,8 +316,8 @@ mod tests {
     fn a_token_nothing_will_buy_is_not_exitable() {
         let out = run(&instrument(vec![]), MINT).expect("answers");
         assert!(!out.exitable);
-        assert!(out.curve.is_empty());
-        assert!(!out.no_route_at.is_empty());
+        assert_eq!(out.curve, [] as [crate::simulate_exit::Point; 0]);
+        assert_ne!(out.no_route_at, [] as [u64; 0]);
     }
 
     #[test]
