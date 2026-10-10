@@ -4760,3 +4760,40 @@ source locally with PR 343/344. Only appended plan history conflicted; retained
 all sections. Combined unit floor 2220. Complete integrated GitHub verification
 and a fresh release are still needed before deployment. Primary run 38068474113
 remains live; do not overwrite it. Autonomous execution remains off.
+
+
+### Protected native-operation completion (2026-10-10)
+
+Previous goal turn made concrete progress: integrated verified PR 343/344/345
+source on 57c2757 and dispatched GitHub integration/release. Those runs are now
+terminal green: CI 38070118800 passed every job and the final mutation gate;
+release 38070117408 built all six binaries. Downloaded artifacts and independently
+matched every SHA256 against BUILD-INFO.txt at exactly 57c2757. Primary full-scope
+CI 38068474113 remains live at inspection; leave it intact.
+
+Actual next caller: radar-issuer --reconcile-operation <operation-id>. Recheck
+retained exact signed transaction/normalized economic facts, one unknown
+operation, zero-token opening basis, fresh wallet/journal checkpoint, raw token
+quantities, native balance and transaction anchors. Also compare each retained
+buy's pre/post wallet mint totals with preceding retained quantities. Current
+net quantities alone can conceal an unexplained earlier token change; a new
+process regression demonstrates that refusal. Existing zero-opening fixtures
+now use consistent zero pre-token balances and fifteen acquired units. Unknown
+opening basis and unsupported sales remain refused.
+
+Every external native effect used for cash comparison must already be durable.
+Rehold the original claim against verified pre-execution native cash, then use
+OperationLog::reconcile to validate and write completion before releasing the
+unused reservation. Retained lots/basis/rent/failed fees replay on restart; a
+response-loss retry performs no second write, and subsequent issuance still
+requires a new protected checkpoint and risk state covering those effects.
+
+Added six actual-process regressions covering success, retries, next-issuance
+risk floors, failed network fees, stale/foreign/mismatched inputs, missing or
+nonzero opening basis, multiple unknown operations, external-flow retention and
+hidden token gaps. Unit floor remains 2220 (new integration tests only).
+Verification must run on GitHub in an independent branch based on integrated
+controls. No local jobs or live signing. This does not close complete live wallet
+coverage, sale completion, dropped-transaction recovery, delegation, adaptive
+reasoning, research chat or live supervision. Goal remains fully autonomous
+trading, not this offline milestone.

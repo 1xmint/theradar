@@ -1270,6 +1270,33 @@ runtime validity or completeness. All execution/ownership/portfolio flags stay
 false and the root classification stays unresolved. It writes no journal and
 cannot satisfy live reconciliation or authorize capital.
 
+## Protected completion of native-SOL buys and failed fees
+
+`radar-issuer --reconcile-operation <operation-id>` uses the configured protected
+snapshot and owned journal. It rechecks retained signed bindings and normalized
+valuations, requires one submitted unknown operation, a retained zero-token
+opening baseline, current wallet/journal coverage, matching token quantities and
+native cash including every transaction anchor. Each buy must also account for
+its mint quantity before and after execution against the retained preceding
+buys; partial token-account coverage refuses. Any external native effects used
+to explain that cash must already be retained in the journal. Missing evidence,
+unexplained movements, nonzero unknown opening basis and sales refuse completion.
+
+Rehold the claim against the verified pre-execution native balance, then use
+OperationLog's validated, durable terminal transition with the measured debit.
+The unused reservation is released only after completion reaches disk. Retained
+token lots, acquisition basis, rent and failed fees remain replayable. A retry
+rechecks retained history and returns the same completion without another write;
+it does not require the old snapshot checkpoint to match the terminal record it
+just created. A new issuance still requires an updated protected checkpoint and
+state covering the retained exposure, losses and failures.
+
+This is offline operator-provisioned per-operation completion, not complete live
+wallet accounting or independently verified historical ownership/coverage. It
+does not implement sale completion, dropped-transaction recovery, current market
+valuation, a live supervisor, delegation or adaptive trading. Live activation
+remains closed. GitHub process regressions must verify the command before use.
+
 ## What would reverse this
 
 Nothing foreseeable reverses holding a policy locally. The specific ceilings are

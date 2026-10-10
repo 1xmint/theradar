@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 //! Offline operator-provisioned kernel issuer. It holds no wallet or Privy key.
 //! Configured private files are the trust boundary; stdin carries no authority.
-//! This is not yet a live snapshot adapter or a settlement reconciler.
+//! Reconciles retained native-SOL buys/failed fees against protected wallet reads.
+//! This is not yet a live snapshot adapter or a sale execution/recovery loop.
 
 use std::io::{BufRead as _, Read as _, Write as _};
 use std::path::{Path, PathBuf};
@@ -28,6 +29,9 @@ mod basis;
 
 #[path = "radar-issuer/acquisitions.rs"]
 mod acquisitions;
+
+#[path = "radar-issuer/reconciliation.rs"]
+mod reconciliation;
 
 #[path = "radar-issuer/native_transfers.rs"]
 mod native_transfers;
@@ -550,8 +554,7 @@ impl Issuer {
         if expired(now, self.config.valid_until_unix_secs) {
             return Err("mandate expired".into());
         }
-        // Without settlement reconciliation, no second decision may assume
-        // the first one's exposure, loss or unknown submission vanished.
+        // Only verified durable reconciliation may release the previous claim.
         if self.operations.outstanding().next().is_some() {
             return Err("outstanding operation requires reconciliation".into());
         }
@@ -793,6 +796,22 @@ fn run() -> Result<(), String> {
     let mut issuer = Issuer::load(Path::new(&path))?;
     let args: Vec<_> = std::env::args().skip(1).collect();
     if issuer.inventory_mode(&args)? {
+        return Ok(());
+    }
+    if args.len() == 2 && args[0] == "--reconcile-operation" {
+        let snapshot: Snapshot =
+            serde_json::from_slice(&private_read(&issuer.config.snapshot_path)?)
+                .map_err(|_| "invalid trusted snapshot")?;
+        println!(
+            "{}",
+            reconciliation::apply(
+                &mut issuer.operations,
+                &issuer.config,
+                &snapshot,
+                &args[1],
+                unix_now()?
+            )?
+        );
         return Ok(());
     }
     if args == ["--review-acquisitions"] {
