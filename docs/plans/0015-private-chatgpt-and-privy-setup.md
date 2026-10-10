@@ -4433,3 +4433,54 @@ preserving its exact meaning, and asserted break-even PnL contributes no loss.
 No broad mutation exclusions added. New GitHub proof required. Integrated
 primary 62cfeb8 was published before these results; run 38065819742 is live and
 must finish intact before integrating this follow-up and refreshing its checks.
+
+### Account activity mutation boundary follow-up (2026-10-10)
+
+Older full-branch run 38063256175 shard 3 completed with seven survivors at
+account_activity.rs:15:56, :15:73, :15:60, :15:65 and :21:35. Removed redundant
+minimum signature-length arithmetic: tx::decode already bounds-checks every
+signature and message field before any slicing. Kept the packet-size and
+nonzero-signature restrictions. Added a valid single-signer/single-account
+transaction (the missing equality boundary) and refusal for every truncated
+prefix. This addresses the actual reported checks without broad mutation
+exclusions. Unit floor is 2210 on this separate branch over PR 335; verification
+is pending GitHub Actions, with no local test/build/lint/mutation jobs. No live
+deployment or authority changed. PR 337 separately contains the retained-risk
+guard; its first GitHub baseline found two older nonzero-opening fixtures that
+must be constructed as historical journal entries, not newly authorized trades.
+
+PR 338 run 38065557483 passed each nonempty mutation baseline but reported one
+new survivor at account_activity.rs:15:20, changing packet length >1232 to
+>=1232. Added a correctly signed, decodable packet of exactly 1232 bytes with an
+opaque instruction; trailing bytes would not test this boundary because the
+decoder refuses them independently. Ordinary jobs were still finishing at last
+inspection. Wait for terminal status before publishing this test correction;
+all verification remains on GitHub. No exclusions or production guard changes.
+
+### Integrated primary verification handback (2026-10-10)
+
+Primary now integrates PR 335's proven owner/token sources, PR 337's risk guard
+and historical fixture correction (285b7f7), and PR 338's packet-boundary fix
+(f186b11). Resolved only plan append conflicts and combined unit floor to 2213.
+Reviewed the full staged changes before committing. PR 338 first run finished:
+every ordinary job passed, only its packet-equality mutant and final gate failed;
+the exact-boundary correction is published for fresh GitHub verification.
+The risk correction's run 38065674814 is also live. Publish integrated primary
+now that its prior full-branch run is terminal and all failure logs/annotations
+were inspected. Fresh full-branch GitHub tests and all four mutation shards must
+verify this combined source; stacked checks alone cannot prove that scope.
+Do not push over these live runs. No local test/build/lint/mutation jobs,
+deployment or trades. Continue with any reported failures, then complete live
+risk coverage, durable application/recovery, execution/exits, limits, signer
+isolation, delegation and funding before turning autonomous execution on.
+
+GitHub marked PRs 335, 337 and 338 merged when their commits reached the stacked
+base branch; that does not merge PR 334 into main or establish full CI success.
+PR 338 run 38065790380 at f186b11 is now fully green, including all jobs and
+the final mutation gate. The two nonempty mutation shards each passed baseline
+and caught two mutants; two shards had none. Risk follow-up 7a67a7a is on draft
+PR 339. Its initial plan append conflict prevented CI from starting; merged
+primary 62cfeb8 into the follow-up, preserving both plan sections and combined
+floor 2213, so GitHub can verify it. Keep primary run 38065819742 intact. Next:
+inspect PR 339 results, fix any failures, then integrate the correction and
+refresh full primary CI only after its current run finishes. Autonomous off.
