@@ -136,7 +136,7 @@ impl Policy {
 }
 
 fn zero_daily_loss_cap() -> Option<MicroUsd> {
-    Some(MicroUsd::ZERO)
+    Policy::CLOSED.max_daily_loss
 }
 
 impl Default for Policy {

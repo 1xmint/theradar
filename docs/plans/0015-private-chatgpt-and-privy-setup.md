@@ -4702,3 +4702,14 @@ the owner's draft choices and adaptive proposals into an authorized live policy
 still requires the independent mandate and verified wallet inputs. Existing
 action-aware reduction work, accounting, execution/recovery and delegation
 remain necessary; no live service, policy file, authority or funds changed.
+
+PR 345 first run 38069556295 at d7d506c exposed a serde-default helper lint
+and one equivalent survivor. Lint rejected a function always returning Some;
+read the value from Policy::CLOSED instead, keeping a single default source.
+Shard 3 applied policy.rs:139:5's exact Some(Default::default()) replacement
+and passed its baseline and mutated tests. MicroUsd derives Default over u64,
+so this equals Some(MicroUsd::ZERO). Added only that exact replacement to the
+documented equivalence list; None replacements and the daily-loss boundary
+remain tested. All four baselines passed: four mutants, two caught, one unviable
+and the equivalent survivor. Other jobs passed except lint; tests remain live
+at inspection. Do not push this correction until the current run is terminal.
