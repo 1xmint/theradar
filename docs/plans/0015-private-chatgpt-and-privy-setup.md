@@ -4376,3 +4376,30 @@ economic coverage and durable idempotent portfolio/risk application, independent
 live risk inputs, execution/exits/recovery/scheduling, and owner limits,
 isolated issuer/signer deployment, Privy policy/delegation and funding validation.
 Autonomous execution remains off; keep the full goal active.
+
+### Retained risk bounds at issuance (2026-10-10)
+
+Added an issuer caller guard after the pure kernel accepts and before any
+authorization or new operation is persisted. It reuses acquisitions::review to
+recheck retained signatures and economic inputs, then refuses a supplied risk
+state below recorded remaining cost basis (total and creator), current UTC-day
+gross disposal losses plus failed network fees, or the ordered trailing failure
+count. Gains do not offset incurred loss stops; the failure streak survives a
+UTC day boundary and resets on a recorded success. These are conservative
+recorded bounds, not current market exposure or complete wallet risk. Missing
+opening basis, unknown disposal basis, ambiguous event ordering, future records
+and arithmetic overflow refuse. A completed journal entry without signed and
+valued economics also refuses even after refreshing its checkpoint.
+
+Added boundary/understatement/refusal unit coverage and a process regression
+that completes a retained buy, refreshes the checkpoint, and proves flat or
+unattributed state cannot issue or change history. Recorded basis and creator
+exposure permit the next issue in this synthetic fixture. Unit floor is 2212.
+Local work is source review, formatting and diff checks only; GitHub must still
+verify tests, lint and mutation coverage. Publish a separate stacked branch over
+PR 335, leaving primary run 38063256175 intact. That older run now reports seven
+survivors in account_activity::transaction (signature extent arithmetic and
+account-count boundary); its last shard is still running. Inspect the complete
+run before fixing and publishing integrated primary. No deployment, signing
+authority or trade enabled. Live risk input/reconciliation, execution and exits,
+owner numeric limits, isolated deployment, delegation and funding remain.

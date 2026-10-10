@@ -47,6 +47,9 @@ mod token_effects;
 #[path = "radar-issuer/token_reconciliation.rs"]
 mod token_reconciliation;
 
+#[path = "radar-issuer/risk_floor.rs"]
+mod risk_floor;
+
 #[path = "radar-issuer/account_inventory.rs"]
 mod account_inventory;
 
@@ -447,6 +450,13 @@ impl Issuer {
                 Verdict::Authorised(value) => *value,
                 Verdict::Refused { .. } => return Err("risk kernel refused".into()),
             };
+        let history = acquisitions::review(&self.operations, &self.config)?;
+        risk_floor::verify(
+            &history,
+            self.operations.opening_inventory(),
+            &snapshot.state,
+            now,
+        )?;
         // Narrow the kernel window to the signer's policy window.
         authorization.expires_after = radar_types::Slot(
             authorization.expires_after.get().min(

@@ -153,6 +153,12 @@ fn terminal_history_requires_a_new_protected_accounting_checkpoint_before_issuan
         // Deliberate protected operator provision in this fixture, not inferred PnL.
         fixture.snapshot["state"]["realised_loss_today"] = json!(0);
         fixture.save();
+        if completed {
+            // A new checkpoint cannot manufacture missing signed/economic history.
+            assert_eq!(issuer.ask(&fixture.candidate)["outcome"], "refused");
+            assert_eq!(std::fs::read(&history).expect("no issuance"), before);
+            continue;
+        }
         assert_eq!(issuer.ask(&fixture.candidate)["outcome"], "issued");
         assert_eq!(
             issuer.ask(&fixture.candidate)["reason"],
@@ -2348,6 +2354,62 @@ fn acquisition_report_refuses_missing_changed_duplicate_or_invalid_retained_econ
         assert_eq!(result.stdout, Vec::<u8>::new(), "{case}");
         assert_eq!(std::fs::read(&history).expect("unchanged"), saved);
     }
+}
+
+#[test]
+fn issuance_refuses_flat_or_unattributed_state_after_a_retained_completed_buy() {
+    let (mut fixture, id, price_path, _) = acquisition_cost_fixture_opening_amount(Some(0));
+    let recorded = fixture
+        .command()
+        .args(["--record-valuation", id.as_str()])
+        .arg(price_path)
+        .output()
+        .unwrap();
+    assert!(
+        recorded.status.success(),
+        "{}",
+        String::from_utf8_lossy(&recorded.stderr)
+    );
+    let path = fixture.dir.path().join("operations.jsonl");
+    let mut log = radar_journal::OperationLog::open(&path).unwrap();
+    let mut portfolio = native_portfolio(&fixture);
+    log.rehold(&mut portfolio).unwrap();
+    log.reconcile(
+        &id,
+        radar_types::Settlement::Completed(radar_types::TokenQuantity::lamports(15_156_000)),
+        &mut portfolio,
+        unix_now(),
+    )
+    .unwrap();
+    fixture.snapshot["accounting_checkpoint"] = json!(log.checkpoint());
+    drop(log);
+    let saved = std::fs::read(&path).unwrap();
+    fixture.snapshot["state"]["now"] = json!(1002);
+    fixture.save();
+    let mut issuer = fixture.start();
+    assert_eq!(
+        issuer.ask(&fixture.candidate)["reason"],
+        "snapshot risk state understates retained history"
+    );
+    assert_eq!(std::fs::read(&path).unwrap(), saved);
+    fixture.snapshot["state"]["deployed"] = json!(3_001_200);
+    fixture.save();
+    assert_eq!(
+        issuer.ask(&fixture.candidate)["reason"],
+        "snapshot risk state understates retained history"
+    );
+    assert_eq!(std::fs::read(&path).unwrap(), saved);
+    let creator = fixture.snapshot["proposal"]["creator"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    fixture.snapshot["state"]["per_creator"][creator] = json!(3_001_200);
+    fixture.save();
+    assert_eq!(issuer.ask(&fixture.candidate)["outcome"], "issued");
+    assert_eq!(
+        issuer.ask(&fixture.candidate)["reason"],
+        "outstanding operation requires reconciliation"
+    );
 }
 
 fn another_fixture_transaction(binding: &radar_journal::ExecutionBinding) -> (String, String) {
