@@ -5074,6 +5074,7 @@ existing executor run is terminal. Role behavior is already verified; executor
 behavior and the combined result still require the fresh full GitHub run. This
 supersedes the earlier sequencing note, not any activation gate. No live change.
 
+
 ### Exact-SOL output units and handback (2026-10-10)
 
 Previous goal turn made source progress by combining verified role checks and the
@@ -5108,3 +5109,33 @@ argument/conversion regressions; adjusted the index count. The trading tests
 passed in that run, but repository conformance is a required test and the run
 remains failed. Publish this documentation fix with the naming correction only
 after the old run finishes. No production behavior changed in either correction.
+
+### Integrated verified signer and executor source (2026-10-10)
+
+Fast-forwarded feat/integrated-autonomous-controls from 63e66e6 to verified
+f90b058. This includes direction, explicit native units, aggregate token-debit
+bounds, captured mint/trader/quote roles and correct executor buy/sell dispatch.
+Their combined CI 38081547094 passed every job, with 17 mutants (nine caught,
+eight unviable). Earlier accounting and optional-cap controls remain included.
+No production authority or service was changed. Test floor 2228.
+
+Request fresh broad integrated GitHub CI and a release-linux artifact before
+protected installation work. Fixed radar-deploy updates Serve only; do not imply
+that downloading an issuer/signer binary installs or activates those services.
+Exact-SOL builder correction is separate PR 353; initial run 38081913177 has a
+naming-only lint correction committed as 72f296a, awaiting terminal old run before
+publication. Do not integrate it as verified yet. Authorized output floors, live
+holdings/exit issuance and reconciliation, portfolio inputs, adaptive supervisor/
+research chat, recovery and protected site handover remain goal work.
+
+
+### Corrected builder verification after base retarget
+
+GitHub marked executor/role/token PRs integrated when their exact source reached
+the integration branch, and retargeted PR 353 to that branch. Its correction
+push c963b24 had no CI run because appended plan notes conflicted with 33cbe0f.
+Merged that verified documentation base, preserving both handbacks; no source
+conflict or trading behavior change. Fresh GitHub verification is required.
+Issuer-output enforcement is independently published as PR 354 at 6df0d00 and
+not yet integrated or verified. Integrated 33cbe0f CI/release both passed; no
+production authority or service changed. Goal remains fully autonomous trading.
