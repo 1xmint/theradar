@@ -3685,3 +3685,67 @@ Independent live risk inputs, execution/exits/recovery/scheduling and activated
 owner limits/isolated keys/verified Privy policy/delegation/funding/deployment
 validation remain required. No new live read, deployment, key, delegation,
 owner limit or trade in the adapter increment. Autonomous execution stays off.
+
+
+### Durable external-transfer evidence, isolated increment (2026-10-09)
+
+While source 6d46e4e CI 38004462702 runs, work on the independent local
+feat/native-transfer-retention branch in the sibling worktree. Add immutable
+NativeTransferRecord storage to the existing owned journal and a protected
+--record-native-transfers caller. Canonical signed identity, exact normalized
+whitelisted facts/review, idempotent repeats, persistence-before-memory and
+operation collision checks survive replay. Re-verify retained facts/signatures
+and combine identical current/retained transfers once in inventory cash review.
+No risk state, reservation, claims, execution authority or completeness changes.
+Seven tests added; floor 2177 to 2184. ADR 0008 records the contract.
+
+The initial intact-chain missing-record test hit Journal::NoCorrelation before
+replay; give it an unrelated correlation so it reaches the intended association
+refusal. A temporary module insertion matched a word in a doc comment instead
+of the import; repair the anchor before compilation. No such edit is retained.
+Scoped restored verification and manual guard faults remain required.
+
+Pending CI's ordinary tests failed in existing protected_disposal_measurement_
+survives_replay_without_releasing_capital at issuer_process.rs:385:13: the child
+reported history unavailable. This generic message does not establish the
+underlying lock or replay error. Other ordinary jobs passed; mutation jobs still
+run. No push/cancellation, retry workaround or production locking change made.
+Inspect completed baselines/survivors before a repair; do not assert a cause not
+reported by the evidence.
+
+
+Restored verification passed 504 scoped tests: CLI 238, journal 54 and signer
+212, with one pre-existing ignored journal test unchanged. Rust 1.99 all-target
+scoped Clippy passed after extracting fixture helpers to satisfy its function
+length limit without suppressions. Formatting passed. The affected native-
+transfer tests were rerun after that helper-only refactor. Conformance remains
+to be checked after staging the new storage module.
+
+All 26 manual logic faults caught and restored: wire count/extent/canonical
+identity, evidence/signature binding, immutable and replay conflicts, outcome/
+stage/operation associations, operation collisions in both directions, retained
+wallet/artifact/review/context/conflicts, checkpoint/freshness/wallet guards and
+advanced-record counting. The first artifact fault survived because an existing
+record's immutability refusal masked it; add fresh-insert artifact/signature
+cases and catch the exact guard removals. LEARNINGS 57 extended. Two harness
+substring-uniqueness assertions stopped before applying ambiguous faults;
+restrict them to the intended closure/function, finish the checks, and restore
+all four production files. No fault, dependency, exclusion or lint suppression
+is retained. Full new-source GitHub CI is still required.
+
+
+All 33 conformance checks passed after staging the storage module. Prior source
+6d46e4e CI 38004462702 attempt 1 fully completed: every ordinary job except
+tests passed; all four mutation shards and final gate passed. Shards 0/1/2/3
+tested 315/315/315/312 mutants, caught 242/219/265/246, unviable 73/96/50/66:
+1,257 tested, 972 caught, 285 unviable, none missed. Every unmodified mutation
+baseline passed (60s+2s, 93s+8s, 10s+2s, 55s+4s build/test). Final gate logs
+shards: success. Ordinary test failure remains the disposal process's generic
+history unavailable refusal, without its underlying I/O or replay cause.
+
+Rerun only failed tests job 114069938853 once, after all jobs completed, to
+measure repeatability on unchanged source. Attempt 2 is pending; no source push
+or cancellation caused it. Do not treat a rerun as an established root-cause
+repair. If it repeats, improve evidence and diagnose the exact failure before
+another attempt. New retention code still needs its own full CI after this run
+completes; no source publication or deployment in this increment.

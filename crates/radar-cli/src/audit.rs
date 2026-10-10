@@ -297,6 +297,7 @@ fn open(path: &str) -> Result<Journal, String> {
 
 const fn stage_label(stage: Stage) -> &'static str {
     match stage {
+        Stage::NativeTransfer => "SOL transfer ",
         Stage::Inventory => "inventory    ",
         Stage::Received => "received     ",
         Stage::Parsed => "parsed       ",

@@ -1139,6 +1139,41 @@ coverage. Provider metadata provenance, historical account coverage, durable
 transfer retention and idempotent risk-state application remain absent. Inventory
 review keeps its existing incomplete/unknown accounting and authority flags.
 
+## Immutable external native-transfer retention
+
+The protected issuer's --record-native-transfers mode captures supported supplied
+or collected activity from its private snapshot. Snapshot wallet, host freshness
+and exact journal checkpoint must agree before recording. Preserve only canonical
+signed bytes, whitelisted integer native/token effects and outcome/fee facts,
+the configured wallet and the exact locally verified transfer result. Raw provider
+metadata and extra input fields are excluded. Print the resulting checkpoint;
+the operator must associate a refreshed snapshot with it before the next record.
+
+OperationLog stores NativeTransferRecord values in its existing owned hash chain,
+using a separate native_transfer stage and optional correlation field. Older
+absent fields remain absent from serialization and historical digests. Storage
+checks a canonical single-signature wire prefix, bounded extent and immutable association;
+the protected caller establishes cryptographic and economic correctness. The
+implementation is in [native transfer storage](../../crates/radar-journal/src/native_transfers.rs).
+Identical repeats append nothing; conflicts refuse. Persistence precedes memory
+updates. Each record is durable independently: a failed multi-record command may
+leave a verified prefix, which an associated retry can safely recognize. No
+batch atomicity, rollback protection or chain inclusion proof is claimed.
+
+Replay validates stage/outcome/correlation and exact identity, deduplicates
+identical records and rejects conflicts or signed artifacts also attached to an
+operation. Recording and future signed binding/proposal reject that collision in
+both directions. No reservation, portfolio or operation transition is made.
+
+Inventory review re-decodes and strictly verifies every retained transfer for
+the configured wallet, compares its full normalized result and rejects observations
+older than its execution. Combining current and retained identical evidence counts
+one signature once; conflicts and duplication with recorded operations refuse.
+Cash comparison can therefore still use a transfer after it disappears from the
+current input packet. Coverage, daily loss/exposure, economic reconciliation and
+risk-state updates remain incomplete. This is durable evidence and comparison,
+not live idempotent portfolio application or authority to trade.
+
 ## What would reverse this
 
 Nothing foreseeable reverses holding a policy locally. The specific ceilings are

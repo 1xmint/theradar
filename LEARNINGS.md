@@ -2345,3 +2345,10 @@ Use a complete empty packet with equal bounds to isolate that guard. Verify the
 edit exists, not just that the editing script exited successfully. Reapplying
 the greater-or-equal to greater-than fault now fails the boundary regression.
 Production behavior was restored; this was an offline test gap.
+
+
+The native-transfer storage regression initially changed an artifact after that
+signature was already recorded, so the immutability refusal masked the wire-to-
+evidence identity guard. Add malformed first-insert cases in an otherwise empty
+journal. Reapplying the artifact and signature guard removals now fails those
+cases. Identical-repeat and conflicting-repeat tests remain separate.

@@ -199,12 +199,12 @@ fn collected(packet: &Value, native_slot: u64) -> Result<Value, String> {
     Ok(normalized)
 }
 
-pub(super) fn review(
+pub(super) fn capture(
     current: &Value,
     history: &Value,
     config: &Config,
     now: u64,
-) -> Result<Vec<Value>, String> {
+) -> Result<Vec<radar_journal::NativeTransferRecord>, String> {
     let native_slot = integer(&current["native_sol"], "slot");
     let normalized;
     let packet = match (
@@ -263,9 +263,88 @@ pub(super) fn review(
                     "native transfer is duplicated or newer than native observation".into(),
                 );
             }
-            Ok(reviewed)
+            let mut evidence = json!({});
+            for field in [
+                "transaction_base64",
+                "slot",
+                "outcome",
+                "network_fee_lamports",
+                "pre_balances",
+                "post_balances",
+                "pre_token_balances",
+                "post_token_balances",
+            ] {
+                evidence[field] = row[field].clone();
+            }
+            let signed = b64::encode(
+                &b64::decode(
+                    row["transaction_base64"]
+                        .as_str()
+                        .ok_or("native transaction missing")?,
+                )
+                .ok_or("native transaction base64 invalid")?,
+            );
+            evidence["transaction_base64"] = json!(signed);
+            Ok(radar_journal::NativeTransferRecord {
+                wallet: config.wallet,
+                signed_transaction: signed,
+                evidence,
+                review: reviewed,
+            })
         })
         .collect()
+}
+
+#[cfg(test)]
+pub(super) fn review(
+    current: &Value,
+    history: &Value,
+    config: &Config,
+    now: u64,
+) -> Result<Vec<Value>, String> {
+    Ok(capture(current, history, config, now)?
+        .into_iter()
+        .map(|r| r.review)
+        .collect())
+}
+
+pub(super) fn combine(
+    current: &Value,
+    history: &Value,
+    config: &Config,
+    now: u64,
+    retained: &[radar_journal::NativeTransferRecord],
+) -> Result<Vec<Value>, String> {
+    let mut records = std::collections::BTreeMap::new();
+    for record in retained
+        .iter()
+        .cloned()
+        .chain(capture(current, history, config, now)?)
+    {
+        let reviewed = transaction(&record.evidence, config.wallet)?;
+        let signature = reviewed["signature"]
+            .as_str()
+            .ok_or("retained transfer signature missing")?
+            .to_owned();
+        if record.wallet != config.wallet
+            || record.evidence["transaction_base64"] != record.signed_transaction
+            || reviewed != record.review
+            || integer(&reviewed, "execution_slot")? > integer(&current["native_sol"], "slot")?
+            || history["recorded_native_cash_flows"]
+                .as_array()
+                .is_some_and(|flows| flows.iter().any(|flow| flow["signature"] == signature))
+            || records
+                .get(&signature)
+                .is_some_and(|previous| previous != &record)
+        {
+            return Err(
+                "retained transfer is changed, foreign, duplicated or newer than observation"
+                    .into(),
+            );
+        }
+        records.insert(signature, record);
+    }
+    Ok(records.into_values().map(|record| record.review).collect())
 }
 
 #[cfg(test)]
@@ -364,6 +443,49 @@ mod tests {
             "coverage":"provider_reported_address_history","signature_scan_finished":true,
             "transaction_fetch_finished":true,"after_slot_exclusive":"42","through_slot_inclusive":"44",
             "signatures":[{"signature":signature,"slot":"43","outcome":tx["outcome"]}],"transactions":[row]}})
+    }
+
+    #[test]
+    fn retained_native_transfers_are_reverified_and_combined_exactly_once() {
+        let current = activity(true);
+        let mut records = capture(&current, &json!({}), &config(), 11).unwrap();
+        assert!(records[0].evidence.get("raw_metadata").is_none());
+        let expected = vec![records[0].review.clone()];
+        assert_eq!(
+            combine(&current, &json!({}), &config(), 11, &records).unwrap(),
+            expected
+        );
+        let mut no_packet = current.clone();
+        no_packet.as_object_mut().unwrap().remove("wallet_activity");
+        assert_eq!(
+            combine(&no_packet, &json!({}), &config(), 11, &records).unwrap(),
+            expected
+        );
+        let original = records[0].clone();
+        records[0].review["net_change_lamports"] = json!("-10");
+        assert!(combine(&no_packet, &json!({}), &config(), 11, &records).is_err());
+        records[0] = original.clone();
+        records[0].wallet = Address::new([9; 32]);
+        assert!(combine(&no_packet, &json!({}), &config(), 11, &records).is_err());
+        records[0] = original.clone();
+        records[0].signed_transaction = "changed".into();
+        assert!(combine(&no_packet, &json!({}), &config(), 11, &records).is_err());
+        records[0] = original.clone();
+        let history =
+            json!({"recorded_native_cash_flows":[{"signature":original.review["signature"]}]});
+        assert!(combine(&no_packet, &history, &config(), 11, &records).is_err());
+        no_packet["native_sol"]["slot"] = json!("42");
+        assert!(combine(&no_packet, &json!({}), &config(), 11, &records).is_err());
+        no_packet["native_sol"]["slot"] = json!("43");
+        assert_eq!(
+            combine(&no_packet, &json!({}), &config(), 11, &records).unwrap(),
+            expected
+        );
+        // Different raw metadata for the same valid signed transfer must not replace history.
+        records[0].evidence["pre_balances"] = json!(["101", "10", "1"]);
+        records[0].evidence["post_balances"] = json!(["92", "17", "1"]);
+        records[0].review = transaction(&records[0].evidence, config().wallet).unwrap();
+        assert!(combine(&current, &json!({}), &config(), 11, &records).is_err());
     }
 
     #[test]

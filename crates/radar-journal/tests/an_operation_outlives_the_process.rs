@@ -1594,3 +1594,321 @@ fn an_event_about_nothing_operational_is_written_exactly_as_it_always_was() {
         radar_journal::Verified::Intact { events: 1 }
     );
 }
+
+fn external_transfer() -> radar_journal::NativeTransferRecord {
+    let mut bytes = vec![1];
+    bytes.extend([7; 64]);
+    bytes.extend([1, 0, 1]);
+    let signed = radar_types::b64::encode(&bytes);
+    radar_journal::NativeTransferRecord {
+        wallet: WALLET,
+        signed_transaction: signed.clone(),
+        evidence: serde_json::json!({"transaction_base64":signed}),
+        review: serde_json::json!({"signature":radar_types::Signature::new([7;64]),"net_change_lamports":"-2"}),
+    }
+}
+
+#[test]
+fn native_transfer_storage_is_immutable_idempotent_and_survives_restart() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("native.jsonl");
+    let mut log = OperationLog::open(&path).unwrap();
+    assert_eq!(log.native_transfers().count(), 0);
+    assert_eq!(
+        log.record_native_transfer(external_transfer(), 1).unwrap(),
+        Applied::Advanced
+    );
+    let checkpoint = log.checkpoint().to_owned();
+    let saved = std::fs::read(&path).unwrap();
+    assert_eq!(
+        log.record_native_transfer(external_transfer(), 2).unwrap(),
+        Applied::AlreadySeen
+    );
+    let mut changed = external_transfer();
+    changed.review["net_change_lamports"] = serde_json::json!("-3");
+    assert!(log.record_native_transfer(changed, 2).is_err());
+    let mut changed = external_transfer();
+    changed.wallet = Address::new([8; 32]);
+    assert!(log.record_native_transfer(changed, 2).is_err());
+    let mut changed = external_transfer();
+    changed.evidence["transaction_base64"] = serde_json::json!("different");
+    assert!(log.record_native_transfer(changed, 2).is_err());
+    let mut changed = external_transfer();
+    changed.review["signature"] = serde_json::json!(radar_types::Signature::new([8; 64]));
+    assert!(log.record_native_transfer(changed, 2).is_err());
+    assert_eq!(std::fs::read(&path).unwrap(), saved);
+    assert_eq!(log.entries().count(), 0);
+    assert_eq!(log.outstanding().count(), 0);
+    drop(log);
+    let mut log = OperationLog::open(&path).unwrap();
+    assert_eq!(
+        log.native_transfers().cloned().collect::<Vec<_>>(),
+        vec![external_transfer()]
+    );
+    assert_eq!(log.checkpoint(), checkpoint);
+    assert_eq!(
+        log.record_native_transfer(external_transfer(), 3).unwrap(),
+        Applied::AlreadySeen
+    );
+    assert_eq!(std::fs::read(&path).unwrap(), saved);
+}
+
+#[test]
+fn native_transfer_write_failure_preserves_memory_and_checkpoint() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("native.jsonl");
+    let mut log = OperationLog::open(&path).unwrap();
+    std::fs::create_dir(&path).unwrap();
+    assert!(log.record_native_transfer(external_transfer(), 1).is_err());
+    assert_eq!(log.native_transfers().count(), 0);
+    assert_eq!(log.checkpoint(), "");
+}
+
+fn record_native_collision(journal: &mut radar_journal::Journal) {
+    use radar_journal::Outcome;
+    journal
+        .record_operation(
+            Outcome::Ok,
+            0,
+            Correlation {
+                execution: Some(radar_journal::ExecutionBinding {
+                    wallet: WALLET,
+                    transaction: "reviewed".into(),
+                    signed_transaction: Some(external_transfer().signed_transaction),
+                    reviewed_proposal: None,
+                }),
+                ..Correlation::default()
+            },
+            radar_journal::OperationEntry {
+                intent: intent(),
+                reserved: None,
+                state: OperationState::Proposed,
+            },
+            None,
+            None,
+        )
+        .unwrap();
+}
+
+fn native_correlation(case: &str) -> Correlation {
+    let mut correlation = Correlation {
+        native_transfer: Some(external_transfer()),
+        ..Correlation::default()
+    };
+    if case == "mixed" {
+        correlation.mention = Some("unrelated".into());
+    }
+    if case == "missing" {
+        correlation.native_transfer = None;
+        correlation.mention = Some("unrelated".into());
+    }
+    correlation
+}
+
+#[test]
+fn native_transfer_replay_checks_association_and_conflicts_even_with_an_intact_chain() {
+    use radar_journal::{Journal, Outcome, Stage};
+    for case in [
+        "stage",
+        "outcome",
+        "mixed",
+        "missing",
+        "conflict",
+        "duplicate",
+        "operation",
+        "collision",
+        "native_operation",
+    ] {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("native.jsonl");
+        let mut journal = Journal::open(&path).unwrap();
+        if case == "collision" {
+            record_native_collision(&mut journal);
+        }
+        let mut correlation = native_correlation(case);
+        if case == "operation" {
+            journal
+                .record_operation(
+                    Outcome::Ok,
+                    1,
+                    correlation,
+                    radar_journal::OperationEntry {
+                        intent: intent(),
+                        reserved: None,
+                        state: OperationState::Proposed,
+                    },
+                    None,
+                    None,
+                )
+                .unwrap();
+        } else {
+            journal
+                .record(
+                    if case == "stage" {
+                        Stage::Received
+                    } else {
+                        Stage::NativeTransfer
+                    },
+                    if case == "outcome" {
+                        Outcome::Uncertain
+                    } else {
+                        Outcome::Ok
+                    },
+                    1,
+                    correlation.clone(),
+                    None,
+                    vec![],
+                    None,
+                    None,
+                )
+                .unwrap();
+            if case == "conflict" || case == "duplicate" {
+                if case == "conflict" {
+                    correlation.native_transfer.as_mut().unwrap().review["net_change_lamports"] =
+                        serde_json::json!("-3");
+                }
+                journal
+                    .record(
+                        Stage::NativeTransfer,
+                        Outcome::Ok,
+                        2,
+                        correlation,
+                        None,
+                        vec![],
+                        None,
+                        None,
+                    )
+                    .unwrap();
+            }
+        }
+        if case == "native_operation" {
+            mix_opening_operation(&journal, &path);
+        }
+        assert!(matches!(
+            journal.verify().unwrap(),
+            radar_journal::Verified::Intact { .. }
+        ));
+        if case == "duplicate" {
+            assert_eq!(
+                OperationLog::open(&path)
+                    .unwrap()
+                    .native_transfers()
+                    .count(),
+                1
+            );
+        } else {
+            assert!(OperationLog::open(&path).is_err(), "{case}");
+        }
+    }
+}
+
+#[test]
+fn native_transfers_cannot_be_recounted_as_operations_in_either_direction() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("native.jsonl");
+    let mut log = OperationLog::open(&path).unwrap();
+    let record = external_transfer();
+    let binding = radar_journal::ExecutionBinding {
+        wallet: WALLET,
+        transaction: "reviewed".into(),
+        signed_transaction: Some(record.signed_transaction.clone()),
+        reviewed_proposal: None,
+    };
+    log.propose(
+        intent(),
+        1,
+        Correlation {
+            execution: Some(binding.clone()),
+            ..Correlation::default()
+        },
+    )
+    .unwrap();
+    assert!(log.record_native_transfer(record.clone(), 2).is_err());
+    let other = dir.path().join("other.jsonl");
+    let mut log = OperationLog::open(&other).unwrap();
+    log.record_native_transfer(record.clone(), 1).unwrap();
+    assert!(
+        log.propose(
+            intent(),
+            2,
+            Correlation {
+                native_transfer: Some(record.clone()),
+                ..Correlation::default()
+            }
+        )
+        .is_err()
+    );
+    assert!(
+        log.propose(
+            intent(),
+            2,
+            Correlation {
+                execution: Some(binding.clone()),
+                ..Correlation::default()
+            }
+        )
+        .is_err()
+    );
+    let mut unsigned = binding;
+    unsigned.signed_transaction = None;
+    let id = log
+        .propose(
+            intent(),
+            2,
+            Correlation {
+                execution: Some(unsigned),
+                ..Correlation::default()
+            },
+        )
+        .unwrap();
+    let mut portfolio = account();
+    log.reserve(&id, &mut portfolio, 3).unwrap();
+    log.submit(&id, 4, |_| Ok::<_, ()>(())).unwrap().unwrap();
+    assert!(
+        log.record_signed(&id, record.signed_transaction, 5)
+            .is_err()
+    );
+    assert_eq!(log.outstanding().count(), 1);
+}
+
+#[test]
+fn native_transfer_storage_checks_exact_wire_extent_and_canonical_identity() {
+    for (size, accepted) in [(64, false), (65, true), (1232, true), (1233, false)] {
+        let dir = tempfile::tempdir().unwrap();
+        let mut log = OperationLog::open(dir.path().join("native.jsonl")).unwrap();
+        let mut record = external_transfer();
+        let mut bytes = vec![7; size];
+        bytes[0] = 1;
+        record.signed_transaction = radar_types::b64::encode(&bytes);
+        record.evidence["transaction_base64"] = serde_json::json!(record.signed_transaction);
+        assert_eq!(
+            log.record_native_transfer(record, 1).is_ok(),
+            accepted,
+            "{size}"
+        );
+    }
+    for case in ["count", "base64", "canonical", "artifact", "signature"] {
+        let dir = tempfile::tempdir().unwrap();
+        let mut log = OperationLog::open(dir.path().join("native.jsonl")).unwrap();
+        let mut record = external_transfer();
+        if case == "count" {
+            let mut bytes = radar_types::b64::decode(&record.signed_transaction).unwrap();
+            bytes[0] = 2;
+            record.signed_transaction = radar_types::b64::encode(&bytes);
+        }
+        if case == "base64" {
+            record.signed_transaction = "%%%".into();
+        }
+        if case == "canonical" {
+            record.signed_transaction.push(' ');
+        }
+        record.evidence["transaction_base64"] = serde_json::json!(record.signed_transaction);
+        if case == "artifact" {
+            record.evidence["transaction_base64"] = serde_json::json!("changed");
+        }
+        if case == "signature" {
+            record.review["signature"] = serde_json::json!(radar_types::Signature::new([8; 64]));
+        }
+        assert!(log.record_native_transfer(record, 1).is_err(), "{case}");
+    }
+}

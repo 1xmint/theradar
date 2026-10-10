@@ -288,6 +288,13 @@ impl Issuer {
                 "{}",
                 serde_json::json!({"opening_inventory_recorded":true,"portfolio_state_updated":false})
             );
+        } else if args == ["--record-native-transfers"] {
+            let count = self.record_native_transfers()?;
+            println!(
+                "{}",
+                serde_json::json!({"native_transfers_advanced":count,"accounting_checkpoint":self.operations.checkpoint(),
+                "portfolio_state_updated":false,"reservation_released":false})
+            );
         } else if args == ["--review-inventory"] {
             println!("{}", self.review_inventory()?);
         } else {
@@ -306,7 +313,43 @@ impl Issuer {
             &history,
             unix_now()?,
             self.operations.opening_inventory(),
+            &self
+                .operations
+                .native_transfers()
+                .cloned()
+                .collect::<Vec<_>>(),
         )
+    }
+
+    fn record_native_transfers(&mut self) -> Result<usize, String> {
+        let snapshot: Snapshot = serde_json::from_slice(&private_read(&self.config.snapshot_path)?)
+            .map_err(|_| "invalid trusted snapshot")?;
+        let now = unix_now()?;
+        let history = acquisitions::review(&self.operations, &self.config)?;
+        if snapshot.wallet != self.config.wallet
+            || snapshot.accounting_checkpoint != self.operations.checkpoint()
+            || !snapshot_current(
+                now,
+                snapshot.observed_at_unix_secs,
+                self.config.max_snapshot_age_secs,
+            )
+        {
+            return Err("transfer snapshot does not cover wallet, time and current journal".into());
+        }
+        let records =
+            native_transfers::capture(&snapshot.wallet_evidence, &history, &self.config, now)?;
+        let mut advanced = 0;
+        for record in records {
+            if self
+                .operations
+                .record_native_transfer(record, now)
+                .map_err(|_| "native transfer could not be retained")?
+                == radar_journal::Applied::Advanced
+            {
+                advanced += 1;
+            }
+        }
+        Ok(advanced)
     }
 
     fn record_opening_inventory(&mut self) -> Result<(), String> {

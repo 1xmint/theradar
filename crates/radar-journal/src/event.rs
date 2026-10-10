@@ -28,6 +28,8 @@ pub const MAX_REDACTED: usize = 512;
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Stage {
+    /// Caller-verified external plain SOL activity, not an operation or authority.
+    NativeTransfer,
     /// Immutable opening inventory, before any operation in the owned journal.
     Inventory,
     /// A mention arrived.
@@ -94,6 +96,9 @@ pub enum Outcome {
 /// find that run from a mint, a week, or a transaction they are holding.
 #[derive(Clone, Default, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub struct Correlation {
+    /// Immutable caller-verified native transfer; absent from older event hashes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub native_transfer: Option<NativeTransferRecord>,
     /// Protected caller's normalized genesis holdings, not economic coverage.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub opening_inventory: Option<OpeningInventoryRecord>,
@@ -145,7 +150,8 @@ impl Correlation {
     /// [`Journal::record`](crate::Journal::record) can say so.
     #[must_use]
     pub const fn is_empty(&self) -> bool {
-        self.opening_inventory.is_none()
+        self.native_transfer.is_none()
+            && self.opening_inventory.is_none()
             && self.valuation.is_none()
             && self.settlement.is_none()
             && self.execution.is_none()
@@ -410,4 +416,18 @@ impl Recorded {
     pub fn id(&self) -> &str {
         &self.event.id
     }
+}
+
+/// Caller-verified plain SOL transfer evidence and its exact normalized result.
+/// Storage binds identity and immutability; the protected caller verifies effects.
+#[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
+pub struct NativeTransferRecord {
+    /// Wallet whose economic effect the caller established.
+    pub wallet: radar_types::Address,
+    /// Canonical signed bytes, never signing material.
+    pub signed_transaction: String,
+    /// Whitelisted integer balance/outcome facts needed for local re-verification.
+    pub evidence: serde_json::Value,
+    /// Exact normalized result of the protected transfer verifier.
+    pub review: serde_json::Value,
 }

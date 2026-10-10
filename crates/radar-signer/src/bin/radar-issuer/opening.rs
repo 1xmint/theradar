@@ -17,7 +17,7 @@ pub(super) fn capture(
     let history = json!({"accounting_checkpoint":"","lots":[]});
     // Reuse exactly the existing protected read checks. A genesis snapshot
     // cannot borrow the checkpoint of previous trades or invent opening lots.
-    let reviewed = inventory::review(snapshot, config, &history, now, None)?;
+    let reviewed = inventory::review(snapshot, config, &history, now, None, &[])?;
     let holdings = reviewed["tokens_by_mint"]
         .as_array()
         .ok_or("opening holdings missing")?

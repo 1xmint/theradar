@@ -87,6 +87,9 @@
 //! [`Reconciled`]: OperationState::Reconciled
 //! [`Portfolio`]: radar_types::Portfolio
 
+#[path = "native_transfers.rs"]
+mod native_transfers;
+
 use std::collections::BTreeMap;
 
 use radar_types::{
@@ -244,6 +247,9 @@ pub struct OperationEntry {
 /// What stopped an operation.
 #[derive(Debug, thiserror::Error)]
 pub enum OperationError {
+    /// External transfer identity, association or immutable evidence conflicts.
+    #[error("native transfer record is inconsistent or duplicates an operation")]
+    NativeTransfer,
     /// An opening record conflicts, follows other history or has the wrong stage.
     #[error("opening inventory must be immutable genesis history")]
     OpeningInventory,
@@ -394,6 +400,7 @@ pub struct OperationLog {
     operations: BTreeMap<OperationId, Live>,
     build: Option<String>,
     opening_inventory: Option<crate::OpeningInventoryRecord>,
+    native_transfers: BTreeMap<String, crate::NativeTransferRecord>,
 }
 
 impl OperationLog {
@@ -505,12 +512,14 @@ impl OperationLog {
         let events = journal.events()?;
         let opening_inventory = replay_opening(&events)?;
         let operations = replay(&events)?;
+        let native_transfers = native_transfers::replay(&events, &operations)?;
         Ok(Self {
             _owner: owner,
             journal,
             operations,
             build: radar_types::build_sha().map(str::to_owned),
             opening_inventory,
+            native_transfers,
         })
     }
 
@@ -663,6 +672,13 @@ impl OperationLog {
         signed: String,
         at: u64,
     ) -> Result<Applied, OperationError> {
+        if self
+            .native_transfers
+            .values()
+            .any(|record| record.signed_transaction == signed)
+        {
+            return Err(OperationError::NativeTransfer);
+        }
         let live = self
             .operations
             .get_mut(id)
@@ -745,6 +761,19 @@ impl OperationLog {
         at: u64,
         correlation: Correlation,
     ) -> Result<OperationId, OperationError> {
+        if correlation.native_transfer.is_some()
+            || correlation
+                .execution
+                .as_ref()
+                .and_then(|binding| binding.signed_transaction.as_ref())
+                .is_some_and(|signed| {
+                    self.native_transfers
+                        .values()
+                        .any(|record| &record.signed_transaction == signed)
+                })
+        {
+            return Err(OperationError::NativeTransfer);
+        }
         let entry = OperationEntry {
             intent,
             reserved: None,

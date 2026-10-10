@@ -199,6 +199,7 @@ pub(super) fn review(
     history: &Value,
     now: u64,
     opening: Option<&radar_journal::OpeningInventoryRecord>,
+    retained: &[radar_journal::NativeTransferRecord],
 ) -> Result<Value, String> {
     if history["sales"]
         .as_array()
@@ -278,7 +279,7 @@ pub(super) fn review(
         row["retained_acquired_raw"] = json!(acquired.to_string());
         row["retained_disposed_raw"] = json!(disposed.to_string());
     }
-    let transfers = super::native_transfers::review(value, history, config, now)?;
+    let transfers = super::native_transfers::combine(value, history, config, now, retained)?;
     let cash = super::cash::review(opening, config.wallet, history, value, &transfers)?;
     Ok(
         json!({"version":1,"authority":"protected_operator_inventory_comparison",

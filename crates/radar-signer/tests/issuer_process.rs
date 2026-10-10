@@ -3801,3 +3801,92 @@ fn a_broken_output_pipe_keeps_the_claim_unknown_after_restart() {
         "outstanding operation requires reconciliation"
     );
 }
+
+fn record_native(fixture: &Fixture) -> std::process::Output {
+    fixture
+        .command()
+        .arg("--record-native-transfers")
+        .output()
+        .unwrap()
+}
+
+#[test]
+fn protected_native_transfer_record_is_durable_and_comparison_counts_it_once() {
+    let mut fixture = inventory_fixture_opening(Some(0));
+    let packet = external_native_packet(&fixture);
+    fixture.snapshot["wallet_evidence"]["native_transfers"] = packet;
+    fixture.save();
+    let path = fixture.dir.path().join("operations.jsonl");
+    let original = fixture.snapshot.clone();
+    for (field, bad) in [
+        ("wallet", json!(address(0x99))),
+        ("observed_at_unix_secs", json!(0)),
+    ] {
+        fixture.snapshot[field] = bad;
+        fixture.save();
+        assert!(!record_native(&fixture).status.success(), "{field}");
+        fixture.snapshot = original.clone();
+        fixture.save();
+    }
+    let output = record_native(&fixture);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let recorded: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(recorded["native_transfers_advanced"], 1);
+    assert_eq!(recorded["portfolio_state_updated"], false);
+    assert_eq!(recorded["reservation_released"], false);
+    let saved = std::fs::read(&path).unwrap();
+    assert!(!String::from_utf8_lossy(&saved).contains("MUST_NOT_PERSIST"));
+    // A stale snapshot must not silently cover this newly advanced journal.
+    assert!(!record_native(&fixture).status.success());
+    fixture.snapshot["accounting_checkpoint"] = recorded["accounting_checkpoint"].clone();
+    fixture.save();
+    let output = record_native(&fixture);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let repeated: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(repeated["native_transfers_advanced"], 0);
+    assert_eq!(std::fs::read(&path).unwrap(), saved);
+    let report: Value = serde_json::from_slice(&inventory_report(&fixture).stdout).unwrap();
+    assert_eq!(
+        report["reviewed_external_native_transfers"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    assert_eq!(
+        report["recorded_native_cash_comparison"]["expected_lamports"],
+        "300000000"
+    );
+    assert_eq!(
+        report["recorded_native_cash_comparison"]["transaction_anchors"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
+    fixture.snapshot["wallet_evidence"]
+        .as_object_mut()
+        .unwrap()
+        .remove("native_transfers");
+    fixture.save();
+    let report: Value = serde_json::from_slice(&inventory_report(&fixture).stdout).unwrap();
+    assert_eq!(
+        report["recorded_native_cash_comparison"]["expected_lamports"],
+        "300000000"
+    );
+    assert_eq!(report["economic_reconciliation_complete"], false);
+    assert_eq!(report["portfolio_state_updated"], false);
+    assert_eq!(report["reservation_released"], false);
+    let log = radar_journal::OperationLog::open(&path).unwrap();
+    assert_eq!(log.native_transfers().count(), 1);
+    assert_eq!(log.outstanding().count(), 1);
+    assert_eq!(std::fs::read(&path).unwrap(), saved);
+}
