@@ -1270,6 +1270,21 @@ runtime validity or completeness. All execution/ownership/portfolio flags stay
 false and the root classification stays unresolved. It writes no journal and
 cannot satisfy live reconciliation or authorize capital.
 
+## Known venue trade direction
+
+For decoded pump.fun bonding-curve trade instructions, the signer now checks
+the instruction side against Authorization.action. A buy requires Buy;
+a sell requires Reduce or Exit. This applies to every known trade variant and
+every instruction in a message, so mixing a buy and a sell cannot satisfy one
+authorization. Sell arguments must be readable even though their minimum SOL
+output is not an outgoing-spend bound. The Privy process repeats this check
+after issuer proof verification; an issuer signature cannot waive it.
+
+This binds only the direction of known curve trades. Sale token quantities,
+per-instruction mint/account roles, other-program semantics and live exit
+issuance/accounting remain separate requirements. It does not enable live sales
+or replace any existing native spend, policy, expiry, ownership or nonce check.
+
 ## What would reverse this
 
 Nothing foreseeable reverses holding a policy locally. The specific ceilings are

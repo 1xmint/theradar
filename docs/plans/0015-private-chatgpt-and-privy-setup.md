@@ -4760,3 +4760,33 @@ source locally with PR 343/344. Only appended plan history conflicted; retained
 all sections. Combined unit floor 2220. Complete integrated GitHub verification
 and a fresh release are still needed before deployment. Primary run 38068474113
 remains live; do not overwrite it. Autonomous execution remains off.
+
+
+### Signer verifies known curve trade direction (2026-10-10)
+
+Native completion PR 347 at 8acc176 passed all jobs in GitHub run
+38077732628, with four baselines and thirty-three mutants: twenty-seven caught,
+six unviable, none missed. Fast-forwarded combined source and published handoff
+63e66e6; combined CI 38078028706 and release 38078025956 are live. Leave those
+runs intact. This branch is based independently on verified controls 57c2757.
+
+Actual caller: radar_signer::check, used by both local and isolated Privy signing
+processes. It decoded buy sizes but skipped all sales and never checked a known
+venue trade's side against Authorization.action. Decode every known curve trade,
+including sell argument extents. Require Buy for acquisitions and Reduce/Exit
+for sales; refuse mixed directions within one message. Keep every native spend,
+policy, expiry, ownership and nonce check. A trusted issuer proof cannot waive
+the decoded direction. Update the previous large-sale regression to use actual
+Exit authority; its minimum incoming SOL still does not count as outgoing spend.
+
+Added one unit matrix across all six trade variants and all three actions,
+mixed messages and every truncated sale argument extent, plus an actual Privy
+process regression with valid re-attested proofs. Refusal leaves the nonce
+available, corrected direction succeeds once and duplicate success refuses.
+Unit floor 2221. Verify on GitHub; no local jobs or live signing.
+
+This closes only a concrete side mismatch after verification. Sale token bounds,
+per-instruction mint/account roles, routing, live snapshot accounting and exit
+completion remain open, alongside the adaptive supervisor/chat and delegation.
+It does not claim a generic arbitrary-program semantic check or enable exits.
+The goal remains fully autonomous trading.

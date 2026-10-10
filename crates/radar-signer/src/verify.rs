@@ -13,7 +13,7 @@
 //! Transaction claims are checked against decoded bytes. Caller-supplied
 //! authorization bounds are also checked against this signer's own policy.
 
-use radar_risk::{Authorization, Autonomy, Policy};
+use radar_risk::{Action, Authorization, Autonomy, Policy};
 use radar_types::{Address, Slot};
 
 use crate::tx::{DecodeError, Message, decode};
@@ -39,6 +39,10 @@ pub const SYSTEM_PROGRAM: [u8; 32] = [0u8; 32];
 /// ever going to be signable.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, thiserror::Error)]
 pub enum Rejection {
+    /// A decoded venue trade acquires tokens under reduction authority, or
+    /// disposes of tokens under acquisition authority.
+    #[error("venue trade {0} contradicts the authorized action")]
+    TradeActionMismatch(String),
     /// The bytes did not decode.
     #[error("undecodable: {0}")]
     Undecodable(String),
@@ -349,7 +353,7 @@ pub fn check(
     // was 5,000,000. Rule 1 says the signer re-derives the transaction and checks
     // it against the authorisation's bounds; for the only kind of transaction
     // Radar would ever sign, it did not. LEARNINGS 33.
-    let bought = match lamports_bought(&message) {
+    let bought = match lamports_bought(&message, authorization.action) {
         Ok(v) => v,
         Err(unreadable) => {
             rejections.extend(unreadable);
@@ -429,7 +433,9 @@ fn lamports_transferred(message: &Message) -> u64 {
 /// *minimum acceptable output*, not a spend, and adding it to the total would
 /// refuse a large exit for being large — the trap the comment above
 /// [`lamports_transferred`]'s call site describes. So sells contribute nothing
-/// here. That leaves the size of a sale unbounded by this process, and it is
+/// here, but their decoded side must agree with the authorized action and their
+/// argument bytes must be readable. This binds direction, not token quantity.
+/// That leaves the size of a sale unbounded by this process, and it is
 /// deliberately unbounded: the bound a sale needs is on **tokens**, and the
 /// authorization carries no token quantity to check one against. Recorded as a
 /// known gap rather than closed with a number nobody has measured.
@@ -439,7 +445,7 @@ fn lamports_transferred(message: &Message) -> u64 {
 /// Returns [`Rejection::UnreadableVenueInstruction`] for every pump.fun
 /// instruction whose discriminator is not in the decoder's table or whose
 /// arguments are truncated. Rule 9: an unreadable size is unknown, not zero.
-fn lamports_bought(message: &Message) -> Result<u64, Vec<Rejection>> {
+fn lamports_bought(message: &Message, action: Action) -> Result<u64, Vec<Rejection>> {
     let program = radar_decode::Program::PumpFun;
     let mut total = 0u64;
     let mut unreadable = Vec::new();
@@ -464,10 +470,10 @@ fn lamports_bought(message: &Message) -> Result<u64, Vec<Rejection>> {
             ));
             continue;
         };
-        if !known.is_buy() {
+        if !known.is_trade() {
             continue;
         }
-        // A buy that decodes to a known variant but whose arguments are
+        // A trade that decodes to a known variant but whose arguments are
         // truncated is refused rather than skipped: the discriminator said this
         // instruction spends, and the payload would not say how much.
         let Some(Ok(trade)) = radar_decode::pumpfun::trade_args(known, &instruction.data) else {
@@ -476,6 +482,15 @@ fn lamports_bought(message: &Message) -> Result<u64, Vec<Rejection>> {
             ));
             continue;
         };
+        if known.is_buy() != action.increases_exposure() {
+            unreadable.push(Rejection::TradeActionMismatch(
+                known.anchor_name().to_owned(),
+            ));
+            continue;
+        }
+        if !known.is_buy() {
+            continue;
+        }
         // Exactly one of the two fields is lamports, and which one depends on
         // the variant — `radar_decode::args` carries the unit in the type so
         // this cannot read a token amount as money. `u64::MAX` as a max cost
@@ -705,8 +720,18 @@ mod tests {
 
     /// `check` against the venue allowlist, with the caller's own ceiling given.
     fn check_venue(bytes: &[u8], max_lamports: u64) -> Result<Checked, Vec<Rejection>> {
+        check_venue_action(bytes, max_lamports, Action::Buy)
+    }
+
+    fn check_venue_action(
+        bytes: &[u8],
+        max_lamports: u64,
+        action: Action,
+    ) -> Result<Checked, Vec<Rejection>> {
+        let mut auth = authorization();
+        auth.action = action;
         check(
-            &authorization(),
+            &auth,
             bytes,
             &Address::new(WALLET),
             &venue_allowlist(),
@@ -1534,13 +1559,69 @@ mod tests {
         // limits exist to prevent.
         use radar_decode::pumpfun::Instruction;
         assert!(
-            check_venue(
+            check_venue_action(
                 &venue_tx(venue_trade(Instruction::Sell, 500_000_000_000, 900_000_000)),
                 u64::MAX,
+                Action::Exit,
             )
             .is_ok(),
             "a sell's minimum output is not a spend"
         );
+    }
+
+    #[test]
+    fn every_known_trade_direction_matches_its_authorization_including_mixed_messages() {
+        use radar_decode::pumpfun::Instruction;
+        for (instruction, _, _) in radar_decode::pumpfun::KNOWN
+            .iter()
+            .filter(|(ix, _, _)| ix.is_trade())
+        {
+            let bytes = venue_tx(venue_trade(*instruction, 10, 20));
+            for action in [Action::Buy, Action::Reduce, Action::Exit] {
+                let result = check_venue_action(&bytes, 50_000_000, action);
+                if instruction.is_buy() == action.increases_exposure() {
+                    assert!(result.is_ok(), "{instruction:?} / {action:?}: {result:?}");
+                } else {
+                    assert!(
+                        result
+                            .unwrap_err()
+                            .contains(&Rejection::TradeActionMismatch(
+                                instruction.anchor_name().to_owned()
+                            ))
+                    );
+                }
+            }
+        }
+        let mixed = build(
+            &[WALLET, MINT, PUMP, SYSTEM_PROGRAM],
+            &[
+                (2, vec![0, 1], venue_trade(Instruction::Buy, 10, 20)),
+                (2, vec![0, 1], venue_trade(Instruction::Sell, 10, 20)),
+            ],
+        );
+        for action in [Action::Buy, Action::Reduce, Action::Exit] {
+            assert!(
+                check_venue_action(&mixed, 50_000_000, action)
+                    .unwrap_err()
+                    .iter()
+                    .any(|reason| matches!(reason, Rejection::TradeActionMismatch(_)))
+            );
+        }
+        for instruction in [Instruction::Sell, Instruction::SellV2] {
+            let complete = venue_trade(instruction, 10, 20);
+            for length in 0..complete.len() {
+                assert!(
+                    check_venue_action(
+                        &venue_tx(complete[..length].to_vec()),
+                        50_000_000,
+                        Action::Reduce
+                    )
+                    .unwrap_err()
+                    .iter()
+                    .any(|reason| matches!(reason, Rejection::UnreadableVenueInstruction(_)))
+                );
+            }
+        }
     }
 
     #[test]

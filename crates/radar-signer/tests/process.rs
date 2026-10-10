@@ -21,6 +21,69 @@ const SYSTEM: [u8; 32] = [0u8; 32];
 /// The secret half of the test wallet. Deterministic; not a real key.
 const SEED: [u8; 32] = [0x5A; 32];
 
+#[test]
+fn privy_process_rechecks_venue_trade_direction_after_a_valid_issuer_proof() {
+    let scratch = Scratch::new("privy-trade-direction");
+    let policy = policy_file(&scratch.0, &open_policy());
+    let pump = *radar_decode::pumpfun::PROGRAM_ID.as_bytes();
+    let mut command = privy_only_command(&policy);
+    command.env(
+        "RADAR_SIGNER_PROGRAMS",
+        format!("{},{}", b58(&pump), b58(&SYSTEM)),
+    );
+    let mut signer = Signer::from_command(command);
+    for (instruction, _, _) in radar_decode::pumpfun::KNOWN
+        .iter()
+        .filter(|(ix, _, _)| ix.is_trade())
+    {
+        let mut data = instruction.discriminator().as_bytes().to_vec();
+        data.extend(10_u64.to_le_bytes());
+        data.extend(20_u64.to_le_bytes());
+        let bytes = transaction(&[wallet(), MINT, pump, SYSTEM], &[(2, vec![0, 1], data)]);
+        for (action, buying) in [("buy", true), ("reduce", false), ("exit", false)] {
+            let mut input = privy_request(&bytes);
+            input["authorization"]["action"] = serde_json::json!(action);
+            input["authorization"]["nonce"] =
+                serde_json::json!(format!("{}-{action}", instruction.anchor_name()));
+            attest(&mut input);
+            let answer = signer.ask(&input);
+            if instruction.is_buy() == buying {
+                assert_eq!(
+                    answer["outcome"], "authorised",
+                    "{instruction:?}/{action}: {answer}"
+                );
+                assert_eq!(
+                    signer.ask(&input)["outcome"],
+                    "refused",
+                    "one-time authority"
+                );
+            } else {
+                assert_eq!(
+                    answer["outcome"], "refused",
+                    "{instruction:?}/{action}: {answer}"
+                );
+                assert!(
+                    answer["reasons"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .any(|reason| reason
+                            .as_str()
+                            .unwrap_or_default()
+                            .contains("contradicts the authorized action")),
+                    "{answer}"
+                );
+                // A proof from a trusted issuer cannot override transaction
+                // direction. A refusal also must not consume its durable nonce.
+                input["authorization"]["action"] =
+                    serde_json::json!(if instruction.is_buy() { "buy" } else { "exit" });
+                attest(&mut input);
+                assert_eq!(signer.ask(&input)["outcome"], "authorised");
+            }
+        }
+    }
+}
+
 /// A signer process with a pipe to it.
 struct Signer {
     child: Child,
