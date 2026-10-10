@@ -5073,3 +5073,21 @@ separately and then another merge run, publish this combined source after the
 existing executor run is terminal. Role behavior is already verified; executor
 behavior and the combined result still require the fresh full GitHub run. This
 supersedes the earlier sequencing note, not any activation gate. No live change.
+
+### Integrated verified signer and executor source (2026-10-10)
+
+Fast-forwarded feat/integrated-autonomous-controls from 63e66e6 to verified
+f90b058. This includes direction, explicit native units, aggregate token-debit
+bounds, captured mint/trader/quote roles and correct executor buy/sell dispatch.
+Their combined CI 38081547094 passed every job, with 17 mutants (nine caught,
+eight unviable). Earlier accounting and optional-cap controls remain included.
+No production authority or service was changed. Test floor 2228.
+
+Request fresh broad integrated GitHub CI and a release-linux artifact before
+protected installation work. Fixed radar-deploy updates Serve only; do not imply
+that downloading an issuer/signer binary installs or activates those services.
+Exact-SOL builder correction is separate PR 353; initial run 38081913177 has a
+naming-only lint correction committed as 72f296a, awaiting terminal old run before
+publication. Do not integrate it as verified yet. Authorized output floors, live
+holdings/exit issuance and reconciliation, portfolio inputs, adaptive supervisor/
+research chat, recovery and protected site handover remain goal work.
