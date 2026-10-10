@@ -3946,3 +3946,32 @@ dependency, suppression or exclusion retained. All 33 conformance checks passed
 after staging; new-source full CI remains required. Prior-run logs are not yet
 available through gh while that run is in progress; do not report a test total
 from the empty/error log response.
+
+
+### Handback: known-account collector locally integrated; prior CI pending (2026-10-10)
+
+Source 51ff9b9 is committed on feat/known-account-activity in the native sibling
+worktree and fast-forwarded locally into fix/wallet-signin-diagnostics. It is
+not pushed and has no full CI yet. Remote PR 334 still ends at 255337c.
+CI 38023346308 at that prior source has all ordinary jobs and mutation shards
+0/2 successful; shards 1/3 still run. No cancellation, retry or workflow change.
+Full logs were unavailable through gh during the run, so no new prior-source
+Rust/mutation totals are claimed. Inspect all completed shard logs, unmodified
+baselines and final gate before the next push. Do not push over a running check.
+
+Local proof: 352 scoped CLI/on-chain tests, 33 conformance checks, scoped
+all-target Rust 1.99 Clippy/formatting and sixteen manual faults caught/restored.
+Both worktrees were clean after the source commit and local integration, before
+this handback. No Cargo/rustc process remained at inspection. No cleanup, live
+measurement, keys, limits, delegation, deployment or trade. Autonomous execution
+remains off. This handback also stays local while prior CI runs.
+
+On prior-source green, publish the completed collector follow-up and inspect
+its fresh full CI. On a failure, diagnose the exact reported check before another
+push. Then bridge known-address evidence into local token-effect review without
+claiming target ownership or exhaustive coverage. Historical account discovery,
+independent metadata provenance, economic reconciliation/idempotent risk-state
+application, live risk inputs and execution/exits/recovery remain unfinished;
+owner limits and verified Privy delegation/funding/deployment are still needed
+before autonomous activation. The unsupported new coverage label must not be
+relabeled to make the existing native adapter accept it.
