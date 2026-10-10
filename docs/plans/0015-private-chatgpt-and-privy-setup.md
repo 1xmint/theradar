@@ -4652,3 +4652,26 @@ recommendation awaiting the owner's response, not a settled product decision;
 no policy, UI or trading behavior was changed to implement it. Continue
 artifact/CI verification independently, and settle the discussion before
 recording new product doctrine or implementing the risk-panel redesign.
+
+### Approved adaptive-risk direction and optional cap drafts (2026-10-10)
+
+Josh accepted the recommendation and requested it in the checklist. Recorded
+the decision in design 0017 and the executable-work checklist in plan 0011:
+adaptive risk by default, optional daily cap, current portfolio/risk explanations,
+conversational research leads, measured results and reviewed tool improvements.
+The prior discussion is settled; implementation resumed with optional cap
+preferences. New site drafts disable the daily cap explicitly. Older persisted
+preferences missing daily_loss_enabled keep their existing cap enabled. The
+separate Agent decides choice and saved manual value survive disabling,
+re-enabling and refresh. Enabled manual caps retain numeric validation;
+disabling the cap does not bypass capital/per-trade validation. These settings
+remain drafts; live Policy construction and adaptive behavior remain open.
+
+Added Rust legacy/validation/restart and web toggle/save/refresh regressions;
+unit floor 2218. Verify on GitHub in an independent branch while primary full
+CI 38068474113 remains live. No local jobs, deployment or signing activation.
+
+Collector/issuer bridge PR 343 at 2031e2e passed every job in GitHub run
+38068950676, including all four baselines and final mutation gate. Logs show
+twelve mutants, nine caught and three unviable, none missed. Its verified source
+is ready for integration after the primary's current full run finishes.

@@ -188,6 +188,8 @@ struct Preferences {
     capital_usd: String,
     max_trade_usd: String,
     daily_loss_usd: String,
+    #[serde(default = "legacy_daily_loss_enabled")]
+    daily_loss_enabled: bool,
     autonomous_requested: bool,
     #[serde(default)]
     agent_decides: AgentDecisions,
@@ -199,6 +201,12 @@ struct AgentDecisions {
     capital_usd: bool,
     max_trade_usd: bool,
     daily_loss_usd: bool,
+}
+
+// Existing settings already selected a cap; adding optional caps must not
+// silently remove that owner's restriction during an upgrade.
+fn legacy_daily_loss_enabled() -> bool {
+    true
 }
 
 fn manual_amount(input: &str, agent_decides: bool) -> Result<Option<u64>, ()> {
@@ -233,7 +241,10 @@ impl Preferences {
         match (
             manual_amount(&self.capital_usd, self.agent_decides.capital_usd),
             manual_amount(&self.max_trade_usd, self.agent_decides.max_trade_usd),
-            manual_amount(&self.daily_loss_usd, self.agent_decides.daily_loss_usd),
+            manual_amount(
+                &self.daily_loss_usd,
+                self.agent_decides.daily_loss_usd || !self.daily_loss_enabled,
+            ),
         ) {
             (Ok(capital), Ok(trade), Ok(loss)) => capital.is_none_or(|capital| {
                 trade.is_none_or(|trade| trade <= capital)
@@ -576,10 +587,47 @@ mod tests {
             capital_usd: "100".into(),
             max_trade_usd: "10".into(),
             daily_loss_usd: "5".into(),
+            daily_loss_enabled: true,
             autonomous_requested: true,
             agent_decides: AgentDecisions::default(),
         }
     }
+    #[test]
+    fn optional_daily_cap_preserves_legacy_limits_and_survives_restart() {
+        let mut legacy = serde_json::to_value(preferences()).unwrap();
+        legacy.as_object_mut().unwrap().remove("daily_loss_enabled");
+        let mut prefs: Preferences = serde_json::from_value(legacy.clone()).unwrap();
+        assert!(prefs.daily_loss_enabled);
+        legacy["daily_loss_enabled"] = json!("false");
+        assert!(serde_json::from_value::<Preferences>(legacy).is_err());
+        prefs.daily_loss_enabled = false;
+        for ignored in ["", "NaN", "101"] {
+            prefs.daily_loss_usd = ignored.into();
+            assert!(prefs.validate());
+            let mut enabled = prefs.clone();
+            enabled.daily_loss_enabled = true;
+            assert!(!enabled.validate());
+            enabled.agent_decides.daily_loss_usd = true;
+            assert!(enabled.validate());
+        }
+        prefs.max_trade_usd = "101".into();
+        assert!(!prefs.validate());
+        prefs.max_trade_usd = "10".into();
+        let dir = tempfile::tempdir().unwrap();
+        let owner = proof("alice", "first");
+        Store::at(dir.path().into())
+            .unwrap()
+            .write(&owner, &prefs)
+            .unwrap();
+        let restored = Store::at(dir.path().into())
+            .unwrap()
+            .read(&owner)
+            .unwrap()
+            .unwrap();
+        assert_eq!(restored, prefs);
+        assert!(!restored.daily_loss_enabled);
+    }
+
     #[test]
     fn only_positive_fixed_precision_amounts_are_accepted() {
         assert_eq!(micro_usd("1.234567"), Some(1_234_567));
