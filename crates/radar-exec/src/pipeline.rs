@@ -214,7 +214,7 @@ pub fn execute<R: Routing, S: Signing, T: Sending>(
     signer: &S,
     sender: &T,
 ) -> Outcome {
-    let routed = match attempt.authorization.action {
+    let built = match attempt.authorization.action {
         Action::Buy => router.build_buy(
             &attempt.authorization.mint,
             &attempt.wallet,
@@ -233,7 +233,7 @@ pub fn execute<R: Routing, S: Signing, T: Sending>(
             router.build_sell(&attempt.authorization.mint, &attempt.wallet, amount)
         }
     };
-    let route = match routed {
+    let route = match built {
         Ok(r) => r,
         Err(e) => {
             return Outcome::NoRoute { why: e.to_string() };

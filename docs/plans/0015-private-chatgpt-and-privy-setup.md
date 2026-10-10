@@ -5021,3 +5021,10 @@ with role binding only after both actual runs pass; combined floor will be 2228.
 This does not implement sell construction, protected holdings/exit authority,
 portfolio evidence, sale reconciliation/recovery or adaptive supervision/chat.
 Goal remains fully autonomous trading; production authority remains closed.
+
+Role-binding run 38081131378 at 2768670 completed fully green, including the
+actual-process capture regression and all mutation shards/final gate. Twelve
+mutants: eight caught, four unviable, none missed. No live changes followed.
+Executor run 38081286620 at e5d6fe1 reported a lint failure: the local name routed
+is too similar to router. Rename it built without changing behavior. Let all
+remaining jobs finish before publishing the correction; require a fresh full run.
