@@ -4528,3 +4528,18 @@ Next inspect that run's terminal results, publish the integrated primary for
 full-scope verification, then deploy only the verified artifact through the
 fixed deployment procedure. These controls save preferences; autonomous signing
 and trading remain off pending live risk inputs and execution integration.
+
+### Issuer release artifact handback (2026-10-10)
+
+Read-only preflight confirmed Radar at its documented 127.0.0.1:8402 endpoint:
+build 3f38ee0, healthy, policyClosed true, Codex configured with no calls yet.
+radar-signer.socket remains inactive; serve retains NoNewPrivileges and read-only
+home protection. An initial probe at unrelated port 8090 was not Radar evidence.
+
+The release workflow builds every radar-signer package binary, including the
+issuer, but omitted radar-issuer from both BUILD-INFO hashes and upload paths.
+Include it in both so installation can use a traceable GitHub artifact. Corrected
+the workflow's server deployment example to the fixed radar-deploy procedure;
+that procedure does not install or activate the separate issuer/signer. Verify
+the release build and its artifact on GitHub before claiming this deployment gap
+closed. No server files, service settings, delegation or funds changed.
