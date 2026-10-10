@@ -4998,3 +4998,38 @@ Merged verified native-unit source aa1ea1c (all GitHub checks green in
 physical-unit and token-quantity checks and all three actual-process regressions.
 Combined minimum test floor 2225. Fresh combined GitHub verification is required;
 separate native verification does not prove this new token-bound behavior.
+
+### Captured curve trade roles and handback (2026-10-10)
+
+Verified token-bound source a6d1a9d: GitHub CI 38080077978 completed successfully,
+including tests/build/lint and all mutation shards/final gate. Thirteen mutants:
+eight caught and five unviable, none missed. No local verification jobs ran.
+
+Current branch feat/signer-trade-account-roles began from that verified source.
+Actual caller remains radar_signer::check in the key-holding processes. Added
+independent per-instruction mint/trader binding for all six known curve trade
+variants and explicit wrapped-SOL quote binding for v2. Test fixtures retain six
+successful public mainnet RPC captures with signatures, slots, source versions,
+argument bytes, instruction accounts and reported mint/owner token anchors.
+The old and v2 layouts differ; a global mint-membership check did not bind roles.
+The actual Privy process regression re-attests substituted/missing roles, mixed
+messages and a wallet that is not a required signer. Existing synthetic trade
+fixtures now supply the correct mint/trader roles rather than masking new checks.
+
+Capture investigation also found the old buy_exact_sol_in fixture transaction
+failed before invoking the trade. A different successful transaction anchors the
+new role fixture; old fixture provenance is not silently rewritten. RPC metadata
+is provider-reported layout evidence, not an independent historical ownership
+proof. Reconstructed legacy tests are not claimed as executed mainnet messages.
+
+GitHub verification is required for this new branch. No jobs ran locally and no
+production service, protected policy or signing authority changed. The smart-panel
+checklist remains in plan 0011 and design 0017: adaptive risk, optional daily cap,
+each option independently agent-selected, live portfolio/reasons, research chat,
+independent pause/revoke and measured net outcomes. These remain activation work.
+
+Next: inspect the fresh GitHub results, then integrate verified source. Protected
+exit authority/holdings, token-account and curve derivations, bidirectional routing,
+live wallet/portfolio evidence, sale completion and recovery, supervisor/chat,
+protected deployment and owner site handover still block autonomous activation.
+The goal remains fully autonomous trading; it is not enabled yet.

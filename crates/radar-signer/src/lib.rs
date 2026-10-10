@@ -24,6 +24,7 @@ pub mod key;
 pub mod privy;
 pub mod protocol;
 pub mod replay;
+mod trade_accounts;
 pub mod turnkey;
 pub mod tx;
 pub mod verify;
