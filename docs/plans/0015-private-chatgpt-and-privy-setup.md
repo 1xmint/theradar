@@ -5439,3 +5439,27 @@ derivation, global writable/signing privileges or live signer-enforced asset
 bounds/net settlement. Keep autonomous Routing and live delegation closed while
 implementing those checks, other market families and the live portfolio/recovery/
 adaptive supervisor/chat/site handover. The full goal stays active.
+
+Router envelope CI 38112811307 at fd1cd0b passed fully: build, MSRV, tests,
+lint, web/site and mutation aggregate. Retained diagnostics outside the checkout
+at radar-mutation-38112811307: 24 selected, 21 caught, three unviable, none missed.
+Exact route_review.rs:43:9 and :79:24 OR-to-AND mutations compile and fail the
+input-byte and pool-account regressions respectively. No exclusions added.
+Fast-forwarded integrated source to this verified change; publish this handback
+and require fresh broad integrated CI. No deployment or signing-authority change.
+
+Next-layer read-only evidence: inspected official raydium-io/raydium-amm at
+commit d26944bfb76fb5fa8f91e5d440c2050ed358ef81 (program/src/processor.rs,
+instruction.rs and state.rs). SwapBaseInV2 uses tag 16 with explicit raw input
+and minimum output, eight named account roles, pool ownership/length checks,
+authority derivation and pool-vault identity checks. This is a reference, not
+an accepted transaction capture. A finalized getMultipleAccounts read for the
+captured route's pool and two vaults returned slot 455525719: a 752-byte account
+owned by the Raydium program and two 165-byte accounts owned by SPL Token.
+Whole response retained outside the checkout as radar-raydium-raw-state-2026-10-11.json,
+SHA256 1dd4565b926afd3a4e30805637142bbadf51b9add17ec18021f3ba1f7febb22a.
+These historical observations do not prove live wallet ownership or readiness.
+The signer decoder currently discards header readonly counts; expose and validate
+actual global privileges at its consumers before relying on account roles.
+Live portfolio/recovery, adaptive supervisor/chat, protected handover/install and
+broader market verification remain open. Fully autonomous trading remains off.
