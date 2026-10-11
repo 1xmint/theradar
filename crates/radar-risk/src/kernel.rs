@@ -153,7 +153,7 @@ pub enum Refusal {
     OverDeploymentLimit,
     /// Exposure to this creator's tokens would exceed its ceiling.
     OverCreatorLimit,
-    /// Today's realised loss is at or beyond the daily cap.
+    /// An acquisition would cross the entry gate after the daily loss cap.
     DailyLossReached,
     /// The round trip costs more than the policy allows as a share of size.
     RoundTripTooExpensive,
@@ -270,9 +270,13 @@ pub fn evaluate(proposal: &Proposal, state: &PortfolioState, policy: &Policy) ->
     {
         reasons.push(Refusal::TooManyFailures);
     }
-    if policy
-        .max_daily_loss
-        .is_some_and(|limit| state.realised_loss_today >= limit)
+    // A monetary loss gate closes entries, not bounded protection. The issuer
+    // must still establish that a Reduce/Exit actually reduces owned inventory;
+    // this pure kernel's action label alone is not that proof.
+    if proposal.action.increases_exposure()
+        && policy
+            .max_daily_loss
+            .is_some_and(|limit| state.realised_loss_today >= limit)
     {
         reasons.push(Refusal::DailyLossReached);
     }

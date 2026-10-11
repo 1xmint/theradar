@@ -5603,3 +5603,35 @@ semantics explicitly: kernel currently applies the enabled daily-loss check to
 all actions, while position/canary sizing applies only to acquisitions. No
 change to the owner's saved cap or that existing behavior was made here.
 The full autonomous goal remains active; no funding or live trade occurred.
+
+### Verified service deployment and daily entry gate (2026-10-11)
+
+Integrated CI 38114392276 at d142c8b passed fully, including all mutation shards.
+Release 38114389746 passed at the same exact commit. Downloaded its artifact
+outside the checkout and verified the BUILD-INFO commit and all six SHA256 hashes.
+Copied only radar-serve to /tmp/radar-serve.new and ran fixed sudo radar-deploy.
+The service reports active; /health reports exact build d142c8b5750681b9331ecbc4274d96523cee0baf,
+policyClosed true. NoNewPrivileges=yes, ProtectSystem=strict and
+ProtectHome=read-only remain set; radar-signer.socket remains inactive.
+
+Owner completed Cloudflare login. Reloaded the actual /automation page after
+deployment: Privy wallet matches the owner, balance is zero SOL at slot
+455535371, no token holdings; three independent Agent decides checkboxes and
+optional unchecked daily cap are present. Preferences were not changed. The
+page correctly reports execution disabled. ChatGPT shows Connect rather than
+a linked confirmation in this UI; verify the bridge's current login status
+before claiming that credential is still linked. No secret was inspected.
+
+Independent PumpSwap observation PR 361 at 096da33 is running GitHub CI
+38114787717. Do not push over that run. Its raw fixture is not in this branch.
+
+Fix/daily-cap-entry-gate addresses a concrete mismatch with accepted design 0017
+section 8 and the deployed UI: a reached optional daily loss cap must close
+entries while allowing independently checked reductions. Restrict the kernel's
+DailyLossReached gate to acquisitions. Keep halt, autonomy, operational failure
+and freshness checks unchanged for all actions; this kernel does not prove a
+Reduce/Exit label, so protected issuer inventory and signer transaction bounds
+remain necessary. Add a boundary regression for loss below/at/above the cap,
+both reductions and exits, plus each remaining global refusal. Test floor 2252
+on this branch; combine with PR 361's additional test as 2253 upon integration.
+Require GitHub CI and relevant mutations. No authority or live trade is enabled.

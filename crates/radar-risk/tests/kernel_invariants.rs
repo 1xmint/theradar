@@ -236,6 +236,68 @@ fn exiting_is_never_blocked_by_a_sizing_limit() {
 // --- limits ------------------------------------------------------------------
 
 #[test]
+fn daily_loss_closes_entries_without_trapping_reductions_or_bypassing_other_gates() {
+    let mut pol = policy();
+    pol.max_daily_loss = Some(MicroUsd(1));
+    for loss in [0, 1, 2, u64::MAX] {
+        let portfolio = PortfolioState {
+            realised_loss_today: MicroUsd(loss),
+            ..state()
+        };
+        assert_eq!(
+            refusals(&evaluate(&buy(20.0), &portfolio, &pol)).contains(&Refusal::DailyLossReached),
+            loss >= 1
+        );
+        for action in [Action::Reduce, Action::Exit] {
+            let proposal = Proposal {
+                action,
+                ..buy(20.0)
+            };
+            assert!(
+                evaluate(&proposal, &portfolio, &pol)
+                    .authorisation()
+                    .is_some()
+            );
+            for (restricted, expected) in [
+                (
+                    PortfolioState {
+                        halted: true,
+                        ..portfolio.clone()
+                    },
+                    Refusal::Halted,
+                ),
+                (
+                    PortfolioState {
+                        consecutive_failures: 3,
+                        ..portfolio.clone()
+                    },
+                    Refusal::TooManyFailures,
+                ),
+                (
+                    PortfolioState {
+                        now: Slot(2_000),
+                        ..portfolio.clone()
+                    },
+                    Refusal::InputsTooStale,
+                ),
+            ] {
+                let reasons = refusals(&evaluate(&proposal, &restricted, &pol));
+                assert!(reasons.contains(&expected), "{action:?}: {reasons:?}");
+                assert!(!reasons.contains(&Refusal::DailyLossReached));
+            }
+            let no_authority = Policy {
+                autonomy: Autonomy::Observe,
+                ..pol.clone()
+            };
+            assert!(
+                refusals(&evaluate(&proposal, &portfolio, &no_authority))
+                    .contains(&Refusal::NoAutonomy)
+            );
+        }
+    }
+}
+
+#[test]
 fn daily_caps_are_optional_but_disabling_one_does_not_disable_other_risk_checks() {
     let mut pol = policy();
     pol.max_daily_loss = Some(MicroUsd(1));
