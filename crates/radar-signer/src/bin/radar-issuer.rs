@@ -72,6 +72,9 @@ mod inventory;
 #[path = "radar-issuer/opening.rs"]
 mod opening;
 
+#[path = "radar-issuer/live_price.rs"]
+mod live_price;
+
 #[derive(Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 struct Config {
@@ -85,6 +88,8 @@ struct Config {
     // Independently collected private observations. No model/stdin-selected path.
     #[serde(default)]
     observations_path: Option<PathBuf>,
+    #[serde(default)]
+    sol_price_path: Option<PathBuf>,
     history_path: PathBuf,
     key_path: PathBuf,
     max_snapshot_age_secs: u64,
@@ -104,7 +109,11 @@ struct Snapshot {
     observed_at_unix_secs: u64,
     sol_lamports: u64,
     // A conservative upper price bounds how many lamports fit in a USD ceiling.
+    #[serde(default)]
     sol_upper_micro_usd: u64,
+    // Derived only from the configured private collector file, never JSON/stdin.
+    #[serde(skip)]
+    live_price_expires_at_unix_secs: Option<u64>,
     fee_upper_lamports: u64,
     state: PortfolioState,
     // Operator's coverage assertion, not proof of economic correctness.
@@ -152,7 +161,14 @@ impl Snapshot {
             snapshot.wallet_evidence = observations.wallet_evidence;
             snapshot.transaction_evidence = observations.transaction_evidence;
         }
-        // Do not refresh risk state, reviewed balance, valuation, proposal, byte
+        if let Some(path) = &config.sol_price_path {
+            let (upper, expires) = live_price::read(path, &snapshot, config, unix_now()?)?;
+            // An independently live upper price can tighten the native ceiling;
+            // it cannot loosen a larger reviewed upper-price floor.
+            snapshot.sol_upper_micro_usd = snapshot.sol_upper_micro_usd.max(upper);
+            snapshot.live_price_expires_at_unix_secs = Some(expires);
+        }
+        // Do not refresh risk state, reviewed balance, proposal, byte
         // approval or their observation time merely because a collector ran.
         Ok(snapshot)
     }
@@ -587,6 +603,7 @@ impl Issuer {
             .min(self.config.valid_until_unix_secs)
             .min(evidence_expiry)
             .min(wallet_expiry)
+            .min(snapshot.live_price_expires_at_unix_secs.unwrap_or(u64::MAX))
             .min(
                 snapshot
                     .observed_at_unix_secs

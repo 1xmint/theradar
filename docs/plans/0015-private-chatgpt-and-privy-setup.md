@@ -5927,3 +5927,98 @@ stale. Next connect independent live valuation and reconciled portfolio state,
 then the outer adaptive controller and durable submission/settlement/recovery.
 Do not describe this observation-input connector as a complete snapshot producer.
 Signing, delegation and autonomous execution remain disabled.
+
+### Independent live SOL valuation source handback (2026-10-11)
+
+Protected observations PR 365 is merged into integration 9d8ebd4; combined CI
+38157603325 is live. Do not push over it. Independent feat/live-sol-valuation
+starts there and supplies the missing independently read native-SOL USD price
+to the future snapshot producer via the actual sol-price-read CLI caller.
+
+Captured the documented sponsored SOL/USD account through a finalized public
+mainnet RPC read from the VPS: context 455726015, posted slot 455725955, receiver
+owner rec5EKMGg6MxZYaMdyBfgwp4d5rB9T1VQH5pJv5LtFJ, 134 bytes, Full tag 1,
+SOL/USD feed ef0d8b6fda2ceba41da15d4095d1da392a0d2f8ed0c6c7bc0f4cfac8c280b56d,
+publication 1791738026, price 11207456511, confidence 1591085, exponent -8.
+Cross-checked SDK layouts and program IDs in the primary sources linked in ADR
+0008. Captured bytes are retained in tests; no private endpoint/key was read.
+
+The new direct reader checks the fixed account's owner, discriminator, length,
+Full verification, feed, bank/posting contexts, publication age and explicit
+confidence ratio. Checked integer scaling yields outward micro-USD bounds,
+never floats or an assumed stablecoin peg. CLI requires explicit RPC, minimum
+slot, maximum age and confidence ceiling. Output has read_only authority and
+explicitly incomplete wallet inventory; this is price evidence, not a complete
+portfolio or authorization. Protected price ingestion/valuation remains open.
+
+Four decoder/arithmetic regressions plus the actual CLI/mock-RPC regression
+raise floor 2266. Require GitHub builds/tests/lint and behavior mutation checks;
+no local test/build job, new dependency, service or authority was introduced.
+No deployment. A subsequent VPS read was stopped when Tailscale required fresh
+SSH reauthentication; this does not block repository implementation or GitHub CI.
+
+### Independent price reader verification correction (2026-10-11)
+
+Combined protected-observations CI 38157603325 passed at integration 9d8ebd4.
+Price source CI 38158260523 at 955eced completed with build, tests, MSRV,
+format, site/web, dependencies and all four mutation shards passing. Mutation
+diagnostics retained outside the checkout in radar-mutation-38158260523 show
+55 mutations: 49 caught, six compiler-unviable and none missed. This run still
+failed lint: public sol_price::read parsed its fixed account using expect without
+a Panics section. Return an error from that parse instead of adding a public
+panic or suppressing the lint. Publish only after this run is terminal and
+require fresh GitHub verification; no new test count or mutation waiver.
+Protected live valuation and autonomous execution remain unfinished.
+
+Price-reader correction CI 38158536969 at 99fc71a passed build, tests, MSRV,
+formatting, dependencies, site/web and every mutation shard. Lint then reached
+the CLI integration test and rejected two assert!(stdout.is_empty()) calls;
+use the repository's existing assert_eq!(stdout, Vec::<u8>::new()) convention.
+The run is terminal before publishing this two-line test correction. Keep it
+on the price-reader PR, separate from the uncommitted protected price-consumer
+work on feat/protected-live-price. Require fresh GitHub verification.
+
+### Protected live price consumer source handback (2026-10-11)
+
+Independent feat/protected-live-price starts at 3030f37, the price-reader lint
+correction. Price-reader CI 38158812428 is live; do not push over it. Add the
+actual protected consumer while that existing reader is verified separately.
+
+sol-price-read --output reuses private complete atomic publication, leaving
+previous evidence unchanged on network failure. Protected config sol_price_path
+is loaded by every snapshot consumer. Strict collector metadata/shape, positive
+ordered SOL/USD band, reviewed contexts, publication/read freshness and private
+file permissions are required. Missing or invalid configured evidence never
+falls back to the reviewed price. The issuer trusts this protected collector,
+not model/stdin input; no new network edge or signing credential is added.
+
+The actual native-spend calculation uses max(reviewed upper price, live upper
+price), preserving the reviewed floor while tightening the ceiling when SOL
+prices rise. With live evidence the reviewed upper price may be omitted; without
+it absent/zero price still refuses. Bound proof expiry by publication and read
+expiry as well as all existing expiries. Fresh prices cannot refresh old risk
+state, wallet balances, proposal or exact reviewed bytes.
+
+Three actual issuer process regressions cover tightening/no relaxation, omitted
+reviewed price, spend one lamport above the new bound, capped expiry, strict
+identity/context/freshness, missing-file/no-fallback, reload/recovery, old risk
+state and public-file refusal. A fourth real CLI/mock-RPC regression checks private
+publication and old-file preservation on failed collection. Floor is 2270;
+require GitHub tests/build/lint/MSRV and behavior mutations before integration.
+Complete marked portfolio valuation, usable capital, adaptive controller and
+execution/recovery remain open. No production deployment or authority change.
+
+### Protected price context verification correction (2026-10-11)
+
+Price reader CI 38158812428 passed fully at 3030f37. Protected-consumer CI
+38159017477 completed at 37fe773 with tests/build/MSRV/lint, site/web,
+formatting and dependency checks passing, but mutation shard 2 found
+live_price.rs:55:31 (< to >) survived. The older context fixture also had a
+posting slot after that context, so the independent posting guard masked the
+missing context-floor check. Keep posting <= context for that damaged packet;
+also use a valid context strictly after proposal.oldest_input_slot and within
+state.now to exercise the non-degenerate interval. Other faults remain isolated.
+Retain diagnostics outside the checkout in radar-mutation-38159017477.
+No production logic change or mutation exclusion. Preserve floor 2270, publish
+only after the old run is terminal, and require new GitHub checks before merging.
+Do not push the parent price-reader branch or integration over the child run.

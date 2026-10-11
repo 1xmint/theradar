@@ -14,6 +14,150 @@ fn now() -> u64 {
         .as_secs()
 }
 
+fn sol_price_reads() -> Vec<Value> {
+    let mut bytes = radar_types::b64::decode("IvEjY51+9M1gMUcENA3t3zcf1CRyFI8kjp0abRpesqw6zYt/1dayQwHvDYtv2izrpB2hXUCV0do5Kg0vjtDGx7wPTPrIwoC1bf82BJwCAAAALUcYAAAAAAD4////qsDLagAAAACpwMtqAAAAAFi/XZcCAAAAbTwuAAAAAACD0ykbAAAAAAA=").unwrap();
+    bytes[93..101].copy_from_slice(&i64::try_from(now()).unwrap().to_le_bytes());
+    bytes[125..133].copy_from_slice(&50_u64.to_le_bytes());
+    vec![json!({"result":{"context":{"slot":51},"value":[{
+        "owner":"rec5EKMGg6MxZYaMdyBfgwp4d5rB9T1VQH5pJv5LtFJ",
+        "data":[radar_types::b64::encode(&bytes),"base64"]
+    }]}})]
+}
+
+#[test]
+fn actual_sol_price_command_reads_receiver_verified_bounds_and_refuses_missing_scope() {
+    let (endpoint, server) = fixture(sol_price_reads());
+    let args = [
+        "sol-price-read",
+        "--rpc",
+        &endpoint,
+        "--min-slot",
+        "50",
+        "--max-age-secs",
+        "60",
+        "--max-confidence-bps",
+        "100",
+    ];
+    let output = Command::new(env!("CARGO_BIN_EXE_radar"))
+        .args(args)
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{:?}", output.stderr);
+    let evidence: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(evidence["authority"], "read_only");
+    assert_eq!(evidence["source"], "pyth_receiver_full");
+    assert_eq!(evidence["wallet_inventory_complete"], false);
+    assert_eq!(evidence["execution_guaranteed"], false);
+    assert_eq!(
+        evidence["observation"]["lower_micro_usd_per_sol"],
+        112_058_654
+    );
+    assert_eq!(
+        evidence["observation"]["upper_micro_usd_per_sol"],
+        112_090_476
+    );
+    let calls = server.join().unwrap();
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0]["method"], "getMultipleAccounts");
+    assert_eq!(
+        calls[0]["params"],
+        json!([[radar_onchain::sol_price::ACCOUNT],
+        {"encoding":"base64","commitment":"finalized"}])
+    );
+    for length in [1, 3, 5, 7] {
+        let failed = Command::new(env!("CARGO_BIN_EXE_radar"))
+            .args(&args[..length])
+            .output()
+            .unwrap();
+        assert!(!failed.status.success());
+        assert_eq!(failed.stdout, Vec::<u8>::new());
+        assert!(String::from_utf8_lossy(&failed.stderr).contains("sol-price-read needs"));
+    }
+    for (index, invalid) in [(2, " "), (4, "bad"), (6, "bad"), (8, "10001")] {
+        let mut damaged = args;
+        damaged[index] = invalid;
+        let failed = Command::new(env!("CARGO_BIN_EXE_radar"))
+            .args(damaged)
+            .output()
+            .unwrap();
+        assert!(!failed.status.success());
+        assert_eq!(failed.stdout, Vec::<u8>::new());
+        assert!(String::from_utf8_lossy(&failed.stderr).contains("sol-price-read needs"));
+    }
+}
+
+#[test]
+fn sol_price_command_publishes_private_complete_packets_and_retains_previous_on_rpc_failure() {
+    let directory = tempfile::tempdir().unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        std::fs::set_permissions(directory.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+    }
+    let path = directory.path().join("price.json");
+    let (endpoint, server) = fixture(sol_price_reads());
+    let command = |endpoint: &str| {
+        Command::new(env!("CARGO_BIN_EXE_radar"))
+            .args([
+                "sol-price-read",
+                "--rpc",
+                endpoint,
+                "--min-slot",
+                "50",
+                "--max-age-secs",
+                "60",
+                "--max-confidence-bps",
+                "100",
+                "--output",
+                path.to_str().unwrap(),
+            ])
+            .output()
+            .unwrap()
+    };
+    let output = command(&endpoint);
+    assert!(output.status.success(), "{:?}", output.stderr);
+    assert_eq!(
+        serde_json::from_slice::<Value>(&output.stdout).unwrap(),
+        json!({"price_written":true,"authority":"read_only"})
+    );
+    assert_eq!(server.join().unwrap().len(), 1);
+    let previous = std::fs::read(&path).unwrap();
+    let packet: Value = serde_json::from_slice(&previous).unwrap();
+    assert_eq!(
+        packet["observation"]["upper_micro_usd_per_sol"],
+        112_090_476
+    );
+    let (failed_endpoint, server) =
+        fixture(vec![json!({"error":{"message":"private provider detail"}})]);
+    let failed = command(&failed_endpoint);
+    assert!(!failed.status.success());
+    assert_eq!(failed.stdout, Vec::<u8>::new());
+    assert!(!String::from_utf8_lossy(&failed.stderr).contains("private provider detail"));
+    assert_eq!(std::fs::read(&path).unwrap(), previous);
+    assert_eq!(server.join().unwrap().len(), 1);
+    let missing = Command::new(env!("CARGO_BIN_EXE_radar"))
+        .args([
+            "sol-price-read",
+            "--rpc",
+            "http://127.0.0.1:1",
+            "--min-slot",
+            "50",
+            "--max-age-secs",
+            "60",
+            "--max-confidence-bps",
+            "100",
+            "--output",
+        ])
+        .output()
+        .unwrap();
+    assert!(!missing.status.success());
+    assert!(
+        String::from_utf8_lossy(&missing.stderr)
+            .contains("sol-price-read needs --output <private-file>")
+    );
+    assert_eq!(std::fs::read(&path).unwrap(), previous);
+}
+
 fn settlement_bytes() -> Vec<u8> {
     let mut bytes = vec![1];
     bytes.extend_from_slice(&[0xAB; 64]);

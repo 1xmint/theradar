@@ -494,6 +494,7 @@ mod tests {
             valid_until_unix_secs: 0,
             snapshot_path: std::path::PathBuf::default(),
             observations_path: None,
+            sol_price_path: None,
             history_path: std::path::PathBuf::default(),
             key_path: std::path::PathBuf::default(),
             max_snapshot_age_secs: 10,

@@ -444,6 +444,47 @@ risk state, its reconciliation coverage, scheduled collection and execution loop
 remain necessary before live autonomous operation. This is a connected live-read
 input, not a claim that the complete snapshot producer now exists.
 
+`radar sol-price-read --rpc <URL> --min-slot <N> --max-age-secs <N>
+--max-confidence-bps <0..10000> [--output <private-file>]` supplies independent native-SOL USD evidence
+for that producer. It reads the fixed sponsored SOL/USD receiver account through
+finalized direct RPC, checks owner, discriminator, complete captured layout,
+Full verification, feed identity, posting/bank contexts, host-clock publication
+age and the explicit confidence ratio ceiling. Integer arithmetic rounds the
+lower oracle confidence bound down and the upper bound up to micro-USD per SOL.
+These are oracle confidence bounds, not guaranteed market or execution bounds.
+No stablecoin peg, token value, exposure, basis or realised PnL is inferred.
+
+The reader's initial layout and owner are backed by a mainnet capture at slot
+455726015 on 2026-10-11, matching the
+[receiver SDK](https://github.com/pyth-network/pyth-crosschain/blob/main/target_chains/solana/pyth_solana_receiver_sdk/src/price_update.rs),
+[price message](https://github.com/pyth-network/pyth-crosschain/blob/main/pythnet/pythnet_sdk/src/messages.rs),
+and [program IDs](https://github.com/pyth-network/pyth-crosschain/blob/main/target_chains/solana/pyth_solana_receiver_sdk/src/lib.rs).
+The [push-feed documentation](https://docs.pyth.network/price-feeds/core/push-feeds/solana)
+identifies the sponsored feed; RPC/network identity and receiver program security
+remain trust assumptions. The Pro receiver has a different owner/address and is
+not silently substituted. The optional output uses the same private complete
+atomic publication as evidence-read; a failed read retains the previous file's
+original timestamps. This command cannot change signer policy.
+
+The protected issuer's optional `sol_price_path` selects that private collector
+file; stdin cannot choose it. Snapshot consumers reload and validate its strict
+shape, SOL/USD/feed metadata, positive ordered band, reviewed context bounds,
+publication time and read window. Configured missing, public, malformed, stale
+or substituted price evidence refuses rather than falling back to the reviewed
+price. A live upper price can only tighten the native spend ceiling: use the
+larger of it and any existing reviewed upper-price floor. With this path, the
+reviewed upper price may be omitted; without it, absent/zero price still refuses
+issuance. This does not change the signer-owned native limit.
+
+Authorization expiry is additionally capped by both the oracle publication's
+expiry and its read window's expiry. Fresh price collection cannot refresh the
+reviewed risk state, wallet balance, proposal, bytes or original risk observation
+time. The issuer trusts the protected collector's normalized evidence; it does
+not rerun receiver signature verification or accept a price from the model.
+Reconciled complete portfolio valuation, lower-bound usable capital, token
+valuations, basis and realised PnL remain unfinished; this native-spend input
+does not establish any of them.
+
 The private snapshot also requires `wallet_evidence`, containing the JSON from
 `radar wallet-read`. Before reserving capital the issuer binds version 1,
 read-only/finalized metadata, configured wallet identity, native decimals of

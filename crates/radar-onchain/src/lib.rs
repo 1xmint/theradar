@@ -55,6 +55,7 @@ pub mod preflight;
 pub mod reserves;
 pub mod rpc;
 pub mod settlement;
+pub mod sol_price;
 pub mod wallet_activity;
 pub mod wallet_inventory;
 

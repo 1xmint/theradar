@@ -30,6 +30,7 @@ mod route;
 mod selection;
 mod session;
 mod settlement_read;
+mod sol_price_read;
 mod study;
 mod transaction_read;
 mod wallet_activity_read;
@@ -118,6 +119,8 @@ commands:
                                  whether it is fixed or proportional
   wallet-read --wallet <address> --rpc <URL>
     Finalized balances plus raw token/mint verification; no prices or authority.
+  sol-price-read --rpc <URL> --min-slot <N> --max-age-secs <N> --max-confidence-bps <0..10000> [--output <private-file>]
+    Receiver-verified SOL/USD confidence bounds; read-only, no portfolio authority.
   wallet-activity-read --wallet <address> --after-slot <N> --through-slot <N> --rpc <URL> [--inventory-review <path>]
     Bounded finalized address history and raw transactions; incomplete wallet coverage.
   curve-exit --mint <address> --raw-tokens <N> --rpc <URL>
@@ -902,6 +905,7 @@ fn main() -> ExitCode {
         "creator-index" => creator_index(&args),
         "dossier" => dossier::run(&args),
         "wallet-read" => wallet_read::run(&args),
+        "sol-price-read" => sol_price_read::run(&args),
         "wallet-activity-read" => wallet_activity_read::run(&args),
         "curve-exit" => curve_exit::run(&args),
         "transaction-read" => transaction_read::run(&args),

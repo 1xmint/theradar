@@ -7,6 +7,141 @@ use std::process::{Child, Command, Stdio};
 
 const SEED: [u8; 32] = [0x6B; 32];
 
+fn live_price_packet(published: u64, upper: u64) -> Value {
+    json!({"version":1,"authority":"read_only","commitment":"finalized",
+        "asset":"SOL","quote":"USD","source":"pyth_receiver_full",
+        "account":"7UVimffxr9ow1uXYxsr4LHAcV58mLzhmwaeKvJ1pjLiE",
+        "read_started_at_unix_secs":unix_now(),"read_completed_at_unix_secs":unix_now(),
+        "observation":{"context_slot":1000,"posted_slot":1000,"published_at_unix_secs":published,
+            "lower_micro_usd_per_sol":upper,"upper_micro_usd_per_sol":upper},
+        "wallet_inventory_complete":false,"execution_guaranteed":false})
+}
+
+#[test]
+fn protected_live_price_tightens_native_ceiling_and_bounds_authorization_expiry() {
+    for (reviewed, live, ceiling, old_read) in [
+        (200_000_000, 400_000_000, 125_000_000, false),
+        (200_000_000, 100_000_000, 250_000_000, false),
+        (0, 400_000_000, 125_000_000, false),
+        (0, 400_000_000, 125_000_000, true),
+    ] {
+        let mut fixture = Fixture::new();
+        let path = fixture.dir.path().join("price.json");
+        fixture.config["sol_price_path"] = json!(path);
+        if reviewed == 0 {
+            fixture
+                .snapshot
+                .as_object_mut()
+                .unwrap()
+                .remove("sol_upper_micro_usd");
+        } else {
+            fixture.snapshot["sol_upper_micro_usd"] = json!(reviewed);
+        }
+        set_curve_buy(&mut fixture, ceiling);
+        let stamp = unix_now();
+        let published = if old_read { stamp } else { stamp - 100 };
+        let mut packet = live_price_packet(published, live);
+        if old_read {
+            packet["read_started_at_unix_secs"] = json!(stamp - 100);
+        }
+        write(&path, &packet);
+        fixture.save();
+        let answer = fixture.start().ask(&fixture.candidate);
+        assert_eq!(answer["outcome"], "issued", "{answer}");
+        assert_eq!(answer["intent"]["max_lamports"], ceiling);
+        assert_eq!(
+            answer["intent"]["proof"]["expires_at_unix_secs"],
+            stamp + 20
+        );
+    }
+    let mut fixture = Fixture::new();
+    set_curve_buy(&mut fixture, 125_000_001);
+    let path = fixture.dir.path().join("price.json");
+    fixture.config["sol_price_path"] = json!(path);
+    write(&path, &live_price_packet(unix_now(), 400_000_000));
+    fixture.save();
+    assert_eq!(
+        fixture.start().ask(&fixture.candidate)["outcome"],
+        "refused"
+    );
+}
+
+#[test]
+fn protected_live_price_reloads_and_never_falls_back_or_refreshes_old_risk_state() {
+    let mut fixture = Fixture::new();
+    fixture.snapshot["state"]["now"] = json!(1001);
+    let path = fixture.dir.path().join("price.json");
+    fixture.config["sol_price_path"] = json!(path);
+    fixture.save();
+    let mut issuer = fixture.start();
+    assert_eq!(issuer.ask(&fixture.candidate)["outcome"], "refused");
+    let mut packet = live_price_packet(unix_now(), 200_000_000);
+    packet["observation"]["context_slot"] = json!(1001);
+    for (pointer, value) in [
+        ("/version", json!(0)),
+        ("/authority", json!("model")),
+        ("/commitment", json!("processed")),
+        ("/asset", json!("USDC")),
+        ("/quote", json!("SOL")),
+        ("/source", json!("caller")),
+        ("/account", json!(address(0x44))),
+        ("/wallet_inventory_complete", json!(true)),
+        ("/execution_guaranteed", json!(true)),
+        ("/observation/lower_micro_usd_per_sol", json!(0)),
+        ("/observation/upper_micro_usd_per_sol", json!(199_999_999)),
+        ("/observation/context_slot", json!(999)),
+        ("/observation/context_slot", json!(1002)),
+        ("/observation/posted_slot", json!(1002)),
+        ("/observation/published_at_unix_secs", json!(unix_now() + 1)),
+        (
+            "/observation/published_at_unix_secs",
+            json!(unix_now() - 121),
+        ),
+        ("/read_started_at_unix_secs", json!(unix_now() - 121)),
+        ("/read_completed_at_unix_secs", json!(unix_now() + 3600)),
+    ] {
+        let mut damaged = packet.clone();
+        *damaged.pointer_mut(pointer).unwrap() = value;
+        if pointer == "/observation/context_slot" && damaged.pointer(pointer) == Some(&json!(999)) {
+            // Keep posting <= context so it cannot mask the old-context fault.
+            damaged["observation"]["posted_slot"] = json!(999);
+        }
+        write(&path, &damaged);
+        assert_eq!(
+            issuer.ask(&fixture.candidate)["outcome"],
+            "refused",
+            "{pointer}"
+        );
+    }
+    let mut unknown = packet.clone();
+    unknown["state"] = json!({"halted":false});
+    write(&path, &unknown);
+    assert_eq!(issuer.ask(&fixture.candidate)["outcome"], "refused");
+    write(&path, &packet);
+    fixture.snapshot["observed_at_unix_secs"] = json!(unix_now() - 121);
+    fixture.save();
+    assert_eq!(issuer.ask(&fixture.candidate)["outcome"], "refused");
+    fixture.snapshot["observed_at_unix_secs"] = json!(unix_now());
+    fixture.save();
+    assert_eq!(issuer.ask(&fixture.candidate)["outcome"], "issued");
+}
+
+#[cfg(unix)]
+#[test]
+fn protected_live_price_refuses_shared_files_without_using_reviewed_fallback() {
+    use std::os::unix::fs::PermissionsExt as _;
+    let mut fixture = Fixture::new();
+    let path = fixture.dir.path().join("price.json");
+    fixture.config["sol_price_path"] = json!(path);
+    write(&path, &live_price_packet(unix_now(), 200_000_000));
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+    fixture.save();
+    assert_eq!(
+        fixture.start().ask(&fixture.candidate)["outcome"],
+        "refused"
+    );
+}
+
 #[test]
 fn protected_live_observations_are_reloaded_bound_and_cannot_refresh_risk_state() {
     let mut fixture = Fixture::new();
