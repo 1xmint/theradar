@@ -13,7 +13,8 @@ public-data branch; neither child advances the parent while the other CI runs.
 - [x] Implement actual CLI paper-only account/positions/clock reader.
 - [x] Add four unit regressions plus an operator-process refusal regression;
   test floor 2293. Verification pending GitHub, no local tests/builds/lint/jobs.
-- [ ] Read complete GitHub CI, including mutation diagnostics, and fix failures.
+- [x] Complete GitHub CI 38179026608 passed at 5c51176, including all mutation
+  shards. PR 373 integrated at 9fa709d with the identical Git tree.
 - [ ] Owner creates paper account; connect paper credentials privately.
 - [ ] Verify actual account response; no assumption that fixtures prove access.
 - [ ] Record market data with coverage and as-of boundaries.
@@ -96,3 +97,12 @@ size millionths with null units, not microshares or executable capacity. Verify
 the actual feed/instrument units before paper execution sizes use this field.
 Prices retain explicit micro-USD per share. Record this limitation rather than
 manufacturing a conversion; all other quote checks remain necessary.
+
+### Foundation integration and next handoff
+
+Full CI 38179026608 at 5c511763eb83e90719c53c46edf067c347cefe57 passed every job.
+PR 373 is merged at 9fa709d on feat/integrated-autonomous-controls. Both commits
+have Git tree 8750339c33760a026bd85b02d0ad8557390a24b5. Parent integration CI
+must still be read before further parent merges. Continue on the independent
+feat/alpaca-paper-reconciliation branch with [plan 0018](0018-alpaca-paper-reconciliation.md).
+This is repository integration only: no production, keys or orders changed.

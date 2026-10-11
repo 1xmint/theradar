@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # 0022 — Alpaca paper first, measured profit as the objective
 
-**Status:** owner-approved direction; account reader and IEX capture/replay pending complete GitHub verification.
+**Status:** owner-approved direction; account/market/quote foundation verified on GitHub; reconciliation increment in progress.
 
 On 2026-10-11 Josh accepted the recommendation to start with Alpaca paper
 stocks/ETFs. The objective is durable profit after costs when learned intelligence
@@ -78,6 +78,17 @@ canonical date round-trip validation rejects impossible dates and leap seconds.
 Age and spread bounds are explicit operator inputs, not autonomous capital
 mandates. Quote conditions, tradability, market hours, complete account state,
 costs, reservations and execution permissions still need their own checks.
+
+`radar alpaca-reconcile` collects account, open orders, positions, clock, open
+orders again and account again, with the configured account ID required on both
+account reads. Selected fields are compared after sorting orders by identity;
+differences remain visible, not silently combined into a stable state. Pending
+cancellation, partial fills and nested legs are retained. A 500-order response
+is refused because [the API limit](https://docs.alpaca.markets/us/reference/getallorders-1)
+cannot prove another order was not omitted. Smaller responses and stable selected
+fields still do not establish atomicity, economic completeness or capital
+authority. Future risk-state production must reconcile local durable reservations,
+broker fills and unsupported account/order states before releasing any capital.
 
 Preserve the smart panel: manual inputs with per-option Agent decides checkboxes,
 adaptive risk by default, optional daily loss cap, research chat, visible reasons

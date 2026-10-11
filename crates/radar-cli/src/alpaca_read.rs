@@ -8,9 +8,9 @@ use serde_json::{Value, json};
 
 const PAPER_API: &str = "https://paper-api.alpaca.markets";
 
-#[derive(Deserialize, Serialize)]
-struct BrokerAccount {
-    id: String,
+#[derive(Deserialize, Serialize, PartialEq, Eq)]
+pub(super) struct BrokerAccount {
+    pub(super) id: String,
     status: String,
     currency: Option<String>,
     cash: Option<String>,
@@ -22,7 +22,7 @@ struct BrokerAccount {
 }
 
 #[derive(Deserialize, Serialize)]
-struct Position {
+pub(super) struct Position {
     asset_id: String,
     symbol: String,
     asset_class: String,
@@ -34,7 +34,7 @@ struct Position {
 }
 
 #[derive(Deserialize, Serialize)]
-struct Clock {
+pub(super) struct Clock {
     timestamp: String,
     is_open: bool,
     next_open: String,

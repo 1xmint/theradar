@@ -128,3 +128,36 @@ fn quote_command_uses_capture_universe_and_availability_before_validating_prices
         }
     }
 }
+
+#[test]
+fn reconciliation_command_refuses_missing_credentials_and_endpoint_overrides() {
+    for (args, expected) in [
+        (
+            vec!["alpaca-reconcile", "--account-id", "paper-id"],
+            "configure both Alpaca paper credentials privately",
+        ),
+        (vec!["alpaca-reconcile"], "usage: radar alpaca-reconcile"),
+        (
+            vec![
+                "alpaca-reconcile",
+                "--account-id",
+                "paper-id",
+                "--url",
+                "https://api.alpaca.markets",
+            ],
+            "usage: radar alpaca-reconcile",
+        ),
+    ] {
+        let output = Command::new(env!("CARGO_BIN_EXE_radar"))
+            .args(args)
+            .env_remove("RADAR_ALPACA_PAPER_KEY_ID")
+            .env("RADAR_ALPACA_PAPER_SECRET_KEY", "sentinel-private-secret")
+            .output()
+            .unwrap();
+        assert!(!output.status.success());
+        assert_eq!(output.stdout, Vec::<u8>::new());
+        let error = String::from_utf8(output.stderr).unwrap();
+        assert!(error.contains(expected));
+        assert!(!error.contains("sentinel-private-secret"));
+    }
+}

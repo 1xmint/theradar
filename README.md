@@ -34,6 +34,13 @@ remain unverified and cannot yet bound executable share quantity. Unsupported
 precision and exponent notation are refused. This produces quote inputs only,
 not an account mandate, asset-eligibility verdict or permission to place orders.
 
+`radar alpaca-reconcile --account-id <expected-paper-account-id>` pins the account
+identity and brackets positions/market-clock reads with account and open-order
+reads. It preserves pending orders and nested legs, reports changes in selected
+fields, and refuses full 500-order responses. Stable fields do not prove an atomic
+snapshot or complete economic accounting. It uses the same private paper keys
+and cannot submit orders. See [reconciliation work](docs/plans/0018-alpaca-paper-reconciliation.md).
+
 **Status: recording, and refusing to trade.** The pipeline runs end to end on a
 live instance — recording launches, measuring what became of them, and running
 the full decision lane over what it has recorded. 479,564 launches, 1,326,862 outcome measurements and 7,543
