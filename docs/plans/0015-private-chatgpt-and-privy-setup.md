@@ -5495,3 +5495,45 @@ do not demonstrate a Raydium swap: metadata has no inner swap instructions and
 the latter log contains only a custom router invocation. A pool address in a
 successful transaction is not an executed trade. Do not promote these to swap
 fixtures. Their whole responses are retained outside the checkout for audit.
+
+Privilege correction CI 38113401609 at 4cf6168 passed fully: build, MSRV,
+tests, lint, web/site and mutation aggregate. Diagnostics retained outside the
+checkout at radar-mutation-38113401609: 25 selected, 19 caught, six unviable,
+none missed. Exact tx.rs:263:46 OR-to-AND and verify.rs:359:43 AND-to-OR mutations
+compile and fail the malformed-header and fee-payer regressions. No exclusions.
+Integrated Router CI 38113032606 at 9be396a also passed fully. Fast-forwarded
+integrated source to verified privilege changes and recorded this handback;
+publish for fresh broad integrated CI. No deployment or live signing changes.
+
+Read-only production checks: Tailscale SSH reached guardian-vps-tail and Radar's
+localhost:8402 health returned status ok, build 57c275777e2b8b271f86f5828607e973455d5af8,
+agent configured true and policyClosed true. Provider last_call never is only
+that process's current reported state, not proof of no historical inference.
+Public finalized getBalance for Josh's known Privy address returned zero lamports
+at slot 455528722. Funding is still needed for eventual canaries; no funding,
+delegation or transaction was requested or performed by these read-only checks.
+
+Further market evidence: successful signature
+4hioC89h8bGN84NubErash1iPQWTUi5DpMU4PsjEYz6NRGnVdGAkuAtEEPKSihuAAP3qXYqmBPb6oRbyekVpV2uA
+at finalized slot 455527070 is version 1, so maxSupportedTransactionVersion 0
+refused. Read with version 1 for research only; signer support was not changed.
+Whole raw JSON (not parsed instructions) is retained outside the checkout as
+radar-raydium-v1-candidate-2026-10-11.json, SHA256
+53b1766fe02e92cb536c96533c8de84fa25070f8c7dd67176f43e66a2f8ecbc2.
+Despite containing Raydium pool addresses, it actually invokes PumpSwap in its
+inner instruction at top-level index 3. Its first program-index-25 instruction
+has 25-byte payload c62e1552b4d9e870317cf92c0000000088b0b6841902000001,
+matching buy_exact_quote_in's discriminator, two raw u64s and OptionBool byte.
+Official pump-fun/pump-public-docs at 2293f9a66c654e9fe82dc5e8f4618538f24bb35f,
+idl/pump_amm.json, describes 23 named base account roles; capture has 26 accounts.
+Review the remaining three roles and Token-2022 state rather than claiming
+complete semantics. This is usable observed instruction evidence for the
+reference-only PumpSwap decoder, not a live trading authorization. Preserve the
+full response and provenance when adding a fixture in the next market slice.
+
+Next: independent pool/vault/token/ATA verification and signer-enforced route
+asset bounds; protected live portfolio/evidence and settlement/recovery; adaptive
+supervisor/research-chat consumer; protected website handover/pause/revoke and
+service installation. Maintain multiple market families and SOL/USDC scope,
+explicitly refuse unsupported routes, and do not require every Solana program
+before an admitted, verified capability can run. Autonomous trading stays off.
