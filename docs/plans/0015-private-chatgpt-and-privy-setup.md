@@ -5906,3 +5906,24 @@ at the shared input boundary. Issuance's downstream preflight previously masked
 that survivor; inventory does not run transaction preflight. No mutation waiver
 or new authority. Existing four-test increment and floor 2261 remain unchanged.
 Publish after CI 38157070984 is terminal and require fresh GitHub verification.
+
+### Protected observations integrated handback (2026-10-11)
+
+CI 38157344505 passed fully at 155c820f7c4776b9df4be11faca8d6758a3e8c61:
+tests, build, MSRV, lint, format, site/web, dependencies and all mutation shards.
+The four shards exercised 27 mutations: 20 caught and 7 compiler-unviable,
+none missed. Retained diagnostics in radar-mutation-38157344505 confirm exact
+evidence_read.rs:59:20 (> to >=) fails the boundary publication regression and
+radar-issuer.rs:146:17 (|| to &&) fails the inventory-command binding regression.
+The redundant symlink disjunction was removed, with its directory refusal
+category retained and covered. No mutation exclusion was added.
+
+Merge verified protected observations source into feat/integrated-autonomous-controls
+after its prior CI 38156185293 passed. Preserve floor 2261 and publish one combined
+run; do not push over it. Production remains verified 3df7778, with this adapter
+not installed. No issuer service or refresh schedule exists yet: scheduling this
+collector alone would still leave the operator-reviewed risk/valuation snapshot
+stale. Next connect independent live valuation and reconciled portfolio state,
+then the outer adaptive controller and durable submission/settlement/recovery.
+Do not describe this observation-input connector as a complete snapshot producer.
+Signing, delegation and autonomous execution remain disabled.
