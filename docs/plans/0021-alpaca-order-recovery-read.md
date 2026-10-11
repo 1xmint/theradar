@@ -42,6 +42,10 @@ against HTTP 200/302/400/401/404/500. An account 404 must refuse, whereas an ord
 404 remains unresolved. The same regression now reaches the actual dispatch
 branch; the GitHub mutation check will reapply its inverse. No exclusion added.
 
+CI 38182060005 lint requires a semicolon in the expanded transport regression's
+block arm; correct that formatting without changing behavior. Keep its run intact
+until all jobs finish, then verify the replacement on GitHub.
+
 The order lookup is read-only and grants no execution authority. It neither
 retries orders nor releases claims on HTTP 404, canceled/expired/filled status or
 any other observation. Account snapshots remain sequential, not atomic; timestamp

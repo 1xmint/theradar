@@ -368,7 +368,7 @@ mod tests {
                     "paper order lookup returned an unexpected status"
                 ),
                 _ if path == "/lookup" => {
-                    assert_eq!(response.unwrap_err(), "paper order lookup failed")
+                    assert_eq!(response.unwrap_err(), "paper order lookup failed");
                 }
                 _ => {
                     assert!(response.is_err(), "missing or failed accounts must refuse");
