@@ -7,6 +7,354 @@ use std::process::{Child, Command, Stdio};
 
 const SEED: [u8; 32] = [0x6B; 32];
 
+fn native_capital_report(fixture: &Fixture) -> std::process::Output {
+    fixture
+        .command()
+        .arg("--review-native-capital")
+        .output()
+        .unwrap()
+}
+
+#[test]
+fn native_capital_counts_only_cash_above_the_operating_floor_without_authority() {
+    let mut fixture = Fixture::new();
+    for (balance, above) in [
+        (0_u64, 0_u64),
+        (4999, 0),
+        (5000, 0),
+        (5001, 1),
+        (300_000_000, 299_995_000),
+    ] {
+        fixture.snapshot["sol_lamports"] = json!(balance);
+        fixture.snapshot["wallet_evidence"]["native_sol"]["raw_amount"] =
+            json!(balance.to_string());
+        fixture.save();
+        let output = native_capital_report(&fixture);
+        assert!(output.status.success(), "{:?}", output.stderr);
+        let report: Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(report["status"], "counted");
+        assert_eq!(report["slot"], 1000);
+        assert_eq!(report["observed_lamports"], balance.to_string());
+        assert_eq!(report["outstanding_claim_lamports"], "0");
+        assert_eq!(report["free_after_claims_lamports"], balance.to_string());
+        assert_eq!(report["operating_reserve_lamports"], "5000");
+        assert_eq!(
+            report["above_operating_reserve_lamports"],
+            above.to_string()
+        );
+        assert_eq!(report["outstanding_claims"], json!([]));
+        assert_eq!(report["authority"], "read_only");
+        assert_eq!(report["wallet"], fixture.config["wallet"]);
+        assert_eq!(report["accounting_checkpoint"], "");
+        assert_eq!(
+            report["read_expires_at_unix_secs"],
+            fixture.snapshot["wallet_evidence"]["read_started_at_unix_secs"]
+                .as_u64()
+                .unwrap()
+                + 120
+        );
+        for field in ["usable_capital_micro_usd", "equity_micro_usd"] {
+            assert!(report[field].is_null());
+        }
+        for field in [
+            "portfolio_state_updated",
+            "economic_reconciliation_complete",
+            "reservation_released",
+        ] {
+            assert_eq!(report[field], false);
+        }
+    }
+    assert_eq!(
+        std::fs::read(fixture.dir.path().join("operations.jsonl")).unwrap(),
+        Vec::<u8>::new()
+    );
+}
+
+#[test]
+fn native_capital_replays_multiple_reserved_claims_but_not_unreserved_proposals() {
+    use radar_types::{
+        Asset, AssetRole, Balance, Holding, Portfolio, Slot, TokenQuantity, Unvaluable, Valuation,
+    };
+    let mut fixture = Fixture::new();
+    let history = fixture.dir.path().join("operations.jsonl");
+    let mut log = radar_journal::OperationLog::open(&history).unwrap();
+    let wallet = serde_json::from_value(fixture.config["wallet"].clone()).unwrap();
+    let mut portfolio = Portfolio::at(wallet, Slot(1000));
+    let unknown = Valuation::Unknown(Unvaluable::QuoteUnpriced);
+    portfolio
+        .hold(
+            Asset::Sol,
+            Holding::new(
+                AssetRole::Cash,
+                Balance::Counted(TokenQuantity::lamports(300_000_000)),
+                unknown,
+                unknown,
+            ),
+        )
+        .unwrap();
+    let mut ids = Vec::new();
+    for (amount, reserve) in [(20_000_000, true), (30_000_000, true), (200_000_000, false)] {
+        let id = log
+            .propose(
+                radar_journal::Intent {
+                    asset: Asset::Sol,
+                    amount: TokenQuantity::lamports(amount),
+                    at: Slot(1000),
+                },
+                unix_now(),
+                radar_journal::Correlation {
+                    mint: Some(address(0x22)),
+                    ..radar_journal::Correlation::default()
+                },
+            )
+            .unwrap();
+        if reserve {
+            log.reserve(&id, &mut portfolio, unix_now()).unwrap();
+            ids.push(id.as_str().to_owned());
+        }
+    }
+    fixture.snapshot["accounting_checkpoint"] = json!(log.checkpoint());
+    drop(log);
+    fixture.save();
+    let saved = std::fs::read(&history).unwrap();
+    for _ in 0..2 {
+        let output = native_capital_report(&fixture);
+        assert!(output.status.success(), "{:?}", output.stderr);
+        let report: Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(report["outstanding_claim_lamports"], "50000000");
+        assert_eq!(report["free_after_claims_lamports"], "250000000");
+        assert_eq!(report["above_operating_reserve_lamports"], "249995000");
+        let claims = report["outstanding_claims"].as_array().unwrap();
+        assert_eq!(claims.len(), 2);
+        for id in &ids {
+            assert!(
+                claims
+                    .iter()
+                    .any(|claim| claim["operation"] == *id && claim["state"] == "reserved")
+            );
+        }
+        assert_eq!(std::fs::read(&history).unwrap(), saved);
+    }
+    fixture.config["fee_reserve_lamports"] = json!(260_000_000);
+    fixture.save();
+    let output = native_capital_report(&fixture);
+    assert!(output.status.success());
+    let report: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["above_operating_reserve_lamports"], "0");
+    // The existing full review exposes the same result when its history is reviewable.
+    fixture.snapshot["wallet_evidence"]["raw_token_verification"] =
+        json!({"authority":"read_only","inventory_complete":false,"slot":null,"accounts":[]});
+    fixture.save();
+    let output = inventory_report(&fixture);
+    assert!(output.status.success(), "{:?}", output.stderr);
+    let inventory: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(inventory["native_capital"], report);
+}
+
+#[test]
+fn native_capital_keeps_submission_unknown_claim_and_refuses_stale_or_substituted_reads() {
+    let mut fixture = Fixture::new();
+    let answer = fixture.start().ask(&fixture.candidate);
+    assert_eq!(answer["outcome"], "issued", "{answer}");
+    let history = fixture.dir.path().join("operations.jsonl");
+    let log = radar_journal::OperationLog::open(&history).unwrap();
+    fixture.snapshot["accounting_checkpoint"] = json!(log.checkpoint());
+    drop(log);
+    fixture.save();
+    let saved = std::fs::read(&history).unwrap();
+    let output = native_capital_report(&fixture);
+    assert!(output.status.success(), "{:?}", output.stderr);
+    let report: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["outstanding_claim_lamports"], "250005000");
+    assert_eq!(report["free_after_claims_lamports"], "49995000");
+    assert_eq!(report["above_operating_reserve_lamports"], "49990000");
+    assert_eq!(
+        report["outstanding_claims"][0]["state"],
+        "submission_unknown"
+    );
+    // Even if the balance fell because submission landed, no claim is released
+    // or silently dropped until the existing reconciliation path establishes it.
+    fixture.snapshot["sol_lamports"] = json!(100_000_000);
+    fixture.snapshot["wallet_evidence"]["native_sol"]["raw_amount"] = json!("100000000");
+    fixture.save();
+    let output = native_capital_report(&fixture);
+    assert!(output.status.success());
+    let unknown: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(unknown["status"], "unknown");
+    assert_eq!(
+        unknown["refusal"],
+        "native capital cannot cover outstanding claims"
+    );
+    assert!(unknown["above_operating_reserve_lamports"].is_null());
+    let original = fixture.snapshot.clone();
+    for (pointer, value) in [
+        ("/accounting_checkpoint", json!("")),
+        ("/wallet", json!(address(0x44))),
+        ("/wallet_evidence/wallet", json!(address(0x44))),
+        ("/wallet_evidence/native_sol/raw_amount", json!("100000001")),
+        ("/wallet_evidence/native_sol/slot", json!("999")),
+        (
+            "/wallet_evidence/read_started_at_unix_secs",
+            json!(unix_now() - 121),
+        ),
+    ] {
+        fixture.snapshot = original.clone();
+        *fixture.snapshot.pointer_mut(pointer).unwrap() = value;
+        fixture.save();
+        let output = native_capital_report(&fixture);
+        assert!(!output.status.success(), "{pointer}");
+        assert_eq!(output.stdout, Vec::<u8>::new());
+        assert_eq!(std::fs::read(&history).unwrap(), saved);
+    }
+}
+
+#[test]
+fn native_capital_requires_balance_at_or_after_opening_and_reconciled_claim_release() {
+    let mut opening = Fixture::new();
+    opening.snapshot["wallet_evidence"]["raw_token_verification"] =
+        json!({"authority":"read_only","inventory_complete":false,"slot":null,"accounts":[]});
+    opening.save();
+    assert!(record_opening(&opening).status.success());
+    let opening_path = opening.dir.path().join("operations.jsonl");
+    let log = radar_journal::OperationLog::open(&opening_path).unwrap();
+    opening.snapshot["accounting_checkpoint"] = json!(log.checkpoint());
+    drop(log);
+    let opening_saved = std::fs::read(&opening_path).unwrap();
+    opening.snapshot["proposal"]["oldest_input_slot"] = json!(999);
+    opening.snapshot["state"]["now"] = json!(1001);
+    for native_slot in [999, 1000, 1001] {
+        opening.snapshot["wallet_evidence"]["native_sol"]["slot"] = json!(native_slot.to_string());
+        opening.save();
+        let output = native_capital_report(&opening);
+        assert!(output.status.success(), "{:?}", output.stderr);
+        let report: Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(
+            report["status"],
+            if native_slot < 1000 {
+                "unknown"
+            } else {
+                "counted"
+            }
+        );
+        if native_slot < 1000 {
+            assert_eq!(
+                report["refusal"],
+                "native capital observation does not cover opening inventory"
+            );
+        }
+        assert_eq!(std::fs::read(&opening_path).unwrap(), opening_saved);
+    }
+    opening.config["wallet"] = json!(address(0x44));
+    opening.snapshot["wallet"] = opening.config["wallet"].clone();
+    opening.snapshot["wallet_evidence"]["wallet"] = opening.config["wallet"].clone();
+    opening.save();
+    let output = native_capital_report(&opening);
+    assert!(output.status.success());
+    let report: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["status"], "unknown");
+    assert_eq!(
+        report["refusal"],
+        "native capital observation does not cover opening inventory"
+    );
+    assert_eq!(std::fs::read(&opening_path).unwrap(), opening_saved);
+
+    let (mut fixture, id) = reconciliation_fixture();
+    assert!(reconcile_operation(&fixture, id.as_str()).status.success());
+    let path = fixture.dir.path().join("operations.jsonl");
+    let log = radar_journal::OperationLog::open(&path).unwrap();
+    fixture.snapshot["accounting_checkpoint"] = json!(log.checkpoint());
+    let slot: u64 = log.settlement(&id).unwrap().review["slot"]
+        .as_str()
+        .unwrap()
+        .parse()
+        .unwrap();
+    drop(log);
+    let saved = std::fs::read(&path).unwrap();
+    for observed_slot in [slot - 1, slot, slot + 1] {
+        fixture.snapshot["wallet_evidence"]["native_sol"]["slot"] =
+            json!(observed_slot.to_string());
+        fixture.save();
+        let output = native_capital_report(&fixture);
+        assert!(output.status.success(), "{:?}", output.stderr);
+        let report: Value = serde_json::from_slice(&output.stdout).unwrap();
+        if observed_slot < slot {
+            assert_eq!(report["status"], "unknown");
+            assert_eq!(
+                report["refusal"],
+                "native capital observation precedes released settlement"
+            );
+            assert!(report["above_operating_reserve_lamports"].is_null());
+        } else {
+            assert_eq!(report["status"], "counted");
+            assert_eq!(report["outstanding_claim_lamports"], "0");
+            assert_eq!(report["free_after_claims_lamports"], "284844000");
+            assert_eq!(report["above_operating_reserve_lamports"], "284839000");
+        }
+        assert_eq!(std::fs::read(&path).unwrap(), saved);
+    }
+}
+
+#[test]
+fn native_capital_keeps_wrong_asset_units_and_newer_claim_context_unknown() {
+    use radar_types::{
+        Asset, AssetRole, Balance, Decimals, Holding, Slot, TokenQuantity, Unvaluable, Valuation,
+    };
+    for case in 0..3 {
+        let mut fixture = Fixture::new();
+        fixture.snapshot["state"]["now"] = json!(1001);
+        let asset = if case == 0 {
+            Asset::WrappedSol
+        } else {
+            Asset::Sol
+        };
+        let quantity = if case == 1 {
+            TokenQuantity::new(10, Decimals::from_mint_account(6).unwrap())
+        } else {
+            TokenQuantity::lamports(10)
+        };
+        let mut portfolio = native_portfolio(&fixture);
+        let unknown = Valuation::Unknown(Unvaluable::QuoteUnpriced);
+        portfolio
+            .hold(
+                asset,
+                Holding::new(
+                    AssetRole::Cash,
+                    Balance::Counted(quantity),
+                    unknown,
+                    unknown,
+                ),
+            )
+            .unwrap();
+        let path = fixture.dir.path().join("operations.jsonl");
+        let mut log = radar_journal::OperationLog::open(&path).unwrap();
+        let id = log
+            .propose(
+                radar_journal::Intent {
+                    asset,
+                    amount: quantity,
+                    at: Slot(if case == 2 { 1001 } else { 1000 }),
+                },
+                unix_now(),
+                radar_journal::Correlation {
+                    mint: Some(address(0x22)),
+                    ..radar_journal::Correlation::default()
+                },
+            )
+            .unwrap();
+        log.reserve(&id, &mut portfolio, unix_now()).unwrap();
+        fixture.snapshot["accounting_checkpoint"] = json!(log.checkpoint());
+        drop(log);
+        fixture.save();
+        let saved = std::fs::read(&path).unwrap();
+        let output = native_capital_report(&fixture);
+        assert!(output.status.success(), "{:?}", output.stderr);
+        let report: Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(report["status"], "unknown", "case {case}");
+        assert!(report["above_operating_reserve_lamports"].is_null());
+        assert_eq!(std::fs::read(&path).unwrap(), saved);
+    }
+}
+
 fn live_price_packet(published: u64, upper: u64) -> Value {
     json!({"version":1,"authority":"read_only","commitment":"finalized",
         "asset":"SOL","quote":"USD","source":"pyth_receiver_full",
@@ -5149,6 +5497,29 @@ fn protected_native_transfer_record_is_durable_and_comparison_counts_it_once() {
     assert_eq!(log.native_transfers().count(), 1);
     assert_eq!(log.outstanding().count(), 1);
     assert_eq!(std::fs::read(&path).unwrap(), saved);
+    drop(log);
+    for native_slot in [1001, 1002, 1003] {
+        fixture.snapshot["wallet_evidence"]["native_sol"]["slot"] = json!(native_slot.to_string());
+        fixture.save();
+        let output = native_capital_report(&fixture);
+        assert!(output.status.success(), "{:?}", output.stderr);
+        let capital: Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(
+            capital["status"],
+            if native_slot < 1002 {
+                "unknown"
+            } else {
+                "counted"
+            }
+        );
+        if native_slot < 1002 {
+            assert_eq!(
+                capital["refusal"],
+                "native capital observation precedes retained transfer"
+            );
+        }
+        assert_eq!(std::fs::read(&path).unwrap(), saved);
+    }
 }
 
 #[test]
