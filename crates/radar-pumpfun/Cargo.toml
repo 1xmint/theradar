@@ -20,6 +20,8 @@ radar-pda.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]
+# Checks retained pool-capture hashes; production derivation lives in radar-pda.
+sha2 = "0.11"
 # Test-only, to read the mainnet account captures the fee model is asserted
 # against. The crate itself parses bytes and needs no JSON.
 serde_json.workspace = true

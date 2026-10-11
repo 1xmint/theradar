@@ -1553,6 +1553,7 @@ dependencies = [
  "radar-signer",
  "radar-types",
  "serde_json",
+ "sha2",
  "thiserror",
 ]
 

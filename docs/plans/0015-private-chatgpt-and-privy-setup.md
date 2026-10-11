@@ -5719,3 +5719,10 @@ actual capture results and exact survivors before treating source as verified.
 This remains address proof only; curve/token-account owner and state, ATAs,
 extensions, live portfolio producer/supervisor and settlement recovery remain
 open. No protected-service activation, money, authority or deployment changes.
+
+Curve CI 38115581554 at 72c6fbf completed failed: an existing pumpfun pool
+capture test still imports sha2 after production derivation moved. Restore sha2
+under dev-dependencies, retaining the capture hash check and the intended pure
+production dependency graph. Mutation shards passed; inspect retained diagnostics
+at radar-mutation-38115581554. Integrated CI 38115366541 at 2f495fd passed fully.
+Require fresh GitHub build/tests/lint before integrating curve source. No deploy.
