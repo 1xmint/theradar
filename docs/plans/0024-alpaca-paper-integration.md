@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # 0024 — Integrate the paper foundation, then complete autonomous execution
 
-**Status:** combined source implemented; GitHub verification pending.
+**Status:** initial combined source verified; directory-sync integration verification pending.
 
 Branch: feat/alpaca-paper-integration. Parent remains integration 6ae333d until
 all relevant child checks finish. All tests/builds/lint/mutations run on GitHub.
@@ -16,12 +16,14 @@ The preceding goal turns made progress through source fixes and verified CI.
 | Client-ID recovery reads | 11a9107 | 38182273530 |
 | Durable intent journal | eadb500 | 38182537437 |
 | Equity asset observations | ba4e58a | 38182759739 |
+| Broker directory sync | 055a773 | 38183410146 |
 
 Asset observations passed full CI before incorporation. Preserve both shared
 BrokerOrder lifecycle fields
 and exposure field visibility. Keep every CLI dispatch, report and historical
 journal hash behavior. The combined independent test floor is 2331 before the
-four asset tests, then 2335. Do not replace a sum with either child's floor.
+four asset tests, then 2335. Directory sync adds two, bringing the floor to 2337.
+Do not replace a sum with either child's floor.
 
 ## Checklist
 
@@ -29,7 +31,9 @@ four asset tests, then 2335. Do not replace a sum with either child's floor.
   branch without moving the parent used by the remaining child CI.
 - [x] Resolve overlapping order schema, command/help and documentation additions.
 - [x] Incorporate asset observations only after their entire CI passes.
-- [ ] Read combined GitHub CI, including all mutation shards, and repair failures.
+- [x] Initial combined 61f82b2 passed full CI 38183043973, including all mutation shards.
+- [x] Incorporate directory sync only after full source CI 38183410146 passed.
+- [ ] Read full CI for the combined directory-sync tree and repair failures.
 - [ ] Advance the shared parent only from the verified combined tree.
 - [ ] Produce and deploy a verified artifact through the fixed deployment path.
 
@@ -39,7 +43,7 @@ four asset tests, then 2335. Do not replace a sum with either child's floor.
    order and IEX data responses. No keys in chat or in the model/web environment.
 2. Bind durable order payloads to broker observations; reconcile fills, fees,
    cash movements and local claims through restarts before releasing claims.
-   Verify directory-entry durability before the executor relies on new logs.
+   Directory-sync source is verified; merged-tree verification remains pending.
 3. Complete the pure equity risk verdict and separate paper executor: owner
    mandate, fresh asset/session/quote checks, exact long-only cash/share sizing,
    cost/edge bounds, idempotent order submission, cancellation and recovery.
