@@ -84,6 +84,26 @@ fn missing_journal_bad_or_conflicting_intent_never_prints_empty_safe_claims() {
             .unwrap()
             .contains("paper order journal is missing")
     );
+    let valid = intent().to_string();
+    // A valid object ending at the bound must not lose its closing brace.
+    let at_bound = format!("{}{valid}", " ".repeat(65_536 - valid.len()));
+    std::fs::write(&input, at_bound).unwrap();
+    assert!(run(&journal, Some(&input), "paper-id").status.success());
+    // Valid JSON plus whitespace remains parseable if a short read hides excess
+    // bytes. Refusal must come from the byte bound, not a JSON syntax failure.
+    std::fs::write(
+        &input,
+        format!("{valid}{}", " ".repeat(65_537 - valid.len())),
+    )
+    .unwrap();
+    let oversized = run(&journal, Some(&input), "paper-id");
+    assert!(!oversized.status.success());
+    assert_eq!(oversized.stdout, Vec::<u8>::new());
+    assert!(
+        String::from_utf8(oversized.stderr)
+            .unwrap()
+            .contains("paper intent exceeds 64 KiB")
+    );
     for body in [
         "null".to_owned(),
         "x".repeat(65_537),

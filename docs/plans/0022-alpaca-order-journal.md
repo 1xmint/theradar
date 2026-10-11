@@ -50,6 +50,12 @@ carrying either marker alone; neither can appear as empty Solana history. Keep
 the initial run intact until every job finishes; replacement verification is
 pending. No local jobs or mutation exclusions.
 
+The same run's shard 0 found size-bound survivors at alpaca_journal.rs:15:25
+(+ to - and *) and :18:20 (> to == and >=). The process regression now accepts
+strict valid JSON ending exactly at 64 KiB and refuses valid JSON with trailing
+whitespace beyond it for the size-specific reason. This distinguishes a bounded
+read hiding excess bytes from genuinely invalid JSON. Test count is unchanged.
+
 Source only, no credentials, network orders, delegation, deposits or deployment.
 The submit ordering API has regression callers but no production executor yet.
 It deliberately has no release/terminal reconciliation route: even an HTTP 404 or
