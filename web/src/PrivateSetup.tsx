@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-//! Operator-only setup for the owner's subscription and autonomous Privy lane.
+//! Operator-only setup: Alpaca paper first, optional Solana wallet.
 
 import { lazy, Suspense, useEffect, useState } from "react";
 import { SubscriptionLink } from "./Agent";
@@ -28,8 +28,8 @@ export function PrivateSetup() {
       <div>
         <h2 className="text-xl font-semibold">Private trader setup</h2>
         <p className="mt-2 text-sm text-[var(--color-dim)]">
-          Connect ChatGPT for reasoning and a Privy wallet for autonomous execution.
-          Signing in to ChatGPT does not grant permission to move funds.
+          Start with Alpaca paper stocks and ETFs, with ChatGPT for research and reasoning.
+          Paper trading uses simulated funds. Signing in to ChatGPT does not enable trading.
         </p>
       </div>
       <div>
@@ -37,18 +37,36 @@ export function PrivateSetup() {
         <SubscriptionLink />
         <p className="text-sm text-[var(--color-dim)]">You can connect before enabling inference or trading.</p>
       </div>
+      <div className="rounded-md border border-[var(--color-line)] bg-[var(--color-surface)] p-4 space-y-3">
+        <h3 className="font-medium">Alpaca paper trading — recommended starting venue</h3>
+        <p className="text-sm text-[var(--color-dim)]">
+          Create a free paper-only account, then open its Paper Trading dashboard.
+          No deposit is needed. Use a simulated balance that matches the capital you intend to test.
+          Start without leverage or short selling.
+        </p>
+        <a className="inline-block rounded border border-[var(--color-line)] px-3 py-2 text-sm"
+          href="https://app.alpaca.markets/" target="_blank" rel="noopener noreferrer">Open Alpaca dashboard</a>
+        <p className="text-sm text-[var(--color-dim)]">
+          Broker connection: not available on this page yet. Keep paper API keys private;
+          do not paste them into research chat. Your Solana wallet settings do not apply to Alpaca.
+        </p>
+        <p className="text-sm text-[var(--color-dim)]">
+          Paper results help test the system, but simulated fills omit some live costs and execution effects.
+          Profits in paper trading do not establish live profitability.
+        </p>
+      </div>
       <div className="rounded-md border border-[var(--color-line)] bg-[var(--color-surface)] p-4">
-        <h3 className="font-medium">Privy wallet</h3>
+        <h3 className="font-medium">Optional Solana module — Privy wallet</h3>
         {privy ? <Suspense fallback={<p role="status">Loading wallet connection…</p>}><PrivyWallet appId={privy} /></Suspense>
           : <p className="mt-2 text-sm" role="status">{error ?? "Checking Privy configuration…"}</p>}
       </div>
       <div className="rounded-md border border-[var(--color-line)] p-4">
         <h3 className="font-medium">Autonomous execution: not enabled</h3>
         <p className="mt-2 text-sm text-[var(--color-dim)]">
-          The execution supervisor still needs to be connected to the Privy signing lane.
-          Choose a manual value or Agent decides for each wallet option above.
-          Execution also needs verified wallet-based bounds, allowed assets,
-          an inference allowance, and a session expiry before trading can start.
+          Alpaca paper execution still needs a verified broker connection, complete account and pending-order
+          checks, risk controls, and recovery after interruptions. Its controls will offer manual values or
+          Agent decides, with adaptive risk and an optional daily loss stop.
+          The Solana settings above remain separate drafts; neither venue is enabled by this page.
         </p>
       </div>
     </section>
