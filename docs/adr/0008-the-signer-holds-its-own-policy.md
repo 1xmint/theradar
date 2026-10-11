@@ -485,6 +485,25 @@ Reconciled complete portfolio valuation, lower-bound usable capital, token
 valuations, basis and realised PnL remain unfinished; this native-spend input
 does not establish any of them.
 
+`radar wallet-read --value-sol --min-slot <N> --max-age-secs <N>
+--max-confidence-bps <0..10000>` connects the native balance to that independent
+price reader. The existing wallet/RPC flags remain required. It preserves every
+wallet/token read and context, adds a native-only micro-USD confidence band rounded
+outward using integer arithmetic, and retains the oracle observation and source.
+The native balance must meet the explicit context floor; the oracle bank must be
+at least as recent as that balance. The oracle posting meets the explicit floor,
+not the wallet bank slot, because feed posting has its own cadence. Refuse stale
+combined read windows, backward clock movement, missing/invalid oracle data and
+out-of-range dollar amounts without emitting partial evidence. Unvalued reads
+retain their previous output and do not request a price.
+
+This is read-only collector output. A native band is not total wallet equity,
+available capital or a guaranteed execution value. Token marks, outstanding
+reservations, operating reserves, cost basis and economic reconciliation remain
+unknown; even an empty token enumeration is not promoted to complete portfolio
+authority. Total USD value, realised PnL and usable capital remain null. This
+option does not refresh or populate the issuer's reviewed portfolio state.
+
 The private snapshot also requires `wallet_evidence`, containing the JSON from
 `radar wallet-read`. Before reserving capital the issuer binds version 1,
 read-only/finalized metadata, configured wallet identity, native decimals of

@@ -6040,3 +6040,30 @@ remain recorded in plan 0011 and design 0017. Next connect native wallet valuati
 to independently read price evidence, without treating token prices, economic
 reconciliation or usable capital as known. Full portfolio, adaptive supervision,
 submission/settlement/recovery and protected owner handover remain activation work.
+
+### Native wallet valuation collector handback (2026-10-11)
+
+Independent feat/wallet-native-valuation starts at integration b545c71 while its
+combined CI 38159650933 runs. Do not push that integration branch over its check.
+The actual wallet-read caller now offers --value-sol with explicit context, age
+and confidence bounds. It retains typed native balance from the existing inventory
+read and calls the already verified SOL/USD reader. No float or UI value enters
+the calculation; checked dollar conversion and outward rounding preserve an
+honest native-only band. Require balance >= explicit floor, oracle bank >= balance
+bank, oracle posting >= explicit floor, and the whole read window within age.
+This admits a feed posting older than the wallet bank without admitting an old
+oracle bank. Failed inventory/price/age checks emit no partial output.
+
+Three unit regressions cover arithmetic/precision/overflow, exact-age and backward
+clock boundaries, and missing/invalid explicit scope. Two real CLI/mock-RPC
+regressions cover zero and fractional native balances, equal/later oracle banks,
+retained raw/frozen tokens, context-floor/old-bank/owner/stale/RPC refusals and
+continued null total equity/usable capital/PnL. Raise floor 2275; require GitHub
+tests/build/lint/MSRV and behavioral mutations. No local jobs or new exclusions.
+
+This source is not verified until those jobs pass. Existing unvalued collectors
+retain their schema and requests. No service/delegation/funding/signing change.
+Full marked portfolio, claims/reserve accounting, economic reconciliation and
+protected live snapshot production remain open; the native band alone cannot
+authorize wallet-based adaptive capital. Continue those actual consumers before
+autonomous supervision, submission/settlement/recovery and owner handover.
