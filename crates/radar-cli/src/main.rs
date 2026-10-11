@@ -14,6 +14,7 @@ use radar_instruments::{Context, CreatorHistory, CreatorTrackRecord, Registry, S
 mod alpaca_market;
 mod alpaca_quote;
 mod alpaca_read;
+mod alpaca_reconcile;
 mod audit;
 mod basis;
 mod brief;
@@ -122,6 +123,7 @@ commands:
                                  re-derives the 850 bps constant and says
                                  whether it is fixed or proportional
   alpaca-read (paper account, positions and US equity market clock; credentials from environment)
+  alpaca-reconcile --account-id <expected-paper-account-id>
   alpaca-market-read --symbols SPY,QQQ --output <new-capture-file>
   alpaca-market-replay --input <capture-file> --as-of-unix-ms <N>
   alpaca-quote --input <capture-file> --symbol SPY --as-of-unix-ms <N> --max-age-ms <N> --max-spread-bps <N>
@@ -916,6 +918,7 @@ fn main() -> ExitCode {
         "creator-index" => creator_index(&args),
         "dossier" => dossier::run(&args),
         "alpaca-read" => alpaca_read::run(&args),
+        "alpaca-reconcile" => alpaca_reconcile::run(&args),
         "alpaca-market-read" | "alpaca-market-replay" => alpaca_market::run(&args),
         "alpaca-quote" => alpaca_quote::run(&args),
         "wallet-read" => wallet_read::run(&args),
