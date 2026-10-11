@@ -5747,3 +5747,89 @@ PR 363 into feat/integrated-autonomous-controls and require combined GitHub CI.
 Production remains d142c8b; derived-address checks do not yet prove account state
 or enable trading. Independent subscription status PR 364 at c4ae72a is running
 CI 38155504412. Do not push over that live check or deploy unverified code.
+
+### Persistent subscription status source handback (2026-10-11)
+
+Independent fix/persistent-subscription-status starts at verified integration
+2f495fd while curve correction 0a3af53 runs GitHub CI 38155302364. The owner
+completed browser sign-in; fresh browser verification was rejected by the browser
+security policy, so no alternate browser route is attempted. Host CLI previously
+confirmed ChatGPT linked. The UI currently loses that fact when its device-login
+child is absent, including after a server restart.
+
+Add Codex::is_linked using the existing configured command and cleared environment
+with login status, null stdin/stdout/stderr and the existing bounded process wait
+(15 seconds, matching the installed bridge). Zero reports linked, one unlinked,
+other statuses and spawn/timeout failures remain unknown. The actual GET /v1/link
+consumer keeps active flow progress and checks persisted login only while idle,
+using spawn_blocking so the HTTP runtime remains available. No inference call,
+credential parsing, refresh implementation or signing authority is introduced.
+CLI failure returns 503 and a fixed nonsecret message, rather than pretending the
+subscription is unlinked. Existing operator identity checks are unchanged.
+
+Real router regressions run fake CLI processes, require precisely login status,
+check fresh server/restart persistence, logout and relink without a restart, and
+unknown exits without exposing either output stream. Existing missing CLI case
+now expects unknown status; absence of an inference budget still leaves status
+available and chat closed. Test floor 2255 on this branch; combine the additional
+curve regression as 2256 when both are verified. Require GitHub build, tests,
+lint and behavior mutations before integration or release. Autonomy remains off;
+live evidence, account/state proof, supervisor and protected handover still open.
+
+Subscription status CI 38155504412 at c4ae72a identified exact missed mutants:
+Codex::is_linked at codex.rs:96:9 returning Ok(true) or Ok(false), and deleting
+Some(0)/Some(1) match arms at 105:13/106:13. Diagnostics show mutation jobs ran
+only radar-model's suite, so router coverage cannot kill those substitutions.
+Add a direct subprocess regression in radar-model for exit 0, 1, 2, 9 and 127,
+exact login/status arguments and a missing executable. This exercises the real
+method without introducing a second parser or any exclusion. Test floor 2256
+on this branch, 2257 after combining the curve regression. Keep the corrected
+source local until CI 38155504412 is terminal; then publish fresh GitHub checks.
+Curve integration 43af3c2 is running CI 38155552918 independently. No deploy,
+wallet preference change, delegation or trade occurred in this work.
+
+CI 38155504412 completed failed only for the four missed model-crate mutants;
+its workspace tests, build, lint, MSRV, web and site passed. Publish a3bbf44's
+correction. GitHub did not start a new run because PR 364 conflicted with its
+updated integration base. Merge 43af3c2 into the fix branch, retain both plan
+handbacks and set the combined test floor to 2257. Require fresh GitHub checks;
+no canceled/restarted check or mutation exclusion is used.
+
+### Combined status verification handback (2026-10-11)
+
+PR 364 conflicts are resolved at 3df7778; GitHub CI 38155900425 passed fully
+at that exact head. Its first two mutation shards now catch all four previously
+missed Codex::is_linked substitutions. Read retained diagnostics outside the
+checkout at radar-mutation-38155900425: returning Ok(true) actually fails the
+new persisted_login_status regression on the unlinked case. No mutation waiver.
+The remaining behavior shards and full tests/build also passed. Curve integration
+CI 38155552918 remains live at 43af3c2; do not push over that run. Dispatch the
+Linux release from the remote fix branch while it still points at verified
+3df7778. Keep this documentation update local until the release head is secured.
+
+Next integrate verified status source, preserve floor 2257, publish combined CI
+and release the server only after exact-head checks pass; use the fixed deploy
+script and inspect the protected status endpoint via the authorized server path.
+Browser verification remains unavailable under the browser security policy.
+Production still d142c8b; no authority or wallet changes.
+
+For the execution work, inspected current actual seams rather than creating a
+parallel framework: CLI evidence-read already collects wallet/preflight packets;
+onchain wallet_inventory verifies raw mint/token layouts; curve_market reads
+mint/reserves/fees at one reported context; the protected issuer still requires
+an operator-provisioned Snapshot containing proposal, exact bytes, valuation and
+risk state. A network read packet alone must not be called a live portfolio or
+silently populate that state with zero. The next execution implementation must
+connect those existing collectors to a protected, fresh snapshot producer and
+reconciliation consumer, with model recommendations translated by an outer
+controller. Keep account/token state verification and actual admitted route
+construction alongside that work; do not gate all progress on universal venue
+support or replace the broad goal with a buy-only demonstration.
+
+Curve integration CI 38155552918 at 43af3c2 passed fully. Integrate verified
+subscription status source plus its handback, with test floor 2257. Publish
+combined GitHub CI once; do not push over it. Linux release 38156147328 is live
+and confirms its exact source head is 3df77788914ef7bef006205bfd732f6e0f460c86.
+Download only after success, validate BUILD-INFO and artifact checksums, deploy
+only radar-serve through radar-deploy, and require /health build plus protected
+link status verification. Signer remains inactive and autonomy remains closed.
