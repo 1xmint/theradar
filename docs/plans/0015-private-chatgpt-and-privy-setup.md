@@ -6143,3 +6143,12 @@ curve_mark market-floor operator, not the later oracle-floor comparison.
 Retain diagnostics outside the checkout in radar-mutation-38161340796/shard1.
 Other mutation shards passed; no production logic change, new test count or
 mutation waiver. Publish only after this terminal run and require fresh CI.
+
+CI 38161612529 at 48c5bc4 completed with tests/build/MSRV and all four mutation
+shards passing. Lint alone rejected the missing statement semicolon in the
+Token-2022 mismatch fixture (wallet_read_process.rs:280). Add that semicolon;
+no production behavior, test count or mutation exclusion changes. Require a
+fresh complete GitHub run before integration. Browser sign-in is reported
+complete by the owner; the previously observed browser URL-policy restriction
+still prevents claiming a verified authenticated Radar page. No live authority
+or production deployment changed.

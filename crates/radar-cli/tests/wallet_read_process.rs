@@ -277,7 +277,7 @@ fn portfolio_marks_refuse_old_market_context_or_changed_mint_program_and_units()
             0 => market["result"]["context"]["slot"] = json!(52),
             1 => {
                 market["result"]["value"][0]["owner"] =
-                    json!(radar_pumpfun::token::TOKEN_2022_PROGRAM)
+                    json!(radar_pumpfun::token::TOKEN_2022_PROGRAM);
             }
             _ => {
                 let mut mint = radar_types::b64::decode(
