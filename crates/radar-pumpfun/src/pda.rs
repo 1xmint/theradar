@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 //! Program-derived addresses, and the pump.fun accounts derived from them.
 //!
-//! # Why this is here rather than pulled in
+//! # Shared derivation, venue-specific seeds
 //!
 //! Solana's own crate would bring an enormous dependency tree into a workspace
 //! whose stated bar is "the alternative is writing it ourselves and getting it
-//! wrong". This is a SHA-256 and a curve check, both of which are already in the
+//! wrong". The shared `radar-pda` core is a SHA-256 and a curve check, already in the
 //! tree, and the result is *verifiable against mainnet* — which is the part that
 //! matters. Every derivation below is asserted against an address observed in a
 //! real transaction, so "getting it wrong" is a thing the tests would catch
@@ -23,7 +23,7 @@
 //! produce a different, equally valid-looking address that the program would not
 //! recognise.
 
-use sha2::{Digest, Sha256};
+pub use radar_pda::find;
 
 use radar_types::Address;
 
@@ -32,10 +32,6 @@ use radar_types::Address;
 /// Re-exported from the decoder rather than declared again — one address for one
 /// program, per ADR 0009's single-table rule.
 pub use radar_decode::pumpfun::PROGRAM_ID;
-
-/// The marker Solana appends before hashing, which is what stops a PDA from
-/// colliding with an ordinary hash of the same bytes.
-const MARKER: &[u8] = b"ProgramDerivedAddress";
 
 /// The associated-token-account program.
 ///
@@ -52,40 +48,6 @@ pub const FEE_PROGRAM: Address = Address::new([
     0x0c, 0x35, 0xff, 0xa9, 0x05, 0x5a, 0x8e, 0x56, 0x8d, 0xa8, 0xf7, 0xbc, 0x07, 0x56, 0x15, 0x27,
     0x4c, 0xf1, 0xc9, 0x2c, 0xa4, 0x1f, 0x40, 0x00, 0x9c, 0x51, 0x6a, 0xa4, 0x14, 0xc2, 0x7c, 0x70,
 ]);
-
-/// Whether a 32-byte value is a point on the ed25519 curve.
-///
-/// A PDA is precisely an address that is **not**, because that is what
-/// guarantees no private key exists for it.
-fn on_curve(bytes: &[u8; 32]) -> bool {
-    ed25519_dalek::VerifyingKey::from_bytes(bytes).is_ok()
-}
-
-/// Derives a program address from seeds, with its bump.
-///
-/// `None` when every bump from 255 to 0 lands on the curve, which is
-/// astronomically unlikely and is returned rather than panicked so that a caller
-/// building a transaction gets a refusal instead of a crash.
-#[must_use]
-pub fn find(seeds: &[&[u8]], program: &Address) -> Option<(Address, u8)> {
-    // Counting **down** from 255. Solana's canonical address is the first found
-    // in this direction; counting up yields a different address that is equally
-    // off-curve and that the program will not accept.
-    for bump in (0..=u8::MAX).rev() {
-        let mut hasher = Sha256::new();
-        for seed in seeds {
-            hasher.update(seed);
-        }
-        hasher.update([bump]);
-        hasher.update(program.as_bytes());
-        hasher.update(MARKER);
-        let digest: [u8; 32] = hasher.finalize().into();
-        if !on_curve(&digest) {
-            return Some((Address::new(digest), bump));
-        }
-    }
-    None
-}
 
 /// The bonding curve holding a mint's reserves.
 ///
@@ -234,35 +196,6 @@ mod tests {
             event_authority().expect("event authority"),
             addr(OBSERVED_EVENT_AUTHORITY)
         );
-    }
-
-    #[test]
-    fn a_derived_address_is_never_on_the_curve() {
-        // The property that makes a PDA unsignable. If a derivation returned an
-        // on-curve address, someone could hold its key.
-        for mint in [MINT, "So11111111111111111111111111111111111111112"] {
-            let derived = bonding_curve(&addr(mint)).expect("a derivation");
-            assert!(
-                !on_curve(derived.as_bytes()),
-                "{mint} derived an on-curve address"
-            );
-        }
-    }
-
-    #[test]
-    fn the_bump_counts_down_from_255() {
-        // Solana's canonical address is the first found counting down. Counting
-        // up would yield a different address that is equally off-curve and that
-        // the program would reject -- a bug with no symptom until a transaction
-        // fails on chain.
-        let (_, bump) = find(&[b"global"], &PROGRAM_ID).expect("a derivation");
-        assert_eq!(bump, 255, "global's canonical bump is the first tried");
-
-        // And one that is not 255, so the test above is not passing because the
-        // search stops immediately every time.
-        let (_, mint_bump) =
-            find(&[b"bonding-curve", addr(MINT).as_bytes()], &PROGRAM_ID).expect("a derivation");
-        assert!(mint_bump < 255, "got {mint_bump}");
     }
 
     /// The rest of the buy layout, observed in the same transaction.

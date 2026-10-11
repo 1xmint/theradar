@@ -16,14 +16,12 @@ workspace = true
 # a transaction was rejected.
 radar-decode.workspace = true
 radar-types.workspace = true
-sha2 = "0.11"
+radar-pda.workspace = true
 thiserror.workspace = true
-# Only to ask whether a 32-byte value is a point on the ed25519 curve, which is
-# what makes an address a program-derived one. No key is held, generated or used
-# in this crate.
-ed25519-dalek = { workspace = true }
 
 [dev-dependencies]
+# Checks retained pool-capture hashes; production derivation lives in radar-pda.
+sha2 = "0.11"
 # Test-only, to read the mainnet account captures the fee model is asserted
 # against. The crate itself parses bytes and needs no JSON.
 serde_json.workspace = true

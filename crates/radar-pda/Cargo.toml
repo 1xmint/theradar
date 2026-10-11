@@ -1,0 +1,19 @@
+# SPDX-License-Identifier: Apache-2.0
+[package]
+name = "radar-pda"
+description = "Pure canonical Solana address derivation shared by builders and independent verification."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+
+[dependencies]
+radar-types.workspace = true
+ed25519-dalek.workspace = true
+sha2 = "0.11"
+
+[lints]
+workspace = true
