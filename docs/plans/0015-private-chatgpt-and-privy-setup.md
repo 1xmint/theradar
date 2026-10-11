@@ -5969,3 +5969,11 @@ a Panics section. Return an error from that parse instead of adding a public
 panic or suppressing the lint. Publish only after this run is terminal and
 require fresh GitHub verification; no new test count or mutation waiver.
 Protected live valuation and autonomous execution remain unfinished.
+
+Price-reader correction CI 38158536969 at 99fc71a passed build, tests, MSRV,
+formatting, dependencies, site/web and every mutation shard. Lint then reached
+the CLI integration test and rejected two assert!(stdout.is_empty()) calls;
+use the repository's existing assert_eq!(stdout, Vec::<u8>::new()) convention.
+The run is terminal before publishing this two-line test correction. Keep it
+on the price-reader PR, separate from the uncommitted protected price-consumer
+work on feat/protected-live-price. Require fresh GitHub verification.

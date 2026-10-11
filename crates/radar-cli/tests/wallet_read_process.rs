@@ -66,7 +66,7 @@ fn actual_sol_price_command_reads_receiver_verified_bounds_and_refuses_missing_s
             .output()
             .unwrap();
         assert!(!failed.status.success());
-        assert!(failed.stdout.is_empty());
+        assert_eq!(failed.stdout, Vec::<u8>::new());
         assert!(String::from_utf8_lossy(&failed.stderr).contains("sol-price-read needs"));
     }
     for (index, invalid) in [(2, " "), (4, "bad"), (6, "bad"), (8, "10001")] {
@@ -77,7 +77,7 @@ fn actual_sol_price_command_reads_receiver_verified_bounds_and_refuses_missing_s
             .output()
             .unwrap();
         assert!(!failed.status.success());
-        assert!(failed.stdout.is_empty());
+        assert_eq!(failed.stdout, Vec::<u8>::new());
         assert!(String::from_utf8_lossy(&failed.stderr).contains("sol-price-read needs"));
     }
 }
