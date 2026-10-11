@@ -41,6 +41,13 @@ fields, and refuses full 500-order responses. Stable fields do not prove an atom
 snapshot or complete economic accounting. It uses the same private paper keys
 and cannot submit orders. See [reconciliation work](docs/plans/0018-alpaca-paper-reconciliation.md).
 
+The same report includes conservative exposure bounds for supported simple equity
+limit orders and long positions. It reserves original pending quantities, rounds
+funds down and exposure up, and reports unsupported or changing states with null
+bounds. Fees, durable local claims, freshness and complete economic reconciliation
+remain unresolved; these bounds are not available capital or trading authority.
+See [exposure accounting](docs/plans/0020-alpaca-paper-exposure.md).
+
 **Status: recording, and refusing to trade.** The pipeline runs end to end on a
 live instance — recording launches, measuring what became of them, and running
 the full decision lane over what it has recorded. 479,564 launches, 1,326,862 outcome measurements and 7,543

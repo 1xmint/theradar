@@ -90,6 +90,27 @@ fields still do not establish atomicity, economic completeness or capital
 authority. Future risk-state production must reconcile local durable reservations,
 broker fills and unsupported account/order states before releasing any capital.
 
+The reconciliation caller also computes pure, conservative exposure bounds when
+selected account and pending-order observations are unchanged. The supported
+initial lane is active USD accounts with known unrestricted flags, long US equity
+positions and simple quantity-based equity limit orders. Notional, market/stop,
+multi-leg, replacement, unknown state, malformed decimal and oversold cases have
+unknown bounds, never zero. Pending cancellation retains its full commitment.
+Reserve original order quantities even after partial fills, since positions and
+cash may reflect fills at different instants. This can over-reserve and refuse
+otherwise valid actions; it must not be loosened without fill/local-claim evidence.
+
+[Alpaca already deducts open buys from buying power](https://docs.alpaca.markets/us/docs/orders-at-alpaca).
+Compute the cash bound as min(cash minus conservative pending buys, broker buying
+power, equity), rather than subtracting pending buys from buying power again.
+Positions use max(cost basis, market value) and buys add their limit-price bound;
+pending sells reserve observed long shares and never create short capacity.
+[Nine-place fractional quantities](https://docs.alpaca.markets/us/docs/fractional-trading)
+and broker dollar strings use exact integer arithmetic. Cash is floored to
+micro-USD; liabilities are ceiled. Unsupported precision/overflow is unknown.
+These are observation bounds, not a risk authorization: fees, unsettled funds,
+freshness, local claims and complete economic reconciliation remain separate gates.
+
 Preserve the smart panel: manual inputs with per-option Agent decides checkboxes,
 adaptive risk by default, optional daily loss cap, research chat, visible reasons
 and direct pause/revoke. The model may recommend a budget from observed funds;
