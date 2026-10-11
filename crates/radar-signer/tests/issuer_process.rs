@@ -64,10 +64,9 @@ fn native_capital_counts_only_cash_above_the_operating_floor_without_authority()
             assert_eq!(report[field], false);
         }
     }
-    assert!(
-        std::fs::read(fixture.dir.path().join("operations.jsonl"))
-            .unwrap()
-            .is_empty()
+    assert_eq!(
+        std::fs::read(fixture.dir.path().join("operations.jsonl")).unwrap(),
+        Vec::<u8>::new()
     );
 }
 
@@ -204,13 +203,61 @@ fn native_capital_keeps_submission_unknown_claim_and_refuses_stale_or_substitute
         fixture.save();
         let output = native_capital_report(&fixture);
         assert!(!output.status.success(), "{pointer}");
-        assert!(output.stdout.is_empty());
+        assert_eq!(output.stdout, Vec::<u8>::new());
         assert_eq!(std::fs::read(&history).unwrap(), saved);
     }
 }
 
 #[test]
-fn native_capital_requires_balance_at_or_after_reconciled_claim_release() {
+fn native_capital_requires_balance_at_or_after_opening_and_reconciled_claim_release() {
+    let mut opening = Fixture::new();
+    opening.snapshot["wallet_evidence"]["raw_token_verification"] =
+        json!({"authority":"read_only","inventory_complete":false,"slot":null,"accounts":[]});
+    opening.save();
+    assert!(record_opening(&opening).status.success());
+    let opening_path = opening.dir.path().join("operations.jsonl");
+    let log = radar_journal::OperationLog::open(&opening_path).unwrap();
+    opening.snapshot["accounting_checkpoint"] = json!(log.checkpoint());
+    drop(log);
+    let opening_saved = std::fs::read(&opening_path).unwrap();
+    opening.snapshot["proposal"]["oldest_input_slot"] = json!(999);
+    opening.snapshot["state"]["now"] = json!(1001);
+    for native_slot in [999, 1000, 1001] {
+        opening.snapshot["wallet_evidence"]["native_sol"]["slot"] = json!(native_slot.to_string());
+        opening.save();
+        let output = native_capital_report(&opening);
+        assert!(output.status.success(), "{:?}", output.stderr);
+        let report: Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(
+            report["status"],
+            if native_slot < 1000 {
+                "unknown"
+            } else {
+                "counted"
+            }
+        );
+        if native_slot < 1000 {
+            assert_eq!(
+                report["refusal"],
+                "native capital observation does not cover opening inventory"
+            );
+        }
+        assert_eq!(std::fs::read(&opening_path).unwrap(), opening_saved);
+    }
+    opening.config["wallet"] = json!(address(0x44));
+    opening.snapshot["wallet"] = opening.config["wallet"].clone();
+    opening.snapshot["wallet_evidence"]["wallet"] = opening.config["wallet"].clone();
+    opening.save();
+    let output = native_capital_report(&opening);
+    assert!(output.status.success());
+    let report: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["status"], "unknown");
+    assert_eq!(
+        report["refusal"],
+        "native capital observation does not cover opening inventory"
+    );
+    assert_eq!(std::fs::read(&opening_path).unwrap(), opening_saved);
+
     let (mut fixture, id) = reconciliation_fixture();
     assert!(reconcile_operation(&fixture, id.as_str()).status.success());
     let path = fixture.dir.path().join("operations.jsonl");
@@ -5450,6 +5497,29 @@ fn protected_native_transfer_record_is_durable_and_comparison_counts_it_once() {
     assert_eq!(log.native_transfers().count(), 1);
     assert_eq!(log.outstanding().count(), 1);
     assert_eq!(std::fs::read(&path).unwrap(), saved);
+    drop(log);
+    for native_slot in [1001, 1002, 1003] {
+        fixture.snapshot["wallet_evidence"]["native_sol"]["slot"] = json!(native_slot.to_string());
+        fixture.save();
+        let output = native_capital_report(&fixture);
+        assert!(output.status.success(), "{:?}", output.stderr);
+        let capital: Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(
+            capital["status"],
+            if native_slot < 1002 {
+                "unknown"
+            } else {
+                "counted"
+            }
+        );
+        if native_slot < 1002 {
+            assert_eq!(
+                capital["refusal"],
+                "native capital observation precedes retained transfer"
+            );
+        }
+        assert_eq!(std::fs::read(&path).unwrap(), saved);
+    }
 }
 
 #[test]

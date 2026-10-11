@@ -40,10 +40,10 @@ fn counted(
             return Err("native capital observation precedes retained transfer".into());
         }
     }
-    if let Some(opening) = operations.opening_inventory() {
-        if opening.wallet != config.wallet || opening.native_slot > native_slot {
-            return Err("native capital observation does not cover opening inventory".into());
-        }
+    if let Some(opening) = operations.opening_inventory()
+        && (opening.wallet != config.wallet || opening.native_slot > native_slot)
+    {
+        return Err("native capital observation does not cover opening inventory".into());
     }
     let mut portfolio = Portfolio::at(config.wallet, native_slot);
     let unknown = Valuation::Unknown(Unvaluable::QuoteUnpriced);

@@ -6195,3 +6195,15 @@ The actual issued SubmissionUnknown, native reserve arithmetic and released
 settlement boundary regressions passed the mutation baseline. This is a fixture
 correction, not a change to production claim semantics or a mutation waiver.
 Wait for every existing job to finish before pushing; require fresh GitHub CI.
+
+Also exercise the native-capital opening and retained-transfer context guards in
+the existing process regressions: older/equal/newer native observations and an
+opening belonging to a different configured wallet. Keep all journal bytes
+unchanged and the same five added tests/floor 2288. Combined integration CI
+38162255756 and the initial capital run must finish before their branches move.
+
+The completed initial capital run passed build/MSRV, formatting, dependencies and
+site/web. Tests and mutation baselines fail only the two uncorrelated fixtures.
+Lint additionally requires assert_eq for the two empty byte vectors and a
+collapsed opening guard; apply these without changing its semantics. Publish
+the corrections only after that terminal failure and re-run the full GitHub gate.
