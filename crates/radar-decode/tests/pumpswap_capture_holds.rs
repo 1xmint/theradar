@@ -9,9 +9,14 @@ const RAW: &[u8] = include_bytes!("fixtures/pumpswap_buy_exact_quote_in_raw.json
 
 #[test]
 fn the_captured_successful_pumpswap_buy_decodes_in_its_actual_program() {
+    let checksum: [u8; 32] = Sha256::digest(RAW).into();
     assert_eq!(
-        format!("{:x}", Sha256::digest(RAW)),
-        "53b1766fe02e92cb536c96533c8de84fa25070f8c7dd67176f43e66a2f8ecbc2",
+        checksum,
+        [
+            0x53, 0xb1, 0x76, 0x6f, 0xe0, 0x2e, 0x92, 0xcb, 0x53, 0x6c, 0x96, 0x53, 0x3c, 0x8d,
+            0xe8, 0x4f, 0xa2, 0x50, 0x70, 0xf8, 0xc7, 0xdd, 0x67, 0x17, 0x6f, 0x43, 0xe6, 0x6a,
+            0x2f, 0x8e, 0xcb, 0xc2,
+        ],
         "retain the complete raw RPC response"
     );
     let capture: Value = serde_json::from_slice(RAW).expect("raw RPC JSON");

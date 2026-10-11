@@ -5623,3 +5623,12 @@ production behavior, signing permission, account proof or venue admission;
 mutation of test/fixture plumbing adds no behavior coverage. Publish for GitHub
 build/tests/lint. Continue the same integrated deployment after CI finishes,
 then account/token proof, live evidence, supervisor and settlement wiring.
+
+Initial fixture CI 38114787717 at 096da33 completed failed: SHA256 0.11's
+digest array does not implement LowerHex. Compare an explicit 32-byte checksum
+instead of formatting the array; no production behavior changes. Mutation
+shards passed with no production mutation needed. Require fresh GitHub CI for
+the correction. Independent daily-cap entry-gate PR 362 at 950ecd0 is running
+CI 38114955196. Integrated release d142c8b has now been deployed with the fixed
+script and exact health build verified; owner login enabled actual UI inspection,
+with optional cap/Agent decides controls present and execution disabled.
