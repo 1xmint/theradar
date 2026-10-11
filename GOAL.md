@@ -22,6 +22,20 @@ authorisation, and deterministic risk controls.**
 
 ## What it is optimising for
 
+**Owner decision, 2026-10-11:** optimise for durable profit after costs when
+learned intelligence is applied, rather than attachment to any chain or venue.
+Start the next experiment on Alpaca paper stocks/ETFs, initially without
+leverage or dependence on shorting. Hyperliquid public-data research and Solana
+are secondary modules. Live venue eligibility must be established for this U.S.
+owner. No percentage ranking of future profitability has been established.
+See [the accepted experiment](docs/design/0022-alpaca-paper-first-experiment.md).
+
+Advance through held-out and forward evaluation with realistic costs, drawdown
+and tradable baselines. A paper profit alone does not establish live expectancy.
+Preserve adaptive risk, optional daily loss stops, the site's per-option
+"Agent decides" controls and research chat. Model judgement remains an inert
+proposal until the deterministic controls permit execution.
+
 **More profit and less loss for the customer, over time and in the moment.**
 
 Both halves are load-bearing. "Over time" rules out a strategy that wins often

@@ -1,9 +1,21 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # Radar
 
-Solana research and trading infrastructure, with an x402/MCP agent surface built
+Autonomous trading research, with **Alpaca paper stocks/ETFs as the primary next
+experiment**. Hyperliquid public-data research and Solana remain secondary;
+neither is the starting live venue for this U.S. owner. See the
+[accepted direction](docs/design/0022-alpaca-paper-first-experiment.md).
+
+The existing Solana infrastructure has an x402/MCP agent surface built
 in and, on the live instance, sitting behind Cloudflare Access rather than open
 to any outside agent (issue #186) — see [What is live](#what-is-live) below.
+
+`radar alpaca-read` reads a paper account, open positions and the US equity market
+clock. It requires private environment variables `RADAR_ALPACA_PAPER_KEY_ID` and
+`RADAR_ALPACA_PAPER_SECRET_KEY`; it always uses Alpaca's paper host and never
+places orders. See [setup and remaining work](docs/plans/0017-alpaca-paper-foundation.md).
+The command is not yet wired to the deployed site. Existing measurements below
+describe the Solana experiment, not Alpaca performance.
 
 **Status: recording, and refusing to trade.** The pipeline runs end to end on a
 live instance — recording launches, measuring what became of them, and running
