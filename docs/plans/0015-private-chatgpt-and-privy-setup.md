@@ -5833,3 +5833,76 @@ and confirms its exact source head is 3df77788914ef7bef006205bfd732f6e0f460c86.
 Download only after success, validate BUILD-INFO and artifact checksums, deploy
 only radar-serve through radar-deploy, and require /health build plus protected
 link status verification. Signer remains inactive and autonomy remains closed.
+
+### Protected live observations source handback (2026-10-11)
+
+Independent feat/protected-live-evidence starts at integrated 5587cd2 while
+combined CI 38156185293 and Linux release 38156147328 remain live. Do not push
+over them. The release source is verified 3df7778 and does not include this work.
+
+Connect existing collectors to the actual protected issuer rather than copying
+observations by hand: evidence-read --output publishes its complete two-field
+packet through a private synced temporary file and atomic rename, within the
+issuer's 1 MiB limit. Failures preserve previous evidence with its original
+expiry. Explicit private parent, mode 0600 and create-new temporary files prevent
+accidental shared publication or overwriting an existing writer's temporary file.
+No process, service, listener, signing credential or scheduler is introduced.
+
+Optional protected config observations_path is loaded by Snapshot::read for all
+six issuer snapshot consumers. Require exact wallet/transaction identity and
+strict packet shape, then use existing freshness/fee/simulation/inventory checks.
+Never fall back to inline evidence when that configured file fails. Preserve the
+reviewed risk state, balance, price, proposal and original snapshot time; a fresh
+collector cannot refresh an old economic decision or legitimize a changed balance.
+
+Four regressions raise the floor to 2261: private complete replacement/failure
+preservation, private/symlink directory refusal, actual issuer process reload and
+binding without inline fallback, and public-file refusal. The process regression
+also verifies stale reads, wrong identity/bytes, simulation/fee faults, unknown
+fields and that fresh evidence cannot refresh old risk state. Require GitHub
+build/tests/lint and behavior mutations before integration. No deployment or
+activation of this source. Full protected snapshot valuation, reconciliation,
+scheduled refresh, supervisor and admitted execution/recovery remain open.
+
+### Protected observations verification correction (2026-10-11)
+
+GitHub CI 38156652117 completed with failure at cfba8d0. Build, tests,
+lint and MSRV found the existing native-transfer Config fixture missing the
+new optional observations_path; add None. Mutation shard 0 also found that
+the positive publication fixture's tempfile directory was not private under
+the runner environment; explicitly set its Unix mode to 0700. Retain the
+production private-parent requirement. All four mutation shards failed their
+unmutated baseline, so this run provides no mutation-effectiveness claim.
+Publish the correction only after that run completes, then require fresh
+GitHub checks before integration. Combined integration CI 38156185293 at
+5587cd2 completed successfully.
+
+Production now runs verified source 3df77788914ef7bef006205bfd732f6e0f460c86:
+CI 38155900425 and Linux release 38156147328 passed. All six artifact hashes
+matched BUILD-INFO before deploying radar-serve through the fixed radar-deploy
+procedure. Health reported that exact build; the host CLI reported Logged in
+using ChatGPT. Service remains active with NoNewPrivileges, ProtectSystem
+strict and ProtectHome read-only; signer.socket remains inactive. This deploy
+does not include protected observations. Owner reports Cloudflare sign-in
+complete; browser verification remains unavailable under the browser security
+policy, so the protected page rendering has not been verified. No wallet,
+funding, delegation or autonomous execution changed.
+
+### Protected observations mutation follow-up (2026-10-11)
+
+CI 38157070984 at e6a5fd5 completed: tests, build, MSRV, lint, formatting,
+site/web and dependency checks passed. All mutation baselines passed, but three
+substitutions survived: evidence_read.rs:59:20 (> to >=), :68:27 (|| to &&),
+and radar-issuer.rs:146:17 (|| to &&). Retained diagnostics are outside the
+checkout in radar-mutation-38157070984. Do not integrate this failed run.
+
+Extend publication regression to accept exactly 1 MiB and continue rejecting
+oversize packets. Simplify the directory-type predicate: symlink_metadata's
+is_dir already rejects symlinks, so the separate symlink disjunction is redundant.
+Check its stable refusal category before any file operation. Extend the actual
+issuer inventory-command regression: a valid protected packet succeeds, then
+substituting either wallet identity or transaction identity independently fails
+at the shared input boundary. Issuance's downstream preflight previously masked
+that survivor; inventory does not run transaction preflight. No mutation waiver
+or new authority. Existing four-test increment and floor 2261 remain unchanged.
+Publish after CI 38157070984 is terminal and require fresh GitHub verification.

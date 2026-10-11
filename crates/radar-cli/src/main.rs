@@ -124,8 +124,8 @@ commands:
     One-context curve/mint/fee read; conservative hypothetical sell, no authority.
   transaction-read --transaction <binary-file> --min-slot <N> --rpc <URL>
     Exact unsigned legacy simulation and message fee; JSON, no signing or sending.
-  evidence-read --wallet <address> --transaction <binary-file> --min-slot <N> --rpc <URL>
-    Collect wallet and exact transaction evidence together; no valuation or authority.
+  evidence-read --wallet <address> --transaction <binary-file> --min-slot <N> --rpc <URL> [--output <private-file>]
+    Collect wallet and exact transaction evidence; optional private atomic publication.
   settlement-read --wallet <address> --transaction <signed-binary-file> --min-slot <N> --rpc <URL>
     Exact finalized transaction and balance metadata; no claim release or USD accounting.
 
