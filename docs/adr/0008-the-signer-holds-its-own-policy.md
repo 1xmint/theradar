@@ -1643,6 +1643,29 @@ the independent live snapshot producer, supervisor or existing reconciliation
 path. GitHub process and mutation verification is required before claiming this
 source verified.
 
+## Derived curve token-account binding — 2026-10-11
+
+For every known classic and v2 pump.fun trade, the signer admits only the
+canonical SPL Token/Token-2022 program in the captured base-token-program role.
+It derives the curve's associated token account from the authorized mint,
+independently derived bonding curve and that token program. The actual reserve
+role must match: classic index 4, v2 index 11. Classic sales name their token
+program at index 9, classic buys at 8, and v2 at 3. Another valid token program
+cannot reuse the previous program's token-account address.
+
+The already-captured ATA derivation and program constant move into pure radar-pda
+for actual builder and signer callers. Existing builder APIs and mainnet address
+regressions remain; no signer dependency on the builder is introduced. Unit
+coverage exercises all six trade variants under both admitted token programs.
+The Privy process's six successful mainnet captures cover both layouts, invalid
+program/account substitution, cross-program mismatch and mixed valid/bad trades.
+GitHub verification is required before claiming this source verified.
+
+This proves the curve reserve's address binding. Raw account ownership/data,
+user/quote token accounts, transfer extensions, writability, live simulation and
+complete asset spend/output semantics still require their independent checks.
+It does not open delegation or an autonomous routing path.
+
 ## What would reverse this
 
 Nothing foreseeable reverses holding a policy locally. The specific ceilings are

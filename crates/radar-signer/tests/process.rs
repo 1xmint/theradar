@@ -317,6 +317,33 @@ fn captured_role_cases(
     let mut wrong_curve = accounts.to_vec();
     wrong_curve[curve_role] = [0x97; 32];
     cases.push((wrong_curve, Some("derived bonding curve role")));
+    let (curve_token_role, token_program_role) = if curve_role == 10 {
+        (11, 3)
+    } else if known == radar_decode::pumpfun::Instruction::Sell {
+        (4, 9)
+    } else {
+        (4, 8)
+    };
+    let mut wrong_curve_token = accounts.to_vec();
+    wrong_curve_token[curve_token_role] = [0x95; 32];
+    cases.push((wrong_curve_token, Some("derived curve token account role")));
+    let mut wrong_program = accounts.to_vec();
+    wrong_program[token_program_role] = [0x94; 32];
+    cases.push((wrong_program, Some("base token program role")));
+    let classic: radar_types::Address = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        .parse()
+        .unwrap();
+    let extended: radar_types::Address = "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"
+        .parse()
+        .unwrap();
+    let other = if accounts[token_program_role] == *classic.as_bytes() {
+        extended
+    } else {
+        classic
+    };
+    let mut swapped_program = accounts.to_vec();
+    swapped_program[token_program_role] = *other.as_bytes();
+    cases.push((swapped_program, Some("derived curve token account role")));
     let mut wrong_mint = accounts.to_vec();
     wrong_mint[mint_role] = [0x99; 32];
     cases.push((wrong_mint, Some("mint role")));
@@ -391,20 +418,27 @@ fn captured_message(
     transaction(&keys, &instructions)
 }
 
-fn venue_keys(pump: [u8; 32]) -> [[u8; 32]; 6] {
+fn venue_keys(pump: [u8; 32]) -> [[u8; 32]; 8] {
+    let token: radar_types::Address = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        .parse()
+        .unwrap();
+    let curve = radar_pda::find(
+        &[b"bonding-curve", &MINT],
+        &radar_decode::pumpfun::PROGRAM_ID,
+    )
+    .unwrap()
+    .0;
     [
         wallet(),
         MINT,
         pump,
         SYSTEM,
         *radar_types::Asset::WRAPPED_SOL_MINT.as_bytes(),
-        *radar_pda::find(
-            &[b"bonding-curve", &MINT],
-            &radar_decode::pumpfun::PROGRAM_ID,
-        )
-        .unwrap()
-        .0
-        .as_bytes(),
+        *curve.as_bytes(),
+        *token.as_bytes(),
+        *radar_pda::associated_token_account(&curve, &radar_types::Address::new(MINT), &token)
+            .unwrap()
+            .as_bytes(),
     ]
 }
 
@@ -417,11 +451,13 @@ fn venue_roles(ix: radar_decode::pumpfun::Instruction) -> Vec<u8> {
         let mut roles = vec![3; 14];
         roles[1] = 1;
         roles[2] = 4;
+        roles[3] = 6;
         roles[10] = 5;
+        roles[11] = 7;
         roles[13] = 0;
         roles
     } else {
-        vec![3, 3, 1, 5, 3, 3, 0]
+        vec![3, 3, 1, 5, 7, 3, 0, 3, 6, 6]
     }
 }
 

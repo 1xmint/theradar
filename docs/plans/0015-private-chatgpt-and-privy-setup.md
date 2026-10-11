@@ -6207,3 +6207,47 @@ site/web. Tests and mutation baselines fail only the two uncorrelated fixtures.
 Lint additionally requires assert_eq for the two empty byte vectors and a
 collapsed opening guard; apply these without changing its semantics. Publish
 the corrections only after that terminal failure and re-run the full GitHub gate.
+
+### Native claims verified integration; curve token-account binding (2026-10-11)
+
+The preceding turn made progress through committed fixture and context regression
+corrections. Native-capital source d2b1545 passes every job in CI 38162992011.
+Its four mutation shards report 26 tested, 21 caught, five compiler-unviable and
+no missed mutations. Combined holdings integration ec80986 passed every job in
+CI 38162255756. PR 370 merged at 64230845eb5c9452f7ff16c55c40138dd3f1bbbe;
+require the merge's combined verification before production. No service, wallet,
+delegation or signing change was performed.
+
+feat/signer-curve-token-binding starts at the native-claims merge. The signer
+independently binds every supported classic/v2 trade's actual curve reserve token
+account to the authorized mint, derived curve and captured base token-program
+role. Admit only canonical SPL Token/Token-2022; reject wrong reserve address,
+unsupported program and cross-program address reuse. Share the existing captured
+ATA algorithm/constant through pure radar-pda, retaining builder API/capture
+checks and adding no builder-to-signer dependency.
+
+Extend all six actual Privy-process capture regressions with those substitutions
+and mixed valid/bad instructions. Add one unit regression over every trade under
+both token programs and every actual role; floor 2289. Synthetic issuer and signer
+fixtures gain actual derived curve accounts and token-program roles; preserve
+their historical economics fixtures and update changed wire offsets explicitly.
+Require GitHub build/tests/lint/MSRV and behavioral mutations; no local jobs,
+new package or mutation waiver. Source remains unverified until those pass.
+
+This closes a reserve address binding, not raw account ownership/contents,
+user/quote account semantics, token-extension safety or live execution. The full
+objective still needs independently produced live risk snapshots, adaptive
+preference/controller integration, durable execution and recovery, deployment,
+bounded delegation, pause/revoke and a verified handover/canary. Keep working on
+those actual consumers; do not claim autonomy from these isolated protections.
+
+Initial curve-token CI 38163883799 at e4829ef caught two builder/signer process
+baseline failures at the_signer_reads_what_this_crate_builds.rs:202 and :391.
+That existing synthetic buy helper passed mint/token-program arguments in the
+wrong order to both curve and user ATA derivations. Existing mainnet address
+regressions and the newly enforced signer independently reject that result.
+Correct both helper calls to the existing (owner, mint, token_program) API;
+do not weaken the signer. No test count or exclusions change. Wait for the
+current run to finish, then require a new complete GitHub run before integration.
+Combined integration CI 38163263101 is also still running. No deployment,
+wallet authority or autonomous activation changed.

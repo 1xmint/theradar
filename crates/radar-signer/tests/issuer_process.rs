@@ -653,15 +653,21 @@ fn set_curve_buy(fixture: &mut Fixture, spend: u64) {
     let curve = radar_pda::find(&[b"bonding-curve", mint.as_bytes()], &pump)
         .unwrap()
         .0;
+    let token: radar_types::Address = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        .parse()
+        .unwrap();
+    let curve_token = radar_pda::associated_token_account(&curve, &mint, &token).unwrap();
     // Rebuild consistently even when replacing a prior curve trade. Preserve
     // the wallet, mint and blockhash; add the actual derived reserve address.
     let mut bytes = vec![1];
     bytes.extend([0; 64]);
-    bytes.extend([1, 0, 0, 4]);
+    bytes.extend([1, 0, 0, 6]);
     bytes.extend(message.accounts[0]);
     bytes.extend(message.accounts[1]);
     bytes.extend(pump.as_bytes());
     bytes.extend(curve.as_bytes());
+    bytes.extend(token.as_bytes());
+    bytes.extend(curve_token.as_bytes());
     bytes.extend(message.recent_blockhash);
     let mut data = radar_decode::pumpfun::Instruction::BuyExactSolIn
         .discriminator()
@@ -669,7 +675,7 @@ fn set_curve_buy(fixture: &mut Fixture, spend: u64) {
         .to_vec();
     data.extend(spend.to_le_bytes());
     data.extend(1_u64.to_le_bytes());
-    bytes.extend([1, 2, 7, 1, 1, 1, 3, 1, 1, 0, 24]);
+    bytes.extend([1, 2, 10, 1, 1, 1, 3, 5, 1, 0, 1, 4, 4, 24]);
     bytes.extend(data);
     let encoded = radar_types::b64::encode(&bytes);
     fixture.candidate["transaction"] = json!(encoded);
@@ -732,11 +738,11 @@ fn issuer_distinguishes_nontrades_and_foreign_program_trade_bytes() {
             bytes[133..165].copy_from_slice(program.as_bytes());
             fixture.config["programs"] = json!([program]);
         } else {
-            // The helper's seven instruction accounts end at 239; next are
+            // The helper's ten instruction accounts end at 306; next are
             // its data length and payload. A nontrade has just a discriminator.
-            bytes[239] = 8;
-            bytes.truncate(248);
-            bytes[240..248].copy_from_slice(
+            bytes[306] = 8;
+            bytes.truncate(315);
+            bytes[307..315].copy_from_slice(
                 radar_decode::pumpfun::Instruction::CollectCreatorFee
                     .discriminator()
                     .as_bytes(),
@@ -792,16 +798,16 @@ fn exit_fixture(action: &str, amount: u64, split: bool) -> Fixture {
     set_curve_buy(&mut fixture, amount);
     let mut bytes =
         radar_types::b64::decode(fixture.candidate["transaction"].as_str().unwrap()).unwrap();
-    bytes[240..248].copy_from_slice(
+    bytes[307..315].copy_from_slice(
         radar_decode::pumpfun::Instruction::Sell
             .discriminator()
             .as_bytes(),
     );
     if split {
-        bytes[248..256].copy_from_slice(&1_u64.to_le_bytes());
-        let mut second = bytes[230..].to_vec();
-        second[18..26].copy_from_slice(&amount.saturating_sub(1).to_le_bytes());
-        bytes[229] = 2;
+        bytes[315..323].copy_from_slice(&1_u64.to_le_bytes());
+        let mut second = bytes[294..].to_vec();
+        second[21..29].copy_from_slice(&amount.saturating_sub(1).to_le_bytes());
+        bytes[293] = 2;
         bytes.extend(second);
     }
     let encoded = radar_types::b64::encode(&bytes);
