@@ -198,10 +198,14 @@ mod tests {
         orders: Vec<Value>,
         positions: Vec<Value>,
     ) -> Result<Value, String> {
+        let orders: Vec<BrokerOrder> =
+            serde_json::from_value(serde_json::to_value(orders).unwrap()).unwrap();
+        let positions: Vec<Position> =
+            serde_json::from_value(serde_json::to_value(positions).unwrap()).unwrap();
         summarize(
             &serde_json::from_value(account).unwrap(),
-            &serde_json::from_value(json!(orders)).unwrap(),
-            &serde_json::from_value(json!(positions)).unwrap(),
+            &orders,
+            &positions,
         )
     }
 
@@ -473,7 +477,8 @@ mod tests {
         assert_eq!(bounds["cash_bound_microusd"], "1");
         assert_eq!(ceil_micros(1_000, 1_000).unwrap(), 1);
         assert!(ceil_micros(u128::MAX, 1_000).is_err());
-        assert!(add(&mut u64::MAX, 1).is_err());
+        let mut total = u64::MAX;
+        assert!(add(&mut total, 1).is_err());
         let mut order = order_value();
         order["qty"] = json!("18446744073.709551615");
         order["limit_price"] = json!("18446744073.709551615");

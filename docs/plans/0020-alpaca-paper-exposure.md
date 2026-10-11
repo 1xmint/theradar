@@ -31,6 +31,12 @@ step toward isolated autonomous paper execution, not an alternative end state.
 
 ## Handback
 
+CI 38180545954 at 8a75159 found test fixture type inference selecting unsized
+slices for serde decoding, and a mutable reference to u64::MAX. Use explicit Vec
+decode types and a local mutable total. Full run must finish before pushing the
+repair; do not cancel pending jobs. The full run is now terminal with the same
+baseline compilation error in build/tests/MSRV/mutation jobs. No local substitute verification.
+
 PR 374 source 02a3d3d passed every job in CI 38179746811, including all mutation
 shards. This increment is pending verification. No paper account or real broker
 capture has been supplied. Unsupported states remain visible observations with
