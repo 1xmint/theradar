@@ -16,7 +16,7 @@ and dispatched combined CI. This turn advances the payload gate needed by recove
 Actual caller: radar alpaca-order-read with optional --journal <private-file>.
 Existing unbound lookup behavior stays available and never claims payload binding.
 
-- [x] Refuse missing logs, wrong accounts and absent retained IDs before keys/IO.
+- [x] Refuse missing logs, wrong accounts and absent retained IDs before keys/broker IO.
 - [x] Hold cooperative journal ownership through the bracketed broker reads.
 - [x] Pure exact payload matching using the existing decimal parser: identity,
   ticker, side, nanoshares, limit; simple equity/day/nonextended order shape.
@@ -28,6 +28,15 @@ Existing unbound lookup behavior stays available and never claims payload bindin
 - [ ] Integrate verified source and rerun combined checks before parent advancement.
 
 ## Handback
+
+CI 38184000795 at 52fa7af completed: only the new process test's assert_is_empty
+lint failed. Repaired with the existing assert_eq empty-vector convention.
+All other jobs passed, including tests and all mutation shards: 32 caught,
+zero missed/timeouts, six unviable. Exact diagnostics show unused/dead-code
+deny-warnings errors for three no-op replacements, missing BrokerIntent::Default,
+an illegal || let-chain mutation, and type inference after deleting the sole
+Some(path) argument arm. Compile refusals are not behavioral mutation kills.
+No exclusions added; full repair verification remains pending.
 
 No orders, credentials, deployment or activation. Matching confirms selected
 broker payload fields only, never fill/cash/fee reconciliation, eligibility,

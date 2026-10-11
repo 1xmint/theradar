@@ -1,10 +1,13 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # 0024 — Integrate the paper foundation, then complete autonomous execution
 
-**Status:** initial combined source verified; directory-sync integration verification pending.
+**Status:** combined source verified and merged to parent; parent CI pending.
 
-Branch: feat/alpaca-paper-integration. Parent remains integration 6ae333d until
-all relevant child checks finish. All tests/builds/lint/mutations run on GitHub.
+Branch: feat/alpaca-paper-integration. Full CI 38183693452 passed at f9553a8.
+PR 380 merged to integration parent 3a4ba61; both trees are
+70aa0602901a56ea2862294d4866a11670105a8d. Parent CI 38184135535 is pending.
+The source base stays f9553a8 while intent-binding PR 382 runs.
+All tests/builds/lint/mutations run on GitHub.
 The preceding goal turns made progress through source fixes and verified CI.
 
 ## Evidence brought together
@@ -33,8 +36,9 @@ Do not replace a sum with either child's floor.
 - [x] Incorporate asset observations only after their entire CI passes.
 - [x] Initial combined 61f82b2 passed full CI 38183043973, including all mutation shards.
 - [x] Incorporate directory sync only after full source CI 38183410146 passed.
-- [ ] Read full CI for the combined directory-sync tree and repair failures.
-- [ ] Advance the shared parent only from the verified combined tree.
+- [x] Combined directory-sync f9553a8 passed all CI 38183693452 jobs.
+- [x] Advance the parent via PR 380 only after full source CI; verified tree identity.
+- [ ] Read parent CI 38184135535 before further parent advancement.
 - [ ] Produce and deploy a verified artifact through the fixed deployment path.
 
 ## Remaining work toward the full goal
@@ -43,7 +47,7 @@ Do not replace a sum with either child's floor.
    order and IEX data responses. No keys in chat or in the model/web environment.
 2. Bind durable order payloads to broker observations; reconcile fills, fees,
    cash movements and local claims through restarts before releasing claims.
-   Directory-sync source is verified; merged-tree verification remains pending.
+   Directory-sync source and its combined tree are verified.
 3. Complete the pure equity risk verdict and separate paper executor: owner
    mandate, fresh asset/session/quote checks, exact long-only cash/share sizing,
    cost/edge bounds, idempotent order submission, cancellation and recovery.

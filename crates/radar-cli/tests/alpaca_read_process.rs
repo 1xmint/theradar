@@ -65,7 +65,7 @@ fn bound_recovery_command_requires_existing_verified_retained_intent_before_cred
             .output()
             .unwrap();
         assert!(!output.status.success());
-        assert!(output.stdout.is_empty());
+        assert_eq!(output.stdout, Vec::<u8>::new());
         let error = String::from_utf8(output.stderr).unwrap();
         assert!(error.contains(expected), "{error}");
         assert!(!error.contains("sentinel-private-secret"));
