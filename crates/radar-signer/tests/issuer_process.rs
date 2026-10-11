@@ -51,19 +51,34 @@ fn issuer_converts_usd_to_native_units_then_clamps_and_proves_the_native_policy(
 fn set_curve_buy(fixture: &mut Fixture, spend: u64) {
     let pump = radar_decode::pumpfun::PROGRAM_ID;
     fixture.config["programs"] = json!([pump]);
-    let mut bytes =
+    let previous =
         radar_types::b64::decode(fixture.candidate["transaction"].as_str().unwrap()).unwrap();
-    // Three static accounts, then blockhash; replace the synthetic venue
-    // with a real curve-buy discriminator and a readable native size.
-    bytes[133..165].copy_from_slice(pump.as_bytes());
-    bytes.truncate(197);
+    let message = radar_signer::decode(&previous).unwrap();
+    let mint: radar_types::Address = fixture.candidate["proposal"]["mint"]
+        .as_str()
+        .unwrap()
+        .parse()
+        .unwrap();
+    let curve = radar_pda::find(&[b"bonding-curve", mint.as_bytes()], &pump)
+        .unwrap()
+        .0;
+    // Rebuild consistently even when replacing a prior curve trade. Preserve
+    // the wallet, mint and blockhash; add the actual derived reserve address.
+    let mut bytes = vec![1];
+    bytes.extend([0; 64]);
+    bytes.extend([1, 0, 0, 4]);
+    bytes.extend(message.accounts[0]);
+    bytes.extend(message.accounts[1]);
+    bytes.extend(pump.as_bytes());
+    bytes.extend(curve.as_bytes());
+    bytes.extend(message.recent_blockhash);
     let mut data = radar_decode::pumpfun::Instruction::BuyExactSolIn
         .discriminator()
         .as_bytes()
         .to_vec();
     data.extend(spend.to_le_bytes());
     data.extend(1_u64.to_le_bytes());
-    bytes.extend([1, 2, 7, 1, 1, 1, 1, 1, 1, 0, 24]);
+    bytes.extend([1, 2, 7, 1, 1, 1, 3, 1, 1, 0, 24]);
     bytes.extend(data);
     let encoded = radar_types::b64::encode(&bytes);
     fixture.candidate["transaction"] = json!(encoded);
@@ -126,11 +141,11 @@ fn issuer_distinguishes_nontrades_and_foreign_program_trade_bytes() {
             bytes[133..165].copy_from_slice(program.as_bytes());
             fixture.config["programs"] = json!([program]);
         } else {
-            // The helper's seven instruction accounts end at 207; next are
+            // The helper's seven instruction accounts end at 239; next are
             // its data length and payload. A nontrade has just a discriminator.
-            bytes[207] = 8;
-            bytes.truncate(216);
-            bytes[208..216].copy_from_slice(
+            bytes[239] = 8;
+            bytes.truncate(248);
+            bytes[240..248].copy_from_slice(
                 radar_decode::pumpfun::Instruction::CollectCreatorFee
                     .discriminator()
                     .as_bytes(),
@@ -186,16 +201,16 @@ fn exit_fixture(action: &str, amount: u64, split: bool) -> Fixture {
     set_curve_buy(&mut fixture, amount);
     let mut bytes =
         radar_types::b64::decode(fixture.candidate["transaction"].as_str().unwrap()).unwrap();
-    bytes[208..216].copy_from_slice(
+    bytes[240..248].copy_from_slice(
         radar_decode::pumpfun::Instruction::Sell
             .discriminator()
             .as_bytes(),
     );
     if split {
-        bytes[216..224].copy_from_slice(&1_u64.to_le_bytes());
-        let mut second = bytes[198..].to_vec();
+        bytes[248..256].copy_from_slice(&1_u64.to_le_bytes());
+        let mut second = bytes[230..].to_vec();
         second[18..26].copy_from_slice(&amount.saturating_sub(1).to_le_bytes());
-        bytes[197] = 2;
+        bytes[229] = 2;
         bytes.extend(second);
     }
     let encoded = radar_types::b64::encode(&bytes);

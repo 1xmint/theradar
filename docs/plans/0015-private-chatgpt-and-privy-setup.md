@@ -5698,3 +5698,24 @@ on signer only for dev tests. Do not add a production signer dependency to the
 builder or duplicate derivation. Factor its pure PDA algorithm into a shared
 module/crate with actual builder and signer consumers; preserve mainnet tests.
 Both classic and v2 account positions must be verified against captures.
+
+### Derived curve source handback (2026-10-11)
+
+Integrated source 2f495fd is running GitHub CI 38115366541; do not push over it.
+Independent feat/signer-curve-derivation starts there. Factor the existing pure
+SHA256/off-curve algorithm into radar-pda, with real production callers in the
+builder and signer. Move its two generic tests with it, retaining the builder's
+mainnet address/seed tests and adding exact known addresses to the bump test.
+No new registry dependency is introduced. Update manifests and lock graph.
+
+Signer requires the mint-derived canonical reserve address in every known trade
+(classic role 3, v2 role 10); the existing six raw-capture process regressions
+must verify those role choices. Add substituted-curve cases while keeping the
+correct curve in static keys and/or another trade. Update synthetic signer and
+issuer fixtures to carry the derived reserve instead of a placeholder, preserving
+their spend/output/issuance purpose. Test floor 2254: two generic tests moved,
+one new signer regression. Publish GitHub build/tests/lint/mutations, inspect
+actual capture results and exact survivors before treating source as verified.
+This remains address proof only; curve/token-account owner and state, ATAs,
+extensions, live portfolio producer/supervisor and settlement recovery remain
+open. No protected-service activation, money, authority or deployment changes.

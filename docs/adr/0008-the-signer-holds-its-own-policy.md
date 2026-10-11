@@ -1486,6 +1486,22 @@ Process regressions cover Capped/Canary reductions and exits above entry limits,
 token/output/native violations and continued refusal of oversized acquisitions.
 GitHub verification is required before treating this source as verified.
 
+## Derived curve binding — 2026-10-11
+
+The known pump.fun trade check now independently derives the canonical
+`bonding-curve` address from the authorized mint and requires it in each trade's
+actual reserve role: classic index 3, v2 index 10. A correct curve merely present
+in static keys or another instruction does not satisfy the check. The retained
+six successful trade captures exercise both layouts through the Privy process.
+GitHub verification is required before claiming this source is verified.
+
+The existing builder derivation moved into pure `radar-pda`, with actual builder
+and signer callers. The signer imports no builder; the builder acquires no
+production signer dependency. Canonical-bump/off-curve tests moved with the
+algorithm, and the builder's mainnet seed/address tests remain. This proves an
+address binding, not curve-account ownership, raw reserve data, associated token
+accounts, extension safety or arbitrary venue semantics. Those remain open.
+
 ## What would reverse this
 
 Nothing foreseeable reverses holding a policy locally. The specific ceilings are

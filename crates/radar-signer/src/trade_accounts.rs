@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-//! Bind known curve instructions to the authorized mint and signing trader.
+//! Bind known curve instructions to the authorized mint, derived curve and trader.
 //! The account positions are captured from accepted mainnet transactions;
 //! v2 is a different layout, not an extension of the older account order.
 
@@ -27,10 +27,10 @@ pub(crate) fn check(
             // The existing size verifier refuses unknown/truncated data.
             continue;
         };
-        let (mint, trader, quote) = match known {
-            Instruction::Buy | Instruction::BuyExactSolIn | Instruction::Sell => (2, 6, None),
+        let (mint, trader, quote, curve) = match known {
+            Instruction::Buy | Instruction::BuyExactSolIn | Instruction::Sell => (2, 6, None, 3),
             Instruction::BuyV2 | Instruction::BuyExactQuoteInV2 | Instruction::SellV2 => {
-                (1, 13, Some(2))
+                (1, 13, Some(2), 10)
             }
             _ => continue,
         };
@@ -45,6 +45,15 @@ pub(crate) fn check(
         require(
             ix.accounts.get(mint) == Some(authorization.mint.as_bytes()),
             "mint",
+        );
+        let expected_curve = radar_pda::find(
+            &[b"bonding-curve", authorization.mint.as_bytes()],
+            &radar_decode::pumpfun::PROGRAM_ID,
+        );
+        require(
+            expected_curve
+                .is_some_and(|(address, _)| ix.accounts.get(curve) == Some(address.as_bytes())),
+            "derived bonding curve",
         );
         require(
             ix.accounts.get(trader) == Some(wallet.as_bytes())
