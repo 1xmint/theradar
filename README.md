@@ -41,6 +41,30 @@ fields, and refuses full 500-order responses. Stable fields do not prove an atom
 snapshot or complete economic accounting. It uses the same private paper keys
 and cannot submit orders. See [reconciliation work](docs/plans/0018-alpaca-paper-reconciliation.md).
 
+The same report includes conservative exposure bounds for supported simple equity
+limit orders and long positions. It reserves original pending quantities, rounds
+funds down and exposure up, and reports unsupported or changing states with null
+bounds. Fees, durable local claims, freshness and complete economic reconciliation
+remain unresolved; these bounds are not available capital or trading authority.
+See [exposure accounting](docs/plans/0020-alpaca-paper-exposure.md).
+
+`radar alpaca-order-read --account-id <expected-paper-account-id> --client-order-id <retained-id>`
+queries a specific paper order between pinned account reads. It preserves selected
+fill/terminal observations without authorizing a retry or releasing claims.
+HTTP 404 means not visible, not proof that submission failed; other errors refuse
+without partial output. See [recovery reads](docs/plans/0021-alpaca-order-recovery-read.md).
+
+`radar alpaca-order-reserve --journal <private-file> --account-id <paper-id> --intent <typed-intent>`
+records an immutable paper claim. `radar alpaca-order-journal --journal <private-file> --account-id <paper-id>`
+reopens and verifies it under exclusive cooperative ownership. These operator
+commands need no broker keys and cannot submit, retry or release an order.
+See [durable paper claims](docs/plans/0022-alpaca-order-journal.md).
+
+`radar alpaca-assets-read --account-id <paper-id> --symbols SPY,QQQ` reads
+identity-bound equity assets between pinned paper account observations. Missing
+tradability and fractional-share flags remain unknown. This does not authorize
+orders. See [asset checks](docs/plans/0023-alpaca-asset-observations.md).
+
 **Status: recording, and refusing to trade.** The pipeline runs end to end on a
 live instance — recording launches, measuring what became of them, and running
 the full decision lane over what it has recorded. 479,564 launches, 1,326,862 outcome measurements and 7,543

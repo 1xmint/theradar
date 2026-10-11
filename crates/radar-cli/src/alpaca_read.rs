@@ -11,25 +11,25 @@ const PAPER_API: &str = "https://paper-api.alpaca.markets";
 #[derive(Deserialize, Serialize, PartialEq, Eq)]
 pub(super) struct BrokerAccount {
     pub(super) id: String,
-    status: String,
-    currency: Option<String>,
-    cash: Option<String>,
-    equity: Option<String>,
-    buying_power: Option<String>,
-    trading_blocked: Option<bool>,
-    account_blocked: Option<bool>,
-    trade_suspended_by_user: Option<bool>,
+    pub(super) status: String,
+    pub(super) currency: Option<String>,
+    pub(super) cash: Option<String>,
+    pub(super) equity: Option<String>,
+    pub(super) buying_power: Option<String>,
+    pub(super) trading_blocked: Option<bool>,
+    pub(super) account_blocked: Option<bool>,
+    pub(super) trade_suspended_by_user: Option<bool>,
 }
 
 #[derive(Deserialize, Serialize)]
 pub(super) struct Position {
-    asset_id: String,
-    symbol: String,
-    asset_class: String,
-    qty: String,
-    side: String,
-    market_value: Option<String>,
-    cost_basis: String,
+    pub(super) asset_id: String,
+    pub(super) symbol: String,
+    pub(super) asset_class: String,
+    pub(super) qty: String,
+    pub(super) side: String,
+    pub(super) market_value: Option<String>,
+    pub(super) cost_basis: String,
     unrealized_pl: Option<String>,
 }
 

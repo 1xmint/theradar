@@ -90,6 +90,75 @@ fields still do not establish atomicity, economic completeness or capital
 authority. Future risk-state production must reconcile local durable reservations,
 broker fills and unsupported account/order states before releasing any capital.
 
+The reconciliation caller also computes pure, conservative exposure bounds when
+selected account and pending-order observations are unchanged. The supported
+initial lane is active USD accounts with known unrestricted flags, long US equity
+positions and simple quantity-based equity limit orders. Notional, market/stop,
+multi-leg, replacement, unknown state, malformed decimal and oversold cases have
+unknown bounds, never zero. Pending cancellation retains its full commitment.
+Reserve original order quantities even after partial fills, since positions and
+cash may reflect fills at different instants. This can over-reserve and refuse
+otherwise valid actions; it must not be loosened without fill/local-claim evidence.
+
+[Alpaca already deducts open buys from buying power](https://docs.alpaca.markets/us/docs/orders-at-alpaca).
+Compute the cash bound as min(cash minus conservative pending buys, broker buying
+power, equity), rather than subtracting pending buys from buying power again.
+Positions use max(cost basis, market value) and buys add their limit-price bound;
+pending sells reserve observed long shares and never create short capacity.
+[Nine-place fractional quantities](https://docs.alpaca.markets/us/docs/fractional-trading)
+and broker dollar strings use exact integer arithmetic. Cash is floored to
+micro-USD; liabilities are ceiled. Unsupported precision/overflow is unknown.
+These are observation bounds, not a risk authorization: fees, unsettled funds,
+freshness, local claims and complete economic reconciliation remain separate gates.
+
+The paper-only `radar alpaca-order-read` command supplies the broker-side lookup
+needed for recovery by a retained client order ID. The
+[official SDK](https://github.com/alpacahq/alpaca-py/blob/master/alpaca/trading/client.py)
+uses GET /v2/orders:by_client_order_id with the client_order_id query parameter.
+Radar permits its own query-safe ASCII letter/digit/hyphen/underscore identifiers,
+checks the returned client ID and nonblank broker ID, and pins both surrounding
+account reads. Selected fill quantities, average price and lifecycle timestamps
+remain exact strings; unknown fields are omitted. Terminal or missing observations
+do not release a claim or authorize another submission. Only HTTP 404 is reported
+as not_visible; authentication/transport/other HTTP errors refuse. An absent order
+is not proof that an ambiguous submission never reached the broker. This lookup
+alone supplies neither durable intent history, payload binding nor complete
+fill/cash reconciliation.
+
+The separate broker journal records typed paper intents with nanoshares and
+micro-USD price/fee units. Its actual operator callers are alpaca-order-reserve
+and alpaca-order-journal. Reserved and SubmissionUnknown both retain their full
+claim. Client IDs bind immutable intents; a repeated reservation never creates
+another claim or resets uncertainty. The library persists uncertainty before an
+effect and invokes it with the retained intent, then refuses another submission
+even after an error/restart. No production order-submission caller exists yet.
+Uncertain writes poison the current owner; torn, mixed-domain and invalid replay
+refuse. Existing ownership/hash-chain storage is reused, with no new broker bytes
+in historical hashes when absent. These controls establish ordering and identity,
+not capital permission, complete reconciliation or resistance to host rollback.
+There is no release API until intent/fill/cash reconciliation is established.
+
+`radar alpaca-assets-read` reads each requested equity between pinned paper
+account reads. It binds symbol, nonempty unique asset ID and us_equity class;
+nullable status, exchange, tradability, fractional, margin, short and attribute
+observations remain separate from order eligibility. It rejects URL dot segments,
+malformed responses and account changes in identity. Stable selected account
+fields are still not an atomic snapshot. See the
+[asset endpoint](https://docs.alpaca.markets/us/reference/get-v2-assets-symbol_or_asset_id)
+and [official asset model](https://github.com/alpacahq/alpaca-py/blob/master/alpaca/trading/models.py).
+Actual feed/account verification, price/quantity increments, trading session,
+quote conditions, risk state and owner mandate remain required before orders.
+
+Broker record receipts require file sync followed by parent-directory sync on
+every append, including after reopening. A directory-sync error can leave an
+intact event on disk but returns no receipt; the broker owner remains poisoned
+and must reopen. This follows the
+[Linux fsync directory-entry requirement](https://raw.githubusercontent.com/mkerrisk/man-pages/master/man2/fsync.2).
+Filesystems/platforms that cannot perform this operation refuse broker records.
+It assumes a protected, existing, durably provisioned parent directory and a
+storage stack honoring sync; it does not claim host-rollback resistance or a
+physical power-loss test. Historical nonbroker journal behavior is unchanged.
+
 Preserve the smart panel: manual inputs with per-option Agent decides checkboxes,
 adaptive risk by default, optional daily loss cap, research chat, visible reasons
 and direct pause/revoke. The model may recommend a budget from observed funds;
