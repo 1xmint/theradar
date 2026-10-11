@@ -304,6 +304,19 @@ fn captured_role_cases(
     let mint_role = accounts.iter().position(|key| key == &mint).unwrap();
     let trader_role = accounts.iter().position(|key| key == &wallet()).unwrap();
     let mut cases = vec![(accounts.to_vec(), None), (Vec::new(), Some("mint role"))];
+    let curve_role = if matches!(
+        known,
+        radar_decode::pumpfun::Instruction::BuyV2
+            | radar_decode::pumpfun::Instruction::BuyExactQuoteInV2
+            | radar_decode::pumpfun::Instruction::SellV2
+    ) {
+        10
+    } else {
+        3
+    };
+    let mut wrong_curve = accounts.to_vec();
+    wrong_curve[curve_role] = [0x97; 32];
+    cases.push((wrong_curve, Some("derived bonding curve role")));
     let mut wrong_mint = accounts.to_vec();
     wrong_mint[mint_role] = [0x99; 32];
     cases.push((wrong_mint, Some("mint role")));
@@ -378,13 +391,20 @@ fn captured_message(
     transaction(&keys, &instructions)
 }
 
-fn venue_keys(pump: [u8; 32]) -> [[u8; 32]; 5] {
+fn venue_keys(pump: [u8; 32]) -> [[u8; 32]; 6] {
     [
         wallet(),
         MINT,
         pump,
         SYSTEM,
         *radar_types::Asset::WRAPPED_SOL_MINT.as_bytes(),
+        *radar_pda::find(
+            &[b"bonding-curve", &MINT],
+            &radar_decode::pumpfun::PROGRAM_ID,
+        )
+        .unwrap()
+        .0
+        .as_bytes(),
     ]
 }
 
@@ -397,10 +417,11 @@ fn venue_roles(ix: radar_decode::pumpfun::Instruction) -> Vec<u8> {
         let mut roles = vec![3; 14];
         roles[1] = 1;
         roles[2] = 4;
+        roles[10] = 5;
         roles[13] = 0;
         roles
     } else {
-        vec![3, 3, 1, 3, 3, 3, 0]
+        vec![3, 3, 1, 5, 3, 3, 0]
     }
 }
 

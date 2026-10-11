@@ -784,13 +784,20 @@ mod tests {
         build(&venue_keys(), &[venue_ix(data)])
     }
 
-    fn venue_keys() -> [[u8; 32]; 5] {
+    fn venue_keys() -> [[u8; 32]; 6] {
         [
             WALLET,
             MINT,
             PUMP,
             SYSTEM_PROGRAM,
             *radar_types::Asset::WRAPPED_SOL_MINT.as_bytes(),
+            *radar_pda::find(
+                &[b"bonding-curve", &MINT],
+                &radar_decode::pumpfun::PROGRAM_ID,
+            )
+            .unwrap()
+            .0
+            .as_bytes(),
         ]
     }
 
@@ -807,10 +814,11 @@ mod tests {
             let mut roles = vec![3; 14];
             roles[1] = 1;
             roles[2] = 4;
+            roles[10] = 5;
             roles[13] = 0;
             roles
         } else {
-            vec![3, 3, 1, 3, 3, 3, 0]
+            vec![3, 3, 1, 5, 3, 3, 0]
         };
         (2, roles, data)
     }
@@ -1568,6 +1576,60 @@ mod tests {
     // Every test below fails against the code as it stood on 2026-09-06, when
     // the only thing counted toward a ceiling was a system-program transfer and
     // a swap makes none of those.
+
+    #[test]
+    fn every_curve_trade_requires_its_derived_mint_curve_in_the_actual_role() {
+        for (known, _, _) in radar_decode::pumpfun::KNOWN
+            .iter()
+            .filter(|(ix, _, _)| ix.is_trade())
+        {
+            let action = if known.is_buy() {
+                Action::Buy
+            } else {
+                Action::Exit
+            };
+            let original = venue_ix(venue_trade(*known, 10, 20));
+            let role = if known.anchor_name().ends_with("_v2") {
+                10
+            } else {
+                3
+            };
+            assert!(
+                check_venue_action(
+                    &build(&venue_keys(), std::slice::from_ref(&original)),
+                    50_000_000,
+                    action,
+                    Some(10)
+                )
+                .is_ok()
+            );
+            let mut keys = venue_keys().to_vec();
+            keys.push(
+                *radar_pda::find(
+                    &[b"bonding-curve", &[0x96; 32]],
+                    &radar_decode::pumpfun::PROGRAM_ID,
+                )
+                .unwrap()
+                .0
+                .as_bytes(),
+            );
+            for replacement in [3, 6] {
+                let mut damaged = original.clone();
+                damaged.1[role] = replacement;
+                // The correct derived curve is still in static keys and in the
+                // first instruction: membership or one good trade is not proof.
+                let bytes = build(&keys, &[original.clone(), damaged]);
+                let reasons = check_venue_action(&bytes, 50_000_000, action, Some(20)).unwrap_err();
+                assert!(
+                    reasons.contains(&Rejection::TradeAccountMismatch {
+                        instruction: known.anchor_name().to_owned(),
+                        role: "derived bonding curve".to_owned(),
+                    }),
+                    "{known:?}: {reasons:?}"
+                );
+            }
+        }
+    }
 
     #[test]
     fn a_buy_that_spends_more_than_the_authorisation_is_refused() {

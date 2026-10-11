@@ -5699,6 +5699,55 @@ builder or duplicate derivation. Factor its pure PDA algorithm into a shared
 module/crate with actual builder and signer consumers; preserve mainnet tests.
 Both classic and v2 account positions must be verified against captures.
 
+### Derived curve source handback (2026-10-11)
+
+Integrated source 2f495fd is running GitHub CI 38115366541; do not push over it.
+Independent feat/signer-curve-derivation starts there. Factor the existing pure
+SHA256/off-curve algorithm into radar-pda, with real production callers in the
+builder and signer. Move its two generic tests with it, retaining the builder's
+mainnet address/seed tests and adding exact known addresses to the bump test.
+No new registry dependency is introduced. Update manifests and lock graph.
+
+Signer requires the mint-derived canonical reserve address in every known trade
+(classic role 3, v2 role 10); the existing six raw-capture process regressions
+must verify those role choices. Add substituted-curve cases while keeping the
+correct curve in static keys and/or another trade. Update synthetic signer and
+issuer fixtures to carry the derived reserve instead of a placeholder, preserving
+their spend/output/issuance purpose. Test floor 2254: two generic tests moved,
+one new signer regression. Publish GitHub build/tests/lint/mutations, inspect
+actual capture results and exact survivors before treating source as verified.
+This remains address proof only; curve/token-account owner and state, ATAs,
+extensions, live portfolio producer/supervisor and settlement recovery remain
+open. No protected-service activation, money, authority or deployment changes.
+
+Curve CI 38115581554 at 72c6fbf completed failed: an existing pumpfun pool
+capture test still imports sha2 after production derivation moved. Restore sha2
+under dev-dependencies, retaining the capture hash check and the intended pure
+production dependency graph. Mutation shards passed; inspect retained diagnostics
+at radar-mutation-38115581554. Integrated CI 38115366541 at 2f495fd passed fully.
+Require fresh GitHub build/tests/lint before integrating curve source. No deploy.
+
+Corrected curve CI 38154983103 at 41751d8 completed: build, lint, MSRV,
+web/site and mutation checks passed. Signer unit and captured process regressions
+passed, including all six curve layouts. The workspace test job failed only
+because the README crate table omitted radar-pda; add that entry and require a
+fresh complete run before integration. Mutation diagnostics retained outside the
+checkout at radar-mutation-38154983103: three caught, eight unviable, no missed.
+The on_curve replacement is unviable because -D warnings rejects its unused
+argument; this is not a test kill. The exact derived-address equality mutation
+at trade_accounts.rs:55:68 is caught by the curve regression. No exclusions.
+Browser verification after the owner's sign-in was blocked by the browser URL
+security policy; do not circumvent it or claim a fresh page verification.
+
+### Curve integration verification handback (2026-10-11)
+
+Curve source 0a3af53 passed full GitHub CI 38155302364, including captured
+process checks, workspace conformance, build, lint, MSRV and mutations. Integrate
+PR 363 into feat/integrated-autonomous-controls and require combined GitHub CI.
+Production remains d142c8b; derived-address checks do not yet prove account state
+or enable trading. Independent subscription status PR 364 at c4ae72a is running
+CI 38155504412. Do not push over that live check or deploy unverified code.
+
 ### Persistent subscription status source handback (2026-10-11)
 
 Independent fix/persistent-subscription-status starts at verified integration
@@ -5738,3 +5787,10 @@ on this branch, 2257 after combining the curve regression. Keep the corrected
 source local until CI 38155504412 is terminal; then publish fresh GitHub checks.
 Curve integration 43af3c2 is running CI 38155552918 independently. No deploy,
 wallet preference change, delegation or trade occurred in this work.
+
+CI 38155504412 completed failed only for the four missed model-crate mutants;
+its workspace tests, build, lint, MSRV, web and site passed. Publish a3bbf44's
+correction. GitHub did not start a new run because PR 364 conflicted with its
+updated integration base. Merge 43af3c2 into the fix branch, retain both plan
+handbacks and set the combined test floor to 2257. Require fresh GitHub checks;
+no canceled/restarted check or mutation exclusion is used.

@@ -1525,6 +1525,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "radar-pda"
+version = "0.0.1"
+dependencies = [
+ "ed25519-dalek",
+ "radar-types",
+ "sha2",
+]
+
+[[package]]
 name = "radar-provider"
 version = "0.0.1"
 dependencies = [
@@ -1538,8 +1547,8 @@ dependencies = [
 name = "radar-pumpfun"
 version = "0.0.1"
 dependencies = [
- "ed25519-dalek",
  "radar-decode",
+ "radar-pda",
  "radar-risk",
  "radar-signer",
  "radar-types",
@@ -1617,6 +1626,7 @@ dependencies = [
  "ed25519-dalek",
  "radar-decode",
  "radar-journal",
+ "radar-pda",
  "radar-risk",
  "radar-types",
  "ring",
