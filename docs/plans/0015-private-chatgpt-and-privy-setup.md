@@ -5336,3 +5336,19 @@ bidirectional routing across market families/SOL/USDC, dropped recovery, adaptiv
 supervisor/research chat and protected site handover/install remain open. Existing
 signer USD position caps still apply to sales and need appreciated-exit handling.
 Goal active; autonomous trading and live signing remain off.
+
+Protected exit CI 38111283736 at 3c28a3d passed fully: build, MSRV, tests,
+lint, web/site and all mutation shards. Downloaded all four diagnostics to the
+workstation for inspection. Of 31 mutants, 19 were caught and 12 unviable; none
+missed. Exact exit_authority.rs:69:22 OR-to-AND and :69:77 inequality-to-equality
+compile and fail issuer_binds_sale_quantity_to_holdings_and_full_exit_including_split_trades.
+Other holdings/action/program/state guards are also caught; compiler-refused
+function replacements are not called behavioral evidence.
+
+Fast-forwarded integrated-autonomous-controls to the verified source and recorded
+this handback. Fresh integrated CI is required after publication. No deployment,
+delegation or transaction occurred. Next move is actual transaction construction:
+the production Routing implementation still refuses every buy/sell, while the
+browser assembler only emits v0 messages with lookup tables. Build signer-readable
+routes without dropping accounts, privileges, instructions, fees or packet limits;
+execution semantics and live evidence remain separate required gates. Goal active.
