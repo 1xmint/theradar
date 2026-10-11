@@ -11,7 +11,7 @@ use super::alpaca_reconcile::BrokerOrder;
 
 // Alpaca supports nine decimal places for fractional quantities. Keep original
 // decimal digits; refuse unsupported precision/range instead of using f64.
-fn nanos(text: &str) -> Result<u64, String> {
+pub(super) fn nanos(text: &str) -> Result<u64, String> {
     let (whole, fraction) = text.split_once('.').unwrap_or((text, ""));
     if whole.is_empty()
         || !whole.bytes().all(|b| b.is_ascii_digit())

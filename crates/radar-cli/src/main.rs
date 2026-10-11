@@ -128,7 +128,7 @@ commands:
                                  whether it is fixed or proportional
   alpaca-read (paper account, positions and US equity market clock; credentials from environment)
   alpaca-reconcile --account-id <expected-paper-account-id>
-  alpaca-order-read --account-id <expected-paper-account-id> --client-order-id <retained-id>
+  alpaca-order-read --account-id <expected-paper-account-id> --client-order-id <retained-id> [--journal <private-file>]
   alpaca-order-reserve --journal <private-file> --account-id <paper-id> --intent <typed-intent>
   alpaca-order-journal --journal <private-file> --account-id <paper-id>
   alpaca-assets-read --account-id <paper-id> --symbols SPY,QQQ

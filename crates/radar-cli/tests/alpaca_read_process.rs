@@ -4,6 +4,79 @@
 use std::process::Command;
 
 #[test]
+fn bound_recovery_command_requires_existing_verified_retained_intent_before_credentials() {
+    use radar_journal::{BrokerIntent, BrokerLog, BrokerSide};
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("paper.jsonl");
+    let mut log = BrokerLog::open(&path, "paper-id").unwrap();
+    log.reserve(
+        BrokerIntent {
+            account_id: "paper-id".into(),
+            client_order_id: "retained_1".into(),
+            symbol: "SPY".into(),
+            side: BrokerSide::Buy,
+            quantity_nanoshares: 10_000_000,
+            limit_microusd_per_share: 100_000_000,
+            fee_bound_microusd: 1,
+        },
+        1,
+    )
+    .unwrap();
+    drop(log);
+    let missing = directory.path().join("missing.jsonl");
+    for (journal, account, client, expected) in [
+        (
+            &missing,
+            "paper-id",
+            "retained_1",
+            "paper order journal is missing",
+        ),
+        (
+            &path,
+            "paper-id",
+            "missing",
+            "client order ID has no retained journal intent",
+        ),
+        (
+            &path,
+            "other",
+            "retained_1",
+            "invalid or mismatched paper broker intent",
+        ),
+        (
+            &path,
+            "paper-id",
+            "retained_1",
+            "configure both Alpaca paper credentials privately",
+        ),
+    ] {
+        let output = Command::new(env!("CARGO_BIN_EXE_radar"))
+            .args([
+                "alpaca-order-read",
+                "--account-id",
+                account,
+                "--client-order-id",
+                client,
+                "--journal",
+            ])
+            .arg(journal)
+            .env_remove("RADAR_ALPACA_PAPER_KEY_ID")
+            .env("RADAR_ALPACA_PAPER_SECRET_KEY", "sentinel-private-secret")
+            .output()
+            .unwrap();
+        assert!(!output.status.success());
+        assert_eq!(output.stdout, Vec::<u8>::new());
+        let error = String::from_utf8(output.stderr).unwrap();
+        assert!(error.contains(expected), "{error}");
+        assert!(!error.contains("sentinel-private-secret"));
+    }
+    assert!(
+        !missing.exists(),
+        "recovery must not initialize a missing journal"
+    );
+}
+
+#[test]
 fn paper_reader_refuses_missing_credentials_and_live_override_without_output() {
     for args in [
         vec!["alpaca-read"],

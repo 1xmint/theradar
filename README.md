@@ -53,6 +53,11 @@ queries a specific paper order between pinned account reads. It preserves select
 fill/terminal observations without authorizing a retry or releasing claims.
 HTTP 404 means not visible, not proof that submission failed; other errors refuse
 without partial output. See [recovery reads](docs/plans/0021-alpaca-order-recovery-read.md).
+Add `--journal <private-file>` to compare the broker payload with a retained
+intent under journal ownership. Only exact simple day equity limit payloads with
+extended hours disabled can match. Missing orders stay unresolved; matching does
+not reconcile fills/fees, free a claim or authorize execution. See
+[intent binding](docs/plans/0026-alpaca-intent-binding.md).
 
 `radar alpaca-order-reserve --journal <private-file> --account-id <paper-id> --intent <typed-intent>`
 records an immutable paper claim. `radar alpaca-order-journal --journal <private-file> --account-id <paper-id>`

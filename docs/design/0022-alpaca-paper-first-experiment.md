@@ -125,6 +125,19 @@ is not proof that an ambiguous submission never reached the broker. This lookup
 alone supplies neither durable intent history, payload binding nor complete
 fill/cash reconciliation.
 
+The optional --journal recovery path holds a verified BrokerLog owner across the
+reads and loads the requested immutable intent before broker credentials. A found
+order must match account/client identity, ticker, side, exact nanoshares and exact
+micro-USD limit. The initial supported payload is a simple quantity-based US
+equity limit order, day time-in-force, extended_hours explicitly false; notional,
+stop, replacement and nonempty nested-leg fields refuse. Missing/null required
+fields never match. A changed account refuses binding; HTTP 404 remains unresolved.
+The report's intent_payload_verified covers these order fields only. The local
+fee bound has no broker order-field equivalent; fee adequacy, fills, cash,
+freshness, eligibility and authority remain separate. A matching order never
+releases a reservation or permits retry. See the broker's
+[order semantics](https://docs.alpaca.markets/us/docs/orders-at-alpaca).
+
 The separate broker journal records typed paper intents with nanoshares and
 micro-USD price/fee units. Its actual operator callers are alpaca-order-reserve
 and alpaca-order-journal. Reserved and SubmissionUnknown both retain their full
