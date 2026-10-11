@@ -6022,3 +6022,21 @@ Retain diagnostics outside the checkout in radar-mutation-38159017477.
 No production logic change or mutation exclusion. Preserve floor 2270, publish
 only after the old run is terminal, and require new GitHub checks before merging.
 Do not push the parent price-reader branch or integration over the child run.
+
+### Protected price verification and integration handback (2026-10-11)
+
+Correction b496e64 passed every GitHub job in CI 38159312479, including all four
+mutation shards. Shard 2 job 114528707532 reports 13 tested, 13 caught, closing
+the context-floor survivor from the previous run. Independent reader 3030f37
+already passed CI 38158812428. Both are merged into integration a16d3f5; retain
+test floor 2270 and require the combined integration run before release.
+
+The owner reports Cloudflare sign-in complete. Browser verification remains
+unverified because the browser tool previously blocked the Radar URL; do not
+bypass that policy or describe the site as checked. Production remains 3df7778;
+no wallet, funding, delegation, signing or trading change was made. Adaptive risk,
+optional daily cap, independent Agent decides choices and research assistance
+remain recorded in plan 0011 and design 0017. Next connect native wallet valuation
+to independently read price evidence, without treating token prices, economic
+reconciliation or usable capital as known. Full portfolio, adaptive supervision,
+submission/settlement/recovery and protected owner handover remain activation work.
