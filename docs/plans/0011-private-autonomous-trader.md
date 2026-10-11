@@ -1,6 +1,12 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # Plan 0011 — Build and measure a private autonomous trader
 
+**Venue sequencing update (2026-10-11):** [plan 0016](0016-hyperliquid-paper-foundation.md)
+now leads the private trader: Hyperliquid public-data/paper research, an eligible
+live venue for the owner's U.S. account, Solana secondary. Preserve the adaptive
+controls and research chat below. Solana-specific work is retained, not the
+primary activation prerequisite. See [design 0020](../design/0020-hyperliquid-first-research-and-eligible-live-execution.md).
+
 **Status:** in progress — **P0 complete, P1 partial, P6 preparation begun, P7a
 complete; P2, P4, P5, remaining P7 and P8 unstarted.** No live operation is
 authorised by this document. Work resumed at the owner's request in October;

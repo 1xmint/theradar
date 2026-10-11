@@ -11,6 +11,12 @@ and [design 0016](0016-free-to-use-and-metered-intelligence.md).
 
 ## 1. The recommendation and the owner's decision
 
+**Venue update (2026-10-11):** [design 0020](0020-hyperliquid-first-research-and-eligible-live-execution.md)
+supersedes Solana-first private-trader sequencing. Start Hyperliquid public-data
+and paper research; resolve an eligible live venue for Josh's confirmed U.S.
+account. Solana becomes secondary. Adaptive-risk and research-interface decisions
+below remain in force; the legacy execution architecture is not a perps adapter.
+
 **Build the private autonomous trader. Give it a strong research capability,
 one portfolio decision owner, and a bounded fleet of specialists when they earn
 their cost. Use it with Josh's own capital only after the execution and experiment

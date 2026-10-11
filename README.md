@@ -1,7 +1,20 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # Radar
 
-Solana research and trading infrastructure, with an x402/MCP agent surface built
+Evidence-driven trading research infrastructure. The private trader is moving
+to **Hyperliquid-first public-data research and paper evaluation**, with Solana
+retained as an optional secondary module. Hyperliquid live eligibility is
+unresolved for the owner's U.S. account. See [the pivot](docs/design/0020-hyperliquid-first-research-and-eligible-live-execution.md)
+and [implementation checklist](docs/plans/0016-hyperliquid-paper-foundation.md).
+
+`radar perps-read` defaults to Hyperliquid testnet. Use `--network mainnet` for
+mainnet public observations only. `RADAR_HYPERLIQUID_NETWORK=testnet|mainnet`
+sets the observation network; the flag takes precedence. BTC/ETH/SOL metadata,
+funding contexts and bounded-depth books remain raw observations, not an atomic
+fresh snapshot, paper execution or a validated strategy. No account credential,
+signer or order submission is involved. Streaming and perps execution remain open.
+
+The existing Solana research and trading modules have an x402/MCP agent surface built
 in and, on the live instance, sitting behind Cloudflare Access rather than open
 to any outside agent (issue #186) — see [What is live](#what-is-live) below.
 
@@ -46,7 +59,7 @@ distinction it was hiding:
   cause was a hardcoded probe size that made a proposal arithmetically
   impossible, not a market offering nothing (LEARNINGS 10).
 
-**The trading lane is frozen** for the duration of the current work. It unfreezes
+**The legacy Solana trading lane is frozen** for the duration of the current work. It unfreezes
 on one condition: a measured edge at or above that 456 bps bar, in a stratum
 Radar can size into, on data that was not used to find it.
 

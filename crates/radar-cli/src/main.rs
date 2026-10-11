@@ -25,6 +25,7 @@ mod exits;
 mod features;
 mod graduations;
 mod model_prices;
+mod perps_read;
 mod portfolio_read;
 mod replay;
 mod route;
@@ -50,6 +51,10 @@ use radar_types::Slot;
 const USAGE: &str = "radar-cli <command>
 
 commands:
+  perps-read [--network testnet|mainnet]
+                                 Hyperliquid BTC/ETH/SOL public book and funding
+                                 observations for paper research; defaults to
+                                 testnet. Cannot place orders
   brief --store <dir>            is the system healthy right now; exits
                                  non-zero when something is out of bounds
   inspect --store <dir>          what the store holds
@@ -909,6 +914,7 @@ fn main() -> ExitCode {
         "creator-index" => creator_index(&args),
         "dossier" => dossier::run(&args),
         "wallet-read" => wallet_read::run(&args),
+        "perps-read" => perps_read::run(&args),
         "portfolio-read" => portfolio_read::run(&args),
         "sol-price-read" => sol_price_read::run(&args),
         "wallet-activity-read" => wallet_activity_read::run(&args),

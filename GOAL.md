@@ -22,6 +22,15 @@ authorisation, and deterministic risk controls.**
 
 ## What it is optimising for
 
+**Starting venue (owner direction, 2026-10-11): Hyperliquid perpetuals for
+public-data research and paper validation; Solana is an optional secondary
+extension.** Train and validate on major-pair perps first. Live execution requires
+an eligible venue/account: Josh confirmed U.S. residence/location, so Hyperliquid
+live use is unresolved. See [design 0020](docs/design/0020-hyperliquid-first-research-and-eligible-live-execution.md).
+Preserve adaptive risk, optional daily caps, research chat and direct pause/revoke.
+Expand Solana trading after measured positive live expectancy in the primary
+admitted scope. Existing public Solana research remains.
+
 **More profit and less loss for the customer, over time and in the moment.**
 
 Both halves are load-bearing. "Over time" rules out a strategy that wins often
