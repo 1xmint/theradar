@@ -5698,3 +5698,31 @@ on signer only for dev tests. Do not add a production signer dependency to the
 builder or duplicate derivation. Factor its pure PDA algorithm into a shared
 module/crate with actual builder and signer consumers; preserve mainnet tests.
 Both classic and v2 account positions must be verified against captures.
+
+### Persistent subscription status source handback (2026-10-11)
+
+Independent fix/persistent-subscription-status starts at verified integration
+2f495fd while curve correction 0a3af53 runs GitHub CI 38155302364. The owner
+completed browser sign-in; fresh browser verification was rejected by the browser
+security policy, so no alternate browser route is attempted. Host CLI previously
+confirmed ChatGPT linked. The UI currently loses that fact when its device-login
+child is absent, including after a server restart.
+
+Add Codex::is_linked using the existing configured command and cleared environment
+with login status, null stdin/stdout/stderr and the existing bounded process wait
+(15 seconds, matching the installed bridge). Zero reports linked, one unlinked,
+other statuses and spawn/timeout failures remain unknown. The actual GET /v1/link
+consumer keeps active flow progress and checks persisted login only while idle,
+using spawn_blocking so the HTTP runtime remains available. No inference call,
+credential parsing, refresh implementation or signing authority is introduced.
+CLI failure returns 503 and a fixed nonsecret message, rather than pretending the
+subscription is unlinked. Existing operator identity checks are unchanged.
+
+Real router regressions run fake CLI processes, require precisely login status,
+check fresh server/restart persistence, logout and relink without a restart, and
+unknown exits without exposing either output stream. Existing missing CLI case
+now expects unknown status; absence of an inference budget still leaves status
+available and chat closed. Test floor 2255 on this branch; combine the additional
+curve regression as 2256 when both are verified. Require GitHub build, tests,
+lint and behavior mutations before integration or release. Autonomy remains off;
+live evidence, account/state proof, supervisor and protected handover still open.

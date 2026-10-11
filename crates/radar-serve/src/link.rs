@@ -92,7 +92,7 @@ pub enum Progress {
         /// How long it has been open, so the page can say so.
         seconds_elapsed: u64,
     },
-    /// The CLI finished and the credential is written.
+    /// The CLI completed login or confirms its persisted login is linked.
     Linked,
     /// The CLI finished unsuccessfully.
     ///
@@ -102,7 +102,7 @@ pub enum Progress {
         /// What the process exited with.
         status: String,
     },
-    /// Nothing is running.
+    /// No flow is running and the CLI reports no persisted login.
     Idle,
 }
 
@@ -247,22 +247,40 @@ pub async fn begin(State(state): State<Arc<AppState>>) -> Response {
     }
 }
 
-/// Reports the current flow.
+/// Reports the current flow, or checks persisted CLI login when no flow is open.
 pub async fn status(State(state): State<Arc<AppState>>) -> Response {
-    if state.linker.provider.is_none()
-        && state
-            .chat
-            .as_ref()
-            .and_then(|chat| chat.linkable.as_ref())
-            .is_none()
-    {
+    let Some(codex) = state
+        .linker
+        .provider
+        .as_ref()
+        .or_else(|| state.chat.as_ref().and_then(|chat| chat.linkable.as_ref()))
+    else {
         return (
             StatusCode::NOT_FOUND,
             Json(json!({ "error": "no subscription provider is configured" })),
         )
             .into_response();
+    };
+    let progress = state.linker.progress();
+    if !matches!(progress, Progress::Idle) {
+        return Json(progress).into_response();
     }
-    Json(state.linker.progress()).into_response()
+    let codex = codex.clone();
+    match tokio::task::spawn_blocking(move || codex.is_linked()).await {
+        Ok(Ok(linked)) => Json(if linked {
+            Progress::Linked
+        } else {
+            Progress::Idle
+        })
+        .into_response(),
+        _ => (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(Progress::Failed {
+                status: "could not check CLI login status".to_owned(),
+            }),
+        )
+            .into_response(),
+    }
 }
 
 #[cfg(test)]

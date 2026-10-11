@@ -86,6 +86,30 @@ pub struct Codex {
 }
 
 impl Codex {
+    /// Checks persisted CLI login without reading credentials or spending an
+    /// inference call. Neither output stream is exposed or retained.
+    ///
+    /// # Errors
+    /// Returns a process failure or timeout when login state cannot be checked.
+    /// Exit one means unlinked; other unsuccessful exits remain unknown.
+    pub fn is_linked(&self) -> Result<bool, Unreachable> {
+        let child = self
+            .command(&["login", "status"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .map_err(|_| Unreachable::NoContact("starting CLI login status".to_owned()))?;
+        let output = wait_with_deadline(child, Duration::from_secs(15), 15)?;
+        match output.status.code() {
+            Some(0) => Ok(true),
+            Some(1) => Ok(false),
+            _ => Err(Unreachable::Refused {
+                status: output.status.to_string(),
+            }),
+        }
+    }
+
     /// Builds from the configured command line.
     ///
     /// # Errors
@@ -108,8 +132,8 @@ impl Codex {
     /// The command as it will be spawned, with a subcommand appended.
     ///
     /// `RADAR_MODEL_CODEX` names the **base** command and Radar supplies the
-    /// subcommand, because Radar runs two of them: `exec -` to ask a question
-    /// and `login --device-auth` to link the credential. A wrapper that dropped
+    /// subcommand: `exec -` asks a question, `login --device-auth` links the
+    /// credential, and `login status` checks persisted login. A wrapper that dropped
     /// to another user could otherwise only serve one of them, and the
     /// alternative — a second environment variable for the second subcommand —
     /// is two things to keep in step for no gain.
