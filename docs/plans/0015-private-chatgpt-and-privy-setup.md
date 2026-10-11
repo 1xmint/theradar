@@ -5833,3 +5833,33 @@ and confirms its exact source head is 3df77788914ef7bef006205bfd732f6e0f460c86.
 Download only after success, validate BUILD-INFO and artifact checksums, deploy
 only radar-serve through radar-deploy, and require /health build plus protected
 link status verification. Signer remains inactive and autonomy remains closed.
+
+### Protected live observations source handback (2026-10-11)
+
+Independent feat/protected-live-evidence starts at integrated 5587cd2 while
+combined CI 38156185293 and Linux release 38156147328 remain live. Do not push
+over them. The release source is verified 3df7778 and does not include this work.
+
+Connect existing collectors to the actual protected issuer rather than copying
+observations by hand: evidence-read --output publishes its complete two-field
+packet through a private synced temporary file and atomic rename, within the
+issuer's 1 MiB limit. Failures preserve previous evidence with its original
+expiry. Explicit private parent, mode 0600 and create-new temporary files prevent
+accidental shared publication or overwriting an existing writer's temporary file.
+No process, service, listener, signing credential or scheduler is introduced.
+
+Optional protected config observations_path is loaded by Snapshot::read for all
+six issuer snapshot consumers. Require exact wallet/transaction identity and
+strict packet shape, then use existing freshness/fee/simulation/inventory checks.
+Never fall back to inline evidence when that configured file fails. Preserve the
+reviewed risk state, balance, price, proposal and original snapshot time; a fresh
+collector cannot refresh an old economic decision or legitimize a changed balance.
+
+Four regressions raise the floor to 2261: private complete replacement/failure
+preservation, private/symlink directory refusal, actual issuer process reload and
+binding without inline fallback, and public-file refusal. The process regression
+also verifies stale reads, wrong identity/bytes, simulation/fee faults, unknown
+fields and that fresh evidence cannot refresh old risk state. Require GitHub
+build/tests/lint and behavior mutations before integration. No deployment or
+activation of this source. Full protected snapshot valuation, reconciliation,
+scheduled refresh, supervisor and admitted execution/recovery remain open.

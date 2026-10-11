@@ -82,6 +82,9 @@ struct Config {
     policy: Policy,
     valid_until_unix_secs: u64,
     snapshot_path: PathBuf,
+    // Independently collected private observations. No model/stdin-selected path.
+    #[serde(default)]
+    observations_path: Option<PathBuf>,
     history_path: PathBuf,
     key_path: PathBuf,
     max_snapshot_age_secs: u64,
@@ -127,6 +130,33 @@ struct Candidate {
 }
 
 impl Snapshot {
+    fn read(config: &Config) -> Result<Self, String> {
+        let mut snapshot: Self = serde_json::from_slice(&private_read(&config.snapshot_path)?)
+            .map_err(|_| "invalid trusted snapshot")?;
+        if let Some(path) = &config.observations_path {
+            #[derive(Deserialize)]
+            #[serde(deny_unknown_fields)]
+            struct Observations {
+                wallet_evidence: serde_json::Value,
+                transaction_evidence: serde_json::Value,
+            }
+            let observations: Observations = serde_json::from_slice(&private_read(path)?)
+                .map_err(|_| "invalid protected observations")?;
+            if observations.wallet_evidence["wallet"] != config.wallet.to_string()
+                || observations.transaction_evidence["transaction_base64"] != snapshot.transaction
+            {
+                return Err(
+                    "protected observations do not bind the reviewed wallet and transaction".into(),
+                );
+            }
+            snapshot.wallet_evidence = observations.wallet_evidence;
+            snapshot.transaction_evidence = observations.transaction_evidence;
+        }
+        // Do not refresh risk state, reviewed balance, valuation, proposal, byte
+        // approval or their observation time merely because a collector ran.
+        Ok(snapshot)
+    }
+
     fn execution_binding(
         &self,
         transaction: &str,
@@ -333,9 +363,7 @@ fn history_refusal(error: &radar_journal::OperationError) -> &'static str {
 impl Issuer {
     fn inventory_mode(&mut self, args: &[String]) -> Result<bool, String> {
         if args.len() == 2 && args[0] == "--reconcile-operation" {
-            let snapshot: Snapshot =
-                serde_json::from_slice(&private_read(&self.config.snapshot_path)?)
-                    .map_err(|_| "invalid trusted snapshot")?;
+            let snapshot = Snapshot::read(&self.config)?;
             println!(
                 "{}",
                 reconciliation::apply(
@@ -360,9 +388,7 @@ impl Issuer {
                 "portfolio_state_updated":false,"reservation_released":false})
             );
         } else if args == ["--review-account-activity"] {
-            let snapshot: Snapshot =
-                serde_json::from_slice(&private_read(&self.config.snapshot_path)?)
-                    .map_err(|_| "invalid trusted snapshot")?;
+            let snapshot = Snapshot::read(&self.config)?;
             println!(
                 "{}",
                 account_activity::review(
@@ -382,8 +408,7 @@ impl Issuer {
     }
 
     fn review_inventory(&self) -> Result<serde_json::Value, String> {
-        let snapshot: Snapshot = serde_json::from_slice(&private_read(&self.config.snapshot_path)?)
-            .map_err(|_| "invalid trusted snapshot")?;
+        let snapshot = Snapshot::read(&self.config)?;
         let history = acquisitions::review(&self.operations, &self.config)?;
         inventory::review(
             &snapshot,
@@ -400,8 +425,7 @@ impl Issuer {
     }
 
     fn record_native_transfers(&mut self) -> Result<usize, String> {
-        let snapshot: Snapshot = serde_json::from_slice(&private_read(&self.config.snapshot_path)?)
-            .map_err(|_| "invalid trusted snapshot")?;
+        let snapshot = Snapshot::read(&self.config)?;
         let now = unix_now()?;
         let history = acquisitions::review(&self.operations, &self.config)?;
         if snapshot.wallet != self.config.wallet
@@ -431,8 +455,7 @@ impl Issuer {
     }
 
     fn record_opening_inventory(&mut self) -> Result<(), String> {
-        let snapshot: Snapshot = serde_json::from_slice(&private_read(&self.config.snapshot_path)?)
-            .map_err(|_| "invalid trusted snapshot")?;
+        let snapshot = Snapshot::read(&self.config)?;
         let record = opening::capture(&snapshot, &self.config, unix_now()?)?;
         self.operations
             .record_opening_inventory(record, unix_now()?)
@@ -614,8 +637,7 @@ impl Issuer {
         if self.operations.outstanding().next().is_some() {
             return Err("outstanding operation requires reconciliation".into());
         }
-        let snapshot: Snapshot = serde_json::from_slice(&private_read(&self.config.snapshot_path)?)
-            .map_err(|_| "invalid trusted snapshot")?;
+        let snapshot = Snapshot::read(&self.config)?;
         if snapshot.accounting_checkpoint != self.operations.checkpoint() {
             return Err("snapshot accounting does not cover current journal history".into());
         }

@@ -8,6 +8,89 @@ use std::process::{Child, Command, Stdio};
 const SEED: [u8; 32] = [0x6B; 32];
 
 #[test]
+fn protected_live_observations_are_reloaded_bound_and_cannot_refresh_risk_state() {
+    let mut fixture = Fixture::new();
+    let path = fixture.dir.path().join("observations.json");
+    fixture.config["observations_path"] = json!(path);
+    let packet = json!({"wallet_evidence":fixture.snapshot["wallet_evidence"],
+        "transaction_evidence":fixture.snapshot["transaction_evidence"]});
+    fixture.save();
+    let original_snapshot = fixture.snapshot.clone();
+    let mut issuer = fixture.start();
+    // No fallback to valid inline observations when the configured file fails.
+    assert_eq!(issuer.ask(&fixture.candidate)["outcome"], "refused");
+    for (pointer, value) in [
+        ("/wallet_evidence/wallet", json!(address(0x44))),
+        ("/wallet_evidence/native_sol/raw_amount", json!("300000001")),
+        (
+            "/wallet_evidence/read_started_at_unix_secs",
+            json!(unix_now() - 121),
+        ),
+        (
+            "/transaction_evidence/transaction_base64",
+            json!("different bytes"),
+        ),
+        (
+            "/transaction_evidence/simulation/err",
+            json!("simulation failed"),
+        ),
+        ("/transaction_evidence/network_fee/lamports", json!("5001")),
+    ] {
+        let mut damaged = packet.clone();
+        *damaged.pointer_mut(pointer).unwrap() = value;
+        write(&path, &damaged);
+        assert_eq!(
+            issuer.ask(&fixture.candidate)["outcome"],
+            "refused",
+            "{pointer}"
+        );
+    }
+    write(
+        &path,
+        &json!({"wallet_evidence":packet["wallet_evidence"],
+        "transaction_evidence":packet["transaction_evidence"], "state":{"halted":false}}),
+    );
+    assert_eq!(issuer.ask(&fixture.candidate)["outcome"], "refused");
+    write(&path, &packet);
+    fixture.snapshot["observed_at_unix_secs"] = json!(unix_now() - 121);
+    fixture.save();
+    assert_eq!(
+        issuer.ask(&fixture.candidate)["outcome"],
+        "refused",
+        "fresh reads cannot refresh old reviewed risk state"
+    );
+    fixture.snapshot = original_snapshot;
+    fixture.snapshot["wallet_evidence"] = Value::Null;
+    fixture.snapshot["transaction_evidence"] = Value::Null;
+    fixture.save();
+    assert_eq!(
+        issuer.ask(&fixture.candidate)["outcome"],
+        "issued",
+        "private collector packet is the actual consumer input"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn protected_observations_refuse_public_files_despite_valid_inline_fallback() {
+    use std::os::unix::fs::PermissionsExt as _;
+    let mut fixture = Fixture::new();
+    let path = fixture.dir.path().join("observations.json");
+    fixture.config["observations_path"] = json!(path);
+    write(
+        &path,
+        &json!({"wallet_evidence":fixture.snapshot["wallet_evidence"],
+        "transaction_evidence":fixture.snapshot["transaction_evidence"]}),
+    );
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+    fixture.save();
+    assert_eq!(
+        fixture.start().ask(&fixture.candidate)["outcome"],
+        "refused"
+    );
+}
+
+#[test]
 fn issuer_converts_usd_to_native_units_then_clamps_and_proves_the_native_policy() {
     for (limit, spend, expected, ceiling) in [
         (250_000_000, 250_000_000_u64, "issued", 250_000_000),

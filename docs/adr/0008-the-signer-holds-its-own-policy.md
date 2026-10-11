@@ -418,6 +418,32 @@ packet. Its operator caller can use the fields in the protected issuer snapshot;
 the output itself is not a complete snapshot and grants no authority. It does
 not fill missing USD bounds, kernel portfolio state or other instruction costs.
 
+`evidence-read` also accepts `--output <private-file>` to publish both packets
+after collection succeeds. The explicit parent directory must be private and
+must not itself be a symlink. A new mode-0600 temporary file is synced and renamed
+over the destination; a collision or failed publication refuses and retains the
+previous packet. An oversized packet refuses before publication. On a collection
+failure the previous packet remains unchanged and eventually expires; retaining
+it does not extend its read window. Directory ownership and collector scheduling
+remain protected deployment responsibilities, not permissions granted to the web
+server. The command's success output describes publication, not issuance.
+
+The issuer config can select an optional private `observations_path`. Every
+snapshot-consuming operation reloads that exact configured file, requires its
+two-field wallet/preflight shape, binds its wallet and exact transaction to the
+reviewed snapshot, and uses those observations in the existing checks. Missing,
+malformed, public, stale or substituted observations refuse; valid inline fields
+are never a fallback when the path is configured. With no path, existing inline
+snapshots retain their previous behavior. Candidate stdin cannot choose a path.
+
+This adapter deliberately preserves the reviewed balance, portfolio state,
+valuation, proposal, transaction and original snapshot observation time. Fresh
+read packets cannot make those reviewed decisions fresh; a changed balance or
+expired risk snapshot still refuses. A producer of complete independently valued
+risk state, its reconciliation coverage, scheduled collection and execution loop
+remain necessary before live autonomous operation. This is a connected live-read
+input, not a claim that the complete snapshot producer now exists.
+
 The private snapshot also requires `wallet_evidence`, containing the JSON from
 `radar wallet-read`. Before reserving capital the issuer binds version 1,
 read-only/finalized metadata, configured wallet identity, native decimals of
