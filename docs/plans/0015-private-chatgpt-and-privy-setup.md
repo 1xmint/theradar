@@ -5603,3 +5603,23 @@ semantics explicitly: kernel currently applies the enabled daily-loss check to
 all actions, while position/canary sizing applies only to acquisitions. No
 change to the owner's saved cap or that existing behavior was made here.
 The full autonomous goal remains active; no funding or live trade occurred.
+
+### PumpSwap observation handback (2026-10-11)
+
+Release 38114389746 at d142c8b passed. Downloaded outside the checkout to
+radar-release-38114389746 and compared its BUILD-INFO commit and all six SHA256
+hashes successfully. Integrated CI 38114392276 still has its final mutation
+shard running; do not deploy before its terminal success. Production health
+still reports 57c2757 and policyClosed true. Browser inspection reached the
+Cloudflare password screen; asked the owner to finish login and kept the tab.
+
+Independent test/pumpswap-observed-buy retains the complete raw successful
+mainnet response captured earlier, with its hash and transaction provenance.
+The decoder regression resolves the actual CPI program from account keys and
+checks that its captured bytes decode as PumpSwap BuyExactQuoteIn. Correct the
+module's blanket claim that none of its discriminators were observed, leaving
+the other rows reference-derived. Raise the test floor to 2252. This adds no
+production behavior, signing permission, account proof or venue admission;
+mutation of test/fixture plumbing adds no behavior coverage. Publish for GitHub
+build/tests/lint. Continue the same integrated deployment after CI finishes,
+then account/token proof, live evidence, supervisor and settlement wiring.
