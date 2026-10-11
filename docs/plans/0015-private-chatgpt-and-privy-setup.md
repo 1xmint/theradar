@@ -5382,3 +5382,10 @@ Mutation baselines therefore failed before any mutation was tested; shard 3's
 green result contained zero selected mutants and is not behavioral evidence.
 Wait for the full initial run to finish, then publish this correction and require
 a fresh GitHub run. No local jobs or live changes.
+
+Correction run 38111872728 at 9378104 reached a second older assertion in
+the_pipeline_has_real_implementations.rs requiring the same lookup-table reason.
+Updated that integration assertion and its description; searched the exec source
+and tests for remaining copies. The new legacy-build tests had passed before this
+later integration failure, but the full mutation baseline still did not pass.
+Wait for terminal status before publishing; require a fresh full GitHub run.
