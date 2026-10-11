@@ -6089,3 +6089,66 @@ readers. Keep arbitrary/unpriced/frozen holdings explicit, retain observation
 dates and avoid serializing the fresh Portfolio's default zero historical PnL as
 measured performance. Wallet-wide economic reconciliation, claims/reserves and
 live risk-snapshot construction remain distinct requirements before allocation.
+
+### Live marked holdings collector source handback (2026-10-11)
+
+feat/live-marked-holdings starts at integration 05152e6 while its combined CI
+38160467319 runs. Do not push that integration branch over its check. The actual
+portfolio-read CLI uses the existing wallet inventory reader, Portfolio book,
+typed holdings and asset identities, curve reader/exit estimator and independent
+SOL oracle. Native conversion and window checks are shared with wallet-read;
+there is no duplicate USD arithmetic, new package or signing edge.
+
+Retain every observed token quantity, checked aggregation, separate program/units,
+admitted full-position net-of-venue-fees curve marks and verified classic wrapped
+SOL marks. No rent double counting or USDC peg. Zero quantity has a measured zero
+value; frozen/delegated/authority-active or unsupported/unpriced positions remain
+unknown. One unknown mark makes the observed holdings total unknown. Dates use
+the oldest quantity/market/oracle posting input; never redate to the later bank.
+Require context floors and a final oracle bank at/after all admitted marks, plus
+the full read window's explicit age. Required failure emits no partial packet;
+an optional market failure is a retained refusal, not an omitted asset.
+
+Four unit regressions cover aggregation/eligibility/program/units/overflow,
+dated/wrapped/zero/unpriced marks, total unknowns/overflow and explicit scope.
+Four real CLI/mock-RPC regressions cover whole-quantity curve valuation, retained
+historical unknowns, frozen/unsupported/zero/USDC/wrapped behavior, old inventory/
+oracle banks and market context/program/decimals binding. Floor 2283; require
+GitHub build/tests/lint/MSRV and behavior mutations before integration. No local
+test/build job, mutation exclusion, production, funding or authority change.
+
+This collector is not a complete live risk snapshot or economic reconciler.
+Current observed marks are useful evidence, not verified available capital:
+historical PnL, outstanding claims/reserves, economic completeness and equity
+remain unknown. Connect retained accounting and live snapshot construction next,
+then the adaptive supervisor and durable execution/recovery. Expand admitted
+market/quote adapters without making universal coverage an activation gate for
+an otherwise verified capability. Autonomous signing remains disabled.
+
+Initial marked-holdings CI 38161137705 at aca9968 found a dependency-boundary
+compilation error: radar-pumpfun is CLI test-only, and serde was not a direct CLI
+dependency for the new Deserialize derive. Use radar-onchain's existing public
+RPC program identifiers in production; keep pumpfun fixture imports test-only.
+Add the already-workspace serde edge and matching CLI lockfile entry, not a new
+package or production pumpfun edge. Let the old run finish before publishing the
+correction; require fresh GitHub verification. Floor 2283 is unchanged.
+
+Correction CI 38161340796 at 4f2b349 completed with build/tests/MSRV, formatting,
+dependencies and site/web passing. Lint rejected a test helper's unconsumed Vec;
+borrow a slice. Mutation shard 1 found portfolio_read.rs:99:20 (< to <=) survived:
+the success fixture only used market 778 after raw holdings 53. Exercise both
+market 53 (exactly equal) and 778 in the actual successful CLI regression;
+keep the existing older-context refusal. The exact diagnostic diff confirms the
+curve_mark market-floor operator, not the later oracle-floor comparison.
+Retain diagnostics outside the checkout in radar-mutation-38161340796/shard1.
+Other mutation shards passed; no production logic change, new test count or
+mutation waiver. Publish only after this terminal run and require fresh CI.
+
+CI 38161612529 at 48c5bc4 completed with tests/build/MSRV and all four mutation
+shards passing. Lint alone rejected the missing statement semicolon in the
+Token-2022 mismatch fixture (wallet_read_process.rs:280). Add that semicolon;
+no production behavior, test count or mutation exclusion changes. Require a
+fresh complete GitHub run before integration. Browser sign-in is reported
+complete by the owner; the previously observed browser URL-policy restriction
+still prevents claiming a verified authenticated Radar page. No live authority
+or production deployment changed.

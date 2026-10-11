@@ -33,6 +33,8 @@ radar-store.workspace = true
 radar-types.workspace = true
 # `audit`, `replay` and the brief's serving check read and write JSON.
 serde_json.workspace = true
+# Typed verified holdings in portfolio-read; already in the workspace tree.
+serde.workspace = true
 
 # The brief's serving check asks the public surface how it is. Already in the
 # workspace tree via radar-sim, radar-serve and radar-backfill, so this adds a

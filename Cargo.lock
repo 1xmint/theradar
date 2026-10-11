@@ -1415,6 +1415,7 @@ dependencies = [
  "radar-store",
  "radar-strategy",
  "radar-types",
+ "serde",
  "serde_json",
  "tempfile",
  "ureq",

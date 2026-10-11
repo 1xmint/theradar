@@ -44,6 +44,271 @@ fn valued_wallet_command(endpoint: &str) -> std::process::Output {
         .unwrap()
 }
 
+fn portfolio_command(endpoint: &str) -> std::process::Output {
+    Command::new(env!("CARGO_BIN_EXE_radar"))
+        .args([
+            "portfolio-read",
+            "--wallet",
+            &radar_types::Address::new([0x55; 32]).to_string(),
+            "--rpc",
+            endpoint,
+            "--min-slot",
+            "50",
+            "--max-age-secs",
+            "60",
+            "--max-confidence-bps",
+            "10000",
+        ])
+        .output()
+        .unwrap()
+}
+
+fn portfolio_price(context: u64, posted: u64) -> Value {
+    let mut response = sol_price_reads().remove(0);
+    response["result"]["context"]["slot"] = json!(context);
+    let mut bytes =
+        radar_types::b64::decode(response["result"]["value"][0]["data"][0].as_str().unwrap())
+            .unwrap();
+    bytes[125..133].copy_from_slice(&posted.to_le_bytes());
+    response["result"]["value"][0]["data"][0] = json!(radar_types::b64::encode(&bytes));
+    response
+}
+
+fn portfolio_wallet(
+    mint: radar_types::Address,
+    amount: u64,
+    decimals: u8,
+    state: u8,
+) -> Vec<Value> {
+    let mut answers = wallet_with_tokens();
+    answers[0]["result"]["value"] = json!(1_000_000_000_u64);
+    let parsed = &mut answers[1]["result"]["value"][0]["account"]["data"]["parsed"]["info"];
+    parsed["mint"] = json!(mint);
+    parsed["state"] = json!(if state == 1 { "initialized" } else { "frozen" });
+    parsed["tokenAmount"] = json!({"amount":amount.to_string(),"decimals":decimals});
+    let mut mint_bytes = vec![0; 82];
+    let wrapped = mint == radar_types::Asset::WRAPPED_SOL_MINT;
+    mint_bytes[36..44].copy_from_slice(&(if wrapped { 0_u64 } else { 1_000_000 }).to_le_bytes());
+    mint_bytes[44] = decimals;
+    mint_bytes[45] = 1;
+    let mut token = vec![0; 165];
+    token[..32].copy_from_slice(mint.as_bytes());
+    token[32..64].copy_from_slice(&[0x55; 32]);
+    token[64..72].copy_from_slice(&amount.to_le_bytes());
+    token[108] = state;
+    if wrapped {
+        token[109..113].copy_from_slice(&1_u32.to_le_bytes());
+        token[113..121].copy_from_slice(&99_u64.to_le_bytes());
+    }
+    let raw = |bytes: Vec<u8>| {
+        json!({"owner":radar_onchain::rpc::TOKEN_PROGRAM_ID,
+        "data":[radar_types::b64::encode(&bytes),"base64"]})
+    };
+    let values = if mint < radar_types::Address::new([0x44; 32]) {
+        vec![raw(mint_bytes), raw(token)]
+    } else {
+        vec![raw(token), raw(mint_bytes)]
+    };
+    answers[3]["result"]["value"] = json!(values);
+    answers
+}
+
+#[test]
+fn portfolio_command_marks_whole_curve_holding_and_preserves_unknown_historical_results() {
+    for market_slot in [53, 778] {
+        let mut answers = portfolio_wallet(radar_types::Address::new([0x22; 32]), 1000, 6, 1);
+        let mut market = curve_response();
+        market["result"]["context"]["slot"] = json!(market_slot);
+        answers.push(market);
+        answers.push(portfolio_price(778, 777));
+        let (endpoint, server) = fixture(answers);
+        let output = portfolio_command(&endpoint);
+        assert!(output.status.success(), "{:?}", output.stderr);
+        let packet: Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(
+            packet["observed_holdings_usd_band"],
+            json!({"lower_micro_usd":115_375_075,
+        "upper_micro_usd":115_407_839,"oldest_slot":50})
+        );
+        let rows = packet["holdings"].as_array().unwrap();
+        assert_eq!(rows.len(), 2);
+        let position = rows
+            .iter()
+            .find(|row| row["holding"]["role"] == "position")
+            .unwrap();
+        assert_eq!(position["mark"]["raw_tokens"], "1000");
+        assert_eq!(
+            position["mark"]["net_lamports_at_observed_state"],
+            "29595403"
+        );
+        assert_eq!(
+            position["holding"]["value"]["known"],
+            json!({"value":3_316_421,"as_of":53})
+        );
+        assert_eq!(
+            position["upper_value"]["known"],
+            json!({"value":3_317_363,"as_of":53})
+        );
+        assert_eq!(position["holding"]["cost"], json!({"unknown":"no_price"}));
+        for field in [
+            "wallet_inventory_complete",
+            "inventory_atomic",
+            "economic_reconciliation_complete",
+            "execution_guaranteed",
+        ] {
+            assert_eq!(packet[field], false);
+        }
+        for field in [
+            "realised_pnl",
+            "equity_micro_usd",
+            "usable_capital_micro_usd",
+        ] {
+            assert!(packet[field].is_null());
+        }
+        assert_eq!(packet["authority"], "read_only");
+        assert_eq!(server.join().unwrap().len(), 6);
+    }
+}
+
+#[test]
+fn portfolio_command_keeps_frozen_unpriced_and_zero_holdings_without_assuming_usdc_peg() {
+    for kind in 0..5 {
+        let mint = if kind == 3 {
+            radar_types::Asset::USDC_MINT
+        } else if kind == 4 {
+            radar_types::Asset::WRAPPED_SOL_MINT
+        } else {
+            radar_types::Address::new([0x22; 32])
+        };
+        let amount = if kind == 2 {
+            0
+        } else if kind == 4 {
+            2_000_000_000
+        } else {
+            1000
+        };
+        let mut answers = portfolio_wallet(
+            mint,
+            amount,
+            if kind == 4 { 9 } else { 6 },
+            if kind == 0 { 2 } else { 1 },
+        );
+        if kind == 1 {
+            answers.push(json!({"result":{"context":{"slot":778},"value":[null,null,null]}}));
+        }
+        answers.push(portfolio_price(778, 777));
+        let (endpoint, server) = fixture(answers);
+        let output = portfolio_command(&endpoint);
+        assert!(output.status.success(), "{:?}", output.stderr);
+        let packet: Value = serde_json::from_slice(&output.stdout).unwrap();
+        if kind <= 1 || kind == 3 {
+            assert!(packet["observed_holdings_usd_band"].is_null());
+            assert!(
+                packet["holdings"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|row| row["holding"]["value"]["unknown"] == "no_price")
+            );
+        } else {
+            let (low, high) = if kind == 4 {
+                (336_175_962, 336_271_428)
+            } else {
+                (112_058_654, 112_090_476)
+            };
+            assert_eq!(
+                packet["observed_holdings_usd_band"],
+                json!({"lower_micro_usd":low,"upper_micro_usd":high,"oldest_slot":50})
+            );
+        }
+        assert_eq!(server.join().unwrap().len(), if kind == 1 { 6 } else { 5 });
+    }
+}
+
+#[test]
+fn portfolio_command_refuses_old_inventory_or_oracle_banks_without_partial_output() {
+    for fault in 0..6 {
+        let mut answers = if fault <= 2 {
+            collected_reads()[..3].to_vec()
+        } else {
+            portfolio_wallet(
+                radar_types::Address::new([0x22; 32]),
+                1000,
+                6,
+                if fault == 3 { 2 } else { 1 },
+            )
+        };
+        if fault <= 2 {
+            answers[fault]["result"]["context"]["slot"] = json!(49);
+        } else {
+            if fault >= 4 {
+                answers.push(curve_response());
+            }
+            answers.push(if fault == 5 {
+                json!({"error":{"message":"private provider detail"}})
+            } else {
+                portfolio_price(if fault == 3 { 52 } else { 777 }, 50)
+            });
+        }
+        let (endpoint, server) = fixture(answers);
+        let output = portfolio_command(&endpoint);
+        assert!(!output.status.success());
+        assert_eq!(output.stdout, Vec::<u8>::new());
+        assert!(!String::from_utf8_lossy(&output.stderr).contains("private provider detail"));
+        assert_eq!(
+            server.join().unwrap().len(),
+            if fault <= 2 {
+                3
+            } else if fault == 3 {
+                5
+            } else {
+                6
+            }
+        );
+    }
+}
+
+#[test]
+fn portfolio_marks_refuse_old_market_context_or_changed_mint_program_and_units() {
+    for fault in 0..3 {
+        let mut answers = portfolio_wallet(radar_types::Address::new([0x22; 32]), 1000, 6, 1);
+        let mut market = curve_response();
+        match fault {
+            0 => market["result"]["context"]["slot"] = json!(52),
+            1 => {
+                market["result"]["value"][0]["owner"] =
+                    json!(radar_pumpfun::token::TOKEN_2022_PROGRAM);
+            }
+            _ => {
+                let mut mint = radar_types::b64::decode(
+                    market["result"]["value"][0]["data"][0].as_str().unwrap(),
+                )
+                .unwrap();
+                mint[44] = 7;
+                market["result"]["value"][0]["data"][0] = json!(radar_types::b64::encode(&mint));
+            }
+        }
+        answers.push(market);
+        answers.push(portfolio_price(778, 777));
+        let (endpoint, server) = fixture(answers);
+        let output = portfolio_command(&endpoint);
+        assert!(output.status.success(), "{:?}", output.stderr);
+        let packet: Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert!(packet["observed_holdings_usd_band"].is_null());
+        let refused = packet["holdings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|row| row["holding"]["role"] == "position")
+            .unwrap();
+        assert_eq!(
+            refused["mark"]["refusal"],
+            "portfolio market context, program or units differ"
+        );
+        assert_eq!(server.join().unwrap().len(), 6);
+    }
+}
+
 #[test]
 fn native_valued_wallet_preserves_tokens_and_never_claims_equity_or_usable_capital() {
     for (tokens, lamports, balance_slot, lower, upper) in [
