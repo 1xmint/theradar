@@ -29,7 +29,7 @@ fn run(
 
 fn intent() -> Value {
     json!({"account_id":"paper-id","client_order_id":"radar_1","symbol":"SPY","side":"buy",
-        "quantity_nanoshares":10000001,"limit_microusd_per_share":100000001,"fee_bound_microusd":7})
+        "quantity_nanoshares":10_000_001,"limit_microusd_per_share":100_000_001,"fee_bound_microusd":7})
 }
 
 #[test]
@@ -125,7 +125,7 @@ fn missing_journal_bad_or_conflicting_intent_never_prints_empty_safe_claims() {
     std::fs::write(&input, intent().to_string()).unwrap();
     assert!(run(&journal, Some(&input), "paper-id").status.success());
     let mut changed = intent();
-    changed["quantity_nanoshares"] = json!(20000000);
+    changed["quantity_nanoshares"] = json!(20_000_000);
     std::fs::write(&input, changed.to_string()).unwrap();
     let refused = run(&journal, Some(&input), "paper-id");
     assert!(!refused.status.success());

@@ -56,6 +56,11 @@ strict valid JSON ending exactly at 64 KiB and refuses valid JSON with trailing
 whitespace beyond it for the size-specific reason. This distinguishes a bounded
 read hiding excess bytes from genuinely invalid JSON. Test count is unchanged.
 
+Replacement CI 38182243726 lint reached the CLI process fixture and requires
+numeric separators on its three long Rust literals. Apply that source-format
+correction and wait for the run to finish before publishing it. Runtime JSON
+values stay unchanged. Further verification remains on GitHub.
+
 Source only, no credentials, network orders, delegation, deposits or deployment.
 The submit ordering API has regression callers but no production executor yet.
 It deliberately has no release/terminal reconciliation route: even an HTTP 404 or
