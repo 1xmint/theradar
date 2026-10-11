@@ -118,7 +118,8 @@ commands:
                                  re-derives the 850 bps constant and says
                                  whether it is fixed or proportional
   wallet-read --wallet <address> --rpc <URL>
-    Finalized balances plus raw token/mint verification; no prices or authority.
+       [--value-sol --min-slot <N> --max-age-secs <N> --max-confidence-bps <0..10000>]
+    Finalized balances/raw token verification; optional native USD band, read-only.
   sol-price-read --rpc <URL> --min-slot <N> --max-age-secs <N> --max-confidence-bps <0..10000> [--output <private-file>]
     Receiver-verified SOL/USD confidence bounds; read-only, no portfolio authority.
   wallet-activity-read --wallet <address> --after-slot <N> --through-slot <N> --rpc <URL> [--inventory-review <path>]

@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
-//! Direct wallet evidence, before any valuation or kernel portfolio is inferred.
+//! Direct wallet evidence with optional independently read native SOL valuation.
 //! Enumeration and raw token verification are not an atomic wallet snapshot.
 
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use radar_onchain::rpc::{TOKEN_2022_PROGRAM_ID, TOKEN_PROGRAM_ID, TokenAccountsRead};
-use radar_onchain::{Budget, RpcClient};
-use radar_types::Address;
+use radar_onchain::{Budget, RpcClient, sol_price};
+use radar_types::{Address, Slot};
 use serde_json::{Value, json};
 
 fn token_read(value: TokenAccountsRead) -> Result<Value, String> {
@@ -27,6 +27,14 @@ fn token_read(value: TokenAccountsRead) -> Result<Value, String> {
 }
 
 pub(super) fn read(rpc: &RpcClient, wallet: Address, budget: &mut Budget) -> Result<Value, String> {
+    inventory(rpc, wallet, budget).map(|(evidence, _)| evidence)
+}
+
+fn inventory(
+    rpc: &RpcClient,
+    wallet: Address,
+    budget: &mut Budget,
+) -> Result<(Value, radar_onchain::rpc::Balance), String> {
     let balance = rpc
         .balance(budget, &wallet)
         .map_err(|_| "native SOL read failed")?;
@@ -51,13 +59,65 @@ pub(super) fn read(rpc: &RpcClient, wallet: Address, budget: &mut Budget) -> Res
         && extended["slot"] == slot
         && (verification["slot"].is_null() || verification["slot"] == slot))
         .then_some(&slot);
-    Ok(json!({
-        "version":1, "wallet":wallet.to_string(), "commitment":"finalized",
-        "native_sol":{"slot":slot, "raw_amount":balance.lamports.to_string(), "decimals":9},
-        "token_program":tokens, "token_2022":extended, "common_reported_slot":coherent,
-        "raw_token_verification":verification,
-        "usd_value":null, "realised_pnl":null, "authority":"read_only"
-    }))
+    Ok((
+        json!({
+            "version":1, "wallet":wallet.to_string(), "commitment":"finalized",
+            "native_sol":{"slot":slot, "raw_amount":balance.lamports.to_string(), "decimals":9},
+            "token_program":tokens, "token_2022":extended, "common_reported_slot":coherent,
+            "raw_token_verification":verification,
+            "usd_value":null, "realised_pnl":null, "authority":"read_only"
+        }),
+        balance,
+    ))
+}
+
+// Native SOL only: token marks, cost basis, pending claims and operating
+// reserves are not inferred from this band. Confidence is not an exit guarantee.
+fn native_value(lamports: u64, lower: u64, upper: u64) -> Result<Value, String> {
+    let lower = u128::from(lamports) * u128::from(lower) / 1_000_000_000;
+    let upper = (u128::from(lamports) * u128::from(upper)).div_ceil(1_000_000_000);
+    let lower = u64::try_from(lower).map_err(|_| "native SOL value exceeds dollar range")?;
+    let upper = u64::try_from(upper).map_err(|_| "native SOL value exceeds dollar range")?;
+    Ok(json!({"lower_micro_usd":lower,"upper_micro_usd":upper}))
+}
+
+fn valued(
+    rpc: &RpcClient,
+    wallet: Address,
+    budget: &mut Budget,
+    bounds: &sol_price::Bounds,
+) -> Result<Value, String> {
+    let (mut evidence, balance) = inventory(rpc, wallet, budget)?;
+    if balance.slot < bounds.minimum_slot {
+        return Err("native balance precedes valuation context floor".into());
+    }
+    let observation = sol_price::read(rpc, budget, bounds)?;
+    // Require a later bank read, without requiring an oracle posting in the
+    // same slot as the wallet (the feed has its own update cadence).
+    if observation.context_slot < balance.slot {
+        return Err("oracle bank context precedes native balance".into());
+    }
+    evidence["native_sol"]["usd_value"] = native_value(
+        balance.lamports,
+        observation.lower_micro_usd_per_sol,
+        observation.upper_micro_usd_per_sol,
+    )?;
+    evidence["sol_price"] = json!({"source":"pyth_receiver_full","account":sol_price::ACCOUNT,
+        "observation":observation});
+    evidence["wallet_inventory_complete"] = json!(false);
+    evidence["usable_capital_micro_usd"] = Value::Null;
+    evidence["execution_guaranteed"] = json!(false);
+    Ok(evidence)
+}
+
+fn check_window(started: u64, completed: u64, maximum_age: u64) -> Result<(), String> {
+    if completed
+        .checked_sub(started)
+        .is_none_or(|age| age > maximum_age)
+    {
+        return Err("wallet valuation read window is stale or clock moved backwards".into());
+    }
+    Ok(())
 }
 
 pub(super) fn now() -> Result<u64, String> {
@@ -75,12 +135,38 @@ pub fn run(args: &[String]) -> Result<(), String> {
     let endpoint = crate::flag(args, "--rpc")
         .filter(|value| !value.trim().is_empty())
         .ok_or("wallet-read needs an explicit --rpc <URL>")?;
+    let valuation = if args.iter().any(|arg| arg == "--value-sol") {
+        Some(sol_price::Bounds {
+            minimum_slot: Slot(
+                crate::flag(args, "--min-slot")
+                    .and_then(|v| v.parse().ok())
+                    .ok_or("wallet-read --value-sol needs --min-slot <u64>")?,
+            ),
+            maximum_age_secs: crate::flag(args, "--max-age-secs")
+                .and_then(|v| v.parse().ok())
+                .ok_or("wallet-read --value-sol needs --max-age-secs <u64>")?,
+            maximum_confidence_bps: crate::flag(args, "--max-confidence-bps")
+                .and_then(|v| v.parse::<u32>().ok())
+                .filter(|v| *v <= 10_000)
+                .ok_or("wallet-read --value-sol needs --max-confidence-bps <0..10000>")?,
+        })
+    } else {
+        None
+    };
     let started = now()?;
-    // Three enumeration calls and at most one raw token/mint batch.
-    let mut budget = Budget::new(4, 0, Duration::from_secs(20));
-    let mut evidence = read(&RpcClient::new(endpoint), wallet, &mut budget)?;
+    // Three inventory calls, at most one raw batch, and an optional oracle read.
+    let mut budget = Budget::new(5, 0, Duration::from_secs(20));
+    let rpc = RpcClient::new(endpoint);
+    let mut evidence = match &valuation {
+        Some(bounds) => valued(&rpc, wallet, &mut budget, bounds)?,
+        None => read(&rpc, wallet, &mut budget)?,
+    };
+    let completed = now()?;
+    if let Some(bounds) = valuation {
+        check_window(started, completed, bounds.maximum_age_secs)?;
+    }
     evidence["read_started_at_unix_secs"] = json!(started);
-    evidence["read_completed_at_unix_secs"] = json!(now()?);
+    evidence["read_completed_at_unix_secs"] = json!(completed);
     println!("{evidence}");
     Ok(())
 }
@@ -91,6 +177,71 @@ mod tests {
     use radar_onchain::rpc::Transport;
     use std::collections::VecDeque;
     use std::sync::{Arc, Mutex};
+
+    #[test]
+    fn native_value_rounds_outward_without_floats_or_saturation() {
+        for (lamports, low, high, expected_low, expected_high) in [
+            (0, 2, 3, 0_u64, 0_u64),
+            (1, 999_999_999, 1_000_000_001, 0, 2),
+            (1_000_000_000, 2, 3, 2, 3),
+            (3_000_000_001, 2, 3, 6, 10),
+            (u64::MAX, 1, 2, 18_446_744_073, 36_893_488_148),
+        ] {
+            assert_eq!(
+                native_value(lamports, low, high).unwrap(),
+                json!({"lower_micro_usd":expected_low,"upper_micro_usd":expected_high})
+            );
+        }
+        for lower in [0, u64::MAX] {
+            assert!(native_value(u64::MAX, lower, u64::MAX).is_err());
+        }
+    }
+
+    #[test]
+    fn valuation_window_accepts_exact_age_and_refuses_stale_or_backwards_clock() {
+        for (start, end, maximum) in [(100, 100, 0), (100, 101, 1), (100, 120, 20)] {
+            assert_eq!(check_window(start, end, maximum), Ok(()));
+        }
+        for (start, end, maximum) in [(100, 101, 0), (100, 121, 20), (100, 99, u64::MAX)] {
+            assert!(check_window(start, end, maximum).is_err());
+        }
+    }
+
+    #[test]
+    fn native_valuation_requires_explicit_bounds_before_network_reads() {
+        let wallet = wallet().to_string();
+        let args = [
+            "--wallet",
+            &wallet,
+            "--rpc",
+            "http://127.0.0.1:1",
+            "--value-sol",
+            "--min-slot",
+            "50",
+            "--max-age-secs",
+            "60",
+            "--max-confidence-bps",
+            "100",
+        ];
+        for length in [5, 7, 9] {
+            let args: Vec<_> = args[..length].iter().map(|v| (*v).to_owned()).collect();
+            assert!(
+                run(&args)
+                    .unwrap_err()
+                    .contains("wallet-read --value-sol needs")
+            );
+        }
+        for (index, invalid) in [(6, "bad"), (8, "bad"), (10, "10001")] {
+            let mut damaged = args;
+            damaged[index] = invalid;
+            let args: Vec<_> = damaged.iter().map(|v| (*v).to_owned()).collect();
+            assert!(
+                run(&args)
+                    .unwrap_err()
+                    .contains("wallet-read --value-sol needs")
+            );
+        }
+    }
 
     struct Fixture {
         answers: Mutex<VecDeque<String>>,

@@ -24,6 +24,112 @@ fn sol_price_reads() -> Vec<Value> {
     }]}})]
 }
 
+fn valued_wallet_command(endpoint: &str) -> std::process::Output {
+    Command::new(env!("CARGO_BIN_EXE_radar"))
+        .args([
+            "wallet-read",
+            "--wallet",
+            &radar_types::Address::new([0x55; 32]).to_string(),
+            "--rpc",
+            endpoint,
+            "--value-sol",
+            "--min-slot",
+            "50",
+            "--max-age-secs",
+            "60",
+            "--max-confidence-bps",
+            "10000",
+        ])
+        .output()
+        .unwrap()
+}
+
+#[test]
+fn native_valued_wallet_preserves_tokens_and_never_claims_equity_or_usable_capital() {
+    for (tokens, lamports, balance_slot, lower, upper) in [
+        (false, 0_u64, 50, 0, 0),
+        (false, 1_000_000_001, 51, 112_058_654, 112_090_477),
+        (true, 1_000_000_001, 50, 112_058_654, 112_090_477),
+    ] {
+        let mut answers = if tokens {
+            wallet_with_tokens()
+        } else {
+            collected_reads()[..3].to_vec()
+        };
+        answers[0]["result"]["value"] = json!(lamports);
+        answers[0]["result"]["context"]["slot"] = json!(balance_slot);
+        answers.extend(sol_price_reads());
+        let (endpoint, server) = fixture(answers);
+        let output = valued_wallet_command(&endpoint);
+        assert!(output.status.success(), "{:?}", output.stderr);
+        let packet: Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(packet["native_sol"]["raw_amount"], lamports.to_string());
+        assert_eq!(packet["native_sol"]["slot"], balance_slot.to_string());
+        assert_eq!(
+            packet["native_sol"]["usd_value"],
+            json!({"lower_micro_usd":lower,"upper_micro_usd":upper})
+        );
+        assert_eq!(packet["sol_price"]["observation"]["context_slot"], 51);
+        assert_eq!(packet["sol_price"]["observation"]["posted_slot"], 50);
+        assert_eq!(
+            packet["sol_price"]["account"],
+            radar_onchain::sol_price::ACCOUNT
+        );
+        assert_eq!(packet["sol_price"]["source"], "pyth_receiver_full");
+        assert_eq!(packet["wallet_inventory_complete"], false);
+        assert_eq!(packet["execution_guaranteed"], false);
+        assert_eq!(packet["authority"], "read_only");
+        assert!(packet["usd_value"].is_null());
+        assert!(packet["realised_pnl"].is_null());
+        assert!(packet["usable_capital_micro_usd"].is_null());
+        if tokens {
+            assert_eq!(packet["token_program"]["accounts"][0]["raw_amount"], "7");
+            assert_eq!(packet["raw_token_verification"]["slot"], "53");
+        }
+        assert!(packet["common_reported_slot"].is_null());
+        let calls = server.join().unwrap();
+        assert_eq!(calls.len(), if tokens { 5 } else { 4 });
+        assert_eq!(
+            calls.last().unwrap()["params"][0],
+            json!([radar_onchain::sol_price::ACCOUNT])
+        );
+    }
+}
+
+#[test]
+fn native_valuation_refuses_old_bank_contexts_and_failed_prices_without_partial_output() {
+    for fault in 0..5 {
+        let mut answers = collected_reads()[..3].to_vec();
+        if fault == 0 {
+            answers[0]["result"]["context"]["slot"] = json!(49);
+        } else {
+            let mut price = sol_price_reads();
+            match fault {
+                1 => answers[0]["result"]["context"]["slot"] = json!(52),
+                2 => price[0]["result"]["value"][0]["owner"] = json!("foreign"),
+                3 => price[0] = json!({"error":{"message":"private provider detail"}}),
+                _ => {
+                    let mut bytes = radar_types::b64::decode(
+                        price[0]["result"]["value"][0]["data"][0].as_str().unwrap(),
+                    )
+                    .unwrap();
+                    bytes[93..101]
+                        .copy_from_slice(&i64::try_from(now() - 61).unwrap().to_le_bytes());
+                    price[0]["result"]["value"][0]["data"][0] =
+                        json!(radar_types::b64::encode(&bytes));
+                }
+            }
+            answers.extend(price);
+        }
+        let (endpoint, server) = fixture(answers);
+        let output = valued_wallet_command(&endpoint);
+        assert!(!output.status.success());
+        assert_eq!(output.stdout, Vec::<u8>::new());
+        assert!(!String::from_utf8_lossy(&output.stderr).contains("private provider detail"));
+        assert_eq!(server.join().unwrap().len(), if fault == 0 { 3 } else { 4 });
+    }
+}
+
 #[test]
 fn actual_sol_price_command_reads_receiver_verified_bounds_and_refuses_missing_scope() {
     let (endpoint, server) = fixture(sol_price_reads());
