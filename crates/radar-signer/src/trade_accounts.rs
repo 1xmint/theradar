@@ -51,8 +51,9 @@ pub(crate) fn check(
                 && message
                     .accounts
                     .iter()
-                    .take(usize::from(message.required_signatures))
-                    .any(|key| key == wallet.as_bytes()),
+                    .position(|key| key == wallet.as_bytes())
+                    .and_then(|index| message.privileges(index))
+                    .is_some_and(|flags| flags.signer),
             "signing wallet",
         );
         if let Some(quote) = quote {

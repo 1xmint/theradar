@@ -87,6 +87,12 @@ fn captured_legacy_message_preserves_every_instruction_account_and_global_privil
                     .any(|meta| meta["pubkey"] == address && meta["isWritable"] == true)
             });
         assert_eq!(index < readonly_start, writable, "{address}");
+        let flags = decoded.privileges(index).unwrap();
+        assert_eq!(
+            flags.writable, writable,
+            "decoded global privilege {address}"
+        );
+        assert_eq!(flags.signer, address == TAKER, "decoded signer {address}");
     }
 }
 

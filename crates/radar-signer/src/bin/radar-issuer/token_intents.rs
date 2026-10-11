@@ -47,6 +47,8 @@ mod tests {
         data.push(9);
         Message {
             required_signatures: 1,
+            readonly_signed: 0,
+            readonly_unsigned: 1,
             accounts: vec![[1; 32], [2; 32], [3; 32], [4; 32], program.to_bytes()],
             recent_blockhash: [0; 32],
             versioned: false,

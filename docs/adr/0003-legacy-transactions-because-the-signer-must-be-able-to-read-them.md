@@ -95,6 +95,14 @@ global signer/writable privileges, instruction spend/output enforcement, net fil
 and protected live evidence still require independent verification. It grants no
 authority and does not open autonomous Routing.
 
+The independent message decoder retains both read-only header counts and rejects
+counts that cannot describe its account list. Its privilege accessor resolves
+declared transaction-wide signing and writability; it does not trust instruction
+metas or claim runtime-effective writability. The signer requires its fee payer
+to be a writable signer, and curve trader-role checks consume the same accessor.
+Captured legacy construction is checked against these decoded privileges.
+This does not establish pool/vault ownership or complete route-role verification.
+
 - `radar-exec` and `radar-signer` share one decoder — the signer's — so a
   transaction accepted by the pre-check is accepted by the signer for the same
   reasons.

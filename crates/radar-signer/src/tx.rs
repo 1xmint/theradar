@@ -13,6 +13,9 @@
 /// Why a transaction could not be decoded.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum DecodeError {
+    /// Header counts cannot describe the declared account list.
+    #[error("invalid message account privilege counts")]
+    InvalidHeader,
     /// The bytes ran out mid-field.
     #[error("truncated at byte {at}, needed {needed} more")]
     Truncated {
@@ -81,6 +84,10 @@ pub struct Instruction {
 pub struct Message {
     /// How many signatures the message requires.
     pub required_signatures: u8,
+    /// Read-only accounts at the end of the signed account prefix.
+    pub readonly_signed: u8,
+    /// Read-only accounts at the end of the unsigned account suffix.
+    pub readonly_unsigned: u8,
     /// Every account named, in order.
     pub accounts: Vec<[u8; 32]>,
     /// The recent blockhash.
@@ -98,7 +105,36 @@ pub struct Message {
     pub message_offset: usize,
 }
 
+/// Transaction-wide privileges derived from the message header, not an
+/// instruction builder's account descriptions.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AccountPrivileges {
+    /// The account must sign this transaction.
+    pub signer: bool,
+    /// The account is declared writable by this transaction.
+    pub writable: bool,
+}
+
 impl Message {
+    /// Resolve global privileges for an account index in this decoded message.
+    #[must_use]
+    pub fn privileges(&self, index: usize) -> Option<AccountPrivileges> {
+        self.accounts.get(index)?;
+        let signed = usize::from(self.required_signatures);
+        let writable_signed = signed.checked_sub(usize::from(self.readonly_signed))?;
+        let writable_unsigned = self
+            .accounts
+            .len()
+            .checked_sub(usize::from(self.readonly_unsigned))?;
+        let signer = index < signed;
+        let writable = if signer {
+            index < writable_signed
+        } else {
+            index < writable_unsigned
+        };
+        Some(AccountPrivileges { signer, writable })
+    }
+
     /// The bytes a Solana signature actually covers.
     ///
     /// Not the whole transaction: the signature array is excluded. Signing the
@@ -217,10 +253,16 @@ pub fn decode(bytes: &[u8]) -> Result<Message, DecodeError> {
     } else {
         first
     };
-    let _readonly_signed = r.u8()?;
-    let _readonly_unsigned = r.u8()?;
+    let readonly_signed = r.u8()?;
+    let readonly_unsigned = r.u8()?;
 
     let account_count = r.shortvec()?;
+    let unsigned = account_count
+        .checked_sub(usize::from(required_signatures))
+        .ok_or(DecodeError::InvalidHeader)?;
+    if readonly_signed > required_signatures || usize::from(readonly_unsigned) > unsigned {
+        return Err(DecodeError::InvalidHeader);
+    }
     let mut accounts = Vec::with_capacity(account_count.min(256));
     for _ in 0..account_count {
         accounts.push(r.key()?);
@@ -276,6 +318,8 @@ pub fn decode(bytes: &[u8]) -> Result<Message, DecodeError> {
 
     Ok(Message {
         required_signatures,
+        readonly_signed,
+        readonly_unsigned,
         accounts,
         recent_blockhash,
         instructions,
@@ -308,6 +352,57 @@ mod tests {
             out.extend_from_slice(data);
         }
         out
+    }
+
+    #[test]
+    fn header_privileges_resolve_all_four_classes_in_legacy_and_v0() {
+        for versioned in [false, true] {
+            let mut bytes = legacy(&[], 5);
+            bytes[1..4].copy_from_slice(&[2, 1, 2]);
+            if versioned {
+                bytes.insert(1, 0x80);
+                bytes.push(0); // no lookup tables
+            }
+            let message = decode(&bytes).unwrap();
+            assert_eq!(message.readonly_signed, 1);
+            assert_eq!(message.readonly_unsigned, 2);
+            for (index, (signer, writable)) in [
+                (true, true),
+                (true, false),
+                (false, true),
+                (false, false),
+                (false, false),
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                assert_eq!(
+                    message.privileges(index),
+                    Some(AccountPrivileges { signer, writable }),
+                    "index {index}, versioned {versioned}"
+                );
+            }
+            assert_eq!(message.privileges(5), None);
+            assert_eq!(message.privileges(usize::MAX), None);
+        }
+    }
+
+    #[test]
+    fn impossible_privilege_counts_are_refused_before_resolving_accounts() {
+        for header in [[6, 0, 0], [2, 3, 0], [2, 0, 4]] {
+            let mut bytes = legacy(&[], 5);
+            bytes[1..4].copy_from_slice(&header);
+            assert_eq!(
+                decode(&bytes),
+                Err(DecodeError::InvalidHeader),
+                "{header:?}"
+            );
+        }
+        for header in [[0, 0, 5], [2, 2, 3], [5, 5, 0]] {
+            let mut bytes = legacy(&[], 5);
+            bytes[1..4].copy_from_slice(&header);
+            assert!(decode(&bytes).is_ok(), "valid boundary {header:?}");
+        }
     }
 
     #[test]

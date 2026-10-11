@@ -164,6 +164,9 @@ pub enum Rejection {
     /// reason about.
     #[error("fee payer is not the signing wallet")]
     ForeignFeePayer,
+    /// The fee payer address is insufficient without both global privileges.
+    #[error("fee payer must be a writable signer")]
+    InvalidFeePayerPrivileges,
     /// The transaction contains no instruction at all.
     #[error("no instructions")]
     Empty,
@@ -350,6 +353,12 @@ pub fn check(
 
     if message.fee_payer() != Some(*signing_wallet.as_bytes()) {
         rejections.push(Rejection::ForeignFeePayer);
+    }
+    if !message
+        .privileges(0)
+        .is_some_and(|flags| flags.signer && flags.writable)
+    {
+        rejections.push(Rejection::InvalidFeePayerPrivileges);
     }
 
     rejections.extend(crate::trade_accounts::check(
@@ -1389,6 +1398,24 @@ mod tests {
         )
         .expect_err("must refuse");
         assert!(rejections.contains(&Rejection::NeedsOperator));
+    }
+
+    #[test]
+    fn a_fee_payer_without_writable_signing_privileges_is_refused() {
+        for (offset, value) in [(1, 0), (2, 1)] {
+            let mut bytes = honest();
+            bytes[offset] = value;
+            let rejections = check(
+                &authorization(),
+                &bytes,
+                &Address::new(WALLET),
+                &allowlist(),
+                &policy(),
+                unbounded(NOW),
+            )
+            .expect_err("fee payer address alone is insufficient");
+            assert!(rejections.contains(&Rejection::InvalidFeePayerPrivileges));
+        }
     }
 
     #[test]

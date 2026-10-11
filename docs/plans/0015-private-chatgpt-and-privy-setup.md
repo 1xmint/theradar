@@ -5463,3 +5463,22 @@ The signer decoder currently discards header readonly counts; expose and validat
 actual global privileges at its consumers before relying on account roles.
 Live portfolio/recovery, adaptive supervisor/chat, protected handover/install and
 broader market verification remain open. Fully autonomous trading remains off.
+
+### Signer account privileges handback (2026-10-11)
+
+Started feat/signer-account-privileges from integrated 9be396a after Router
+CI passed. The independent decoder previously discarded both read-only header
+counts. Retain them, reject impossible signed/unsigned counts, and resolve the
+four declared account privilege classes by index. Actual signer fee-payer checks
+now require both signing and writable privileges; curve trader-role verification
+uses the same accessor. This describes header-declared privileges, not runtime
+program-account demotion, account ownership or complete route verification.
+
+Added legacy/v0 class-boundary and malformed-count regressions, a signer refusal
+for a named fee payer without either privilege, and assertions against the raw
+captured metas in the existing legacy compiler regression. Updated two manually
+constructed issuer-test messages for the new fields. Test floor 2249. Publish
+for GitHub build/tests/lint/mutations; no local jobs, deployment or authority
+change. Integrated CI 38113032606 at 9be396a is independently still running.
+Full live inputs, routing semantics/assets, settlement/recovery, adaptive agent
+and chat, protected handover/install and broad market coverage remain open.
