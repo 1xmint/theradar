@@ -6074,3 +6074,18 @@ the large-balance arithmetic fixture inferred as i32 (wallet_read.rs:188:30 and
 the expected tuple columns explicitly u64; no production behavior or test floor
 change. Let the entire old run finish before pushing the correction, then require
 fresh GitHub verification. No checks were cancelled or substituted locally.
+
+### Native wallet valuation verified integration (2026-10-11)
+
+Integration b545c71 passed CI 38159650933. Collector correction 8e2f20b passed
+every job in CI 38160165308; all four mutation shards report 23 tested, 17 caught,
+six compiler-unviable and no missed mutations. Merge d75e937 incorporates PR 368
+into integration with floor 2275. Require combined verification before release;
+do not push integration over its live check. No production or authority change.
+
+Next build the actual marked holdings consumer using existing Portfolio types,
+verified raw wallet observations, the independent SOL feed and admitted exit
+readers. Keep arbitrary/unpriced/frozen holdings explicit, retain observation
+dates and avoid serializing the fresh Portfolio's default zero historical PnL as
+measured performance. Wallet-wide economic reconciliation, claims/reserves and
+live risk-snapshot construction remain distinct requirements before allocation.
