@@ -183,6 +183,7 @@ impl Journal {
             public_reason,
             redacted,
             operation: None,
+            broker: None,
         })
     }
 
@@ -229,6 +230,38 @@ impl Journal {
             public_reason,
             redacted: None,
             operation: Some(operation),
+            broker: None,
+        })
+    }
+
+    pub(crate) fn record_broker(
+        &mut self,
+        entry: crate::BrokerEntry,
+        at: u64,
+    ) -> Result<Recorded, JournalError> {
+        self.append(Event {
+            schema: SCHEMA_VERSION,
+            sequence: self.sequence + 1,
+            id: String::new(),
+            previous: self.previous.clone(),
+            correlation: Correlation {
+                receipt: Some(entry.intent.client_order_id.clone()),
+                ..Correlation::default()
+            },
+            stage: Stage::BrokerOrder,
+            outcome: match entry.state {
+                crate::BrokerState::Reserved => Outcome::Ok,
+                crate::BrokerState::SubmissionUnknown => Outcome::Uncertain,
+            },
+            at,
+            took_ms: None,
+            build: None,
+            versions: Vec::new(),
+            config: None,
+            public_reason: None,
+            redacted: None,
+            operation: None,
+            broker: Some(entry),
         })
     }
 

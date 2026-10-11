@@ -54,6 +54,12 @@ fill/terminal observations without authorizing a retry or releasing claims.
 HTTP 404 means not visible, not proof that submission failed; other errors refuse
 without partial output. See [recovery reads](docs/plans/0021-alpaca-order-recovery-read.md).
 
+`radar alpaca-order-reserve --journal <private-file> --account-id <paper-id> --intent <typed-intent>`
+records an immutable paper claim. `radar alpaca-order-journal --journal <private-file> --account-id <paper-id>`
+reopens and verifies it under exclusive cooperative ownership. These operator
+commands need no broker keys and cannot submit, retry or release an order.
+See [durable paper claims](docs/plans/0022-alpaca-order-journal.md).
+
 **Status: recording, and refusing to trade.** The pipeline runs end to end on a
 live instance — recording launches, measuring what became of them, and running
 the full decision lane over what it has recorded. 479,564 launches, 1,326,862 outcome measurements and 7,543
