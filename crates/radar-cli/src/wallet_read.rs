@@ -181,7 +181,7 @@ mod tests {
     #[test]
     fn native_value_rounds_outward_without_floats_or_saturation() {
         for (lamports, low, high, expected_low, expected_high) in [
-            (0, 2, 3, 0, 0),
+            (0, 2, 3, 0_u64, 0_u64),
             (1, 999_999_999, 1_000_000_001, 0, 2),
             (1_000_000_000, 2, 3, 2, 3),
             (3_000_000_001, 2, 3, 6, 10),

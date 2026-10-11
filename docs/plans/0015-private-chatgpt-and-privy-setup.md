@@ -6067,3 +6067,10 @@ Full marked portfolio, claims/reserve accounting, economic reconciliation and
 protected live snapshot production remain open; the native band alone cannot
 authorize wallet-based adaptive capital. Continue those actual consumers before
 autonomous supervision, submission/settlement/recovery and owner handover.
+
+Initial collector CI 38159963348 at a87b219 found two expected-value literals in
+the large-balance arithmetic fixture inferred as i32 (wallet_read.rs:188:30 and
+:188:46). Lint and mutation baselines report the same compilation error. Make
+the expected tuple columns explicitly u64; no production behavior or test floor
+change. Let the entire old run finish before pushing the correction, then require
+fresh GitHub verification. No checks were cancelled or substituted locally.
