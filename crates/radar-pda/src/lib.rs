@@ -10,6 +10,27 @@ use sha2::{Digest, Sha256};
 
 const MARKER: &[u8] = b"ProgramDerivedAddress";
 
+/// Canonical associated-token-account program, checked by retained mainnet captures.
+pub const ATA_PROGRAM: Address = Address::new([
+    0x8c, 0x97, 0x25, 0x8f, 0x4e, 0x24, 0x89, 0xf1, 0xbb, 0x3d, 0x10, 0x29, 0x14, 0x8e, 0x0d, 0x83,
+    0x0b, 0x5a, 0x13, 0x99, 0xda, 0xff, 0x10, 0x84, 0x04, 0x8e, 0x7b, 0xd8, 0xdb, 0xe9, 0xf8, 0x59,
+]);
+
+/// Derives a holder's canonical token account. The token program is a seed;
+/// this proves an address binding, not the account's contents or spendability.
+#[must_use]
+pub fn associated_token_account(
+    owner: &Address,
+    mint: &Address,
+    token_program: &Address,
+) -> Option<Address> {
+    find(
+        &[owner.as_bytes(), token_program.as_bytes(), mint.as_bytes()],
+        &ATA_PROGRAM,
+    )
+    .map(|(address, _)| address)
+}
+
 /// Whether a 32-byte value is a point on the ed25519 curve.
 ///
 /// A PDA is precisely an address that is **not**, because that is what

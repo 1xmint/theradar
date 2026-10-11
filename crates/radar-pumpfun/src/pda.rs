@@ -38,10 +38,7 @@ pub use radar_decode::pumpfun::PROGRAM_ID;
 /// Every one of these constants is *checked* by a test that derives an address
 /// with it and compares against mainnet, so a transcription error fails here
 /// rather than on chain.
-pub const ATA_PROGRAM: Address = Address::new([
-    0x8c, 0x97, 0x25, 0x8f, 0x4e, 0x24, 0x89, 0xf1, 0xbb, 0x3d, 0x10, 0x29, 0x14, 0x8e, 0x0d, 0x83,
-    0x0b, 0x5a, 0x13, 0x99, 0xda, 0xff, 0x10, 0x84, 0x04, 0x8e, 0x7b, 0xd8, 0xdb, 0xe9, 0xf8, 0x59,
-]);
+pub use radar_pda::ATA_PROGRAM;
 
 /// The fee program pump.fun's instructions carry.
 pub const FEE_PROGRAM: Address = Address::new([
@@ -133,11 +130,7 @@ pub fn associated_token_account(
     mint: &Address,
     token_program: &Address,
 ) -> Option<Address> {
-    find(
-        &[owner.as_bytes(), token_program.as_bytes(), mint.as_bytes()],
-        &ATA_PROGRAM,
-    )
-    .map(|(a, _)| a)
+    radar_pda::associated_token_account(owner, mint, token_program)
 }
 
 /// The fee configuration, which lives under the **fee** program rather than

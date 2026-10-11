@@ -784,20 +784,27 @@ mod tests {
         build(&venue_keys(), &[venue_ix(data)])
     }
 
-    fn venue_keys() -> [[u8; 32]; 6] {
+    fn venue_keys() -> [[u8; 32]; 8] {
+        let token: Address = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+            .parse()
+            .unwrap();
+        let curve = radar_pda::find(
+            &[b"bonding-curve", &MINT],
+            &radar_decode::pumpfun::PROGRAM_ID,
+        )
+        .unwrap()
+        .0;
         [
             WALLET,
             MINT,
             PUMP,
             SYSTEM_PROGRAM,
             *radar_types::Asset::WRAPPED_SOL_MINT.as_bytes(),
-            *radar_pda::find(
-                &[b"bonding-curve", &MINT],
-                &radar_decode::pumpfun::PROGRAM_ID,
-            )
-            .unwrap()
-            .0
-            .as_bytes(),
+            *curve.as_bytes(),
+            *token.as_bytes(),
+            *radar_pda::associated_token_account(&curve, &Address::new(MINT), &token)
+                .unwrap()
+                .as_bytes(),
         ]
     }
 
@@ -814,11 +821,13 @@ mod tests {
             let mut roles = vec![3; 14];
             roles[1] = 1;
             roles[2] = 4;
+            roles[3] = 6;
             roles[10] = 5;
+            roles[11] = 7;
             roles[13] = 0;
             roles
         } else {
-            vec![3, 3, 1, 5, 3, 3, 0]
+            vec![3, 3, 1, 5, 7, 3, 0, 3, 6, 6]
         };
         (2, roles, data)
     }
@@ -1613,7 +1622,7 @@ mod tests {
                 .0
                 .as_bytes(),
             );
-            for replacement in [3, 6] {
+            for replacement in [3, 8] {
                 let mut damaged = original.clone();
                 damaged.1[role] = replacement;
                 // The correct derived curve is still in static keys and in the
@@ -1627,6 +1636,69 @@ mod tests {
                     }),
                     "{known:?}: {reasons:?}"
                 );
+            }
+        }
+    }
+
+    #[test]
+    fn curve_token_binding_uses_each_admitted_program_and_the_actual_instruction_role() {
+        use radar_decode::pumpfun::Instruction;
+        for token in [
+            "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+            "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+        ] {
+            let token: Address = token.parse().unwrap();
+            let mut keys = venue_keys();
+            keys[6] = *token.as_bytes();
+            keys[7] = *radar_pda::associated_token_account(
+                &Address::new(keys[5]),
+                &Address::new(MINT),
+                &token,
+            )
+            .unwrap()
+            .as_bytes();
+            for (known, _, _) in radar_decode::pumpfun::KNOWN
+                .iter()
+                .filter(|(ix, _, _)| ix.is_trade())
+            {
+                let action = if known.is_buy() {
+                    Action::Buy
+                } else {
+                    Action::Exit
+                };
+                let original = venue_ix(venue_trade(*known, 10, 20));
+                assert!(
+                    check_venue_action(
+                        &build(&keys, std::slice::from_ref(&original)),
+                        50_000_000,
+                        action,
+                        Some(10)
+                    )
+                    .is_ok()
+                );
+                let (token_role, program_role) = match known {
+                    Instruction::Buy | Instruction::BuyExactSolIn => (4, 8),
+                    Instruction::Sell => (4, 9),
+                    _ => (11, 3),
+                };
+                for (role, reason) in [
+                    (token_role, "derived curve token account"),
+                    (program_role, "base token program"),
+                ] {
+                    let mut wrong = original.clone();
+                    wrong.1[role] = 3;
+                    let reasons = check_venue_action(
+                        &build(&keys, &[original.clone(), wrong]),
+                        50_000_000,
+                        action,
+                        Some(20),
+                    )
+                    .unwrap_err();
+                    assert!(reasons.contains(&Rejection::TradeAccountMismatch {
+                        instruction: known.anchor_name().to_owned(),
+                        role: reason.to_owned()
+                    }));
+                }
             }
         }
     }
