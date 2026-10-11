@@ -13,7 +13,7 @@ struct Asset {
     id: String,
     symbol: String,
     #[serde(rename = "class")]
-    asset_class: String,
+    kind: String,
     status: Option<String>,
     exchange: Option<String>,
     tradable: Option<bool>,
@@ -47,7 +47,7 @@ fn collect(
         if asset.symbol != *symbol
             || asset.id.trim().is_empty()
             || !identities.insert(asset.id.clone())
-            || asset.asset_class != "us_equity"
+            || asset.kind != "us_equity"
         {
             return Err("paper asset identity or class differs from requested equities".into());
         }

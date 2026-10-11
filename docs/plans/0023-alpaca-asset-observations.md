@@ -23,6 +23,11 @@ including whether fractional shares can trade. Actual caller: alpaca-assets-read
 
 ## Handback
 
+Initial CI 38182530550 lint flagged Asset.asset_class as a redundant struct-name
+prefix. Rename the internal field to kind and preserve the JSON class rename.
+Every mutation shard passed. Full-run completion and replacement verification
+are still required before integration; do not cancel or push over active checks.
+
 Source only; no keys, orders, deposits, deployment, paid data or delegation.
 The CLI accepts --account-id and --symbols only, with no live endpoint override.
 Only selected observations are returned; unknown response fields are omitted.
