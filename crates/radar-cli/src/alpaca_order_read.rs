@@ -213,10 +213,12 @@ mod tests {
                 "canceled_at",
                 "expired_at",
                 "failed_at",
-                "legs",
             ] {
                 assert_eq!(report["order"][field], order(status)[field], "{field}");
             }
+            assert_eq!(report["order"]["legs"].as_array().unwrap().len(), 1);
+            assert_eq!(report["order"]["legs"][0]["id"], "leg-id");
+            assert_eq!(report["order"]["legs"][0]["status"], "held");
             assert_eq!(report["selected_account_fields_unchanged"], true);
             assert!(report["account_after"]["account_number"].is_null());
             assert!(report["order"]["unknown_secret"].is_null());

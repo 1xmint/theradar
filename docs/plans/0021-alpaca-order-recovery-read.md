@@ -29,6 +29,11 @@ to retry or release capital. Preserve the autonomous Alpaca-first objective.
 
 ## Handback
 
+CI 38181116618 found one fixture assertion comparing normalized nested legs
+against sparse raw JSON. Optional absent fields deliberately serialize as null;
+assert the retained leg count, identity and status instead of raw shape equality.
+This fixes the fixture expectation, preserving unknown-field semantics.
+
 The order lookup is read-only and grants no execution authority. It neither
 retries orders nor releases claims on HTTP 404, canceled/expired/filled status or
 any other observation. Account snapshots remain sequential, not atomic; timestamp
