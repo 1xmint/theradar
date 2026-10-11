@@ -5571,3 +5571,35 @@ mutation also demonstrate the exit failure directly; retain the separate process
 regression for wiring and independent physical bounds. Test floor 2251. Wait for
 the initial run's terminal status before publishing and require fresh GitHub CI.
 Integrated privilege CI 38113635524 at 6cdd52d passed fully; no deployment.
+
+Exit CI 38114193405 at 20cd76e passed fully: build, MSRV, tests, lint,
+web/site and mutations. Five selected: four caught, one unviable, none missed.
+Retained diagnostics outside the checkout at radar-mutation-38114193405.
+Exact verify.rs:315:50 AND-to-OR compiles and fails the new appreciated-sale
+library regression with Capped/Reduce AboveSignerPolicy, reproducing the old
+exit failure. Initial CI 38113994343 at 103da94 also passed fully, including
+the real Privy process regression. No exclusions. Integrated to verified exit
+source and record this handback; publish fresh broad integrated CI and dispatch
+release-linux on the same integrated ref. Verify both before deploying anything.
+
+Next operational step is concrete and already authorized: download the new
+GitHub Linux artifact, check all six hashes against its BUILD-INFO commit,
+then use only the fixed radar-deploy procedure for radar-serve. Verify deployed
+/health build and the private setup page's actual controls. This script installs
+Serve only; no separate signer/issuer installation or authority is implied.
+Live trading must remain closed. Previous verified artifact 896009c remains
+older than this source and is not the intended new deployment.
+
+Next account-verification implementation: generic PDA derivation and ATAs already
+exist in radar-pumpfun/src/pda.rs, and raw mint/token ownership and extensions in
+radar-pumpfun/src/token.rs. radar-pumpfun already depends on radar-signer, so do
+not add the reverse dependency and create a cycle or copy the existing algorithm.
+A shared pure derivation at an actual signer/builder consumer must retain the
+mainnet address regressions. Pool, vault, token and ATA verification remain
+incomplete; captured PumpSwap buy and Raydium pool state from prior notes are
+available. Keep live portfolio/evidence, settlement/recovery, adaptive supervisor/
+chat and protected handover/install open. Also review optional daily-stop exit
+semantics explicitly: kernel currently applies the enabled daily-loss check to
+all actions, while position/canary sizing applies only to acquisitions. No
+change to the owner's saved cap or that existing behavior was made here.
+The full autonomous goal remains active; no funding or live trade occurred.
