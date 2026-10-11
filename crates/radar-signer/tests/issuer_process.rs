@@ -103,7 +103,10 @@ fn native_capital_replays_multiple_reserved_claims_but_not_unreserved_proposals(
                     at: Slot(1000),
                 },
                 unix_now(),
-                radar_journal::Correlation::default(),
+                radar_journal::Correlation {
+                    mint: Some(address(0x22)),
+                    ..radar_journal::Correlation::default()
+                },
             )
             .unwrap();
         if reserve {
@@ -285,7 +288,10 @@ fn native_capital_keeps_wrong_asset_units_and_newer_claim_context_unknown() {
                     at: Slot(if case == 2 { 1001 } else { 1000 }),
                 },
                 unix_now(),
-                radar_journal::Correlation::default(),
+                radar_journal::Correlation {
+                    mint: Some(address(0x22)),
+                    ..radar_journal::Correlation::default()
+                },
             )
             .unwrap();
         log.reserve(&id, &mut portfolio, unix_now()).unwrap();

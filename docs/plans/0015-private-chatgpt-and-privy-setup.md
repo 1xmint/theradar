@@ -6186,3 +6186,12 @@ marked holdings, complete retained economic accounting and these claim/reserve
 quantities into the actual protected live risk-state producer next. Then finish
 adaptive preference/supervisor integration, durable execution/recovery and owner
 handover checks. This closes native claim accounting, not the whole live producer.
+
+Initial native-capital CI 38162673830 at 9482a9b found two fixture failures,
+issuer_process.rs:108 and :290: generic OperationLog::propose requires a
+nonempty correlation; default Correlation was rejected with Journal(NoCorrelation).
+Supply the existing fixture mint identity in both generic reservation fixtures.
+The actual issued SubmissionUnknown, native reserve arithmetic and released
+settlement boundary regressions passed the mutation baseline. This is a fixture
+correction, not a change to production claim semantics or a mutation waiver.
+Wait for every existing job to finish before pushing; require fresh GitHub CI.
