@@ -71,8 +71,9 @@ claim zero reservations. Exact intent repeats do not append or reset unknown sta
 Protected stable directories, journal and sidecar paths remain mandatory.
 Cooperative locks and hash chains do not prevent administrator replacement,
 rollback to a valid prefix, or another writer bypassing ownership. File sync
-orders the record before the effect; directory-entry/power-loss guarantees still
-need verification before a production executor relies on newly created logs.
+orders the record before the effect. Broker records now also require successful
+parent-directory sync before returning a receipt; see plan 0025 for verification
+and the operating-system/storage limits of that guarantee.
 This is not economic reconciliation or capital authorization.
 
 Next: bind retained intents to broker lookup payloads, fills and cash movements;
