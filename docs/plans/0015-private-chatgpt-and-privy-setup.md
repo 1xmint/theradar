@@ -6007,3 +6007,18 @@ publication and old-file preservation on failed collection. Floor is 2270;
 require GitHub tests/build/lint/MSRV and behavior mutations before integration.
 Complete marked portfolio valuation, usable capital, adaptive controller and
 execution/recovery remain open. No production deployment or authority change.
+
+### Protected price context verification correction (2026-10-11)
+
+Price reader CI 38158812428 passed fully at 3030f37. Protected-consumer CI
+38159017477 completed at 37fe773 with tests/build/MSRV/lint, site/web,
+formatting and dependency checks passing, but mutation shard 2 found
+live_price.rs:55:31 (< to >) survived. The older context fixture also had a
+posting slot after that context, so the independent posting guard masked the
+missing context-floor check. Keep posting <= context for that damaged packet;
+also use a valid context strictly after proposal.oldest_input_slot and within
+state.now to exercise the non-degenerate interval. Other faults remain isolated.
+Retain diagnostics outside the checkout in radar-mutation-38159017477.
+No production logic change or mutation exclusion. Preserve floor 2270, publish
+only after the old run is terminal, and require new GitHub checks before merging.
+Do not push the parent price-reader branch or integration over the child run.

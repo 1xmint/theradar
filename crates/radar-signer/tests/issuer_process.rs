@@ -69,12 +69,14 @@ fn protected_live_price_tightens_native_ceiling_and_bounds_authorization_expiry(
 #[test]
 fn protected_live_price_reloads_and_never_falls_back_or_refreshes_old_risk_state() {
     let mut fixture = Fixture::new();
+    fixture.snapshot["state"]["now"] = json!(1001);
     let path = fixture.dir.path().join("price.json");
     fixture.config["sol_price_path"] = json!(path);
     fixture.save();
     let mut issuer = fixture.start();
     assert_eq!(issuer.ask(&fixture.candidate)["outcome"], "refused");
-    let packet = live_price_packet(unix_now(), 200_000_000);
+    let mut packet = live_price_packet(unix_now(), 200_000_000);
+    packet["observation"]["context_slot"] = json!(1001);
     for (pointer, value) in [
         ("/version", json!(0)),
         ("/authority", json!("model")),
@@ -88,8 +90,8 @@ fn protected_live_price_reloads_and_never_falls_back_or_refreshes_old_risk_state
         ("/observation/lower_micro_usd_per_sol", json!(0)),
         ("/observation/upper_micro_usd_per_sol", json!(199_999_999)),
         ("/observation/context_slot", json!(999)),
-        ("/observation/context_slot", json!(1001)),
-        ("/observation/posted_slot", json!(1001)),
+        ("/observation/context_slot", json!(1002)),
+        ("/observation/posted_slot", json!(1002)),
         ("/observation/published_at_unix_secs", json!(unix_now() + 1)),
         (
             "/observation/published_at_unix_secs",
@@ -100,6 +102,10 @@ fn protected_live_price_reloads_and_never_falls_back_or_refreshes_old_risk_state
     ] {
         let mut damaged = packet.clone();
         *damaged.pointer_mut(pointer).unwrap() = value;
+        if pointer == "/observation/context_slot" && damaged.pointer(pointer) == Some(&json!(999)) {
+            // Keep posting <= context so it cannot mask the old-context fault.
+            damaged["observation"]["posted_slot"] = json!(999);
+        }
         write(&path, &damaged);
         assert_eq!(
             issuer.ask(&fixture.candidate)["outcome"],
