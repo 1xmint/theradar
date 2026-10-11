@@ -184,8 +184,10 @@ mod tests {
             assert!(
                 collect(|request| Ok(if request["type"] == "metaAndAssetCtxs" {
                     metadata()
-                } else {
+                } else if request["coin"] == "BTC" {
                     bad.clone()
+                } else {
+                    book(&request["coin"])
                 }))
                 .is_err()
             );

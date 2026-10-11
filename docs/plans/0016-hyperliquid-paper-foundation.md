@@ -72,3 +72,14 @@ GitHub lint identified only the unreadable timestamp literal in perps_read.rs.
 Group its digits without semantic changes. Keep this correction local until all
 current jobs finish; then push it with the recorded direction discussion and
 require fresh GitHub verification. No further venue implementation resumed.
+
+Initial CI completed: build/tests/MSRV/web/site/dependency/format/license checks
+passed. Lint rejected the timestamp literal. Mutation shards 1/2 additionally
+named survivors at perps_read.rs:44:13 and :45:35 (each `||` to `&&` in the book
+guard). The malformed-book fixture returned the same BTC packet for later ETH/SOL
+requests, masking a bypass with a later identity refusal. Damage only the BTC
+response and return correct subsequent books, so the regression must detect that
+specific malformed observation. No production semantics, test count or exclusion
+changes. Style/docs correction 486d838 was already pushed before reading those
+two mutation diagnostics; let its new run finish before publishing this fixture
+correction. Require complete GitHub verification; the prototype is not verified.
