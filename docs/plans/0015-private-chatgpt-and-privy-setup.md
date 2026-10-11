@@ -5352,3 +5352,25 @@ the production Routing implementation still refuses every buy/sell, while the
 browser assembler only emits v0 messages with lookup tables. Build signer-readable
 routes without dropping accounts, privileges, instructions, fees or packet limits;
 execution semantics and live evidence remain separate required gates. Goal active.
+
+### Signer-readable Router construction handback (2026-10-11)
+
+Previous goal turn integrated verified protected exits. Integrated CI 38111478862
+at e1b2153 was still running when this branch began; inspect its terminal result.
+Started feat/signer-readable-router-build from e1b2153. Named production caller
+Router::build_legacy fetches quote and instructions once, then uses shared assembly
+validation with inline account placement and legacy encoding. Browser build stays
+v0. No dropped accounts/instructions/privileges or fallback to lookup tables.
+
+Added captured USDC-to-SOL instruction/order/privilege/blockhash comparison through
+the independent signer decoder, oversized SOL-to-USDC refusal, shared signer/tip/
+fee/data refusals, and the actual HTTP request/quote/build path in both directions.
+The full USDC-to-SOL capture fits inline; SOL-to-USDC does not. This is historical
+encoding evidence, not a current mainnet routing measurement. Test floor 2245.
+Publish for GitHub build/tests/lint/mutation checks; no workstation jobs ran.
+
+Autonomous Routing intentionally remains refused until independent routed-program
+semantics and protected asset spend/output verification are complete. This closes
+construction capability only. Actual admitted routes, live evidence/portfolio,
+recovery, adaptive supervisor/chat, owner handover and protected install remain
+goal work. No deployment, delegation or transaction occurred. Goal active.

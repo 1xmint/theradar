@@ -74,6 +74,16 @@ built locally with no router in the path at all.
 
 ## Consequences
 
+The Router now has an explicit build_legacy path using the same quote response
+and instruction validation as browser v0 assembly. All instruction addresses are
+already named in raw metas, so legacy compilation places them inline without
+fetching or trusting lookup-table membership. No instruction, address or privilege
+is removed to fit. Oversized routes refuse; existing browser v0 behavior remains.
+The captured USDC-to-SOL body fits inline, while the larger SOL-to-USDC capture
+exceeds the packet limit. These are historical encoding fixtures, not current
+liquidity or proof that the routed programs are safe. Autonomous Routing remains
+closed pending independent execution-semantic and asset-bound verification.
+
 - `radar-exec` and `radar-signer` share one decoder — the signer's — so a
   transaction accepted by the pre-check is accepted by the signer for the same
   reasons.

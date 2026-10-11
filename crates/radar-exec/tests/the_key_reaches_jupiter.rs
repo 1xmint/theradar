@@ -26,6 +26,56 @@ const TEST_KEY: &str = "test-key-that-authorises-nothing";
 
 const CRLF_CRLF: &[u8] = b"\r\n\r\n";
 
+#[test]
+fn legacy_build_uses_one_quoted_response_in_either_direction_and_preserves_refusals() {
+    for (name, input, output, amount, fits) in [
+        (
+            "jupiter-build-usdc-sol.json",
+            Asset::Usdc,
+            Asset::Sol,
+            10_000_000,
+            true,
+        ),
+        (
+            "jupiter-build-sol-usdc.json",
+            Asset::Sol,
+            Asset::Usdc,
+            100_000_000,
+            false,
+        ),
+    ] {
+        let body = fixture(name);
+        let (endpoint, seen) = one_shot(200, "OK", &body);
+        let router = Router::with_endpoint(endpoint, credentials());
+        let request = QuoteRequest::new(input, output, amount, taker());
+        let result = router.build_legacy(&request, 100);
+        if fits {
+            let build = result.unwrap();
+            assert_eq!(build.quote.input, input);
+            assert_eq!(build.quote.output, output);
+            assert_eq!(build.quote.in_amount, amount);
+            let expected = radar_exec::route::Quote::from_response(&body, &request, 100).unwrap();
+            assert_eq!(build.quote, expected);
+            assert!(
+                !radar_signer::decode(&build.transaction.wire)
+                    .unwrap()
+                    .versioned
+            );
+        } else {
+            assert!(
+                matches!(result, Err(RouteError::Malformed(reason)) if reason.contains("packet limit"))
+            );
+        }
+        let head = seen
+            .recv_timeout(Duration::from_secs(10))
+            .unwrap()
+            .to_lowercase();
+        assert!(head.contains(&format!("x-api-key: {TEST_KEY}")));
+        assert!(head.contains(&format!("amount={amount}")));
+        assert!(head.contains("slippagebps=100"));
+    }
+}
+
 fn credentials() -> Credentials {
     Credentials::from_vars(|k| (k == API_KEY_VAR).then(|| TEST_KEY.to_owned()))
         .expect("a supplied key makes credentials")
