@@ -7,7 +7,8 @@ Branch: feat/alpaca-order-recovery-read. Base: integration 6ae333d, identical tr
 to 02a3d3d verified in complete CI 38179746811. Exposure PR 376 is independent;
 its checks must finish before any parent movement. Complete exposure CI
 38180737966 now passed at 25f0b49, including every mutation shard. Parent CI
-38180442914 is still running; do not advance it. No workstation jobs.
+38180442914 passed every job. Keep the parent fixed while child checks run. No
+workstation jobs.
 
 ## Objective
 
@@ -33,6 +34,13 @@ CI 38181116618 found one fixture assertion comparing normalized nested legs
 against sparse raw JSON. Optional absent fields deliberately serialize as null;
 assert the retained leg count, identity and status instead of raw shape equality.
 This fixes the fixture expectation, preserving unknown-field semantics.
+
+CI 38181361455 then passed baseline checks but caught a surviving mutation at
+alpaca_order_read.rs:112:17 (account-path == changed to !=). Extract the actual
+transport dispatch into read_path and exercise both account and lookup paths
+against HTTP 200/302/400/401/404/500. An account 404 must refuse, whereas an order
+404 remains unresolved. The same regression now reaches the actual dispatch
+branch; the GitHub mutation check will reapply its inverse. No exclusion added.
 
 The order lookup is read-only and grants no execution authority. It neither
 retries orders nor releases claims on HTTP 404, canceled/expired/filled status or

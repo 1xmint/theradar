@@ -90,6 +90,22 @@ fn collect(
     )
 }
 
+fn read_path(
+    agent: &ureq::Agent,
+    base: &str,
+    path: &str,
+    key: &str,
+    secret: &str,
+) -> Result<Option<String>, String> {
+    let url = format!("{base}{path}");
+    // Missing accounts always refuse; only the order lookup may be not visible.
+    if path == "/v2/account" {
+        super::alpaca_read::get(agent, &url, key, secret).map(Some)
+    } else {
+        get_optional(agent, &url, key, secret)
+    }
+}
+
 pub(super) fn run(args: &[String]) -> Result<(), String> {
     let values: Vec<&str> = args.iter().map(String::as_str).collect();
     let [
@@ -108,12 +124,7 @@ pub(super) fn run(args: &[String]) -> Result<(), String> {
         super::alpaca_read::credential(std::env::var("RADAR_ALPACA_PAPER_SECRET_KEY").ok())?;
     let agent = super::alpaca_read::agent();
     let report = collect(expected, client_id, |path| {
-        let url = format!("{PAPER_API}{path}");
-        if path == "/v2/account" {
-            super::alpaca_read::get(&agent, &url, &key, &secret).map(Some)
-        } else {
-            get_optional(&agent, &url, &key, &secret)
-        }
+        read_path(&agent, PAPER_API, path, &key, &secret)
     })?;
     println!("{report}");
     Ok(())
@@ -321,7 +332,10 @@ mod tests {
     #[test]
     fn only_http_404_is_not_visible_other_statuses_and_redirects_refuse() {
         use std::io::{Read as _, Write as _};
-        for status in [200, 302, 400, 401, 404, 500] {
+        for (path, status) in [200, 302, 400, 401, 404, 500]
+            .into_iter()
+            .flat_map(|status| [("/v2/account", status), ("/lookup", status)])
+        {
             let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
             let address = listener.local_addr().unwrap();
             let server = std::thread::spawn(move || {
@@ -339,23 +353,29 @@ mod tests {
                 write!(stream, "HTTP/1.1 {status} Test\r\nContent-Length: {}\r\nLocation: http://{address}/redirected\r\nConnection: close\r\n\r\n{body}", body.len()).unwrap();
                 String::from_utf8(request).unwrap()
             });
-            let response = get_optional(
+            let response = read_path(
                 &super::super::alpaca_read::agent(),
-                &format!("http://{address}/lookup"),
+                &format!("http://{address}"),
+                path,
                 "test-key",
                 "test-secret",
             );
             match status {
                 200 => assert_eq!(response.unwrap(), Some("private-response".into())),
-                404 => assert_eq!(response.unwrap(), None),
-                302 => assert_eq!(
+                404 if path == "/lookup" => assert_eq!(response.unwrap(), None),
+                302 if path == "/lookup" => assert_eq!(
                     response.unwrap_err(),
                     "paper order lookup returned an unexpected status"
                 ),
-                _ => assert_eq!(response.unwrap_err(), "paper order lookup failed"),
+                _ if path == "/lookup" => {
+                    assert_eq!(response.unwrap_err(), "paper order lookup failed")
+                }
+                _ => {
+                    assert!(response.is_err(), "missing or failed accounts must refuse");
+                }
             }
             let request = server.join().unwrap().to_ascii_lowercase();
-            assert!(request.starts_with("get /lookup http/1.1"));
+            assert!(request.starts_with(&format!("get {path} http/1.1")));
             assert!(request.contains("apca-api-key-id: test-key"));
             assert!(request.contains("apca-api-secret-key: test-secret"));
         }
