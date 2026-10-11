@@ -62,11 +62,11 @@ Four checks, each on a value the caller currently controls outright:
    `Policy::CLOSED` *closed at the signer* rather than closed only in the process
    that decides. Today `Policy::CLOSED` is enforced in one place, and that place
    is upstream of the key.
-2. **Notional.** An authorisation may not exceed `policy.max_position`. Refused
+2. **Notional.** An acquisition authorisation may not exceed `policy.max_position`. Refused
    rather than silently clamped: a caller asking for more than the operator's
    policy allows is either a bug or an attack, and quietly serving it a smaller
    number hides both.
-3. **Canary.** Under `Autonomy::Canary`, `policy.max_canary` is the ceiling
+3. **Canary.** Under `Autonomy::Canary`, `policy.max_canary` is the acquisition ceiling
    instead. The dust round trip is the one thing that level exists to permit, and
    it must not inherit the larger bound.
 4. **Lifetime.** An authorisation's window may not exceed
@@ -84,7 +84,7 @@ not the caller's judgement.
 ## What this does not fix, stated plainly
 
 **A compromised caller can still repeat.** Each authorisation is bounded by
-`max_position`, and nothing here bounds how many of them arrive. The
+`max_position` for acquisitions, and nothing here bounds how many of them arrive. The
 portfolio-scoped limits — `max_deployed`, `max_daily_loss`, `max_per_creator` —
 remain unenforceable in this process, for the same reason the kernel re-run was
 rejected: they are functions of state the signer does not hold.
@@ -101,7 +101,7 @@ so that it is a scheduled piece of work rather than a paragraph someone remember
 later.
 
 Until it exists, the bound on a compromised caller is: `max_position` per
-transaction, times however many transactions it can get signed, with
+acquisition transaction, times however many transactions it can get signed, with
 **Privy's policy engine as the independent backstop** — which
 [ADR 0005](0005-customers-keep-custody-and-grant-radar-a-bounded-signer.md)
 precondition 1 still requires be verified by making it refuse.
@@ -1471,9 +1471,20 @@ Process regressions cover partial/full/split sales, excessive or zero quantity,
 partial Exit refusal, mismatched cash/holdings, frozen accounts, stale evidence,
 foreign program bytes, output protection and proof tampering. GitHub verification
 is required. This does not prove token spendability, ATA/curve derivations,
-ownership/writability or live evidence completeness. The signer's existing USD
-position ceiling also still applies to sales; appreciated exits need separate
-policy work. Live routing, collection and delegation remain closed.
+ownership/writability or live evidence completeness. Live routing, collection
+and delegation remain closed.
+
+The signer now applies USD position/canary sizing only to acquisitions, matching
+the kernel's `Action::increases_exposure` rule. An appreciated position can be
+reduced or exited without satisfying the smaller entry cap. This does not grant
+outgoing cash authority: every action retains the explicit native policy and
+issuer-proven caller ceiling; known sales retain raw-token, direction, mint/trader
+and output checks, plus the Privy process's proof, expiry and nonce requirements.
+The legacy native restriction for policies without an explicit cap is unchanged.
+The issuer still requires retained holdings to authorize a supported sale.
+Process regressions cover Capped/Canary reductions and exits above entry limits,
+token/output/native violations and continued refusal of oversized acquisitions.
+GitHub verification is required before treating this source as verified.
 
 ## What would reverse this
 

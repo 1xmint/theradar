@@ -5537,3 +5537,26 @@ supervisor/research-chat consumer; protected website handover/pause/revoke and
 service installation. Maintain multiple market families and SOL/USDC scope,
 explicitly refuse unsupported routes, and do not require every Solana program
 before an admitted, verified capability can run. Autonomous trading stays off.
+
+### Appreciated-position exit handback (2026-10-11)
+
+Previous turn was concrete progress: verified Router and privilege source was
+integrated at 6cdd52d. Broad CI 38113635524 is live for that exact source; do not
+restart it or push onto its branch while awaiting it. Started independent
+fix/appreciated-position-exits from 6cdd52d. Inspection confirmed the risk kernel
+applies position/canary sizing only to exposure increases, but signer check still
+applied its USD ceiling to every action. That could block an appreciated sale
+which the holdings-derived protected issuer and kernel otherwise admitted.
+
+Apply the signer's USD entry ceilings only to acquisitions. Preserve all-action
+physical native policy/caller caps, legacy native restriction, known-sale token,
+output and account-role checks, policy autonomy and Privy proof/expiry/nonce checks.
+Added an actual Privy-process regression for Capped/Canary Reduce/Exit authority
+above entry limits, with token over-debit, weakened output, native policy and
+caller-cap violations refused, and oversized buys still refused. Test floor 2250.
+Update ADR 0008's guarantee and previously explicit open issue in the same change.
+Publish for GitHub build/tests/lint/mutation verification; no local jobs.
+This fixes a concrete exit obstacle, not live routing or full activation. Keep
+pool/token/ATA proof, live portfolio/evidence, settlement/recovery, adaptive
+supervisor/chat, protected handover/install and admitted broad markets open.
+No funds, delegation, deployment or live trade changed.

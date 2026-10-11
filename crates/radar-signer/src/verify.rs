@@ -100,7 +100,7 @@ pub enum Rejection {
         /// The level the signer is configured with.
         level: String,
     },
-    /// The authorisation asks for more than this signer's policy permits.
+    /// An acquisition asks for more notional than this signer's entry policy permits.
     ///
     /// Refused rather than quietly clamped to the smaller number. A caller
     /// asking for more than the operator allowed is either a bug or an attack,
@@ -310,7 +310,9 @@ pub fn check(
     } else {
         policy.max_position
     };
-    if authorization.max_notional > policy_ceiling {
+    // Entry sizing must not trap an appreciated position. Reductions retain
+    // decoded direction, raw-token/output authority and outgoing native bounds.
+    if authorization.action.increases_exposure() && authorization.max_notional > policy_ceiling {
         rejections.push(Rejection::AboveSignerPolicy {
             asked: authorization.max_notional.get(),
             allowed: policy_ceiling.get(),

@@ -405,6 +405,94 @@ fn venue_roles(ix: radar_decode::pumpfun::Instruction) -> Vec<u8> {
 }
 
 #[test]
+fn appreciated_exits_preserve_physical_bounds_and_entry_caps_in_the_privy_process() {
+    use radar_decode::pumpfun::Instruction;
+    use radar_risk::Autonomy;
+    for autonomy in [Autonomy::Capped, Autonomy::Canary] {
+        let scratch = Scratch::new("appreciated-exits");
+        let mut policy = open_policy();
+        policy.autonomy = autonomy;
+        policy.max_position = radar_types::MicroUsd(10_000_000);
+        policy.max_canary = radar_types::MicroUsd(1_000_000);
+        policy.max_native_spend_lamports = Some(100);
+        let path = policy_file(&scratch.0, &policy);
+        let pump = *radar_decode::pumpfun::PROGRAM_ID.as_bytes();
+        let mut command = privy_only_command(&path);
+        command.env(
+            "RADAR_SIGNER_PROGRAMS",
+            format!("{},{}", b58(&pump), b58(&SYSTEM)),
+        );
+        let mut signer = Signer::from_command(command);
+        for action in ["reduce", "exit"] {
+            for (index, (tokens, output, native, caller_cap, reason)) in [
+                (10_u64, 100_u64, 10_u64, 50_u64, None),
+                (11, 100, 10, 50, Some("token")),
+                (10, 99, 10, 50, Some("output")),
+                (10, 100, 101, 200, Some("transfers")),
+                (10, 100, 51, 50, Some("transfers")),
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                let mut data = Instruction::Sell.discriminator().as_bytes().to_vec();
+                data.extend(tokens.to_le_bytes());
+                data.extend(output.to_le_bytes());
+                let mut transfer = 2_u32.to_le_bytes().to_vec();
+                transfer.extend(native.to_le_bytes());
+                let bytes = transaction(
+                    &venue_keys(pump),
+                    &[
+                        (2, venue_roles(Instruction::Sell), data),
+                        (3, vec![0, 1], transfer),
+                    ],
+                );
+                let mut input = privy_request(&bytes);
+                // The $50 sale exceeds both the $10 entry cap and $1 canary cap.
+                input["authorization"]["action"] = json!(action);
+                input["authorization"]["nonce"] = json!(format!("{action}-{index}"));
+                input["authorization"]["max_token_debit_raw"] = json!(10);
+                input["authorization"]["min_output_raw"] = json!(100);
+                input["max_lamports"] = json!(caller_cap);
+                attest(&mut input);
+                let answer = signer.ask(&input);
+                assert_eq!(
+                    answer["outcome"],
+                    if reason.is_none() {
+                        "authorised"
+                    } else {
+                        "refused"
+                    },
+                    "{autonomy:?}/{action}/{index}: {answer}"
+                );
+                if let Some(reason) = reason {
+                    assert!(answer["reasons"].to_string().contains(reason), "{answer}");
+                }
+            }
+        }
+        let mut buy = Instruction::BuyExactSolIn
+            .discriminator()
+            .as_bytes()
+            .to_vec();
+        buy.extend(10_u64.to_le_bytes());
+        buy.extend(100_u64.to_le_bytes());
+        let bytes = transaction(
+            &venue_keys(pump),
+            &[(2, venue_roles(Instruction::BuyExactSolIn), buy)],
+        );
+        let mut input = privy_request(&bytes);
+        input["authorization"]["nonce"] = json!("entry-still-capped");
+        input["authorization"]["min_output_raw"] = json!(100);
+        attest(&mut input);
+        let answer = signer.ask(&input);
+        assert_eq!(answer["outcome"], "refused", "{answer}");
+        assert!(
+            answer["reasons"].to_string().contains("micro-USD"),
+            "{answer}"
+        );
+    }
+}
+
+#[test]
 fn privy_process_checks_aggregate_sale_tokens_and_proof_binds_the_bound() {
     let scratch = Scratch::new("privy-token-debit");
     let policy = policy_file(&scratch.0, &open_policy());
