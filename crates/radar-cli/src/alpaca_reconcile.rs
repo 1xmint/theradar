@@ -23,6 +23,8 @@ pub(super) struct BrokerOrder {
     #[serde(rename = "type")]
     pub(super) kind: Option<String>,
     pub(super) order_class: Option<String>,
+    pub(super) time_in_force: Option<String>,
+    pub(super) extended_hours: Option<bool>,
     pub(super) qty: Option<String>,
     pub(super) notional: Option<String>,
     pub(super) filled_qty: Option<String>,
