@@ -5389,3 +5389,27 @@ Updated that integration assertion and its description; searched the exec source
 and tests for remaining copies. The new legacy-build tests had passed before this
 later integration failure, but the full mutation baseline still did not pass.
 Wait for terminal status before publishing; require a fresh full GitHub run.
+
+Router CI 38112031783 at 0ffc71f passed fully: build, MSRV, tests, lint,
+web/site and mutation aggregate. Downloaded diagnostics: nine selected mutants,
+two caught, seven unviable, none missed; shard 3 had zero selected mutants.
+Exact assemble.rs:786:12 and :836:12 delete-negation mutations compile and fail
+the existing independent v0 reader regressions. The unmutated baseline also runs
+the four new legacy/HTTP regressions successfully. No exclusions were added.
+Integrated exit CI 38111478862 at e1b2153 also passed fully. Fast-forwarded the
+integrated branch to verified Router source and recorded this handback; require
+fresh broad integrated CI after publication. No deployment or authority change.
+
+Next routed verification evidence: the captured USDC-to-SOL swap names Jupiter
+JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4 and discriminator
+bb64facc31c4af14. The official
+[RFQ SDK aggregator IDL](https://github.com/jup-ag/rfq-v2-sdk/blob/f3f30ff2af48f63c11f326a486b8b0eb9611714f/fill-decoder/idls/aggregator.json)
+matches route_v2's fixed amount/slippage prefix and ten named account roles.
+However, its Swap enum has 126 entries while this capture's first route-plan tag
+is 185. Do not reinterpret that unknown tail as one of the older HumidiFi entries.
+Its companion fill decoder deliberately ignores trailing bytes and uses fallback
+byte scanning for RFQ analysis; that is not a signer verification guarantee.
+Obtain and verify the actual supported route layout, account ownership/privileges
+and protected spend/output bounds before connecting autonomous Routing. Also keep
+live evidence, portfolio, recovery, adaptive supervisor/chat, handover and protected
+installation open. Full broad-Solana goal remains active; live signing is off.
