@@ -1004,9 +1004,9 @@ mod tests {
             Routing::build_buy(&router, &mint, &wallet, 1_000_000),
             Routing::build_sell(&router, &mint, &wallet, 1_000_000),
         ] {
-            let err = result.expect_err("the Router API cannot supply a signable transaction");
+            let err = result.expect_err("readability alone cannot authorize autonomous execution");
             assert!(
-                matches!(err, RouteError::Unverifiable(ref m) if m.contains("lookup tables")),
+                matches!(err, RouteError::Unverifiable(ref m) if m.contains("execution semantics") && m.contains("spend/output verification")),
                 "the refusal must name the reason, got {err}"
             );
         }

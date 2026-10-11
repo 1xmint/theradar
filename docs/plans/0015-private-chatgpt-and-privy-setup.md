@@ -5374,3 +5374,11 @@ semantics and protected asset spend/output verification are complete. This close
 construction capability only. Actual admitted routes, live evidence/portfolio,
 recovery, adaptive supervisor/chat, owner handover and protected install remain
 goal work. No deployment, delegation or transaction occurred. Goal active.
+
+Initial Router CI 38111707216 at 24223d8 found an old library regression still
+asserting the autonomous refusal must mention lookup tables. Updated it to require
+the actual remaining execution-semantic and spend/output verification reason.
+Mutation baselines therefore failed before any mutation was tested; shard 3's
+green result contained zero selected mutants and is not behavioral evidence.
+Wait for the full initial run to finish, then publish this correction and require
+a fresh GitHub run. No local jobs or live changes.
