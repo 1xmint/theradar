@@ -13,24 +13,24 @@ const PAPER_API: &str = "https://paper-api.alpaca.markets";
 const OPEN_ORDERS: &str = "/v2/orders?status=open&limit=500&direction=asc&nested=false";
 
 #[derive(Deserialize, Serialize, PartialEq, Eq)]
-struct BrokerOrder {
-    id: String,
-    status: String,
+pub(super) struct BrokerOrder {
+    pub(super) id: String,
+    pub(super) status: String,
     client_order_id: Option<String>,
-    symbol: Option<String>,
-    asset_class: Option<String>,
-    side: Option<String>,
+    pub(super) symbol: Option<String>,
+    pub(super) asset_class: Option<String>,
+    pub(super) side: Option<String>,
     #[serde(rename = "type")]
-    kind: Option<String>,
-    order_class: Option<String>,
-    qty: Option<String>,
-    notional: Option<String>,
-    filled_qty: Option<String>,
-    limit_price: Option<String>,
-    stop_price: Option<String>,
-    replaces: Option<String>,
-    replaced_by: Option<String>,
-    legs: Option<Vec<BrokerOrder>>,
+    pub(super) kind: Option<String>,
+    pub(super) order_class: Option<String>,
+    pub(super) qty: Option<String>,
+    pub(super) notional: Option<String>,
+    pub(super) filled_qty: Option<String>,
+    pub(super) limit_price: Option<String>,
+    pub(super) stop_price: Option<String>,
+    pub(super) replaces: Option<String>,
+    pub(super) replaced_by: Option<String>,
+    pub(super) legs: Option<Vec<BrokerOrder>>,
 }
 
 fn orders(raw: &str) -> Result<Vec<BrokerOrder>, String> {
@@ -78,6 +78,15 @@ fn collect(
         .map_err(|_| "invalid paper market clock response")?;
     let last_orders = orders(&read(OPEN_ORDERS)?)?;
     let last_account = account(&read("/v2/account")?, expected)?;
+    let exposure = if first_account == last_account && first_orders == last_orders {
+        super::alpaca_exposure::summarize(&last_account, &last_orders, &positions)
+    } else {
+        Err("account or pending orders changed during observation".into())
+    };
+    let exposure = match exposure {
+        Ok(bounds) => json!({"supported":true,"bounds":bounds}),
+        Err(reason) => json!({"supported":false,"bounds":null,"reason":reason}),
+    };
     Ok(
         json!({"version":1,"venue":"alpaca","environment":"paper","source":PAPER_API,
         "expected_account_id":expected,
@@ -87,6 +96,7 @@ fn collect(
         "account_before":first_account,"account_after":last_account,
         "open_orders_before":first_orders,"open_orders_after":last_orders,
         "positions":positions,"market_clock":clock,
+        "conservative_exposure":exposure,
         "open_order_responses_below_limit":true,"atomic_snapshot":false,
         "pending_order_accounting_complete":false,"risk_state_complete":false,"execution_authority":false}),
     )
@@ -179,34 +189,74 @@ mod tests {
         assert_eq!(report["expected_account_id"], "paper-id");
         assert_eq!(report["positions"], json!([]));
         assert_eq!(report["market_clock"]["is_open"], true);
+        assert_eq!(report["conservative_exposure"]["supported"], false);
+        assert!(report["conservative_exposure"]["bounds"].is_null());
     }
 
     #[test]
     fn changing_account_and_order_fields_are_visible_without_claiming_atomicity() {
-        let mut account_reads = 0;
-        let mut order_reads = 0;
+        for (change_account, change_orders) in [(true, false), (false, true), (true, true)] {
+            let mut account_reads = 0;
+            let mut order_reads = 0;
+            let report = collect("paper-id", |path| {
+                let mut body: Value = serde_json::from_str(&fixture(path)).unwrap();
+                if path == "/v2/account" {
+                    account_reads += 1;
+                    if account_reads == 2 && change_account {
+                        body["cash"] = json!("40.00");
+                    }
+                }
+                if path == OPEN_ORDERS {
+                    order_reads += 1;
+                    if order_reads == 2 && change_orders {
+                        body[0]["filled_qty"] = json!("0.09");
+                    }
+                }
+                Ok(body.to_string())
+            })
+            .unwrap();
+            assert_eq!(report["selected_account_fields_unchanged"], !change_account);
+            assert_eq!(
+                report["selected_open_order_fields_unchanged"],
+                !change_orders
+            );
+            assert_eq!(report["account_before"]["cash"], "50.01");
+            assert_eq!(
+                report["account_after"]["cash"],
+                if change_account { "40.00" } else { "50.01" }
+            );
+            assert_eq!(
+                report["open_orders_after"][1]["filled_qty"],
+                if change_orders { "0.09" } else { "0.04" }
+            );
+            assert_eq!(report["conservative_exposure"]["supported"], false);
+            assert_eq!(
+                report["conservative_exposure"]["reason"],
+                "account or pending orders changed during observation"
+            );
+        }
+    }
+
+    #[test]
+    fn supported_exposure_is_attached_to_the_actual_reconciliation_caller() {
         let report = collect("paper-id", |path| {
-            let mut body: Value = serde_json::from_str(&fixture(path)).unwrap();
-            if path == "/v2/account" {
-                account_reads += 1;
-                if account_reads == 2 {
-                    body["cash"] = json!("40.00");
-                }
-            }
-            if path == OPEN_ORDERS {
-                order_reads += 1;
-                if order_reads == 2 {
-                    body[0]["filled_qty"] = json!("0.09");
-                }
-            }
-            Ok(body.to_string())
+            Ok(if path == OPEN_ORDERS {
+                json!([{"id":"buy-id","status":"pending_cancel","symbol":"SPY",
+                "asset_class":"us_equity","side":"buy","type":"limit","order_class":"simple",
+                "qty":"0.001","filled_qty":"0.0005","limit_price":"100"}])
+                .to_string()
+            } else {
+                fixture(path)
+            })
         })
         .unwrap();
-        assert_eq!(report["selected_account_fields_unchanged"], false);
-        assert_eq!(report["selected_open_order_fields_unchanged"], false);
-        assert_eq!(report["account_before"]["cash"], "50.01");
-        assert_eq!(report["account_after"]["cash"], "40.00");
-        assert_eq!(report["open_orders_after"][1]["filled_qty"], "0.09");
+        let exposure = &report["conservative_exposure"];
+        assert_eq!(exposure["supported"], true);
+        assert_eq!(exposure["bounds"]["pending_buy_bound_microusd"], "100000");
+        assert_eq!(exposure["bounds"]["cash_bound_microusd"], "49910000");
+        assert_eq!(exposure["bounds"]["local_claims_reconciled"], false);
+        assert_eq!(report["risk_state_complete"], false);
+        assert_eq!(report["execution_authority"], false);
     }
 
     #[test]

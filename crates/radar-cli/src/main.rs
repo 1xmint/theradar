@@ -11,6 +11,7 @@ use std::process::ExitCode;
 
 use radar_asof::AsOf;
 use radar_instruments::{Context, CreatorHistory, CreatorTrackRecord, Registry, SimulateExit};
+mod alpaca_exposure;
 mod alpaca_market;
 mod alpaca_quote;
 mod alpaca_read;
