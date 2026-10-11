@@ -5863,3 +5863,27 @@ fields and that fresh evidence cannot refresh old risk state. Require GitHub
 build/tests/lint and behavior mutations before integration. No deployment or
 activation of this source. Full protected snapshot valuation, reconciliation,
 scheduled refresh, supervisor and admitted execution/recovery remain open.
+
+### Protected observations verification correction (2026-10-11)
+
+GitHub CI 38156652117 completed with failure at cfba8d0. Build, tests,
+lint and MSRV found the existing native-transfer Config fixture missing the
+new optional observations_path; add None. Mutation shard 0 also found that
+the positive publication fixture's tempfile directory was not private under
+the runner environment; explicitly set its Unix mode to 0700. Retain the
+production private-parent requirement. All four mutation shards failed their
+unmutated baseline, so this run provides no mutation-effectiveness claim.
+Publish the correction only after that run completes, then require fresh
+GitHub checks before integration. Combined integration CI 38156185293 at
+5587cd2 completed successfully.
+
+Production now runs verified source 3df77788914ef7bef006205bfd732f6e0f460c86:
+CI 38155900425 and Linux release 38156147328 passed. All six artifact hashes
+matched BUILD-INFO before deploying radar-serve through the fixed radar-deploy
+procedure. Health reported that exact build; the host CLI reported Logged in
+using ChatGPT. Service remains active with NoNewPrivileges, ProtectSystem
+strict and ProtectHome read-only; signer.socket remains inactive. This deploy
+does not include protected observations. Owner reports Cloudflare sign-in
+complete; browser verification remains unavailable under the browser security
+policy, so the protected page rendering has not been verified. No wallet,
+funding, delegation or autonomous execution changed.

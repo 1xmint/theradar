@@ -111,6 +111,12 @@ mod tests {
     #[test]
     fn private_publication_replaces_whole_packets_and_preserves_previous_on_failure() {
         let directory = tempfile::tempdir().unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            std::fs::set_permissions(directory.path(), std::fs::Permissions::from_mode(0o700))
+                .unwrap();
+        }
         let path = directory.path().join("observations.json");
         let first = json!({"wallet_evidence":{"version":1},"transaction_evidence":{"version":1}});
         let next = json!({"wallet_evidence":{"version":2},"transaction_evidence":{"version":2}});
