@@ -5482,3 +5482,16 @@ for GitHub build/tests/lint/mutations; no local jobs, deployment or authority
 change. Integrated CI 38113032606 at 9be396a is independently still running.
 Full live inputs, routing semantics/assets, settlement/recovery, adaptive agent
 and chat, protected handover/install and broad market coverage remain open.
+
+Initial privilege CI 38113194677 at eb6b0af completed all mutation shards:
+25 selected, 19 caught, six unviable, none missed. Retained diagnostics outside
+the checkout at radar-mutation-38113194677. Its lint job rejected similar local
+names signed/signer; renamed the count to signature_count without changing logic.
+Other broad jobs are still pending; wait for terminal status before publishing
+this correction, then require a fresh full run. No lint or mutant exclusions.
+Read-only accepted pool-mention transactions FYrHKj3d5t3gykKF2GueBwoy9Cz9paakXYPZAkxn9VBgu3pbmtGera6qkY9xTp93XDuiqWpNrq45kHe55npYPmM
+and 5raKEHknRZZZUagnrZsRKmu59mHmqKPrbYyxnfPEuPYawmaxgHqpgcKa4dkpRuFzcCaekLzbFNZCjVWWpZCWBzht
+do not demonstrate a Raydium swap: metadata has no inner swap instructions and
+the latter log contains only a custom router invocation. A pool address in a
+successful transaction is not an executed trade. Do not promote these to swap
+fixtures. Their whole responses are retained outside the checkout for audit.

@@ -120,13 +120,13 @@ impl Message {
     #[must_use]
     pub fn privileges(&self, index: usize) -> Option<AccountPrivileges> {
         self.accounts.get(index)?;
-        let signed = usize::from(self.required_signatures);
-        let writable_signed = signed.checked_sub(usize::from(self.readonly_signed))?;
+        let signature_count = usize::from(self.required_signatures);
+        let writable_signed = signature_count.checked_sub(usize::from(self.readonly_signed))?;
         let writable_unsigned = self
             .accounts
             .len()
             .checked_sub(usize::from(self.readonly_unsigned))?;
-        let signer = index < signed;
+        let signer = index < signature_count;
         let writable = if signer {
             index < writable_signed
         } else {
