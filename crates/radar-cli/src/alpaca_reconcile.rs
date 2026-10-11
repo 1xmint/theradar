@@ -13,10 +13,10 @@ const PAPER_API: &str = "https://paper-api.alpaca.markets";
 const OPEN_ORDERS: &str = "/v2/orders?status=open&limit=500&direction=asc&nested=false";
 
 #[derive(Deserialize, Serialize, PartialEq, Eq)]
-struct BrokerOrder {
-    id: String,
-    status: String,
-    client_order_id: Option<String>,
+pub(super) struct BrokerOrder {
+    pub(super) id: String,
+    pub(super) status: String,
+    pub(super) client_order_id: Option<String>,
     symbol: Option<String>,
     asset_class: Option<String>,
     side: Option<String>,
@@ -26,6 +26,13 @@ struct BrokerOrder {
     qty: Option<String>,
     notional: Option<String>,
     filled_qty: Option<String>,
+    filled_avg_price: Option<String>,
+    submitted_at: Option<String>,
+    updated_at: Option<String>,
+    filled_at: Option<String>,
+    canceled_at: Option<String>,
+    expired_at: Option<String>,
+    failed_at: Option<String>,
     limit_price: Option<String>,
     stop_price: Option<String>,
     replaces: Option<String>,
@@ -53,7 +60,7 @@ fn orders(raw: &str) -> Result<Vec<BrokerOrder>, String> {
     Ok(orders)
 }
 
-fn account(raw: &str, expected: &str) -> Result<BrokerAccount, String> {
+pub(super) fn account(raw: &str, expected: &str) -> Result<BrokerAccount, String> {
     let account: BrokerAccount =
         serde_json::from_str(raw).map_err(|_| "invalid paper account response")?;
     if account.id != expected {

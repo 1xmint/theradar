@@ -161,3 +161,54 @@ fn reconciliation_command_refuses_missing_credentials_and_endpoint_overrides() {
         assert!(!error.contains("sentinel-private-secret"));
     }
 }
+
+#[test]
+fn recovery_lookup_command_refuses_missing_credentials_and_injected_identifiers() {
+    for (args, expected) in [
+        (
+            vec![
+                "alpaca-order-read",
+                "--account-id",
+                "paper-id",
+                "--client-order-id",
+                "retained_1",
+            ],
+            "configure both Alpaca paper credentials privately",
+        ),
+        (vec!["alpaca-order-read"], "usage: radar alpaca-order-read"),
+        (
+            vec![
+                "alpaca-order-read",
+                "--account-id",
+                "paper-id",
+                "--client-order-id",
+                "a&x=1",
+            ],
+            "client order ID must contain ASCII letters",
+        ),
+        (
+            vec![
+                "alpaca-order-read",
+                "--account-id",
+                "paper-id",
+                "--client-order-id",
+                "retained_1",
+                "--url",
+                "https://api.alpaca.markets",
+            ],
+            "usage: radar alpaca-order-read",
+        ),
+    ] {
+        let output = Command::new(env!("CARGO_BIN_EXE_radar"))
+            .args(args)
+            .env_remove("RADAR_ALPACA_PAPER_KEY_ID")
+            .env("RADAR_ALPACA_PAPER_SECRET_KEY", "sentinel-private-secret")
+            .output()
+            .unwrap();
+        assert!(!output.status.success());
+        assert_eq!(output.stdout, Vec::<u8>::new());
+        let error = String::from_utf8(output.stderr).unwrap();
+        assert!(error.contains(expected));
+        assert!(!error.contains("sentinel-private-secret"));
+    }
+}
