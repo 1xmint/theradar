@@ -3,8 +3,8 @@
 
 use std::{collections::BTreeMap, time::Duration};
 
+use radar_onchain::rpc::{TOKEN_2022_PROGRAM_ID, TOKEN_PROGRAM_ID};
 use radar_onchain::{Budget, RpcClient, curve_market, sol_price};
-use radar_pumpfun::token::{SPL_TOKEN_PROGRAM, TOKEN_2022_PROGRAM};
 use radar_types::{
     Address, Asset, AssetRole, Balance, Decimals, Holding, MicroUsd, Portfolio, Slot,
     TokenQuantity, Unvaluable, Valuation,
@@ -46,9 +46,10 @@ fn groups(evidence: &Value) -> Result<BTreeMap<Asset, Group>, String> {
     for row in rows {
         let row: RawHolding = serde_json::from_value(row.clone())
             .map_err(|_| "verified portfolio account malformed")?;
-        let asset = if row.program == SPL_TOKEN_PROGRAM {
+        let program = row.program.to_string();
+        let asset = if program == TOKEN_PROGRAM_ID {
             Asset::spl(row.mint)
-        } else if row.program == TOKEN_2022_PROGRAM {
+        } else if program == TOKEN_2022_PROGRAM_ID {
             Asset::token_2022(row.mint)
         } else {
             return Err("portfolio token program unsupported".into());
@@ -356,6 +357,7 @@ pub fn run(args: &[String]) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use radar_pumpfun::token::{SPL_TOKEN_PROGRAM, TOKEN_2022_PROGRAM};
 
     fn price() -> sol_price::Observation {
         sol_price::Observation {

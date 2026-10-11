@@ -6097,7 +6097,7 @@ feat/live-marked-holdings starts at integration 05152e6 while its combined CI
 portfolio-read CLI uses the existing wallet inventory reader, Portfolio book,
 typed holdings and asset identities, curve reader/exit estimator and independent
 SOL oracle. Native conversion and window checks are shared with wallet-read;
-there is no duplicate USD arithmetic, new dependency or signing edge.
+there is no duplicate USD arithmetic, new package or signing edge.
 
 Retain every observed token quantity, checked aggregation, separate program/units,
 admitted full-position net-of-venue-fees curve marks and verified classic wrapped
@@ -6124,3 +6124,11 @@ remain unknown. Connect retained accounting and live snapshot construction next,
 then the adaptive supervisor and durable execution/recovery. Expand admitted
 market/quote adapters without making universal coverage an activation gate for
 an otherwise verified capability. Autonomous signing remains disabled.
+
+Initial marked-holdings CI 38161137705 at aca9968 found a dependency-boundary
+compilation error: radar-pumpfun is CLI test-only, and serde was not a direct CLI
+dependency for the new Deserialize derive. Use radar-onchain's existing public
+RPC program identifiers in production; keep pumpfun fixture imports test-only.
+Add the already-workspace serde edge and matching CLI lockfile entry, not a new
+package or production pumpfun edge. Let the old run finish before publishing the
+correction; require fresh GitHub verification. Floor 2283 is unchanged.
