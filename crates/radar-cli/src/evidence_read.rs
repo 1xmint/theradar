@@ -65,7 +65,8 @@ fn publish(path: &Path, packet: &serde_json::Value) -> Result<(), String> {
         .ok_or("evidence output needs an explicit private directory")?;
     let metadata =
         std::fs::symlink_metadata(parent).map_err(|_| "evidence output directory unavailable")?;
-    if !metadata.is_dir() || metadata.file_type().is_symlink() {
+    // symlink_metadata does not follow a symlink to a directory.
+    if !metadata.is_dir() {
         return Err("evidence output directory must be a regular directory".into());
     }
     #[cfg(unix)]
@@ -130,6 +131,11 @@ mod tests {
             );
         }
         publish(&path, &next).unwrap();
+        let at_limit = json!({"payload":"x".repeat(1_048_576 - "{\"payload\":\"\"}".len())});
+        assert_eq!(at_limit.to_string().len(), 1_048_576);
+        publish(&path, &at_limit).unwrap();
+        assert_eq!(std::fs::read(&path).unwrap().len(), 1_048_576);
+        publish(&path, &next).unwrap();
         assert!(publish(&path, &json!({"oversized":"x".repeat(1_048_576)})).is_err());
         assert_eq!(
             serde_json::from_slice::<serde_json::Value>(&std::fs::read(&path).unwrap()).unwrap(),
@@ -169,7 +175,10 @@ mod tests {
         assert!(!shared.join("packet").exists());
         let linked = directory.path().join("linked");
         symlink(directory.path(), &linked).unwrap();
-        assert!(publish(&linked.join("packet"), &json!({})).is_err());
+        assert_eq!(
+            publish(&linked.join("packet"), &json!({})),
+            Err("evidence output directory must be a regular directory".into())
+        );
         assert!(!directory.path().join("packet").exists());
     }
 

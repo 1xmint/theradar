@@ -5887,3 +5887,22 @@ does not include protected observations. Owner reports Cloudflare sign-in
 complete; browser verification remains unavailable under the browser security
 policy, so the protected page rendering has not been verified. No wallet,
 funding, delegation or autonomous execution changed.
+
+### Protected observations mutation follow-up (2026-10-11)
+
+CI 38157070984 at e6a5fd5 completed: tests, build, MSRV, lint, formatting,
+site/web and dependency checks passed. All mutation baselines passed, but three
+substitutions survived: evidence_read.rs:59:20 (> to >=), :68:27 (|| to &&),
+and radar-issuer.rs:146:17 (|| to &&). Retained diagnostics are outside the
+checkout in radar-mutation-38157070984. Do not integrate this failed run.
+
+Extend publication regression to accept exactly 1 MiB and continue rejecting
+oversize packets. Simplify the directory-type predicate: symlink_metadata's
+is_dir already rejects symlinks, so the separate symlink disjunction is redundant.
+Check its stable refusal category before any file operation. Extend the actual
+issuer inventory-command regression: a valid protected packet succeeds, then
+substituting either wallet identity or transaction identity independently fails
+at the shared input boundary. Issuance's downstream preflight previously masked
+that survivor; inventory does not run transaction preflight. No mutation waiver
+or new authority. Existing four-test increment and floor 2261 remain unchanged.
+Publish after CI 38157070984 is terminal and require fresh GitHub verification.

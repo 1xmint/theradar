@@ -12,9 +12,34 @@ fn protected_live_observations_are_reloaded_bound_and_cannot_refresh_risk_state(
     let mut fixture = Fixture::new();
     let path = fixture.dir.path().join("observations.json");
     fixture.config["observations_path"] = json!(path);
+    fixture.snapshot["wallet_evidence"]["raw_token_verification"] = json!({
+        "authority":"read_only", "inventory_complete":false, "slot":null, "accounts":[]
+    });
     let packet = json!({"wallet_evidence":fixture.snapshot["wallet_evidence"],
         "transaction_evidence":fixture.snapshot["transaction_evidence"]});
     fixture.save();
+    write(&path, &packet);
+    assert!(inventory_report(&fixture).status.success());
+    // Inventory does not run transaction preflight. The shared input boundary
+    // must independently reject either substituted half for this consumer too.
+    for (pointer, value) in [
+        ("/wallet_evidence/wallet", json!(address(0x44))),
+        (
+            "/transaction_evidence/transaction_base64",
+            json!("different bytes"),
+        ),
+    ] {
+        let mut damaged = packet.clone();
+        *damaged.pointer_mut(pointer).unwrap() = value;
+        write(&path, &damaged);
+        let output = inventory_report(&fixture);
+        assert!(!output.status.success(), "{pointer}");
+        assert_eq!(
+            String::from_utf8(output.stderr).unwrap().trim(),
+            "radar-issuer refused: protected observations do not bind the reviewed wallet and transaction"
+        );
+    }
+    std::fs::remove_file(&path).unwrap();
     let original_snapshot = fixture.snapshot.clone();
     let mut issuer = fixture.start();
     // No fallback to valid inline observations when the configured file fails.
