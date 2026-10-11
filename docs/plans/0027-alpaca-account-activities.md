@@ -6,6 +6,10 @@
 Branch: feat/alpaca-account-activities, based on f9553a8, fully verified by CI
 38183693452. Independent of intent-binding repair CI 38184222577: no matching or
 journal changes. Keep the source base fixed until child checks finish.
+GitHub deleted the merged feat/alpaca-paper-integration branch and retargeted
+PR 382 to feat/integrated-autonomous-controls. This child targets that parent at
+3a4ba61, whose tree was verified identical to f9553a8. Parent CI 38184135535
+is still running; do not advance that parent while either child is checked.
 Previous goal turn made progress by merging verified foundation PR 380 and
 repairing the intent-binding lint after inspecting the complete run.
 
