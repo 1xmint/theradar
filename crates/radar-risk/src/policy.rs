@@ -63,7 +63,8 @@ pub struct Policy {
     /// in half an hour can otherwise be held forty-two times over while every
     /// individual position looks small.
     pub max_per_creator: MicroUsd,
-    /// Optional realised daily-loss cap. `None` explicitly disables this cap;
+    /// Optional realised daily-loss entry cap. Reductions and exits remain
+    /// subject to their independent checks. `None` explicitly disables this cap;
     /// other policy checks still apply. A missing serialized field retains the
     /// legacy zero cap, rather than silently removing a restriction.
     #[serde(default = "zero_daily_loss_cap")]

@@ -5632,3 +5632,69 @@ the correction. Independent daily-cap entry-gate PR 362 at 950ecd0 is running
 CI 38114955196. Integrated release d142c8b has now been deployed with the fixed
 script and exact health build verified; owner login enabled actual UI inspection,
 with optional cap/Agent decides controls present and execution disabled.
+
+### Verified service deployment and daily entry gate (2026-10-11)
+
+Integrated CI 38114392276 at d142c8b passed fully, including all mutation shards.
+Release 38114389746 passed at the same exact commit. Downloaded its artifact
+outside the checkout and verified the BUILD-INFO commit and all six SHA256 hashes.
+Copied only radar-serve to /tmp/radar-serve.new and ran fixed sudo radar-deploy.
+The service reports active; /health reports exact build d142c8b5750681b9331ecbc4274d96523cee0baf,
+policyClosed true. NoNewPrivileges=yes, ProtectSystem=strict and
+ProtectHome=read-only remain set; radar-signer.socket remains inactive.
+
+Owner completed Cloudflare login. Reloaded the actual /automation page after
+deployment: Privy wallet matches the owner, balance is zero SOL at slot
+455535371, no token holdings; three independent Agent decides checkboxes and
+optional unchecked daily cap are present. Preferences were not changed. The
+page correctly reports execution disabled. ChatGPT shows Connect rather than
+a linked confirmation in this UI; verify the bridge's current login status
+before claiming that credential is still linked. No secret was inspected.
+
+Independent PumpSwap observation PR 361 at 096da33 is running GitHub CI
+38114787717. Do not push over that run. Its raw fixture is not in this branch.
+
+Fix/daily-cap-entry-gate addresses a concrete mismatch with accepted design 0017
+section 8 and the deployed UI: a reached optional daily loss cap must close
+entries while allowing independently checked reductions. Restrict the kernel's
+DailyLossReached gate to acquisitions. Keep halt, autonomy, operational failure
+and freshness checks unchanged for all actions; this kernel does not prove a
+Reduce/Exit label, so protected issuer inventory and signer transaction bounds
+remain necessary. Add a boundary regression for loss below/at/above the cap,
+both reductions and exits, plus each remaining global refusal. Test floor 2252
+on this branch; combine with PR 361's additional test as 2253 upon integration.
+Require GitHub CI and relevant mutations. No authority or live trade is enabled.
+
+Daily gate CI 38114955196 at 950ecd0: mutation check passed, three selected,
+two caught and one unviable. Retained diagnostics outside the checkout at
+radar-mutation-38114955196. Exact kernel.rs:277:9 AND-to-OR compiles and fails
+the new daily gate regression; kernel.rs:279:60 >=-to-< is also caught. Lint
+identified an unnecessary clone on Copy Policy in the new test. Remove that
+clone, leave behavior unchanged, and wait for the whole current run to finish
+before publishing this correction and requiring fresh GitHub CI. No exclusions.
+
+PumpSwap correction 3d6e72d is running CI 38115000160 after initial 38114787717
+completed failed for digest formatting. Do not push over either live run.
+Read-only /usr/local/bin/radar-codex login status on the host reports Logged in
+using ChatGPT: credential is still linked, despite the setup UI's Connect button.
+Linker::progress currently returns Idle when no device-login child exists; it
+reports a flow, not persistent CLI login state. Record this UI gap for the next
+focused fix, without reconnecting or reading credentials. Owner preferences,
+signer activation and wallet funds remain unchanged. Full autonomy still needs
+account/token verification, live evidence/portfolio producer, supervisor/chat
+consumer, settlement/recovery, and protected handover plus demonstrated canary.
+
+### Verified integration handback (2026-10-11)
+
+PumpSwap CI 38115000160 at 3d6e72d and daily entry-gate CI 38115145497
+at f4dc192 passed fully. Initial daily-gate CI 38114955196 finished failed only
+lint's Copy-policy clone; the corrected run passed tests/build/lint and mutations.
+Integrate both verified branches, preserve both chronological handbacks, and set
+the combined floor to 2253. Publish fresh integrated GitHub CI; do not push over it.
+Production remains the verified d142c8b release, with signer inactive and policy
+closed. No funds or delegation changed. Mainnet curve-address verification is
+next: inspection corrected an earlier dependency assumption — pumpfun depends
+on signer only for dev tests. Do not add a production signer dependency to the
+builder or duplicate derivation. Factor its pure PDA algorithm into a shared
+module/crate with actual builder and signer consumers; preserve mainnet tests.
+Both classic and v2 account positions must be verified against captures.
