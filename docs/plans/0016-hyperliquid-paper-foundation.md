@@ -67,3 +67,8 @@ owner decision. CI 38176947898 is running; lint has failed and must be inspected
 Keep the remaining jobs running, do not cancel or push over them. No production
 or wallet action changed. Next finish verification of this existing source and
 resolve the direction before adding a streaming or execution connector.
+
+GitHub lint identified only the unreadable timestamp literal in perps_read.rs.
+Group its digits without semantic changes. Keep this correction local until all
+current jobs finish; then push it with the recorded direction discussion and
+require fresh GitHub verification. No further venue implementation resumed.

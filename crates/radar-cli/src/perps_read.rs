@@ -102,7 +102,7 @@ mod tests {
     }
 
     fn book(coin: &Value) -> Value {
-        json!({"coin":coin,"time":1700000000000_u64,"levels":[[],[]]})
+        json!({"coin":coin,"time":1_700_000_000_000_u64,"levels":[[],[]]})
     }
 
     #[test]
