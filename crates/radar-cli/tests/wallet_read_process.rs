@@ -14,6 +14,74 @@ fn now() -> u64 {
         .as_secs()
 }
 
+#[test]
+fn actual_sol_price_command_reads_receiver_verified_bounds_and_refuses_missing_scope() {
+    let mut bytes = radar_types::b64::decode("IvEjY51+9M1gMUcENA3t3zcf1CRyFI8kjp0abRpesqw6zYt/1dayQwHvDYtv2izrpB2hXUCV0do5Kg0vjtDGx7wPTPrIwoC1bf82BJwCAAAALUcYAAAAAAD4////qsDLagAAAACpwMtqAAAAAFi/XZcCAAAAbTwuAAAAAACD0ykbAAAAAAA=").unwrap();
+    bytes[93..101].copy_from_slice(&i64::try_from(now()).unwrap().to_le_bytes());
+    bytes[125..133].copy_from_slice(&50_u64.to_le_bytes());
+    let (endpoint, server) = fixture(vec![json!({"result":{"context":{"slot":51},"value":[{
+        "owner":"rec5EKMGg6MxZYaMdyBfgwp4d5rB9T1VQH5pJv5LtFJ",
+        "data":[radar_types::b64::encode(&bytes),"base64"]
+    }]}})]);
+    let args = [
+        "sol-price-read",
+        "--rpc",
+        &endpoint,
+        "--min-slot",
+        "50",
+        "--max-age-secs",
+        "60",
+        "--max-confidence-bps",
+        "100",
+    ];
+    let output = Command::new(env!("CARGO_BIN_EXE_radar"))
+        .args(args)
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{:?}", output.stderr);
+    let evidence: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(evidence["authority"], "read_only");
+    assert_eq!(evidence["source"], "pyth_receiver_full");
+    assert_eq!(evidence["wallet_inventory_complete"], false);
+    assert_eq!(evidence["execution_guaranteed"], false);
+    assert_eq!(
+        evidence["observation"]["lower_micro_usd_per_sol"],
+        112_058_654
+    );
+    assert_eq!(
+        evidence["observation"]["upper_micro_usd_per_sol"],
+        112_090_476
+    );
+    let calls = server.join().unwrap();
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0]["method"], "getMultipleAccounts");
+    assert_eq!(
+        calls[0]["params"],
+        json!([[radar_onchain::sol_price::ACCOUNT],
+        {"encoding":"base64","commitment":"finalized"}])
+    );
+    for length in [1, 3, 5, 7] {
+        let failed = Command::new(env!("CARGO_BIN_EXE_radar"))
+            .args(&args[..length])
+            .output()
+            .unwrap();
+        assert!(!failed.status.success());
+        assert!(failed.stdout.is_empty());
+        assert!(String::from_utf8_lossy(&failed.stderr).contains("sol-price-read needs"));
+    }
+    for (index, invalid) in [(2, " "), (4, "bad"), (6, "bad"), (8, "10001")] {
+        let mut damaged = args;
+        damaged[index] = invalid;
+        let failed = Command::new(env!("CARGO_BIN_EXE_radar"))
+            .args(damaged)
+            .output()
+            .unwrap();
+        assert!(!failed.status.success());
+        assert!(failed.stdout.is_empty());
+        assert!(String::from_utf8_lossy(&failed.stderr).contains("sol-price-read needs"));
+    }
+}
+
 fn settlement_bytes() -> Vec<u8> {
     let mut bytes = vec![1];
     bytes.extend_from_slice(&[0xAB; 64]);

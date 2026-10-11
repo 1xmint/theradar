@@ -5927,3 +5927,32 @@ stale. Next connect independent live valuation and reconciled portfolio state,
 then the outer adaptive controller and durable submission/settlement/recovery.
 Do not describe this observation-input connector as a complete snapshot producer.
 Signing, delegation and autonomous execution remain disabled.
+
+### Independent live SOL valuation source handback (2026-10-11)
+
+Protected observations PR 365 is merged into integration 9d8ebd4; combined CI
+38157603325 is live. Do not push over it. Independent feat/live-sol-valuation
+starts there and supplies the missing independently read native-SOL USD price
+to the future snapshot producer via the actual sol-price-read CLI caller.
+
+Captured the documented sponsored SOL/USD account through a finalized public
+mainnet RPC read from the VPS: context 455726015, posted slot 455725955, receiver
+owner rec5EKMGg6MxZYaMdyBfgwp4d5rB9T1VQH5pJv5LtFJ, 134 bytes, Full tag 1,
+SOL/USD feed ef0d8b6fda2ceba41da15d4095d1da392a0d2f8ed0c6c7bc0f4cfac8c280b56d,
+publication 1791738026, price 11207456511, confidence 1591085, exponent -8.
+Cross-checked SDK layouts and program IDs in the primary sources linked in ADR
+0008. Captured bytes are retained in tests; no private endpoint/key was read.
+
+The new direct reader checks the fixed account's owner, discriminator, length,
+Full verification, feed, bank/posting contexts, publication age and explicit
+confidence ratio. Checked integer scaling yields outward micro-USD bounds,
+never floats or an assumed stablecoin peg. CLI requires explicit RPC, minimum
+slot, maximum age and confidence ceiling. Output has read_only authority and
+explicitly incomplete wallet inventory; this is price evidence, not a complete
+portfolio or authorization. Protected price ingestion/valuation remains open.
+
+Four decoder/arithmetic regressions plus the actual CLI/mock-RPC regression
+raise floor 2266. Require GitHub builds/tests/lint and behavior mutation checks;
+no local test/build job, new dependency, service or authority was introduced.
+No deployment. A subsequent VPS read was stopped when Tailscale required fresh
+SSH reauthentication; this does not block repository implementation or GitHub CI.

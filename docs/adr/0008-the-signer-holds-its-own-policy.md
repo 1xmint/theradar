@@ -444,6 +444,28 @@ risk state, its reconciliation coverage, scheduled collection and execution loop
 remain necessary before live autonomous operation. This is a connected live-read
 input, not a claim that the complete snapshot producer now exists.
 
+`radar sol-price-read --rpc <URL> --min-slot <N> --max-age-secs <N>
+--max-confidence-bps <0..10000>` supplies independent native-SOL USD evidence
+for that producer. It reads the fixed sponsored SOL/USD receiver account through
+finalized direct RPC, checks owner, discriminator, complete captured layout,
+Full verification, feed identity, posting/bank contexts, host-clock publication
+age and the explicit confidence ratio ceiling. Integer arithmetic rounds the
+lower oracle confidence bound down and the upper bound up to micro-USD per SOL.
+These are oracle confidence bounds, not guaranteed market or execution bounds.
+No stablecoin peg, token value, exposure, basis or realised PnL is inferred.
+
+The reader's initial layout and owner are backed by a mainnet capture at slot
+455726015 on 2026-10-11, matching the
+[receiver SDK](https://github.com/pyth-network/pyth-crosschain/blob/main/target_chains/solana/pyth_solana_receiver_sdk/src/price_update.rs),
+[price message](https://github.com/pyth-network/pyth-crosschain/blob/main/pythnet/pythnet_sdk/src/messages.rs),
+and [program IDs](https://github.com/pyth-network/pyth-crosschain/blob/main/target_chains/solana/pyth_solana_receiver_sdk/src/lib.rs).
+The [push-feed documentation](https://docs.pyth.network/price-feeds/core/push-feeds/solana)
+identifies the sponsored feed; RPC/network identity and receiver program security
+remain trust assumptions. The Pro receiver has a different owner/address and is
+not silently substituted. This read-only command does not alter issuer snapshots
+or signer policy; wiring validated prices into reconciled live valuation remains
+separate work. Missing or refused prices remain unknown.
+
 The private snapshot also requires `wallet_evidence`, containing the JSON from
 `radar wallet-read`. Before reserving capital the issuer binds version 1,
 read-only/finalized metadata, configured wallet identity, native decimals of
