@@ -5794,3 +5794,34 @@ correction. GitHub did not start a new run because PR 364 conflicted with its
 updated integration base. Merge 43af3c2 into the fix branch, retain both plan
 handbacks and set the combined test floor to 2257. Require fresh GitHub checks;
 no canceled/restarted check or mutation exclusion is used.
+
+### Combined status verification handback (2026-10-11)
+
+PR 364 conflicts are resolved at 3df7778; GitHub CI 38155900425 passed fully
+at that exact head. Its first two mutation shards now catch all four previously
+missed Codex::is_linked substitutions. Read retained diagnostics outside the
+checkout at radar-mutation-38155900425: returning Ok(true) actually fails the
+new persisted_login_status regression on the unlinked case. No mutation waiver.
+The remaining behavior shards and full tests/build also passed. Curve integration
+CI 38155552918 remains live at 43af3c2; do not push over that run. Dispatch the
+Linux release from the remote fix branch while it still points at verified
+3df7778. Keep this documentation update local until the release head is secured.
+
+Next integrate verified status source, preserve floor 2257, publish combined CI
+and release the server only after exact-head checks pass; use the fixed deploy
+script and inspect the protected status endpoint via the authorized server path.
+Browser verification remains unavailable under the browser security policy.
+Production still d142c8b; no authority or wallet changes.
+
+For the execution work, inspected current actual seams rather than creating a
+parallel framework: CLI evidence-read already collects wallet/preflight packets;
+onchain wallet_inventory verifies raw mint/token layouts; curve_market reads
+mint/reserves/fees at one reported context; the protected issuer still requires
+an operator-provisioned Snapshot containing proposal, exact bytes, valuation and
+risk state. A network read packet alone must not be called a live portfolio or
+silently populate that state with zero. The next execution implementation must
+connect those existing collectors to a protected, fresh snapshot producer and
+reconciliation consumer, with model recommendations translated by an outer
+controller. Keep account/token state verification and actual admitted route
+construction alongside that work; do not gate all progress on universal venue
+support or replace the broad goal with a buy-only demonstration.
