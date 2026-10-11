@@ -5726,3 +5726,15 @@ under dev-dependencies, retaining the capture hash check and the intended pure
 production dependency graph. Mutation shards passed; inspect retained diagnostics
 at radar-mutation-38115581554. Integrated CI 38115366541 at 2f495fd passed fully.
 Require fresh GitHub build/tests/lint before integrating curve source. No deploy.
+
+Corrected curve CI 38154983103 at 41751d8 completed: build, lint, MSRV,
+web/site and mutation checks passed. Signer unit and captured process regressions
+passed, including all six curve layouts. The workspace test job failed only
+because the README crate table omitted radar-pda; add that entry and require a
+fresh complete run before integration. Mutation diagnostics retained outside the
+checkout at radar-mutation-38154983103: three caught, eight unviable, no missed.
+The on_curve replacement is unviable because -D warnings rejects its unused
+argument; this is not a test kill. The exact derived-address equality mutation
+at trade_accounts.rs:55:68 is caught by the curve regression. No exclusions.
+Browser verification after the owner's sign-in was blocked by the browser URL
+security policy; do not circumvent it or claim a fresh page verification.
