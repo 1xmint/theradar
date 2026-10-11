@@ -144,7 +144,8 @@ impl BrokerLog {
         if account.trim().is_empty() {
             return Err(BrokerError::InvalidIntent);
         }
-        let (owner, path) = Owner::acquire(path.into())?;
+        let path = path.into();
+        let (owner, path) = Owner::acquire(&path)?;
         let journal = Journal::open(path)?;
         if !matches!(journal.verify()?, Verified::Intact { .. }) {
             return Err(BrokerError::History);
@@ -434,6 +435,23 @@ mod tests {
             OperationLog::open(&path),
             Err(crate::OperationError::BrokerHistory)
         ));
+        // Either domain marker alone must refuse, including correctly hashed
+        // inconsistent history. Requiring both would silently hide claims.
+        for keep_payload in [true, false] {
+            let mixed = dir.path().join(format!("mixed-{keep_payload}.jsonl"));
+            std::fs::copy(&path, &mixed).unwrap();
+            rewrite(&mixed, |event| {
+                if keep_payload {
+                    event.stage = Stage::Received;
+                } else {
+                    event.broker = None;
+                }
+            });
+            assert!(matches!(
+                OperationLog::open(&mixed),
+                Err(crate::OperationError::BrokerHistory)
+            ));
+        }
         assert!(BrokerLog::open(&path, "other").is_err());
         assert!(BrokerLog::open(&path, "paper-id").is_ok());
         let other = dir.path().join("other.jsonl");

@@ -11,7 +11,7 @@ pub(crate) struct Owner {
 }
 
 impl Owner {
-    pub(crate) fn acquire(path: PathBuf) -> Result<(Self, PathBuf), JournalError> {
+    pub(crate) fn acquire(path: &Path) -> Result<(Self, PathBuf), JournalError> {
         let parent = path
             .parent()
             .filter(|p| !p.as_os_str().is_empty())

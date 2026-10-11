@@ -471,7 +471,8 @@ impl OperationLog {
     /// [`OperationError::Orphan`] or [`OperationError::IllegalTransition`] if
     /// what it records is not a history an operation could have had.
     pub fn open(path: impl Into<std::path::PathBuf>) -> Result<Self, OperationError> {
-        let (owner, path) = Owner::acquire(path.into())?;
+        let path = path.into();
+        let (owner, path) = Owner::acquire(&path)?;
         let journal = Journal::open(&path)?;
         let integrity = journal.verify()?;
         if !matches!(integrity, Verified::Intact { .. }) {

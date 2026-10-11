@@ -43,6 +43,13 @@ The CLI does not grant authority or replace those controls.
 
 ## Handback
 
+Initial GitHub CI 38182002434 found a needless owned path parameter and a
+surviving mutation at operation.rs:483:49 (domain-marker OR changed to AND).
+Borrow the path and extend the domain regression with correctly hashed histories
+carrying either marker alone; neither can appear as empty Solana history. Keep
+the initial run intact until every job finishes; replacement verification is
+pending. No local jobs or mutation exclusions.
+
 Source only, no credentials, network orders, delegation, deposits or deployment.
 The submit ordering API has regression callers but no production executor yet.
 It deliberately has no release/terminal reconciliation route: even an HTTP 404 or
