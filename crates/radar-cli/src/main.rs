@@ -11,6 +11,7 @@ use std::process::ExitCode;
 
 use radar_asof::AsOf;
 use radar_instruments::{Context, CreatorHistory, CreatorTrackRecord, Registry, SimulateExit};
+mod alpaca_activities;
 mod alpaca_assets;
 mod alpaca_exposure;
 mod alpaca_journal;
@@ -128,6 +129,7 @@ commands:
                                  whether it is fixed or proportional
   alpaca-read (paper account, positions and US equity market clock; credentials from environment)
   alpaca-reconcile --account-id <expected-paper-account-id>
+  alpaca-activities-read --account-id <paper-id> --max-pages <positive-u16>
   alpaca-order-read --account-id <expected-paper-account-id> --client-order-id <retained-id> [--journal <private-file>]
   alpaca-order-reserve --journal <private-file> --account-id <paper-id> --intent <typed-intent>
   alpaca-order-journal --journal <private-file> --account-id <paper-id>
@@ -927,6 +929,7 @@ fn main() -> ExitCode {
         "dossier" => dossier::run(&args),
         "alpaca-read" => alpaca_read::run(&args),
         "alpaca-reconcile" => alpaca_reconcile::run(&args),
+        "alpaca-activities-read" => alpaca_activities::run(&args),
         "alpaca-order-read" => alpaca_order_read::run(&args),
         "alpaca-order-reserve" | "alpaca-order-journal" => alpaca_journal::run(&args),
         "alpaca-assets-read" => alpaca_assets::run(&args),

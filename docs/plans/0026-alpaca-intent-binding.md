@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # 0026 — Bind paper recovery payloads to retained order intents
 
-**Status:** source implemented; GitHub verification pending.
+**Status:** source verified on GitHub; combined reconciliation integration pending.
 
 Branch: feat/alpaca-intent-binding, initially based on verified combined 61f82b2
 (full CI 38183043973). Incorporated directory-sync integration f9553a8 so the PR
@@ -24,7 +24,7 @@ Existing unbound lookup behavior stays available and never claims payload bindin
 - [x] Preserve all claims and uncertainty; no writes, retries or claim release.
 - [x] Add four unit regressions and one actual-command regression. Independent
   test floor 2342 (2337 including directory sync + 5).
-- [ ] Read full GitHub CI and exact mutation diagnostics; fix failures.
+- [x] Repair d3f7975 passed full CI 38184222577, including all mutation shards.
 - [ ] Integrate verified source and rerun combined checks before parent advancement.
 
 ## Handback
@@ -36,7 +36,7 @@ zero missed/timeouts, six unviable. Exact diagnostics show unused/dead-code
 deny-warnings errors for three no-op replacements, missing BrokerIntent::Default,
 an illegal || let-chain mutation, and type inference after deleting the sole
 Some(path) argument arm. Compile refusals are not behavioral mutation kills.
-No exclusions added; full repair verification remains pending.
+No exclusions added. Full repair d3f7975 then passed CI 38184222577.
 
 No orders, credentials, deployment or activation. Matching confirms selected
 broker payload fields only, never fill/cash/fee reconciliation, eligibility,

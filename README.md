@@ -48,6 +48,12 @@ bounds. Fees, durable local claims, freshness and complete economic reconciliati
 remain unresolved; these bounds are not available capital or trading authority.
 See [exposure accounting](docs/plans/0020-alpaca-paper-exposure.md).
 
+`radar alpaca-activities-read --account-id <paper-id> --max-pages 10` retrieves
+paginated fill and nontrade cash/fee observations between pinned account reads.
+The page limit bounds requests, not capital; hitting it refuses partial history.
+Exhausting pagination does not prove economic completeness or final fees, and
+never releases reservations. See [activity reconciliation inputs](docs/plans/0027-alpaca-account-activities.md).
+
 `radar alpaca-order-read --account-id <expected-paper-account-id> --client-order-id <retained-id>`
 queries a specific paper order between pinned account reads. It preserves selected
 fill/terminal observations without authorizing a retry or releasing claims.

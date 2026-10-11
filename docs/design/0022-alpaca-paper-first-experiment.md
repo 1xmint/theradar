@@ -138,6 +138,19 @@ freshness, eligibility and authority remain separate. A matching order never
 releases a reservation or permits retry. See the broker's
 [order semantics](https://docs.alpaca.markets/us/docs/orders-at-alpaca).
 
+Account activities are an additional required input for reconciliation, collected
+by radar alpaca-activities-read on the fixed paper host. The command reads all
+activity types in ascending pages of 100 between pinned account observations;
+it percent-encodes the last activity ID as the next cursor and refuses duplicate
+IDs, mismatched explicit account IDs, oversized pages and the operator's request
+limit. Exact string amounts and nullable fields remain observations, not inferred
+zeros. Unknown activity types remain visible. A short page exhausts pagination,
+not economic history: pages are not atomic, late events/corrections can appear,
+and fees can be created the following day. No claim release or final cash/fee
+accounting follows from this command. See the
+[activity endpoint](https://docs.alpaca.markets/us/reference/getaccountactivities-2)
+and [activity schemas/pagination](https://docs.alpaca.markets/us/docs/account-activities).
+
 The separate broker journal records typed paper intents with nanoshares and
 micro-USD price/fee units. Its actual operator callers are alpaca-order-reserve
 and alpaca-order-journal. Reserved and SubmissionUnknown both retain their full
