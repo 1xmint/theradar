@@ -75,6 +75,9 @@ mod opening;
 #[path = "radar-issuer/live_price.rs"]
 mod live_price;
 
+#[path = "radar-issuer/native_capital.rs"]
+mod native_capital;
+
 #[derive(Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 struct Config {
@@ -417,6 +420,12 @@ impl Issuer {
             );
         } else if args == ["--review-inventory"] {
             println!("{}", self.review_inventory()?);
+        } else if args == ["--review-native-capital"] {
+            let snapshot = Snapshot::read(&self.config)?;
+            println!(
+                "{}",
+                native_capital::review(&snapshot, &self.config, &self.operations, unix_now()?)?
+            );
         } else {
             return Ok(false);
         }
@@ -426,7 +435,7 @@ impl Issuer {
     fn review_inventory(&self) -> Result<serde_json::Value, String> {
         let snapshot = Snapshot::read(&self.config)?;
         let history = acquisitions::review(&self.operations, &self.config)?;
-        inventory::review(
+        let mut report = inventory::review(
             &snapshot,
             &self.config,
             &history,
@@ -437,7 +446,10 @@ impl Issuer {
                 .native_transfers()
                 .cloned()
                 .collect::<Vec<_>>(),
-        )
+        )?;
+        report["native_capital"] =
+            native_capital::review(&snapshot, &self.config, &self.operations, unix_now()?)?;
+        Ok(report)
     }
 
     fn record_native_transfers(&mut self) -> Result<usize, String> {

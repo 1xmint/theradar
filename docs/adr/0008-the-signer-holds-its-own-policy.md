@@ -1618,6 +1618,31 @@ algorithm, and the builder's mainnet seed/address tests remain. This proves an
 address binding, not curve-account ownership, raw reserve data, associated token
 accounts, extension safety or arbitrary venue semantics. Those remain open.
 
+## Protected native cash after durable claims — 2026-10-11
+
+The issuer's read-only `--review-native-capital` command uses its existing
+protected snapshot/collector boundary and owned journal. It validates wallet,
+balance, read contexts, remaining host-time validity and the exact accounting
+checkpoint. It reconstitutes native holdings and every outstanding claim through
+the existing Portfolio quantity/reservation checks, then reports counted cash,
+claimed cash, cash after claims and cash above the configured operating reserve.
+That reserve is additional to pending claims, including their already-held fees.
+The full `--review-inventory` report exposes the same native-capital result.
+
+SubmissionUnknown remains claimed across restart without requiring a completed
+trade valuation to read native capital. Insufficient observed cash, unsupported
+claim assets/units, or observations before a claim/opening/retained transfer or
+released settlement yield an explicit unknown capital result. Measured cash below
+the operating floor yields zero above that floor. No claim is dropped or released,
+and stale/substituted wallet evidence or a stale checkpoint refuse the read.
+
+These are observed native quantities after protected claims, not complete wallet
+equity, USD usable capital, historical economic reconciliation, a fresh risk state
+or signing authority. Those remain unknown/false. This command does not replace
+the independent live snapshot producer, supervisor or existing reconciliation
+path. GitHub process and mutation verification is required before claiming this
+source verified.
+
 ## What would reverse this
 
 Nothing foreseeable reverses holding a policy locally. The specific ceilings are

@@ -6152,3 +6152,37 @@ fresh complete GitHub run before integration. Browser sign-in is reported
 complete by the owner; the previously observed browser URL-policy restriction
 still prevents claiming a verified authenticated Radar page. No live authority
 or production deployment changed.
+
+### Marked holdings integration and native capital claims (2026-10-11)
+
+The previous turn made progress: correction 02163bc was committed/pushed and
+GitHub lint passed. Its complete CI 38162024941 now passes every job, including
+all mutation shards. PR 369 is merged at ec809862e2124a0c9aaa95092993a0807e9800ce
+on feat/integrated-autonomous-controls; floor 2283. This is repository integration,
+not a deployment or autonomous-trading activation. The current browser connection
+has no Radar tab, so the owner's reported login has not been visually verified.
+
+feat/inventory-capital-claims starts at that verified-source integration. The
+actual protected issuer gains --review-native-capital, and its full inventory
+review includes the same result. Use the existing Snapshot/collector boundary,
+exact owned journal checkpoint and Portfolio cash/reservation checks. Retain all
+Reserved/SubmissionUnknown claims and fees across restart; ignore unreserved
+proposals. Subtract an additional configured operating floor. Reject old wallet
+identity/balance/context/time/checkpoint inputs. Unsupported or uncovered claims,
+or a native balance before opening/retained transfer/released settlement, yield
+explicit unknown capital rather than freeing money or reporting a partial sum.
+
+Five actual issuer-process regressions cover floor arithmetic and dates, multiple
+durable reservations/proposals and repeat-read immutability, a genuine issued
+SubmissionUnknown claim with missing valuation and falling balance, released
+settlement context boundaries, and claim asset/units/context mismatches. Raise
+the test floor to 2288. Require GitHub build/tests/lint/MSRV and behavioral
+mutation verification; no local jobs or exclusions. Source remains unverified
+until those pass. No production, delegation, deposit or signing change.
+
+The native report deliberately leaves USD usable capital, equity, complete wallet
+inventory/economics and risk-state updates unknown/false. Connect independently
+marked holdings, complete retained economic accounting and these claim/reserve
+quantities into the actual protected live risk-state producer next. Then finish
+adaptive preference/supervisor integration, durable execution/recovery and owner
+handover checks. This closes native claim accounting, not the whole live producer.
