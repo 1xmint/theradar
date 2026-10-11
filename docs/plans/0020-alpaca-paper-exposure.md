@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # 0020 — Conservative paper broker exposure
 
-**Status:** source implemented; full GitHub verification pending.
+**Status:** source verified; combined integration verification pending.
 
 Branch: feat/alpaca-paper-exposure. Base: 02a3d3d, verified by complete GitHub CI
 38179746811 (PR 374). This increment extends that actual reconciliation caller.
@@ -26,7 +26,8 @@ step toward isolated autonomous paper execution, not an alternative end state.
   oversold shares and changing bracket observations; publish null bounds.
 - [x] Attach bounds to the existing CLI caller; add seven behavior regressions,
   including that caller. Test floor 2316.
-- [ ] Read full GitHub CI and mutation diagnostics; repair actual failures.
+- [x] Full CI 38180737966 passed at 25f0b49605e438b3ead7e961858b6aec0c1631fa,
+  including every mutation shard; actual failure diagnostics were repaired.
 - [ ] Integrate verified source after parent/other-child checks finish.
 
 ## Handback

@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # 0019 — Align private setup with the accepted primary venue
 
-**Status:** source updated; GitHub verification pending.
+**Status:** source verified; combined integration verification pending.
 
 Branch: feat/alpaca-primary-setup. Base: integration 9fa709d.
 Independent of the reconciliation branch; neither change advances the parent
@@ -21,7 +21,8 @@ exists. Retain Solana as optional and keep its existing draft controls separate.
   or shorting at the start, private paper keys and paper/live performance limits.
 - [x] Clearly state broker connection is not yet available through this page.
 - [x] Preserve ChatGPT linking and all existing Privy behavior.
-- [ ] Read full GitHub CI before integration. Existing web tests exercise setup
+- [x] Full CI 38179947445 passed at 3b3411504a1f22cff48f6438b226fc7f17fff1d3.
+  Existing web tests exercise setup
   linking and configuration failures; this copy-only change adds no mirror tests.
 
 ## Handback

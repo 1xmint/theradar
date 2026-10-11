@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # 0021 — Paper order recovery observations
 
-**Status:** source implemented; full GitHub verification pending.
+**Status:** source verified; combined integration verification pending.
 
 Branch: feat/alpaca-order-recovery-read. Base: integration 6ae333d, identical tree
 to 02a3d3d verified in complete CI 38179746811. Exposure PR 376 is independent;
@@ -25,7 +25,8 @@ to retry or release capital. Preserve the autonomous Alpaca-first objective.
 - [x] Report HTTP 404 as not visible; refuse other HTTP errors and redirects.
 - [x] Add five unit regressions and one process regression; floor 2315 on this
   independent base (add seven exposure tests on eventual integration).
-- [ ] Read full GitHub CI, including exact mutation diagnostics, and fix failures.
+- [x] Full CI 38182273530 passed at 11a91073864f7e18cdf4d86f8babf133fe5f37e4,
+  including every mutation shard after the documented repairs.
 - [ ] Integrate only after parent and independent-child checks finish.
 
 ## Handback

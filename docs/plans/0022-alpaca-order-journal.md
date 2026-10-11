@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # 0022 — Durable paper intent and submission ordering
 
-**Status:** source implemented; full GitHub verification pending.
+**Status:** source verified; combined integration verification pending.
 
 Branch: feat/alpaca-order-journal. Independent base: integration 6ae333d, identical
 tree to source 02a3d3d verified in complete CI 38179746811. Keep the parent fixed
@@ -26,7 +26,8 @@ reinterpreting Solana token quantities or slots as equity units/time.
 - [x] Reuse cooperative file ownership; preserve historical hashes when broker
   data is absent. Keep broker and Solana domain replay separate.
 - [x] Add seven library and two CLI process regressions; independent floor 2318.
-- [ ] Read complete GitHub CI and exact mutation diagnostics; fix actual failures.
+- [x] Full CI 38182537437 passed at eadb50044adf44b213db3e8f19b976aa9e790ce9,
+  including every mutation shard after the documented repairs.
 - [ ] Integrate only after all relevant parent/child checks finish.
 
 ## Operator intent format

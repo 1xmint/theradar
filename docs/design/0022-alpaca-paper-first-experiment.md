@@ -121,8 +121,9 @@ account reads. Selected fill quantities, average price and lifecycle timestamps
 remain exact strings; unknown fields are omitted. Terminal or missing observations
 do not release a claim or authorize another submission. Only HTTP 404 is reported
 as not_visible; authentication/transport/other HTTP errors refuse. An absent order
-is not proof that an ambiguous submission never reached the broker. This is not
-yet the durable intent journal, payload binding or complete fill/cash reconciliation.
+is not proof that an ambiguous submission never reached the broker. This lookup
+alone supplies neither durable intent history, payload binding nor complete
+fill/cash reconciliation.
 
 The separate broker journal records typed paper intents with nanoshares and
 micro-USD price/fee units. Its actual operator callers are alpaca-order-reserve
