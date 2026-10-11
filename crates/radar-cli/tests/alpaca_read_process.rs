@@ -57,7 +57,12 @@ fn market_replay_enforces_watermark_in_the_operator_command() {
         } else {
             assert!(!output.status.success());
             assert_eq!(output.stdout, Vec::<u8>::new());
-            assert!(!output.stderr.is_empty());
+            let error = String::from_utf8(output.stderr).unwrap();
+            if watermark == "99" {
+                assert!(error.contains("market capture was unavailable at the replay watermark"));
+            } else {
+                assert!(error.contains("replay watermark must be u64 milliseconds"));
+            }
         }
     }
 }

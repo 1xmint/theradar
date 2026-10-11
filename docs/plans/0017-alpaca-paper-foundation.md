@@ -59,3 +59,12 @@ format and exact size boundaries, and the actual replay command without keys.
 Require complete GitHub CI and mutation results. No local jobs, production
 changes, broker account access, orders or paid data. Follow with validated quote
 inputs and durable paper execution/reconciliation; the full goal remains open.
+
+Source 132fd3c is in PR 373 under CI 38178443684. The completed lint job
+requires replacing the replay process test's nonempty stderr assertion at
+alpaca_read_process.rs:60. Assert the specific future-watermark/invalid-watermark
+diagnostic instead; this improves the regression and avoids a lint waiver.
+Also scope GOAL's historical 456 bps bar explicitly to the original Solana
+experiment, consistent with the accepted venue-specific profit objective.
+Do not push these corrections until the current run is terminal and all
+failure/mutation diagnostics have been read. No production or account access.
