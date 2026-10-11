@@ -48,6 +48,12 @@ bounds. Fees, durable local claims, freshness and complete economic reconciliati
 remain unresolved; these bounds are not available capital or trading authority.
 See [exposure accounting](docs/plans/0020-alpaca-paper-exposure.md).
 
+`radar alpaca-order-read --account-id <expected-paper-account-id> --client-order-id <retained-id>`
+queries a specific paper order between pinned account reads. It preserves selected
+fill/terminal observations without authorizing a retry or releasing claims.
+HTTP 404 means not visible, not proof that submission failed; other errors refuse
+without partial output. See [recovery reads](docs/plans/0021-alpaca-order-recovery-read.md).
+
 **Status: recording, and refusing to trade.** The pipeline runs end to end on a
 live instance — recording launches, measuring what became of them, and running
 the full decision lane over what it has recorded. 479,564 launches, 1,326,862 outcome measurements and 7,543

@@ -16,7 +16,7 @@ const OPEN_ORDERS: &str = "/v2/orders?status=open&limit=500&direction=asc&nested
 pub(super) struct BrokerOrder {
     pub(super) id: String,
     pub(super) status: String,
-    client_order_id: Option<String>,
+    pub(super) client_order_id: Option<String>,
     pub(super) symbol: Option<String>,
     pub(super) asset_class: Option<String>,
     pub(super) side: Option<String>,
@@ -26,6 +26,13 @@ pub(super) struct BrokerOrder {
     pub(super) qty: Option<String>,
     pub(super) notional: Option<String>,
     pub(super) filled_qty: Option<String>,
+    filled_avg_price: Option<String>,
+    submitted_at: Option<String>,
+    updated_at: Option<String>,
+    filled_at: Option<String>,
+    canceled_at: Option<String>,
+    expired_at: Option<String>,
+    failed_at: Option<String>,
     pub(super) limit_price: Option<String>,
     pub(super) stop_price: Option<String>,
     pub(super) replaces: Option<String>,
@@ -53,7 +60,7 @@ fn orders(raw: &str) -> Result<Vec<BrokerOrder>, String> {
     Ok(orders)
 }
 
-fn account(raw: &str, expected: &str) -> Result<BrokerAccount, String> {
+pub(super) fn account(raw: &str, expected: &str) -> Result<BrokerAccount, String> {
     let account: BrokerAccount =
         serde_json::from_str(raw).map_err(|_| "invalid paper account response")?;
     if account.id != expected {

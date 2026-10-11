@@ -111,6 +111,19 @@ micro-USD; liabilities are ceiled. Unsupported precision/overflow is unknown.
 These are observation bounds, not a risk authorization: fees, unsettled funds,
 freshness, local claims and complete economic reconciliation remain separate gates.
 
+The paper-only `radar alpaca-order-read` command supplies the broker-side lookup
+needed for recovery by a retained client order ID. The
+[official SDK](https://github.com/alpacahq/alpaca-py/blob/master/alpaca/trading/client.py)
+uses GET /v2/orders:by_client_order_id with the client_order_id query parameter.
+Radar permits its own query-safe ASCII letter/digit/hyphen/underscore identifiers,
+checks the returned client ID and nonblank broker ID, and pins both surrounding
+account reads. Selected fill quantities, average price and lifecycle timestamps
+remain exact strings; unknown fields are omitted. Terminal or missing observations
+do not release a claim or authorize another submission. Only HTTP 404 is reported
+as not_visible; authentication/transport/other HTTP errors refuse. An absent order
+is not proof that an ambiguous submission never reached the broker. This is not
+yet the durable intent journal, payload binding or complete fill/cash reconciliation.
+
 Preserve the smart panel: manual inputs with per-option Agent decides checkboxes,
 adaptive risk by default, optional daily loss cap, research chat, visible reasons
 and direct pause/revoke. The model may recommend a budget from observed funds;
