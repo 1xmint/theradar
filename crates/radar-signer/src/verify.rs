@@ -1000,6 +1000,39 @@ mod tests {
     }
 
     #[test]
+    fn appreciated_sales_are_not_trapped_by_entry_notional_caps() {
+        use radar_decode::pumpfun::Instruction;
+        for autonomy in [Autonomy::Capped, Autonomy::Canary] {
+            let policy = Policy {
+                autonomy,
+                max_position: MicroUsd(1_000_000),
+                max_canary: MicroUsd(100_000),
+                max_native_spend_lamports: Some(100),
+                ..policy()
+            };
+            for action in [Action::Reduce, Action::Exit] {
+                let mut auth = authorization();
+                auth.action = action;
+                auth.max_token_debit_raw = Some(15);
+                auth.min_output_raw = Some(100);
+                let bytes = venue_tx(venue_trade(Instruction::Sell, 15, 100));
+                let outcome = check(
+                    &auth,
+                    &bytes,
+                    &Address::new(WALLET),
+                    &venue_allowlist(),
+                    &policy,
+                    CallerBounds {
+                        now: NOW,
+                        max_lamports: 100,
+                    },
+                );
+                assert!(outcome.is_ok(), "{autonomy:?}/{action:?}: {outcome:?}");
+            }
+        }
+    }
+
+    #[test]
     fn a_large_sale_is_still_signed() {
         // The concern the old exemption was protecting, stated correctly this
         // time. Refusing to sign a sale because it is large is how a position

@@ -5560,3 +5560,14 @@ This fixes a concrete exit obstacle, not live routing or full activation. Keep
 pool/token/ATA proof, live portfolio/evidence, settlement/recovery, adaptive
 supervisor/chat, protected handover/install and admitted broad markets open.
 No funds, delegation, deployment or live trade changed.
+
+Initial exit CI 38113994343 at 103da94 passed lint/web and all mutation shards
+(five selected, four caught, one unviable, none missed); wider tests still run.
+Diagnostics retained outside the checkout at radar-mutation-38113994343.
+The exact verify.rs:315:50 AND-to-OR mutant fails existing acquisition library
+tests before cargo reaches the new process regression. Add a focused library
+regression for appreciated Capped/Canary Reduce/Exit to make the same guard
+mutation also demonstrate the exit failure directly; retain the separate process
+regression for wiring and independent physical bounds. Test floor 2251. Wait for
+the initial run's terminal status before publishing and require fresh GitHub CI.
+Integrated privilege CI 38113635524 at 6cdd52d passed fully; no deployment.
