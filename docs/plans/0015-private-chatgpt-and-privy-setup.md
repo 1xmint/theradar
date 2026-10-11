@@ -5726,3 +5726,15 @@ available and chat closed. Test floor 2255 on this branch; combine the additiona
 curve regression as 2256 when both are verified. Require GitHub build, tests,
 lint and behavior mutations before integration or release. Autonomy remains off;
 live evidence, account/state proof, supervisor and protected handover still open.
+
+Subscription status CI 38155504412 at c4ae72a identified exact missed mutants:
+Codex::is_linked at codex.rs:96:9 returning Ok(true) or Ok(false), and deleting
+Some(0)/Some(1) match arms at 105:13/106:13. Diagnostics show mutation jobs ran
+only radar-model's suite, so router coverage cannot kill those substitutions.
+Add a direct subprocess regression in radar-model for exit 0, 1, 2, 9 and 127,
+exact login/status arguments and a missing executable. This exercises the real
+method without introducing a second parser or any exclusion. Test floor 2256
+on this branch, 2257 after combining the curve regression. Keep the corrected
+source local until CI 38155504412 is terminal; then publish fresh GitHub checks.
+Curve integration 43af3c2 is running CI 38155552918 independently. No deploy,
+wallet preference change, delegation or trade occurred in this work.

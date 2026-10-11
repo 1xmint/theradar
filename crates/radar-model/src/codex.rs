@@ -495,6 +495,39 @@ mod tests {
     use std::collections::BTreeMap;
     use std::ffi::OsStr;
 
+    #[cfg(unix)]
+    #[test]
+    fn persisted_login_status_distinguishes_linked_unlinked_and_unknown() {
+        // Mutation jobs run the changed crate's tests, so exercise the actual
+        // subprocess here as well as through the serving router's regressions.
+        for code in [0, 1, 2, 9, 127] {
+            let codex = Codex {
+                argv: vec![
+                    "/bin/sh".to_owned(),
+                    "-c".to_owned(),
+                    format!(
+                        "[ \"$#\" = 2 ] && [ \"$1\" = login ] && [ \"$2\" = status ] || exit 9; printf secret-output; printf secret-error >&2; exit {code}"
+                    ),
+                    "fixture".to_owned(),
+                ],
+                env: Vec::new(),
+            };
+            match code {
+                0 => assert!(codex.is_linked().unwrap()),
+                1 => assert!(!codex.is_linked().unwrap()),
+                _ => assert!(matches!(
+                    codex.is_linked(),
+                    Err(Unreachable::Refused { .. })
+                )),
+            }
+        }
+        let missing = Codex::from_vars("radar-no-such-cli-3f02bd", &|_| None).unwrap();
+        assert!(matches!(
+            missing.is_linked(),
+            Err(Unreachable::NoContact(_))
+        ));
+    }
+
     fn vars(pairs: &[(&str, &str)]) -> impl Fn(&str) -> Option<String> {
         let map: BTreeMap<String, String> = pairs
             .iter()
