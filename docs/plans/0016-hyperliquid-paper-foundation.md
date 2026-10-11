@@ -55,3 +55,15 @@ This is REST observation, not streaming, paper fills or autonomous execution.
 The full goal stays active. Next inspect GitHub results, repair real failures and
 finish the recorder. Do not reuse Solana bounds for perps, claim an unmeasured
 profitability ranking or make universal venue support an activation prerequisite.
+
+### Profit-first direction discussion
+
+After publication of source e9f8253 / PR 372, the owner supplied an external
+U.S.-venue ranking and clarified that the primary goal is the best chance of
+profit after learned intelligence is applied. Pause further venue implementation.
+[Design 0021](../design/0021-profit-first-venue-selection-for-a-us-account.md)
+records the recommendation and its uncertainty; Alpaca-first is not yet a settled
+owner decision. CI 38176947898 is running; lint has failed and must be inspected.
+Keep the remaining jobs running, do not cancel or push over them. No production
+or wallet action changed. Next finish verification of this existing source and
+resolve the direction before adding a streaming or execution connector.

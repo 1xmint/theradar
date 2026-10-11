@@ -33,6 +33,18 @@ admitted scope. Existing public Solana research remains.
 
 **More profit and less loss for the customer, over time and in the moment.**
 
+**Owner clarification (2026-10-11):** the main objective is the best evidenced
+chance of sustained net profit when learned intelligence is applied. Venue,
+asset class and model complexity serve that objective. A claimed profitability
+ranking without a defined outcome, horizon and measured evidence is not a basis
+for choosing the venue. Win rate, activity and paper PnL are not substitutes for
+net outcomes and drawdown. Evaluate eligible strategies against simple tradable
+controls after execution, funding/borrow and operating costs, on held-out and
+forward data. A learned model is a hypothesis, not proof that an edge exists.
+The U.S. venue recommendation is being reconsidered in
+[design 0021](docs/design/0021-profit-first-venue-selection-for-a-us-account.md);
+the Hyperliquid public-data prototype is not a commitment to live execution.
+
 Both halves are load-bearing. "Over time" rules out a strategy that wins often
 and ruins you once. "In the moment" rules out one that is theoretically sound and
 unexecutable at the size and speed the venue actually offers — which is the trap
