@@ -11,6 +11,7 @@ use std::process::ExitCode;
 
 use radar_asof::AsOf;
 use radar_instruments::{Context, CreatorHistory, CreatorTrackRecord, Registry, SimulateExit};
+mod alpaca_assets;
 mod alpaca_exposure;
 mod alpaca_journal;
 mod alpaca_market;
@@ -130,6 +131,7 @@ commands:
   alpaca-order-read --account-id <expected-paper-account-id> --client-order-id <retained-id>
   alpaca-order-reserve --journal <private-file> --account-id <paper-id> --intent <typed-intent>
   alpaca-order-journal --journal <private-file> --account-id <paper-id>
+  alpaca-assets-read --account-id <paper-id> --symbols SPY,QQQ
   alpaca-market-read --symbols SPY,QQQ --output <new-capture-file>
   alpaca-market-replay --input <capture-file> --as-of-unix-ms <N>
   alpaca-quote --input <capture-file> --symbol SPY --as-of-unix-ms <N> --max-age-ms <N> --max-spread-bps <N>
@@ -927,6 +929,7 @@ fn main() -> ExitCode {
         "alpaca-reconcile" => alpaca_reconcile::run(&args),
         "alpaca-order-read" => alpaca_order_read::run(&args),
         "alpaca-order-reserve" | "alpaca-order-journal" => alpaca_journal::run(&args),
+        "alpaca-assets-read" => alpaca_assets::run(&args),
         "alpaca-market-read" | "alpaca-market-replay" => alpaca_market::run(&args),
         "alpaca-quote" => alpaca_quote::run(&args),
         "wallet-read" => wallet_read::run(&args),
