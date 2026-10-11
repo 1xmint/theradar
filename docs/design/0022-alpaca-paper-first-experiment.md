@@ -162,6 +162,16 @@ and [official asset model](https://github.com/alpacahq/alpaca-py/blob/master/alp
 Actual feed/account verification, price/quantity increments, trading session,
 quote conditions, risk state and owner mandate remain required before orders.
 
+Broker record receipts require file sync followed by parent-directory sync on
+every append, including after reopening. A directory-sync error can leave an
+intact event on disk but returns no receipt; the broker owner remains poisoned
+and must reopen. This follows the
+[Linux fsync directory-entry requirement](https://raw.githubusercontent.com/mkerrisk/man-pages/master/man2/fsync.2).
+Filesystems/platforms that cannot perform this operation refuse broker records.
+It assumes a protected, existing, durably provisioned parent directory and a
+storage stack honoring sync; it does not claim host-rollback resistance or a
+physical power-loss test. Historical nonbroker journal behavior is unchanged.
+
 Preserve the smart panel: manual inputs with per-option Agent decides checkboxes,
 adaptive risk by default, optional daily loss cap, research chat, visible reasons
 and direct pause/revoke. The model may recommend a budget from observed funds;

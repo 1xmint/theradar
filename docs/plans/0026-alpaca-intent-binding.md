@@ -3,9 +3,11 @@
 
 **Status:** source implemented; GitHub verification pending.
 
-Branch: feat/alpaca-intent-binding, based on verified combined 61f82b2
-(full CI 38183043973). Independent of directory-sync integration CI 38183693452;
-no changes to journal persistence. Keep its base fixed while this CI runs.
+Branch: feat/alpaca-intent-binding, initially based on verified combined 61f82b2
+(full CI 38183043973). Incorporated directory-sync integration f9553a8 so the PR
+has a clean merge base and additive test floor. Its CI 38183693452 was still
+running at incorporation; both constituent sources had passed full CI.
+No payload changes to journal persistence. Keep the base fixed while this CI runs.
 Previous goal turn made progress: verified directory-sync source, integrated it
 and dispatched combined CI. This turn advances the payload gate needed by recovery.
 
@@ -21,7 +23,7 @@ Existing unbound lookup behavior stays available and never claims payload bindin
 - [x] Refuse missing/changed/complex payloads; absent broker orders stay unresolved.
 - [x] Preserve all claims and uncertainty; no writes, retries or claim release.
 - [x] Add four unit regressions and one actual-command regression. Independent
-  test floor 2340 (2335 + 5); combined with directory sync it will be 2342.
+  test floor 2342 (2337 including directory sync + 5).
 - [ ] Read full GitHub CI and exact mutation diagnostics; fix failures.
 - [ ] Integrate verified source and rerun combined checks before parent advancement.
 
