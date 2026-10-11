@@ -31,7 +31,7 @@ struct Capture {
     raw_response: String,
 }
 
-fn symbols(text: &str) -> Result<Vec<String>, String> {
+pub(super) fn symbols(text: &str) -> Result<Vec<String>, String> {
     let mut seen = BTreeSet::new();
     let mut symbols = Vec::new();
     for symbol in text.split(',') {

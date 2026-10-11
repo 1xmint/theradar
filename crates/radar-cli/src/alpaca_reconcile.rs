@@ -53,7 +53,7 @@ fn orders(raw: &str) -> Result<Vec<BrokerOrder>, String> {
     Ok(orders)
 }
 
-fn account(raw: &str, expected: &str) -> Result<BrokerAccount, String> {
+pub(super) fn account(raw: &str, expected: &str) -> Result<BrokerAccount, String> {
     let account: BrokerAccount =
         serde_json::from_str(raw).map_err(|_| "invalid paper account response")?;
     if account.id != expected {

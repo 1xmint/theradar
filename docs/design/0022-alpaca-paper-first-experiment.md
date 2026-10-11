@@ -90,6 +90,17 @@ fields still do not establish atomicity, economic completeness or capital
 authority. Future risk-state production must reconcile local durable reservations,
 broker fills and unsupported account/order states before releasing any capital.
 
+`radar alpaca-assets-read` reads each requested equity between pinned paper
+account reads. It binds symbol, nonempty unique asset ID and us_equity class;
+nullable status, exchange, tradability, fractional, margin, short and attribute
+observations remain separate from order eligibility. It rejects URL dot segments,
+malformed responses and account changes in identity. Stable selected account
+fields are still not an atomic snapshot. See the
+[asset endpoint](https://docs.alpaca.markets/us/reference/get-v2-assets-symbol_or_asset_id)
+and [official asset model](https://github.com/alpacahq/alpaca-py/blob/master/alpaca/trading/models.py).
+Actual feed/account verification, price/quantity increments, trading session,
+quote conditions, risk state and owner mandate remain required before orders.
+
 Preserve the smart panel: manual inputs with per-option Agent decides checkboxes,
 adaptive risk by default, optional daily loss cap, research chat, visible reasons
 and direct pause/revoke. The model may recommend a budget from observed funds;

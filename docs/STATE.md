@@ -9,10 +9,18 @@ repository is right and this file is a bug worth fixing in the same change.
 The four most likely to be stale: the measured edge, what the trading lane
 can reach, which venues are recorded, and whether anything has traded.
 
-Radar is a Solana research and trading platform. The goal is not "a trading bot".
-It is infrastructure that can **systematically discover, measure and exploit real
-edges in Solana markets**, and expose the resulting intelligence to other agents
-over x402.
+Radar is an evidence-driven autonomous trading system. The owner's accepted
+2026-10-11 direction is **Alpaca paper stocks/ETFs first, without leverage or
+dependence on shorting**, optimizing durable profit after costs. Solana and
+Hyperliquid public-data research are secondary. See [GOAL](../GOAL.md) and
+[the accepted experiment](design/0022-alpaca-paper-first-experiment.md).
+Account/market/quote and bracket reconciliation source is integrated; exposure,
+recovery, durable claims, asset observations and setup changes still require
+verified integration. No Alpaca account/keys or actual broker execution have
+been verified. The autonomous goal remains incomplete.
+
+The measurements below describe the existing Solana research, recorder and
+execution infrastructure; they do not establish an Alpaca edge.
 
 Two facts set the tone, and both are load-bearing:
 

@@ -41,6 +41,11 @@ fields, and refuses full 500-order responses. Stable fields do not prove an atom
 snapshot or complete economic accounting. It uses the same private paper keys
 and cannot submit orders. See [reconciliation work](docs/plans/0018-alpaca-paper-reconciliation.md).
 
+`radar alpaca-assets-read --account-id <paper-id> --symbols SPY,QQQ` reads
+identity-bound equity assets between pinned paper account observations. Missing
+tradability and fractional-share flags remain unknown. This does not authorize
+orders. See [asset checks](docs/plans/0023-alpaca-asset-observations.md).
+
 **Status: recording, and refusing to trade.** The pipeline runs end to end on a
 live instance — recording launches, measuring what became of them, and running
 the full decision lane over what it has recorded. 479,564 launches, 1,326,862 outcome measurements and 7,543
