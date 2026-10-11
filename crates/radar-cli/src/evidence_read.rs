@@ -54,7 +54,7 @@ pub fn run(args: &[String]) -> Result<(), String> {
 
 // A failed collection never reaches this function. Publication replaces the
 // whole packet, so an issuer cannot observe one new half and one old half.
-fn publish(path: &Path, packet: &serde_json::Value) -> Result<(), String> {
+pub(super) fn publish(path: &Path, packet: &serde_json::Value) -> Result<(), String> {
     let bytes = packet.to_string().into_bytes();
     if bytes.len() > 1_048_576 {
         return Err("evidence packet exceeds issuer read limit".into());

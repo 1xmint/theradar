@@ -5977,3 +5977,33 @@ use the repository's existing assert_eq!(stdout, Vec::<u8>::new()) convention.
 The run is terminal before publishing this two-line test correction. Keep it
 on the price-reader PR, separate from the uncommitted protected price-consumer
 work on feat/protected-live-price. Require fresh GitHub verification.
+
+### Protected live price consumer source handback (2026-10-11)
+
+Independent feat/protected-live-price starts at 3030f37, the price-reader lint
+correction. Price-reader CI 38158812428 is live; do not push over it. Add the
+actual protected consumer while that existing reader is verified separately.
+
+sol-price-read --output reuses private complete atomic publication, leaving
+previous evidence unchanged on network failure. Protected config sol_price_path
+is loaded by every snapshot consumer. Strict collector metadata/shape, positive
+ordered SOL/USD band, reviewed contexts, publication/read freshness and private
+file permissions are required. Missing or invalid configured evidence never
+falls back to the reviewed price. The issuer trusts this protected collector,
+not model/stdin input; no new network edge or signing credential is added.
+
+The actual native-spend calculation uses max(reviewed upper price, live upper
+price), preserving the reviewed floor while tightening the ceiling when SOL
+prices rise. With live evidence the reviewed upper price may be omitted; without
+it absent/zero price still refuses. Bound proof expiry by publication and read
+expiry as well as all existing expiries. Fresh prices cannot refresh old risk
+state, wallet balances, proposal or exact reviewed bytes.
+
+Three actual issuer process regressions cover tightening/no relaxation, omitted
+reviewed price, spend one lamport above the new bound, capped expiry, strict
+identity/context/freshness, missing-file/no-fallback, reload/recovery, old risk
+state and public-file refusal. A fourth real CLI/mock-RPC regression checks private
+publication and old-file preservation on failed collection. Floor is 2270;
+require GitHub tests/build/lint/MSRV and behavior mutations before integration.
+Complete marked portfolio valuation, usable capital, adaptive controller and
+execution/recovery remain open. No production deployment or authority change.
