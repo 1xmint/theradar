@@ -5956,3 +5956,16 @@ raise floor 2266. Require GitHub builds/tests/lint and behavior mutation checks;
 no local test/build job, new dependency, service or authority was introduced.
 No deployment. A subsequent VPS read was stopped when Tailscale required fresh
 SSH reauthentication; this does not block repository implementation or GitHub CI.
+
+### Independent price reader verification correction (2026-10-11)
+
+Combined protected-observations CI 38157603325 passed at integration 9d8ebd4.
+Price source CI 38158260523 at 955eced completed with build, tests, MSRV,
+format, site/web, dependencies and all four mutation shards passing. Mutation
+diagnostics retained outside the checkout in radar-mutation-38158260523 show
+55 mutations: 49 caught, six compiler-unviable and none missed. This run still
+failed lint: public sol_price::read parsed its fixed account using expect without
+a Panics section. Return an error from that parse instead of adding a public
+panic or suppressing the lint. Publish only after this run is terminal and
+require fresh GitHub verification; no new test count or mutation waiver.
+Protected live valuation and autonomous execution remain unfinished.

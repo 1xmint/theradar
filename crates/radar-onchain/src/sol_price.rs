@@ -120,7 +120,9 @@ pub fn read(
     budget: &mut Budget,
     bounds: &Bounds,
 ) -> Result<Observation, String> {
-    let account: Address = ACCOUNT.parse().expect("fixed oracle account");
+    let account: Address = ACCOUNT
+        .parse()
+        .map_err(|_| "fixed oracle account invalid")?;
     let result = client
         .accounts(budget, &[account])
         .map_err(|_| "oracle RPC read failed")?;
