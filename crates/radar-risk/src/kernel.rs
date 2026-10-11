@@ -190,8 +190,8 @@ pub struct Authorization {
     pub max_notional: MicroUsd,
     /// Maximum aggregate raw units of the authorized mint that may be sold.
     /// This is independent of USD notional and native fee/spend bounds. Missing
-    /// authority cannot authorize a decoded sale. The current buy-only issuer
-    /// leaves this unset; exit issuance must derive it from protected holdings.
+    /// authority cannot authorize a decoded sale. The protected issuer derives
+    /// sale authority from decoded quantities checked against retained holdings.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_token_debit_raw: Option<u64>,
     /// Minimum aggregate output of decoded curve trades: raw authorized-mint

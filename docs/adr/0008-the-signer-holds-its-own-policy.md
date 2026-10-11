@@ -1450,8 +1450,30 @@ refusals, units, overflow, preservation of other claims and tampered replay.
 GitHub verification is required before treating this source as verified.
 
 This remains protected operator-provisioned economic reconciliation, not a live
-collector, holdings-derived exit issuer or recovered dropped transaction. Full
+collector or recovered dropped transaction. Full
 wallet coverage and marked exposure remain unknown. No signing authority opens.
+
+## Holdings-derived protected sale issuance
+
+For Reduce and Exit, the offline issuer sums readable Sell/SellV2 quantities
+from exact PumpFun transaction bytes. It reuses retained inventory reconciliation
+and chronological token anchors, then checks the total against current protected
+initialized holdings of the proposed mint. Reduce cannot exceed those holdings;
+Exit must cover the whole measured holding. The resulting raw token bound is
+included in the issuer proof. A missing or zero supported sale refuses.
+
+Sale USD notional values tokens rather than outgoing SOL. Sale native setup and
+other outgoing instructions retain the explicit native policy ceiling, separately
+reserved with fees; buy USD conversion remains unchanged. The signer still
+independently decodes direction, amounts and output protection before issuance.
+
+Process regressions cover partial/full/split sales, excessive or zero quantity,
+partial Exit refusal, mismatched cash/holdings, frozen accounts, stale evidence,
+foreign program bytes, output protection and proof tampering. GitHub verification
+is required. This does not prove token spendability, ATA/curve derivations,
+ownership/writability or live evidence completeness. The signer's existing USD
+position ceiling also still applies to sales; appreciated exits need separate
+policy work. Live routing, collection and delegation remain closed.
 
 ## What would reverse this
 

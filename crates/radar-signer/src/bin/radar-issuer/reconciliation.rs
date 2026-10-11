@@ -7,7 +7,7 @@ use serde_json::{Value, json};
 
 use super::{Config, Snapshot, acquisitions, evidence_integer as integer, inventory};
 
-fn verify_token_anchors(
+pub(super) fn verify_token_anchors(
     log: &OperationLog,
     config: &Config,
     history: &Value,
@@ -142,7 +142,7 @@ pub(super) fn apply(
     )
 }
 
-fn verify_inventory(
+pub(super) fn verify_inventory(
     log: &OperationLog,
     config: &Config,
     snapshot: &Snapshot,

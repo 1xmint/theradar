@@ -2,7 +2,7 @@
 //! Offline operator-provisioned kernel issuer. It holds no wallet or Privy key.
 //! Configured private files are the trust boundary; stdin carries no authority.
 //! Reconciles retained native-SOL buys, sales and failed fees against protected reads.
-//! This is not yet a live snapshot adapter, exit issuer or execution/recovery loop.
+//! This is not yet a live snapshot adapter or execution/recovery loop.
 
 use std::io::{BufRead as _, Read as _, Write as _};
 use std::path::{Path, PathBuf};
@@ -38,6 +38,9 @@ mod cash_completion;
 
 #[path = "radar-issuer/execution_output.rs"]
 mod execution_output;
+
+#[path = "radar-issuer/exit_authority.rs"]
+mod exit_authority;
 
 #[path = "radar-issuer/native_transfers.rs"]
 mod native_transfers;
@@ -469,6 +472,26 @@ impl Issuer {
         })
     }
 
+    fn native_ceiling(
+        &self,
+        authorization: &radar_risk::Authorization,
+        snapshot: &Snapshot,
+    ) -> Result<u64, String> {
+        let native_cap = self.config.policy.max_native_spend_lamports.unwrap_or(0);
+        if authorization.action == Action::Buy {
+            Ok(u64::try_from(
+                u128::from(authorization.max_notional.get()) * 1_000_000_000
+                    / u128::from(snapshot.sol_upper_micro_usd),
+            )
+            .map_err(|_| "lamport ceiling overflow")?
+            .min(native_cap))
+        } else {
+            // Sale notional values tokens, not outgoing SOL. Keep native setup
+            // and other outgoing instructions under their explicit policy cap.
+            Ok(native_cap)
+        }
+    }
+
     fn prepare(
         &self,
         candidate: &Candidate,
@@ -500,12 +523,7 @@ impl Issuer {
                     .ok_or("slot expiry overflow")?,
             ),
         );
-        let max_lamports = u64::try_from(
-            u128::from(authorization.max_notional.get()) * 1_000_000_000
-                / u128::from(snapshot.sol_upper_micro_usd),
-        )
-        .map_err(|_| "lamport ceiling overflow")?
-        .min(self.config.policy.max_native_spend_lamports.unwrap_or(0));
+        let max_lamports = self.native_ceiling(&authorization, snapshot)?;
         if max_lamports == 0 {
             return Err("lamport ceiling is zero".into());
         }
@@ -514,6 +532,14 @@ impl Issuer {
             .ok_or("fee reservation overflow")?;
         let bytes = radar_types::b64::decode(&candidate.transaction)
             .ok_or("invalid transaction encoding")?;
+        authorization.max_token_debit_raw = exit_authority::review(
+            &bytes,
+            snapshot,
+            &self.config,
+            &history,
+            &self.operations,
+            now,
+        )?;
         authorization.min_output_raw = execution_output::review(&bytes, snapshot.min_output_raw)?;
         let allowlist = radar_signer::Allowlist {
             programs: self.config.programs.iter().map(|a| *a.as_bytes()).collect(),
@@ -612,12 +638,11 @@ impl Issuer {
         {
             return Err("reviewed transaction fee is not covered by the reservation".into());
         }
-        if candidate.proposal.action != Action::Buy
-            || candidate.proposal.quote != Asset::Sol
+        if candidate.proposal.quote != Asset::Sol
             || candidate.proposal.notional.get() == 0
             || candidate.proposal.oldest_input_slot > snapshot.state.now
         {
-            return Err("issuer currently accepts only current native-SOL buys".into());
+            return Err("issuer requires a current positive native-SOL trade".into());
         }
         let (mut intent, payload, reserved) = self.prepare(candidate, &snapshot, now)?;
         let mut portfolio = Portfolio::at(self.config.wallet, snapshot.state.now);

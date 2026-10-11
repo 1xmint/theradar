@@ -5313,3 +5313,26 @@ refusals remain labeled unviable. Lint then reached two new test assignments and
 required their trailing semicolons; corrected both. Wait for the remaining test
 job before publication, then require a fresh complete run. No local jobs or live
 changes. Protected exit issuance remains the next feature after this gate.
+
+### Protected exit issuance handback (2026-10-11)
+
+Previous goal turn made source progress. Sale completion CI 38084432595 at
+68ebbd7 passed fully, including 30 mutants (16 caught, 14 unviable, none missed).
+Fast-forwarded integrated-autonomous-controls to that verified source; its fresh
+CI 38084656166 also passed. No new release or production installation occurred.
+
+Started feat/protected-exit-authority from 68ebbd7. Actual caller is Issuer::prepare:
+Reduce/Exit now derive aggregate raw sale authority from exact known curve bytes
+and check retained/current inventory and chronological anchors before attesting.
+Full Exit must equal measured holdings; Reduce must fit. Native expense authority
+stays under its separate policy cap rather than converting token USD notional.
+Independent signer checks and output floors remain. Added two process tests and
+raised test floor to 2241. Publish for GitHub build/tests/lint/mutation checks;
+no local jobs ran. Inspect exact results before integration or further publication.
+
+This is offline operator-provisioned authority, not live trading. ATA/curve and
+token ownership/writability/spendability, live evidence/marked portfolio, actual
+bidirectional routing across market families/SOL/USDC, dropped recovery, adaptive
+supervisor/research chat and protected site handover/install remain open. Existing
+signer USD position caps still apply to sales and need appreciated-exit handling.
+Goal active; autonomous trading and live signing remain off.

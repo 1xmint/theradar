@@ -166,6 +166,134 @@ fn reconciliation_fixture() -> (Fixture, radar_journal::OperationId) {
     (fixture, id)
 }
 
+fn exit_fixture(action: &str, amount: u64, split: bool) -> Fixture {
+    let (mut fixture, buy) = reconciliation_fixture();
+    assert!(reconcile_operation(&fixture, buy.as_str()).status.success());
+    let log =
+        radar_journal::OperationLog::open(fixture.dir.path().join("operations.jsonl")).unwrap();
+    fixture.snapshot["accounting_checkpoint"] = json!(log.checkpoint());
+    drop(log);
+    fixture.snapshot["state"]["deployed"] = json!(3_001_200);
+    let creator = fixture.snapshot["proposal"]["creator"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    fixture.snapshot["state"]["per_creator"][creator] = json!(3_001_200);
+    fixture.candidate["proposal"]["action"] = json!(action);
+    fixture.snapshot["proposal"] = fixture.candidate["proposal"].clone();
+    // Distinguish sale's physical native ceiling from a USD-token valuation.
+    fixture.snapshot["sol_upper_micro_usd"] = json!(u64::MAX);
+    set_curve_buy(&mut fixture, amount);
+    let mut bytes =
+        radar_types::b64::decode(fixture.candidate["transaction"].as_str().unwrap()).unwrap();
+    bytes[208..216].copy_from_slice(
+        radar_decode::pumpfun::Instruction::Sell
+            .discriminator()
+            .as_bytes(),
+    );
+    if split {
+        bytes[216..224].copy_from_slice(&1_u64.to_le_bytes());
+        let mut second = bytes[198..].to_vec();
+        second[18..26].copy_from_slice(&amount.saturating_sub(1).to_le_bytes());
+        bytes[197] = 2;
+        bytes.extend(second);
+    }
+    let encoded = radar_types::b64::encode(&bytes);
+    fixture.candidate["transaction"] = json!(encoded);
+    fixture.snapshot["transaction"] = json!(encoded);
+    fixture.snapshot["transaction_evidence"]["transaction_base64"] = json!(encoded);
+    fixture.snapshot["transaction_evidence"]["message_base64"] =
+        json!(radar_types::b64::encode(&bytes[65..]));
+    fixture.save();
+    fixture
+}
+
+#[test]
+fn issuer_binds_sale_quantity_to_holdings_and_full_exit_including_split_trades() {
+    for (action, amount, split, accepted) in [
+        ("reduce", 6, false, true),
+        ("reduce", 15, false, true),
+        ("exit", 15, false, true),
+        ("exit", 15, true, true),
+        ("exit", 14, false, false),
+        ("reduce", 16, false, false),
+        ("reduce", 16, true, false),
+        ("reduce", 0, false, false),
+        ("buy", 6, false, false),
+    ] {
+        let fixture = exit_fixture(action, amount, split);
+        let answer = fixture.start().ask(&fixture.candidate);
+        assert_eq!(
+            answer["outcome"] == "issued",
+            accepted,
+            "{action}/{amount}/{split}: {answer}"
+        );
+        let log =
+            radar_journal::OperationLog::open(fixture.dir.path().join("operations.jsonl")).unwrap();
+        assert_eq!(log.outstanding().count(), usize::from(accepted));
+        if accepted {
+            assert_eq!(
+                answer["intent"]["authorization"]["max_token_debit_raw"],
+                amount
+            );
+            assert_eq!(answer["intent"]["max_lamports"], 250_000_000);
+            let intent: radar_signer::protocol::PrivyAuthorization =
+                serde_json::from_value(answer["intent"].clone()).unwrap();
+            let key = ed25519_dalek::SigningKey::from_bytes(&SEED);
+            let verifier = radar_signer::attestation::Issuer::new(
+                &radar_types::Address::new(key.verifying_key().to_bytes()),
+                60,
+            )
+            .unwrap();
+            assert!(verifier.check(&intent, unix_now()).is_ok());
+            let mut tampered = intent;
+            tampered.authorization.max_token_debit_raw = Some(amount + 1);
+            assert!(verifier.check(&tampered, unix_now()).is_err());
+        }
+    }
+}
+
+#[test]
+fn exit_issuance_requires_matching_current_inventory_and_output_protection() {
+    for case in ["quantity", "cash", "frozen", "floor", "stale", "foreign"] {
+        let mut fixture = exit_fixture("reduce", 6, false);
+        match case {
+            "quantity" => set_inventory(&mut fixture, 14, 1003),
+            "cash" => {
+                fixture.snapshot["sol_lamports"] = json!(284_844_001);
+                fixture.snapshot["wallet_evidence"]["native_sol"]["raw_amount"] =
+                    json!("284844001");
+            }
+            "frozen" => {
+                fixture.snapshot["wallet_evidence"]["token_program"]["accounts"][0]["state"] =
+                    json!("frozen");
+                fixture.snapshot["wallet_evidence"]["raw_token_verification"]["accounts"][0]["state"] =
+                    json!("frozen");
+            }
+            "floor" => fixture.snapshot["min_output_raw"] = Value::Null,
+            "stale" => fixture.snapshot["observed_at_unix_secs"] = json!(unix_now() - 121),
+            _ => {
+                let mut bytes =
+                    radar_types::b64::decode(fixture.candidate["transaction"].as_str().unwrap())
+                        .unwrap();
+                bytes[133..165].copy_from_slice(&[0x11; 32]);
+                let encoded = radar_types::b64::encode(&bytes);
+                fixture.candidate["transaction"] = json!(encoded);
+                fixture.snapshot["transaction"] = json!(encoded);
+                fixture.snapshot["transaction_evidence"]["transaction_base64"] = json!(encoded);
+                fixture.snapshot["transaction_evidence"]["message_base64"] =
+                    json!(radar_types::b64::encode(&bytes[65..]));
+            }
+        }
+        fixture.save();
+        let path = fixture.dir.path().join("operations.jsonl");
+        let before = std::fs::read(&path).unwrap();
+        let answer = fixture.start().ask(&fixture.candidate);
+        assert_eq!(answer["outcome"], "refused", "{case}: {answer}");
+        assert_eq!(std::fs::read(&path).unwrap(), before, "{case}");
+    }
+}
+
 fn reconcile_operation(fixture: &Fixture, id: &str) -> std::process::Output {
     fixture
         .command()
@@ -4358,7 +4486,11 @@ fn kernel_refusals_and_insufficient_cash_never_produce_a_proof() {
         candidate["proposal"] = fixture.snapshot["proposal"].clone();
         assert_eq!(
             issuer.ask(&candidate)["reason"],
-            "issuer currently accepts only current native-SOL buys",
+            if field == "action" {
+                "exit requires a readable positive curve sale"
+            } else {
+                "issuer requires a current positive native-SOL trade"
+            },
             "{field}"
         );
     }
