@@ -30,3 +30,11 @@ paid data or live orders. Existing private deployment remains unchanged.
 GitHub verification must establish the new source before integration. Historical
 Solana edge thresholds are not Alpaca thresholds. Do not claim live expectancy
 or activation readiness from paper results or an account read.
+
+Initial source 83ee6ca is in draft PR 373. GitHub CI 38177814576 reports a
+lint failure at alpaca_read.rs:20: the Account struct's account_blocked field
+triggers struct_field_names. Rename the internal type BrokerAccount; preserve
+Alpaca's JSON schema and all report semantics. No waiver or new dependency.
+Wait for all jobs to finish before pushing and require fresh complete CI.
+Hyperliquid public-reader correction 05a5e17 passed complete CI 38177609139;
+that branch remains secondary and unmerged. No production changes.

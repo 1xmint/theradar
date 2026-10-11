@@ -9,7 +9,7 @@ use serde_json::{Value, json};
 const PAPER_API: &str = "https://paper-api.alpaca.markets";
 
 #[derive(Deserialize, Serialize)]
-struct Account {
+struct BrokerAccount {
     id: String,
     status: String,
     currency: Option<String>,
@@ -76,7 +76,7 @@ fn collect(mut read: impl FnMut(&str) -> Result<String, String>) -> Result<Value
     let started = crate::wallet_read::now()?;
     // Decode only the fields this report needs. Do not echo an entire account
     // response (account number and future sensitive fields included).
-    let account: Account = serde_json::from_str(&read("/v2/account")?)
+    let account: BrokerAccount = serde_json::from_str(&read("/v2/account")?)
         .map_err(|_| "invalid Alpaca paper account response")?;
     let positions: Vec<Position> = serde_json::from_str(&read("/v2/positions")?)
         .map_err(|_| "invalid Alpaca paper positions response")?;
