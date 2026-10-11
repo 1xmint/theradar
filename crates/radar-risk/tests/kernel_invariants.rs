@@ -287,7 +287,7 @@ fn daily_loss_closes_entries_without_trapping_reductions_or_bypassing_other_gate
             }
             let no_authority = Policy {
                 autonomy: Autonomy::Observe,
-                ..pol.clone()
+                ..pol
             };
             assert!(
                 refusals(&evaluate(&proposal, &portfolio, &no_authority))

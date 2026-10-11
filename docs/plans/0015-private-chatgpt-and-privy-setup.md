@@ -5635,3 +5635,22 @@ remain necessary. Add a boundary regression for loss below/at/above the cap,
 both reductions and exits, plus each remaining global refusal. Test floor 2252
 on this branch; combine with PR 361's additional test as 2253 upon integration.
 Require GitHub CI and relevant mutations. No authority or live trade is enabled.
+
+Daily gate CI 38114955196 at 950ecd0: mutation check passed, three selected,
+two caught and one unviable. Retained diagnostics outside the checkout at
+radar-mutation-38114955196. Exact kernel.rs:277:9 AND-to-OR compiles and fails
+the new daily gate regression; kernel.rs:279:60 >=-to-< is also caught. Lint
+identified an unnecessary clone on Copy Policy in the new test. Remove that
+clone, leave behavior unchanged, and wait for the whole current run to finish
+before publishing this correction and requiring fresh GitHub CI. No exclusions.
+
+PumpSwap correction 3d6e72d is running CI 38115000160 after initial 38114787717
+completed failed for digest formatting. Do not push over either live run.
+Read-only /usr/local/bin/radar-codex login status on the host reports Logged in
+using ChatGPT: credential is still linked, despite the setup UI's Connect button.
+Linker::progress currently returns Idle when no device-login child exists; it
+reports a flow, not persistent CLI login state. Record this UI gap for the next
+focused fix, without reconnecting or reading credentials. Owner preferences,
+signer activation and wallet funds remain unchanged. Full autonomy still needs
+account/token verification, live evidence/portfolio producer, supervisor/chat
+consumer, settlement/recovery, and protected handover plus demonstrated canary.
