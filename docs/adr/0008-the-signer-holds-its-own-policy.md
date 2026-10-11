@@ -504,6 +504,36 @@ unknown; even an empty token enumeration is not promoted to complete portfolio
 authority. Total USD value, realised PnL and usable capital remain null. This
 option does not refresh or populate the issuer's reviewed portfolio state.
 
+`radar portfolio-read --wallet <address> --rpc <URL> --min-slot <N>
+--max-age-secs <N> --max-confidence-bps <0..10000>` assembles observed holdings
+through the existing Portfolio/Holding/Asset vocabulary. It sums same-asset raw
+quantities with checked arithmetic, keeping SPL and Token-2022 identities and
+units distinct. Native and verified classic wrapped SOL use the independent
+oracle; rent reserves in wrapped accounts are not additional token quantities.
+Eligible nonzero token holdings may use the existing independently derived
+curve/mint/fee reader and full-quantity exit estimator. The market must meet the
+raw inventory context and token program/decimals. These marks include the
+observed venue fee bound, before network costs, not guaranteed liquidation.
+
+Frozen/uninitialized accounts, active mint/freeze authorities and delegates
+prevent admitting a nonzero mark. Unsupported markets and unpriced USDC remain
+unknown; there is no stablecoin peg or unsupported route fallback. A measured
+zero quantity needs no price. No unknown holding is dropped or turned into zero;
+the combined observed-holdings band is absent if either side of any mark is
+unknown. Totals use checked arithmetic and the oldest contributing observation.
+SOL price dates use the posting slot, not the newer bank carrying that price.
+
+All inventory contexts meet the explicit floor, market contexts follow raw
+holdings, and the oracle bank follows every admitted mark. Collection shares a
+bounded call allowance and deadline; stale/backwards windows and failed required
+reads emit no partial output. Failed optional market reads remain attributed
+unknown marks. Separate contexts and non-atomic inventory are retained. The
+collector emits holdings, not the Portfolio's default historical result fields:
+equity, usable capital, historical PnL and economic completeness remain unknown.
+It does not reconstruct claims/reserves, authorize allocation, refresh an issuer
+snapshot or enable signing. Other venues and independent quote-asset valuations
+remain adapters to implement, not reasons to delay this admitted capability.
+
 The private snapshot also requires `wallet_evidence`, containing the JSON from
 `radar wallet-read`. Before reserving capital the issuer binds version 1,
 read-only/finalized metadata, configured wallet identity, native decimals of

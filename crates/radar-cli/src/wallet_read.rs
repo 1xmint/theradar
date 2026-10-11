@@ -30,7 +30,7 @@ pub(super) fn read(rpc: &RpcClient, wallet: Address, budget: &mut Budget) -> Res
     inventory(rpc, wallet, budget).map(|(evidence, _)| evidence)
 }
 
-fn inventory(
+pub(super) fn inventory(
     rpc: &RpcClient,
     wallet: Address,
     budget: &mut Budget,
@@ -74,11 +74,16 @@ fn inventory(
 // Native SOL only: token marks, cost basis, pending claims and operating
 // reserves are not inferred from this band. Confidence is not an exit guarantee.
 fn native_value(lamports: u64, lower: u64, upper: u64) -> Result<Value, String> {
+    let (lower, upper) = native_band(lamports, lower, upper)?;
+    Ok(json!({"lower_micro_usd":lower,"upper_micro_usd":upper}))
+}
+
+pub(super) fn native_band(lamports: u64, lower: u64, upper: u64) -> Result<(u64, u64), String> {
     let lower = u128::from(lamports) * u128::from(lower) / 1_000_000_000;
     let upper = (u128::from(lamports) * u128::from(upper)).div_ceil(1_000_000_000);
     let lower = u64::try_from(lower).map_err(|_| "native SOL value exceeds dollar range")?;
     let upper = u64::try_from(upper).map_err(|_| "native SOL value exceeds dollar range")?;
-    Ok(json!({"lower_micro_usd":lower,"upper_micro_usd":upper}))
+    Ok((lower, upper))
 }
 
 fn valued(
@@ -110,7 +115,7 @@ fn valued(
     Ok(evidence)
 }
 
-fn check_window(started: u64, completed: u64, maximum_age: u64) -> Result<(), String> {
+pub(super) fn check_window(started: u64, completed: u64, maximum_age: u64) -> Result<(), String> {
     if completed
         .checked_sub(started)
         .is_none_or(|age| age > maximum_age)

@@ -25,6 +25,7 @@ mod exits;
 mod features;
 mod graduations;
 mod model_prices;
+mod portfolio_read;
 mod replay;
 mod route;
 mod selection;
@@ -120,6 +121,8 @@ commands:
   wallet-read --wallet <address> --rpc <URL>
        [--value-sol --min-slot <N> --max-age-secs <N> --max-confidence-bps <0..10000>]
     Finalized balances/raw token verification; optional native USD band, read-only.
+  portfolio-read --wallet <address> --rpc <URL> --min-slot <N> --max-age-secs <N> --max-confidence-bps <0..10000>
+    Observed holdings with native/wrapped SOL and admitted curve exit marks; unknowns retained.
   sol-price-read --rpc <URL> --min-slot <N> --max-age-secs <N> --max-confidence-bps <0..10000> [--output <private-file>]
     Receiver-verified SOL/USD confidence bounds; read-only, no portfolio authority.
   wallet-activity-read --wallet <address> --after-slot <N> --through-slot <N> --rpc <URL> [--inventory-review <path>]
@@ -906,6 +909,7 @@ fn main() -> ExitCode {
         "creator-index" => creator_index(&args),
         "dossier" => dossier::run(&args),
         "wallet-read" => wallet_read::run(&args),
+        "portfolio-read" => portfolio_read::run(&args),
         "sol-price-read" => sol_price_read::run(&args),
         "wallet-activity-read" => wallet_activity_read::run(&args),
         "curve-exit" => curve_exit::run(&args),
