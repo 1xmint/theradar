@@ -73,10 +73,10 @@ fn buy_accounts(mint: &Address) -> Vec<AccountMeta> {
         AccountMeta::readonly(*mint),
         AccountMeta::writable(curve),
         AccountMeta::writable(
-            pda::associated_token_account(&curve, &token_program, mint).expect("curve ata"),
+            pda::associated_token_account(&curve, mint, &token_program).expect("curve ata"),
         ),
         AccountMeta::writable(
-            pda::associated_token_account(&user, &token_program, mint).expect("user ata"),
+            pda::associated_token_account(&user, mint, &token_program).expect("user ata"),
         ),
         AccountMeta::signer(user),
         AccountMeta::readonly(Address::new(SYSTEM_PROGRAM)),

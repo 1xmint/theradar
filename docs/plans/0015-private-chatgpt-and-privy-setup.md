@@ -6240,3 +6240,14 @@ objective still needs independently produced live risk snapshots, adaptive
 preference/controller integration, durable execution and recovery, deployment,
 bounded delegation, pause/revoke and a verified handover/canary. Keep working on
 those actual consumers; do not claim autonomy from these isolated protections.
+
+Initial curve-token CI 38163883799 at e4829ef caught two builder/signer process
+baseline failures at the_signer_reads_what_this_crate_builds.rs:202 and :391.
+That existing synthetic buy helper passed mint/token-program arguments in the
+wrong order to both curve and user ATA derivations. Existing mainnet address
+regressions and the newly enforced signer independently reject that result.
+Correct both helper calls to the existing (owner, mint, token_program) API;
+do not weaken the signer. No test count or exclusions change. Wait for the
+current run to finish, then require a new complete GitHub run before integration.
+Combined integration CI 38163263101 is also still running. No deployment,
+wallet authority or autonomous activation changed.
