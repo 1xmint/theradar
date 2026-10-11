@@ -1,9 +1,38 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # Radar
 
-Solana research and trading infrastructure, with an x402/MCP agent surface built
+Autonomous trading research, with **Alpaca paper stocks/ETFs as the primary next
+experiment**. Hyperliquid public-data research and Solana remain secondary;
+neither is the starting live venue for this U.S. owner. See the
+[accepted direction](docs/design/0022-alpaca-paper-first-experiment.md).
+
+The existing Solana infrastructure has an x402/MCP agent surface built
 in and, on the live instance, sitting behind Cloudflare Access rather than open
 to any outside agent (issue #186) — see [What is live](#what-is-live) below.
+
+`radar alpaca-read` reads a paper account, open positions and the US equity market
+clock. It requires private environment variables `RADAR_ALPACA_PAPER_KEY_ID` and
+`RADAR_ALPACA_PAPER_SECRET_KEY`; it always uses Alpaca's paper host and never
+places orders. See [setup and remaining work](docs/plans/0017-alpaca-paper-foundation.md).
+The command is not yet wired to the deployed site. Existing measurements below
+describe the Solana experiment, not Alpaca performance.
+
+`radar alpaca-market-read --symbols SPY,QQQ --output ./data/alpaca/capture-001.json`
+captures the explicitly requested IEX feed using the same private paper keys.
+Create the output directory first and use a new filename for each observation;
+existing captures are never replaced. Replay without credentials using
+`radar alpaca-market-replay --input ./data/alpaca/capture-001.json --as-of-unix-ms <N>`.
+The replay gate uses host availability time, preserves missing symbols as null,
+and does not certify exchange timestamps, quote freshness or consolidated coverage.
+These are operator tools; unattended scheduling and execution are still pending.
+
+`radar alpaca-quote --input ./data/alpaca/capture-001.json --symbol SPY --as-of-unix-ms <N> --max-age-ms 1000 --max-spread-bps 10`
+checks a captured quote against explicit age/spread bounds, the capture's requested
+symbols and availability, and its nanosecond UTC exchange timestamp. Prices and
+displayed sizes are parsed as exact integers at six decimal places; size units
+remain unverified and cannot yet bound executable share quantity. Unsupported
+precision and exponent notation are refused. This produces quote inputs only,
+not an account mandate, asset-eligibility verdict or permission to place orders.
 
 **Status: recording, and refusing to trade.** The pipeline runs end to end on a
 live instance — recording launches, measuring what became of them, and running

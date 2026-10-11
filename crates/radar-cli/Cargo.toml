@@ -32,7 +32,8 @@ radar-research.workspace = true
 radar-store.workspace = true
 radar-types.workspace = true
 # `audit`, `replay` and the brief's serving check read and write JSON.
-serde_json.workspace = true
+# Quote inputs retain original numeric digits via RawValue, without f64.
+serde_json = { workspace = true, features = ["raw_value"] }
 # Typed verified holdings in portfolio-read; already in the workspace tree.
 serde.workspace = true
 
