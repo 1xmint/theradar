@@ -84,6 +84,17 @@ exceeds the packet limit. These are historical encoding fixtures, not current
 liquidity or proof that the routed programs are safe. Autonomous Routing remains
 closed pending independent execution-semantic and asset-bound verification.
 
+The legacy Router entry point now also reviews the captured single-hop RaydiumV2
+route_v2 envelope before returning a build. Its complete known payload binds exact
+input, quoted output, slippage, zero platform/positive-slippage fees and the route
+indices. Named wallet/mint/token/program roles, repeated source/destination token
+accounts and the quote's pool identifier must agree. Unknown layouts or suffixes
+refuse. New whole captures demonstrate both SOL/USDC directions fitting inline.
+This remains construction review: actual pool/vault/token ownership, ATA derivation,
+global signer/writable privileges, instruction spend/output enforcement, net fills
+and protected live evidence still require independent verification. It grants no
+authority and does not open autonomous Routing.
+
 - `radar-exec` and `radar-signer` share one decoder — the signer's — so a
   transaction accepted by the pre-check is accepted by the signer for the same
   reasons.

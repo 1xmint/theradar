@@ -687,9 +687,11 @@ impl Router {
 
     /// Fetches a quote and assembles its instructions with every account inline.
     ///
-    /// This supports both directions and arbitrary admitted quote assets, with
-    /// one response for quote and bytes. A readable message still needs protected
-    /// execution-semantic verification; this method grants no signing authority.
+    /// Reviews the currently supported single-hop RaydiumV2 envelope in both
+    /// directions, binding amounts, tolerance and named account roles to the
+    /// request/quote. Other route layouts refuse. Pool/token state and global
+    /// privileges still need independent protected verification; no signing
+    /// authority is granted. Browser v0 builds retain their existing behavior.
     ///
     /// # Errors
     ///
@@ -703,6 +705,7 @@ impl Router {
         let body = self.fetch_body(request, slippage_bps)?;
         let quote = Quote::from_response(&body, request, slippage_bps)?;
         let transaction = crate::assemble::assemble_legacy(&body, request.taker)?;
+        crate::route_review::review(&body, request, &quote, slippage_bps)?;
         Ok(Build { quote, transaction })
     }
 

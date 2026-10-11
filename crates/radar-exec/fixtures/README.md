@@ -13,6 +13,19 @@ on: every route Jupiter returns uses address lookup tables.
 
 ## No credential was used or is present
 
+Two further whole, unedited, keyless `/build` responses were captured on
+2026-10-11 for `dexes=Raydium&maxAccounts=20&slippageBps=100`, with the same
+non-owned taker below. They are
+`jupiter-build-raydium-usdc-sol-2026-10-11.json` (USDC to wSOL, amount 10000000,
+SHA256 cad6c011787556777732b047e87e6a5b4072c4ef8ce1c8b8af898876f38f5eb8)
+and `jupiter-build-raydium-sol-usdc-2026-10-11.json` (wSOL to USDC, amount
+100000000, SHA256 f37ea34d22c157379d24ed8c71348a895721d7d9b0134979bad8952adef28cea).
+Both carry `route_v2`, one full RaydiumV2 hop (tag 105), and 19 instruction
+accounts. They are historical quote/construction evidence, not executed fills,
+current liquidity guarantees, wallet ownership proof or signing permission.
+The optional `dexes` filter was used for this explicit read-only capture; no
+production keyless fallback was introduced.
+
 Every capture was taken **keyless**, except `jupiter-build-401-unauthorized.json`,
 which was taken with the literal string `not-a-real-key-0000`. No
 `RADAR_JUPITER_API_KEY` exists on this machine and none was read, sent or

@@ -5413,3 +5413,29 @@ Obtain and verify the actual supported route layout, account ownership/privilege
 and protected spend/output bounds before connecting autonomous Routing. Also keep
 live evidence, portfolio, recovery, adaptive supervisor/chat, handover and protected
 installation open. Full broad-Solana goal remains active; live signing is off.
+
+### Reviewed Router envelope handback (2026-10-11)
+
+Previous goal turn integrated verified construction. Broad integrated CI
+38112227707 at 0455043 now passed fully. Started feat/reviewed-router-envelope
+from that source. Read-only keyless captures with the same non-owned fixture
+taker confirmed current unrestricted USDC-to-wSOL uses BisonFi tag 141, also
+absent from the inspected SDK enum. Explicit dexes=Raydium captures in both
+directions instead have the complete 39-byte route_v2/RaydiumV2 tag-105 layout
+described in the official RFQ SDK IDL pinned above. Retained both whole bodies
+and SHA256 provenance in the existing fixture README. Nothing signed or submitted.
+
+Actual caller Router::build_legacy now reviews that complete supported envelope:
+exact input and quoted output, tolerance, zero platform/positive-slippage fees,
+single full-hop indices, wallet/mint/token/program roles, repeated token accounts
+and quote/pool identity. Unknown route payloads and suffixes refuse; browser v0
+construction remains unchanged. Raw assemble_legacy remains a format compiler.
+Added adversarial payload/account/missing-field regression and updated real HTTP
+tests to cover both new captures plus oversized and unknown older routes. Test
+floor 2246. Publish for GitHub build/tests/lint/mutation verification; no local jobs.
+
+This is quote/byte-envelope binding, not verified pool/vault/token ownership, ATA
+derivation, global writable/signing privileges or live signer-enforced asset
+bounds/net settlement. Keep autonomous Routing and live delegation closed while
+implementing those checks, other market families and the live portfolio/recovery/
+adaptive supervisor/chat/site handover. The full goal stays active.

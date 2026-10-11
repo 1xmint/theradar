@@ -28,20 +28,34 @@ const CRLF_CRLF: &[u8] = b"\r\n\r\n";
 
 #[test]
 fn legacy_build_uses_one_quoted_response_in_either_direction_and_preserves_refusals() {
-    for (name, input, output, amount, fits) in [
+    for (name, input, output, amount, refusal) in [
+        (
+            "jupiter-build-raydium-usdc-sol-2026-10-11.json",
+            Asset::Usdc,
+            Asset::Sol,
+            10_000_000,
+            None,
+        ),
+        (
+            "jupiter-build-raydium-sol-usdc-2026-10-11.json",
+            Asset::Sol,
+            Asset::Usdc,
+            100_000_000,
+            None,
+        ),
         (
             "jupiter-build-usdc-sol.json",
             Asset::Usdc,
             Asset::Sol,
             10_000_000,
-            true,
+            Some("unsupported or inconsistent"),
         ),
         (
             "jupiter-build-sol-usdc.json",
             Asset::Sol,
             Asset::Usdc,
             100_000_000,
-            false,
+            Some("packet limit"),
         ),
     ] {
         let body = fixture(name);
@@ -49,7 +63,10 @@ fn legacy_build_uses_one_quoted_response_in_either_direction_and_preserves_refus
         let router = Router::with_endpoint(endpoint, credentials());
         let request = QuoteRequest::new(input, output, amount, taker());
         let result = router.build_legacy(&request, 100);
-        if fits {
+        if let Some(expected) = refusal {
+            let error = result.unwrap_err();
+            assert!(error.to_string().contains(expected), "{error}");
+        } else {
             let build = result.unwrap();
             assert_eq!(build.quote.input, input);
             assert_eq!(build.quote.output, output);
@@ -60,10 +77,6 @@ fn legacy_build_uses_one_quoted_response_in_either_direction_and_preserves_refus
                 !radar_signer::decode(&build.transaction.wire)
                     .unwrap()
                     .versioned
-            );
-        } else {
-            assert!(
-                matches!(result, Err(RouteError::Malformed(reason)) if reason.contains("packet limit"))
             );
         }
         let head = seen
