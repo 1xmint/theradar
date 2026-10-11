@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 //! Offline operator-provisioned kernel issuer. It holds no wallet or Privy key.
 //! Configured private files are the trust boundary; stdin carries no authority.
-//! This is not yet a live snapshot adapter or a settlement reconciler.
+//! Reconciles retained native-SOL buys, sales and failed fees against protected reads.
+//! This is not yet a live snapshot adapter or execution/recovery loop.
 
 use std::io::{BufRead as _, Read as _, Write as _};
 use std::path::{Path, PathBuf};
@@ -28,6 +29,18 @@ mod basis;
 
 #[path = "radar-issuer/acquisitions.rs"]
 mod acquisitions;
+
+#[path = "radar-issuer/reconciliation.rs"]
+mod reconciliation;
+
+#[path = "radar-issuer/cash_completion.rs"]
+mod cash_completion;
+
+#[path = "radar-issuer/execution_output.rs"]
+mod execution_output;
+
+#[path = "radar-issuer/exit_authority.rs"]
+mod exit_authority;
 
 #[path = "radar-issuer/native_transfers.rs"]
 mod native_transfers;
@@ -59,6 +72,12 @@ mod inventory;
 #[path = "radar-issuer/opening.rs"]
 mod opening;
 
+#[path = "radar-issuer/live_price.rs"]
+mod live_price;
+
+#[path = "radar-issuer/native_capital.rs"]
+mod native_capital;
+
 #[derive(Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 struct Config {
@@ -69,6 +88,11 @@ struct Config {
     policy: Policy,
     valid_until_unix_secs: u64,
     snapshot_path: PathBuf,
+    // Independently collected private observations. No model/stdin-selected path.
+    #[serde(default)]
+    observations_path: Option<PathBuf>,
+    #[serde(default)]
+    sol_price_path: Option<PathBuf>,
     history_path: PathBuf,
     key_path: PathBuf,
     max_snapshot_age_secs: u64,
@@ -80,11 +104,19 @@ struct Config {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Snapshot {
+    // Protected operator-reviewed raw output floor; never accepted from stdin.
+    // Required for known curve trades. This is not independently live-quoted.
+    #[serde(default)]
+    min_output_raw: Option<u64>,
     wallet: Address,
     observed_at_unix_secs: u64,
     sol_lamports: u64,
     // A conservative upper price bounds how many lamports fit in a USD ceiling.
+    #[serde(default)]
     sol_upper_micro_usd: u64,
+    // Derived only from the configured private collector file, never JSON/stdin.
+    #[serde(skip)]
+    live_price_expires_at_unix_secs: Option<u64>,
     fee_upper_lamports: u64,
     state: PortfolioState,
     // Operator's coverage assertion, not proof of economic correctness.
@@ -110,6 +142,40 @@ struct Candidate {
 }
 
 impl Snapshot {
+    fn read(config: &Config) -> Result<Self, String> {
+        let mut snapshot: Self = serde_json::from_slice(&private_read(&config.snapshot_path)?)
+            .map_err(|_| "invalid trusted snapshot")?;
+        if let Some(path) = &config.observations_path {
+            #[derive(Deserialize)]
+            #[serde(deny_unknown_fields)]
+            struct Observations {
+                wallet_evidence: serde_json::Value,
+                transaction_evidence: serde_json::Value,
+            }
+            let observations: Observations = serde_json::from_slice(&private_read(path)?)
+                .map_err(|_| "invalid protected observations")?;
+            if observations.wallet_evidence["wallet"] != config.wallet.to_string()
+                || observations.transaction_evidence["transaction_base64"] != snapshot.transaction
+            {
+                return Err(
+                    "protected observations do not bind the reviewed wallet and transaction".into(),
+                );
+            }
+            snapshot.wallet_evidence = observations.wallet_evidence;
+            snapshot.transaction_evidence = observations.transaction_evidence;
+        }
+        if let Some(path) = &config.sol_price_path {
+            let (upper, expires) = live_price::read(path, &snapshot, config, unix_now()?)?;
+            // An independently live upper price can tighten the native ceiling;
+            // it cannot loosen a larger reviewed upper-price floor.
+            snapshot.sol_upper_micro_usd = snapshot.sol_upper_micro_usd.max(upper);
+            snapshot.live_price_expires_at_unix_secs = Some(expires);
+        }
+        // Do not refresh risk state, reviewed balance, proposal, byte
+        // approval or their observation time merely because a collector ran.
+        Ok(snapshot)
+    }
+
     fn execution_binding(
         &self,
         transaction: &str,
@@ -315,7 +381,19 @@ fn history_refusal(error: &radar_journal::OperationError) -> &'static str {
 
 impl Issuer {
     fn inventory_mode(&mut self, args: &[String]) -> Result<bool, String> {
-        if args == ["--record-opening-inventory"] {
+        if args.len() == 2 && args[0] == "--reconcile-operation" {
+            let snapshot = Snapshot::read(&self.config)?;
+            println!(
+                "{}",
+                reconciliation::apply(
+                    &mut self.operations,
+                    &self.config,
+                    &snapshot,
+                    &args[1],
+                    unix_now()?
+                )?
+            );
+        } else if args == ["--record-opening-inventory"] {
             self.record_opening_inventory()?;
             println!(
                 "{}",
@@ -329,9 +407,7 @@ impl Issuer {
                 "portfolio_state_updated":false,"reservation_released":false})
             );
         } else if args == ["--review-account-activity"] {
-            let snapshot: Snapshot =
-                serde_json::from_slice(&private_read(&self.config.snapshot_path)?)
-                    .map_err(|_| "invalid trusted snapshot")?;
+            let snapshot = Snapshot::read(&self.config)?;
             println!(
                 "{}",
                 account_activity::review(
@@ -344,6 +420,12 @@ impl Issuer {
             );
         } else if args == ["--review-inventory"] {
             println!("{}", self.review_inventory()?);
+        } else if args == ["--review-native-capital"] {
+            let snapshot = Snapshot::read(&self.config)?;
+            println!(
+                "{}",
+                native_capital::review(&snapshot, &self.config, &self.operations, unix_now()?)?
+            );
         } else {
             return Ok(false);
         }
@@ -351,10 +433,9 @@ impl Issuer {
     }
 
     fn review_inventory(&self) -> Result<serde_json::Value, String> {
-        let snapshot: Snapshot = serde_json::from_slice(&private_read(&self.config.snapshot_path)?)
-            .map_err(|_| "invalid trusted snapshot")?;
+        let snapshot = Snapshot::read(&self.config)?;
         let history = acquisitions::review(&self.operations, &self.config)?;
-        inventory::review(
+        let mut report = inventory::review(
             &snapshot,
             &self.config,
             &history,
@@ -365,12 +446,14 @@ impl Issuer {
                 .native_transfers()
                 .cloned()
                 .collect::<Vec<_>>(),
-        )
+        )?;
+        report["native_capital"] =
+            native_capital::review(&snapshot, &self.config, &self.operations, unix_now()?)?;
+        Ok(report)
     }
 
     fn record_native_transfers(&mut self) -> Result<usize, String> {
-        let snapshot: Snapshot = serde_json::from_slice(&private_read(&self.config.snapshot_path)?)
-            .map_err(|_| "invalid trusted snapshot")?;
+        let snapshot = Snapshot::read(&self.config)?;
         let now = unix_now()?;
         let history = acquisitions::review(&self.operations, &self.config)?;
         if snapshot.wallet != self.config.wallet
@@ -400,8 +483,7 @@ impl Issuer {
     }
 
     fn record_opening_inventory(&mut self) -> Result<(), String> {
-        let snapshot: Snapshot = serde_json::from_slice(&private_read(&self.config.snapshot_path)?)
-            .map_err(|_| "invalid trusted snapshot")?;
+        let snapshot = Snapshot::read(&self.config)?;
         let record = opening::capture(&snapshot, &self.config, unix_now()?)?;
         self.operations
             .record_opening_inventory(record, unix_now()?)
@@ -414,6 +496,10 @@ impl Issuer {
             .map_err(|_| "invalid issuer configuration")?;
         if !config.active
             || config.policy.is_closed()
+            || config
+                .policy
+                .max_native_spend_lamports
+                .is_none_or(|limit| limit == 0)
             || config.max_snapshot_age_secs == 0
             || config.intent_lifetime_secs == 0
             || config.fee_reserve_lamports == 0
@@ -435,6 +521,26 @@ impl Issuer {
             key: SigningKey::from_bytes(&seed),
             operations,
         })
+    }
+
+    fn native_ceiling(
+        &self,
+        authorization: &radar_risk::Authorization,
+        snapshot: &Snapshot,
+    ) -> Result<u64, String> {
+        let native_cap = self.config.policy.max_native_spend_lamports.unwrap_or(0);
+        if authorization.action == Action::Buy {
+            Ok(u64::try_from(
+                u128::from(authorization.max_notional.get()) * 1_000_000_000
+                    / u128::from(snapshot.sol_upper_micro_usd),
+            )
+            .map_err(|_| "lamport ceiling overflow")?
+            .min(native_cap))
+        } else {
+            // Sale notional values tokens, not outgoing SOL. Keep native setup
+            // and other outgoing instructions under their explicit policy cap.
+            Ok(native_cap)
+        }
     }
 
     fn prepare(
@@ -468,11 +574,7 @@ impl Issuer {
                     .ok_or("slot expiry overflow")?,
             ),
         );
-        let max_lamports = u64::try_from(
-            u128::from(authorization.max_notional.get()) * 1_000_000_000
-                / u128::from(snapshot.sol_upper_micro_usd),
-        )
-        .map_err(|_| "lamport ceiling overflow")?;
+        let max_lamports = self.native_ceiling(&authorization, snapshot)?;
         if max_lamports == 0 {
             return Err("lamport ceiling is zero".into());
         }
@@ -481,6 +583,15 @@ impl Issuer {
             .ok_or("fee reservation overflow")?;
         let bytes = radar_types::b64::decode(&candidate.transaction)
             .ok_or("invalid transaction encoding")?;
+        authorization.max_token_debit_raw = exit_authority::review(
+            &bytes,
+            snapshot,
+            &self.config,
+            &history,
+            &self.operations,
+            now,
+        )?;
+        authorization.min_output_raw = execution_output::review(&bytes, snapshot.min_output_raw)?;
         let allowlist = radar_signer::Allowlist {
             programs: self.config.programs.iter().map(|a| *a.as_bytes()).collect(),
         };
@@ -504,6 +615,7 @@ impl Issuer {
             .min(self.config.valid_until_unix_secs)
             .min(evidence_expiry)
             .min(wallet_expiry)
+            .min(snapshot.live_price_expires_at_unix_secs.unwrap_or(u64::MAX))
             .min(
                 snapshot
                     .observed_at_unix_secs
@@ -550,13 +662,11 @@ impl Issuer {
         if expired(now, self.config.valid_until_unix_secs) {
             return Err("mandate expired".into());
         }
-        // Without settlement reconciliation, no second decision may assume
-        // the first one's exposure, loss or unknown submission vanished.
+        // Only verified durable reconciliation may release the previous claim.
         if self.operations.outstanding().next().is_some() {
             return Err("outstanding operation requires reconciliation".into());
         }
-        let snapshot: Snapshot = serde_json::from_slice(&private_read(&self.config.snapshot_path)?)
-            .map_err(|_| "invalid trusted snapshot")?;
+        let snapshot = Snapshot::read(&self.config)?;
         if snapshot.accounting_checkpoint != self.operations.checkpoint() {
             return Err("snapshot accounting does not cover current journal history".into());
         }
@@ -579,12 +689,11 @@ impl Issuer {
         {
             return Err("reviewed transaction fee is not covered by the reservation".into());
         }
-        if candidate.proposal.action != Action::Buy
-            || candidate.proposal.quote != Asset::Sol
+        if candidate.proposal.quote != Asset::Sol
             || candidate.proposal.notional.get() == 0
             || candidate.proposal.oldest_input_slot > snapshot.state.now
         {
-            return Err("issuer currently accepts only current native-SOL buys".into());
+            return Err("issuer requires a current positive native-SOL trade".into());
         }
         let (mut intent, payload, reserved) = self.prepare(candidate, &snapshot, now)?;
         let mut portfolio = Portfolio::at(self.config.wallet, snapshot.state.now);

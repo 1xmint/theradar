@@ -62,11 +62,11 @@ Four checks, each on a value the caller currently controls outright:
    `Policy::CLOSED` *closed at the signer* rather than closed only in the process
    that decides. Today `Policy::CLOSED` is enforced in one place, and that place
    is upstream of the key.
-2. **Notional.** An authorisation may not exceed `policy.max_position`. Refused
+2. **Notional.** An acquisition authorisation may not exceed `policy.max_position`. Refused
    rather than silently clamped: a caller asking for more than the operator's
    policy allows is either a bug or an attack, and quietly serving it a smaller
    number hides both.
-3. **Canary.** Under `Autonomy::Canary`, `policy.max_canary` is the ceiling
+3. **Canary.** Under `Autonomy::Canary`, `policy.max_canary` is the acquisition ceiling
    instead. The dust round trip is the one thing that level exists to permit, and
    it must not inherit the larger bound.
 4. **Lifetime.** An authorisation's window may not exceed
@@ -84,7 +84,7 @@ not the caller's judgement.
 ## What this does not fix, stated plainly
 
 **A compromised caller can still repeat.** Each authorisation is bounded by
-`max_position`, and nothing here bounds how many of them arrive. The
+`max_position` for acquisitions, and nothing here bounds how many of them arrive. The
 portfolio-scoped limits — `max_deployed`, `max_daily_loss`, `max_per_creator` —
 remain unenforceable in this process, for the same reason the kernel re-run was
 rejected: they are functions of state the signer does not hold.
@@ -101,7 +101,7 @@ so that it is a scheduled piece of work rather than a paragraph someone remember
 later.
 
 Until it exists, the bound on a compromised caller is: `max_position` per
-transaction, times however many transactions it can get signed, with
+acquisition transaction, times however many transactions it can get signed, with
 **Privy's policy engine as the independent backstop** — which
 [ADR 0005](0005-customers-keep-custody-and-grant-radar-a-bounded-signer.md)
 precondition 1 still requires be verified by making it refuse.
@@ -417,6 +417,122 @@ preserves each read's slots and host window, and emits `wallet_evidence` plus
 packet. Its operator caller can use the fields in the protected issuer snapshot;
 the output itself is not a complete snapshot and grants no authority. It does
 not fill missing USD bounds, kernel portfolio state or other instruction costs.
+
+`evidence-read` also accepts `--output <private-file>` to publish both packets
+after collection succeeds. The explicit parent directory must be private and
+must not itself be a symlink. A new mode-0600 temporary file is synced and renamed
+over the destination; a collision or failed publication refuses and retains the
+previous packet. An oversized packet refuses before publication. On a collection
+failure the previous packet remains unchanged and eventually expires; retaining
+it does not extend its read window. Directory ownership and collector scheduling
+remain protected deployment responsibilities, not permissions granted to the web
+server. The command's success output describes publication, not issuance.
+
+The issuer config can select an optional private `observations_path`. Every
+snapshot-consuming operation reloads that exact configured file, requires its
+two-field wallet/preflight shape, binds its wallet and exact transaction to the
+reviewed snapshot, and uses those observations in the existing checks. Missing,
+malformed, public, stale or substituted observations refuse; valid inline fields
+are never a fallback when the path is configured. With no path, existing inline
+snapshots retain their previous behavior. Candidate stdin cannot choose a path.
+
+This adapter deliberately preserves the reviewed balance, portfolio state,
+valuation, proposal, transaction and original snapshot observation time. Fresh
+read packets cannot make those reviewed decisions fresh; a changed balance or
+expired risk snapshot still refuses. A producer of complete independently valued
+risk state, its reconciliation coverage, scheduled collection and execution loop
+remain necessary before live autonomous operation. This is a connected live-read
+input, not a claim that the complete snapshot producer now exists.
+
+`radar sol-price-read --rpc <URL> --min-slot <N> --max-age-secs <N>
+--max-confidence-bps <0..10000> [--output <private-file>]` supplies independent native-SOL USD evidence
+for that producer. It reads the fixed sponsored SOL/USD receiver account through
+finalized direct RPC, checks owner, discriminator, complete captured layout,
+Full verification, feed identity, posting/bank contexts, host-clock publication
+age and the explicit confidence ratio ceiling. Integer arithmetic rounds the
+lower oracle confidence bound down and the upper bound up to micro-USD per SOL.
+These are oracle confidence bounds, not guaranteed market or execution bounds.
+No stablecoin peg, token value, exposure, basis or realised PnL is inferred.
+
+The reader's initial layout and owner are backed by a mainnet capture at slot
+455726015 on 2026-10-11, matching the
+[receiver SDK](https://github.com/pyth-network/pyth-crosschain/blob/main/target_chains/solana/pyth_solana_receiver_sdk/src/price_update.rs),
+[price message](https://github.com/pyth-network/pyth-crosschain/blob/main/pythnet/pythnet_sdk/src/messages.rs),
+and [program IDs](https://github.com/pyth-network/pyth-crosschain/blob/main/target_chains/solana/pyth_solana_receiver_sdk/src/lib.rs).
+The [push-feed documentation](https://docs.pyth.network/price-feeds/core/push-feeds/solana)
+identifies the sponsored feed; RPC/network identity and receiver program security
+remain trust assumptions. The Pro receiver has a different owner/address and is
+not silently substituted. The optional output uses the same private complete
+atomic publication as evidence-read; a failed read retains the previous file's
+original timestamps. This command cannot change signer policy.
+
+The protected issuer's optional `sol_price_path` selects that private collector
+file; stdin cannot choose it. Snapshot consumers reload and validate its strict
+shape, SOL/USD/feed metadata, positive ordered band, reviewed context bounds,
+publication time and read window. Configured missing, public, malformed, stale
+or substituted price evidence refuses rather than falling back to the reviewed
+price. A live upper price can only tighten the native spend ceiling: use the
+larger of it and any existing reviewed upper-price floor. With this path, the
+reviewed upper price may be omitted; without it, absent/zero price still refuses
+issuance. This does not change the signer-owned native limit.
+
+Authorization expiry is additionally capped by both the oracle publication's
+expiry and its read window's expiry. Fresh price collection cannot refresh the
+reviewed risk state, wallet balance, proposal, bytes or original risk observation
+time. The issuer trusts the protected collector's normalized evidence; it does
+not rerun receiver signature verification or accept a price from the model.
+Reconciled complete portfolio valuation, lower-bound usable capital, token
+valuations, basis and realised PnL remain unfinished; this native-spend input
+does not establish any of them.
+
+`radar wallet-read --value-sol --min-slot <N> --max-age-secs <N>
+--max-confidence-bps <0..10000>` connects the native balance to that independent
+price reader. The existing wallet/RPC flags remain required. It preserves every
+wallet/token read and context, adds a native-only micro-USD confidence band rounded
+outward using integer arithmetic, and retains the oracle observation and source.
+The native balance must meet the explicit context floor; the oracle bank must be
+at least as recent as that balance. The oracle posting meets the explicit floor,
+not the wallet bank slot, because feed posting has its own cadence. Refuse stale
+combined read windows, backward clock movement, missing/invalid oracle data and
+out-of-range dollar amounts without emitting partial evidence. Unvalued reads
+retain their previous output and do not request a price.
+
+This is read-only collector output. A native band is not total wallet equity,
+available capital or a guaranteed execution value. Token marks, outstanding
+reservations, operating reserves, cost basis and economic reconciliation remain
+unknown; even an empty token enumeration is not promoted to complete portfolio
+authority. Total USD value, realised PnL and usable capital remain null. This
+option does not refresh or populate the issuer's reviewed portfolio state.
+
+`radar portfolio-read --wallet <address> --rpc <URL> --min-slot <N>
+--max-age-secs <N> --max-confidence-bps <0..10000>` assembles observed holdings
+through the existing Portfolio/Holding/Asset vocabulary. It sums same-asset raw
+quantities with checked arithmetic, keeping SPL and Token-2022 identities and
+units distinct. Native and verified classic wrapped SOL use the independent
+oracle; rent reserves in wrapped accounts are not additional token quantities.
+Eligible nonzero token holdings may use the existing independently derived
+curve/mint/fee reader and full-quantity exit estimator. The market must meet the
+raw inventory context and token program/decimals. These marks include the
+observed venue fee bound, before network costs, not guaranteed liquidation.
+
+Frozen/uninitialized accounts, active mint/freeze authorities and delegates
+prevent admitting a nonzero mark. Unsupported markets and unpriced USDC remain
+unknown; there is no stablecoin peg or unsupported route fallback. A measured
+zero quantity needs no price. No unknown holding is dropped or turned into zero;
+the combined observed-holdings band is absent if either side of any mark is
+unknown. Totals use checked arithmetic and the oldest contributing observation.
+SOL price dates use the posting slot, not the newer bank carrying that price.
+
+All inventory contexts meet the explicit floor, market contexts follow raw
+holdings, and the oracle bank follows every admitted mark. Collection shares a
+bounded call allowance and deadline; stale/backwards windows and failed required
+reads emit no partial output. Failed optional market reads remain attributed
+unknown marks. Separate contexts and non-atomic inventory are retained. The
+collector emits holdings, not the Portfolio's default historical result fields:
+equity, usable capital, historical PnL and economic completeness remain unknown.
+It does not reconstruct claims/reserves, authorize allocation, refresh an issuer
+snapshot or enable signing. Other venues and independent quote-asset valuations
+remain adapters to implement, not reasons to delay this admitted capability.
 
 The private snapshot also requires `wallet_evidence`, containing the JSON from
 `radar wallet-read`. Before reserving capital the issuer binds version 1,
@@ -1269,6 +1385,263 @@ It does not independently verify inclusion, metadata, historical ownership,
 runtime validity or completeness. All execution/ownership/portfolio flags stay
 false and the root classification stays unresolved. It writes no journal and
 cannot satisfy live reconciliation or authorize capital.
+
+## Protected completion of native-SOL buys and failed fees
+
+`radar-issuer --reconcile-operation <operation-id>` uses the configured protected
+snapshot and owned journal. It rechecks retained signed bindings and normalized
+valuations, requires one submitted unknown operation, a retained zero-token
+opening baseline, current wallet/journal coverage, matching token quantities and
+native cash including every transaction anchor. Each buy must also account for
+its mint quantity before and after execution against the retained preceding
+buys; partial token-account coverage refuses. Any external native effects used
+to explain that cash must already be retained in the journal. Missing evidence,
+unexplained movements, nonzero unknown opening basis and sales refuse completion.
+
+Rehold the claim against the verified pre-execution native balance, then use
+OperationLog's validated, durable terminal transition with the measured debit.
+The unused reservation is released only after completion reaches disk. Retained
+token lots, acquisition basis, rent and failed fees remain replayable. A retry
+rechecks retained history and returns the same completion without another write;
+it does not require the old snapshot checkpoint to match the terminal record it
+just created. A new issuance still requires an updated protected checkpoint and
+state covering the retained exposure, losses and failures.
+
+This is offline operator-provisioned per-operation completion, not complete live
+wallet accounting or independently verified historical ownership/coverage. It
+does not implement sale completion, dropped-transaction recovery, current market
+valuation, a live supervisor, delegation or adaptive trading. Live activation
+remains closed. GitHub process regressions must verify the command before use.
+
+## Explicit native spend units
+
+For the private autonomous implementation, retain USD capital and position
+limits and add max_native_spend_lamports to the protected Policy. This is an
+independent physical instruction-spend ceiling, not a price feed or a replacement
+for USD exposure checks. A fresh issuer configuration requires a positive value.
+The issuer converts authorized micro-USD using its protected SOL upper-price
+evidence, rounds down and takes the smaller of that amount and its native policy.
+Its proof binds the resulting max_lamports, exact transaction and authorization.
+The isolated signer independently clamps decoded outgoing instruction lamports
+against its own native policy and the proven conversion. USD authorization and
+canary limits remain checked in USD. Network fee reservations remain separate.
+
+For old serialized policies the optional field is absent, and the previous
+restrictive USD-count-as-lamport ceiling is retained. That is explicitly a legacy
+restriction, not a conversion: upgrades do not silently increase existing
+signing authority. Zero explicitly permits no outgoing native instruction spend.
+Installing the verified native configuration is an operator step, not something
+the model can do. The library and unauthenticated local lane cannot authenticate
+price provenance; only the Privy process verifies issuer proof. Live evidence
+production, exit token quantities, mint/account roles and recovery remain required
+before activation. No production configuration is opened by this change.
+
+## Known venue trade direction
+
+For decoded pump.fun bonding-curve trade instructions, the signer now checks
+the instruction side against Authorization.action. A buy requires Buy;
+a sell requires Reduce or Exit. This applies to every known trade variant and
+every instruction in a message, so mixing a buy and a sell cannot satisfy one
+authorization. Sell arguments must be readable even though their minimum SOL
+output is not an outgoing-spend bound. The Privy process repeats this check
+after issuer proof verification; an issuer signature cannot waive it.
+
+This binds only the direction of known curve trades. Aggregate sale quantities
+are checked separately below. Verified holdings,
+per-instruction mint/account roles, other-program semantics and live exit
+issuance/accounting remain separate requirements. It does not enable live sales
+or replace any existing native spend, policy, expiry, ownership or nonce check.
+
+## Aggregate raw-token debit authority
+
+Authorization has an optional max_token_debit_raw, distinct from USD notional
+and native spend. Every decoded curve sale requires an explicit bound. The
+signer sums raw quantities across both known sale variants with checked addition
+and refuses missing authority, overspend or overflow. A sale's minimum incoming
+SOL does not count as outgoing tokens. The Privy issuer proof covers this field,
+so changing it after attestation refuses before key use. Old serialized buy
+authorizations preserve their wire form; absent sale bounds now refuse.
+
+The current kernel/issuer do not invent token authority: they leave the bound
+unset until an exit issuer derives it from independently protected holdings and
+reviewed exit evidence. Direct library/local inputs still lack authenticated
+provenance. Per-instruction mint/account roles and other-program semantics remain
+unresolved, so this quantity check alone cannot activate a live exit. It prepares
+the required enforceable bound, not a complete sell pipeline or ownership proof.
+
+## Execution routes by authorized trade direction
+
+radar_exec::execute requests a buy route only for Action::Buy. Reduce and Exit
+require positive max_token_debit_raw and request a sell route for that raw-token
+quantity. Missing or zero authority refuses before routing, signing or sending.
+Attempt.size_lamports remains a separate outgoing-native instruction ceiling;
+no USD or lamport count is substituted for a sale's tokens. The existing economics,
+signer-refusal and send ordering remains in force. This does not implement forced
+emergency exits or waive their costs; those need an explicit policy and tests.
+
+Routing::build_sell expresses sales into native SOL. The production Jupiter
+router still refuses both directions because it cannot build signer-readable
+transactions. This change does not turn a quote into execution support or derive
+sale authority from holdings. Live exit issuance, supported builders, independent
+signer semantics and sale accounting remain required before activation.
+
+## Known curve mint, trader and native quote binding
+
+Every known curve trade now binds its instruction mint to Authorization.mint
+and its trader to the signing wallet, which must be a required static signer.
+Address-list membership alone is insufficient. Successful public mainnet
+captures establish older mint/trader positions 2/6 and v2 positions 1/13.
+V2 additionally names its quote mint at position 2; the current native-spend
+lane requires wrapped SOL there. Other quote assets need typed spend authority.
+
+The Privy process regression reconstructs legacy messages from six captured
+instruction account lists and argument payloads, substitutes the deterministic
+test wallet, and re-attests every damaged message. It checks missing/substituted
+roles, mixed messages and a trader that is not a required signer. Captured RPC
+metadata anchors the layout, not independent inclusion or historical ownership.
+The fixture retains public source signatures and the source transaction version;
+reconstructed messages are not claimed to have executed on mainnet.
+
+These checks do not derive curve or token accounts, prove their ownership or
+writability, verify arbitrary allowed-program semantics, or provide live holdings
+coverage. Exit issuance, routing and accounting remain required. No deployment,
+signing permission or live wallet authority is changed by this source update.
+
+## Protected output floors
+
+Authorization.min_output_raw is an optional wire field independent of outgoing
+native spend and sale token quantities. When supplied it must be positive. For
+known curve trades the signer sums encoded guaranteed output with checked raw
+arithmetic: authorized-mint tokens for buys, native lamports for sales. Too little
+output, overflow or unreviewed argument suffixes refuse. Only captured 24-byte
+quantity layouts and the older buy/BuyExactSolIn track-volume bool are admitted
+under an output promise. Current first-party interfaces add partial-fill options;
+their effects are not assumed from the first two amounts. Other quote assets
+remain refused by the independent role/quote check. Nontrade or foreign-program
+bytes cannot satisfy an output promise, even with matching discriminators.
+
+Legacy absent fields preserve their serialized shape and provide no output
+promise in the direct library/local lane. The protected offline issuer now
+requires a positive protected Snapshot.min_output_raw for every known curve
+trade, copies it into authority, checks the exact transaction and binds it in
+issuer proof before persisting a reservation. Stdin cannot supply this floor.
+Missing/zero floor or a transaction that weakens it refuses before reservation.
+This remains an operator-reviewed floor, not independent quote provenance or an
+automatic slippage policy. The pure kernel invents no output quote or guarantee.
+
+The actual Privy process regressions cover all six variants, exact/insufficient/
+zero floors, split totals, overflow, proof tampering and optional suffixes. The
+actual issuer regression covers missing/zero/exact/excess protected floors and
+no-reservation refusals. These instruction guarantees do not prove final net
+wallet credits, current liquidity, token-account ownership, complete execution
+semantics or live fill/accounting. Live sales remain unissued and closed.
+
+## Protected sale completion with separate cash sides
+
+The offline reconcile-operation consumer now supports reverified retained sales
+as well as native-SOL buys and failed fees. CompletedCashFlow records outgoing
+network fees, tips and rent separately from gross sale proceeds and rent refunds.
+All outgoing units must fit the reserved native claim, even when incoming cash
+would make the net balance positive. A sale whose gross costs exceed its claim
+remains outstanding; incoming proceeds are not permission to overrun it.
+
+Portfolio settlement checks units, spending and final balance range before
+applying either side or removing the claim. OperationLog validates on a copy,
+persists the terminal record and only then changes the portfolio. Replay binds
+both the original intent/reservation and credit units. Existing debit-only wire
+variants keep their meaning. This is measured cash, not a price or PnL estimate.
+
+The issuer independently replays the signed binding, exact normalized valuation,
+FIFO basis, native pre/post anchors and current wallet checkpoint. Token anchors
+are checked chronologically across buys and sales, starting from the required
+zero-token opening basis. Retried completion revalidates retained economic facts
+and returns already_reconciled without changing history or applying proceeds twice.
+The next issuance still requires the new checkpoint and risk-state floors.
+
+Process regressions cover a completed buy followed by a partial sale, persisted
+fee/proceeds, remaining basis and restart idempotence; hidden token gaps, current
+cash/quantity mismatch, stale reads and credit-funded overspending refuse without
+releasing the claim. Generic portfolio and journal regressions cover atomic
+refusals, units, overflow, preservation of other claims and tampered replay.
+GitHub verification is required before treating this source as verified.
+
+This remains protected operator-provisioned economic reconciliation, not a live
+collector or recovered dropped transaction. Full
+wallet coverage and marked exposure remain unknown. No signing authority opens.
+
+## Holdings-derived protected sale issuance
+
+For Reduce and Exit, the offline issuer sums readable Sell/SellV2 quantities
+from exact PumpFun transaction bytes. It reuses retained inventory reconciliation
+and chronological token anchors, then checks the total against current protected
+initialized holdings of the proposed mint. Reduce cannot exceed those holdings;
+Exit must cover the whole measured holding. The resulting raw token bound is
+included in the issuer proof. A missing or zero supported sale refuses.
+
+Sale USD notional values tokens rather than outgoing SOL. Sale native setup and
+other outgoing instructions retain the explicit native policy ceiling, separately
+reserved with fees; buy USD conversion remains unchanged. The signer still
+independently decodes direction, amounts and output protection before issuance.
+
+Process regressions cover partial/full/split sales, excessive or zero quantity,
+partial Exit refusal, mismatched cash/holdings, frozen accounts, stale evidence,
+foreign program bytes, output protection and proof tampering. GitHub verification
+is required. This does not prove token spendability, ATA/curve derivations,
+ownership/writability or live evidence completeness. Live routing, collection
+and delegation remain closed.
+
+The signer now applies USD position/canary sizing only to acquisitions, matching
+the kernel's `Action::increases_exposure` rule. An appreciated position can be
+reduced or exited without satisfying the smaller entry cap. This does not grant
+outgoing cash authority: every action retains the explicit native policy and
+issuer-proven caller ceiling; known sales retain raw-token, direction, mint/trader
+and output checks, plus the Privy process's proof, expiry and nonce requirements.
+The legacy native restriction for policies without an explicit cap is unchanged.
+The issuer still requires retained holdings to authorize a supported sale.
+Process regressions cover Capped/Canary reductions and exits above entry limits,
+token/output/native violations and continued refusal of oversized acquisitions.
+GitHub verification is required before treating this source as verified.
+
+## Derived curve binding — 2026-10-11
+
+The known pump.fun trade check now independently derives the canonical
+`bonding-curve` address from the authorized mint and requires it in each trade's
+actual reserve role: classic index 3, v2 index 10. A correct curve merely present
+in static keys or another instruction does not satisfy the check. The retained
+six successful trade captures exercise both layouts through the Privy process.
+GitHub verification is required before claiming this source is verified.
+
+The existing builder derivation moved into pure `radar-pda`, with actual builder
+and signer callers. The signer imports no builder; the builder acquires no
+production signer dependency. Canonical-bump/off-curve tests moved with the
+algorithm, and the builder's mainnet seed/address tests remain. This proves an
+address binding, not curve-account ownership, raw reserve data, associated token
+accounts, extension safety or arbitrary venue semantics. Those remain open.
+
+## Protected native cash after durable claims — 2026-10-11
+
+The issuer's read-only `--review-native-capital` command uses its existing
+protected snapshot/collector boundary and owned journal. It validates wallet,
+balance, read contexts, remaining host-time validity and the exact accounting
+checkpoint. It reconstitutes native holdings and every outstanding claim through
+the existing Portfolio quantity/reservation checks, then reports counted cash,
+claimed cash, cash after claims and cash above the configured operating reserve.
+That reserve is additional to pending claims, including their already-held fees.
+The full `--review-inventory` report exposes the same native-capital result.
+
+SubmissionUnknown remains claimed across restart without requiring a completed
+trade valuation to read native capital. Insufficient observed cash, unsupported
+claim assets/units, or observations before a claim/opening/retained transfer or
+released settlement yield an explicit unknown capital result. Measured cash below
+the operating floor yields zero above that floor. No claim is dropped or released,
+and stale/substituted wallet evidence or a stale checkpoint refuse the read.
+
+These are observed native quantities after protected claims, not complete wallet
+equity, USD usable capital, historical economic reconciliation, a fresh risk state
+or signing authority. Those remain unknown/false. This command does not replace
+the independent live snapshot producer, supervisor or existing reconciliation
+path. GitHub process and mutation verification is required before claiming this
+source verified.
 
 ## What would reverse this
 

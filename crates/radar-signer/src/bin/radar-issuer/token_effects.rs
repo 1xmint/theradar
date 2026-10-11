@@ -197,6 +197,8 @@ mod tests {
         data.push(6);
         let message = Message {
             required_signatures: 1,
+            readonly_signed: 0,
+            readonly_unsigned: 0,
             accounts: vec![
                 [1; 32],
                 [2; 32],

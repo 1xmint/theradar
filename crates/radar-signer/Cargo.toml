@@ -17,6 +17,7 @@ ed25519-dalek.workspace = true
 # rather than a second table here: it forbids unsafe code, has no network, and
 # its discriminators are captured from mainnet rather than copied (ADR 0001).
 radar-decode.workspace = true
+radar-pda.workspace = true
 radar-risk.workspace = true
 radar-journal.workspace = true
 ring = { version = "0.17", default-features = false }

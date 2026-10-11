@@ -62,7 +62,7 @@ fn transaction(row: &Value, reported: &[Address]) -> Result<Value, String> {
     )
 }
 
-fn rows(
+pub(super) fn rows(
     packet: &Value,
     known: &BTreeSet<Address>,
     after: u64,

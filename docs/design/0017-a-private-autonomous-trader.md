@@ -34,6 +34,36 @@ choice; do not ask the owner to supply these numbers in chat. No numeric mandate
 was supplied. Draft preferences are not a kernel Policy or a signing grant;
 the separate signer and execution supervisor must enforce an approved Policy
 before any live execution. Wallet creation remains an explicit owner action.
+
+Josh accepted the adaptive-risk recommendation on 2026-10-10: adaptive risk
+management is the default product direction, a daily loss cap is optional, and
+one conversational research interface lets the owner contribute leads while
+the agent investigates and self-steers under an active mandate. The checkbox
+choices above remain independent; enabling a daily cap is a separate choice
+from who selects its value. Older saved caps must remain enabled until the owner
+changes them. New draft settings default to no daily cap. This supersedes the
+mandatory daily-cap interpretation, not the independent signing boundary.
+
+Adaptive decisions must change actual position sizing, concentration, liquidity
+and exit requirements, evidence thresholds and operating reserves. Deteriorating
+performance triggers diagnosis and proportionate de-risking or abstention;
+recovery depends on evidence, not midnight or a promise to recover losses.
+Neither wins nor losses alone prove strategy quality. The panel should explain
+the current choices and their evidence, show equity, available capital, deployed
+exposure and costs, and retain direct pause/revoke controls. Research tools may
+improve through tested experiments; a live model cannot edit its own signing
+permissions or production wallet protections. This is a settled product
+direction, not a claim these capabilities have been implemented or measured.
+
+User-provided social links become attributed research hypotheses. Check source
+provenance, token identity, supporting chain evidence, liquidity, exit capacity
+and all-in costs; ask for missing context when needed. The agent may act without
+per-trade confirmation within an existing mandate, but a post or chat message
+cannot create authority. Measure net results against credible controls, with
+drawdown, recovery, uncertainty and no-trade periods retained. A small wallet
+may rationally remain idle when costs dominate. The weakest point remains an
+unproved trading edge: adaptive risk and fluent explanations do not establish it.
+
 It does not record that Josh has approved a wallet, deposit, loss budget, provider
 purchase, live deployment or customer launch.
 
@@ -401,7 +431,8 @@ landed; check signature history and balances at a defensible commitment.[^16]
 | Close positions | Pause entries and attempt bounded reduce-only exits; show each actual result and residual holding. No guarantee all markets remain liquid. |
 | Stop everything / revoke | Direct deterministic revocation, bypassing the model. No further signatures, including exits. Explain that already released signed transactions may still land. |
 | Model outage or exhausted research budget | Stop model-dependent entries; retain journal/report access and operate pre-authorised deterministic protection if its own prerequisites remain healthy. |
-| Loss/failure limit reached | Close the entry gate. Allow only independently checked exposure-reducing actions under explicit exit policy; never treat a caller's `reduce_only` flag as proof. |
+| Owner-enabled loss cap or operational failure limit reached | Close the entry gate. Allow only independently checked exposure-reducing actions under explicit exit policy; never treat a caller's `reduce_only` flag as proof. A daily monetary cap is optional. |
+| Performance deteriorates without an enabled daily cap | Diagnose forecast, liquidity, execution, cost and data failures; adapt sizing, exposure and evidence requirements or abstain. Retain independent operational controls. Do not automatically increase risk after losses or resume solely because the date changes. |
 | Unknown position, stale data or uncertain submission | No new exposure. Reconcile; only permit an action whose reduction and bounds can actually be established. Surface uncertainty promptly. |
 | RPC, host or signer-provider outage | Display loss of capability and alert through an independent configured channel. Do not say protection is active when signing or state observation is unavailable. |
 | Network fee reserve falls below threshold | Stop entries before the reserve is consumed. Apply the defined session-end/unwind policy while feasible; never require an AI-credit top-up to attempt an already funded exit. |

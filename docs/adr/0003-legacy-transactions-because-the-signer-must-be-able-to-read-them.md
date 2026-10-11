@@ -74,6 +74,35 @@ built locally with no router in the path at all.
 
 ## Consequences
 
+The Router now has an explicit build_legacy path using the same quote response
+and instruction validation as browser v0 assembly. All instruction addresses are
+already named in raw metas, so legacy compilation places them inline without
+fetching or trusting lookup-table membership. No instruction, address or privilege
+is removed to fit. Oversized routes refuse; existing browser v0 behavior remains.
+The captured USDC-to-SOL body fits inline, while the larger SOL-to-USDC capture
+exceeds the packet limit. These are historical encoding fixtures, not current
+liquidity or proof that the routed programs are safe. Autonomous Routing remains
+closed pending independent execution-semantic and asset-bound verification.
+
+The legacy Router entry point now also reviews the captured single-hop RaydiumV2
+route_v2 envelope before returning a build. Its complete known payload binds exact
+input, quoted output, slippage, zero platform/positive-slippage fees and the route
+indices. Named wallet/mint/token/program roles, repeated source/destination token
+accounts and the quote's pool identifier must agree. Unknown layouts or suffixes
+refuse. New whole captures demonstrate both SOL/USDC directions fitting inline.
+This remains construction review: actual pool/vault/token ownership, ATA derivation,
+global signer/writable privileges, instruction spend/output enforcement, net fills
+and protected live evidence still require independent verification. It grants no
+authority and does not open autonomous Routing.
+
+The independent message decoder retains both read-only header counts and rejects
+counts that cannot describe its account list. Its privilege accessor resolves
+declared transaction-wide signing and writability; it does not trust instruction
+metas or claim runtime-effective writability. The signer requires its fee payer
+to be a writable signer, and curve trader-role checks consume the same accessor.
+Captured legacy construction is checked against these decoded privileges.
+This does not establish pool/vault ownership or complete route-role verification.
+
 - `radar-exec` and `radar-signer` share one decoder — the signer's — so a
   transaction accepted by the pre-check is accepted by the signer for the same
   reasons.

@@ -11,6 +11,14 @@ use std::process::ExitCode;
 
 use radar_asof::AsOf;
 use radar_instruments::{Context, CreatorHistory, CreatorTrackRecord, Registry, SimulateExit};
+mod alpaca_assets;
+mod alpaca_exposure;
+mod alpaca_journal;
+mod alpaca_market;
+mod alpaca_order_read;
+mod alpaca_quote;
+mod alpaca_read;
+mod alpaca_reconcile;
 mod audit;
 mod basis;
 mod brief;
@@ -25,11 +33,13 @@ mod exits;
 mod features;
 mod graduations;
 mod model_prices;
+mod portfolio_read;
 mod replay;
 mod route;
 mod selection;
 mod session;
 mod settlement_read;
+mod sol_price_read;
 mod study;
 mod transaction_read;
 mod wallet_activity_read;
@@ -116,16 +126,30 @@ commands:
   cost --from <ts> --to <ts>     what a round trip costs, bucketed by notional;
                                  re-derives the 850 bps constant and says
                                  whether it is fixed or proportional
+  alpaca-read (paper account, positions and US equity market clock; credentials from environment)
+  alpaca-reconcile --account-id <expected-paper-account-id>
+  alpaca-order-read --account-id <expected-paper-account-id> --client-order-id <retained-id>
+  alpaca-order-reserve --journal <private-file> --account-id <paper-id> --intent <typed-intent>
+  alpaca-order-journal --journal <private-file> --account-id <paper-id>
+  alpaca-assets-read --account-id <paper-id> --symbols SPY,QQQ
+  alpaca-market-read --symbols SPY,QQQ --output <new-capture-file>
+  alpaca-market-replay --input <capture-file> --as-of-unix-ms <N>
+  alpaca-quote --input <capture-file> --symbol SPY --as-of-unix-ms <N> --max-age-ms <N> --max-spread-bps <N>
   wallet-read --wallet <address> --rpc <URL>
-    Finalized balances plus raw token/mint verification; no prices or authority.
+       [--value-sol --min-slot <N> --max-age-secs <N> --max-confidence-bps <0..10000>]
+    Finalized balances/raw token verification; optional native USD band, read-only.
+  portfolio-read --wallet <address> --rpc <URL> --min-slot <N> --max-age-secs <N> --max-confidence-bps <0..10000>
+    Observed holdings with native/wrapped SOL and admitted curve exit marks; unknowns retained.
+  sol-price-read --rpc <URL> --min-slot <N> --max-age-secs <N> --max-confidence-bps <0..10000> [--output <private-file>]
+    Receiver-verified SOL/USD confidence bounds; read-only, no portfolio authority.
   wallet-activity-read --wallet <address> --after-slot <N> --through-slot <N> --rpc <URL> [--inventory-review <path>]
     Bounded finalized address history and raw transactions; incomplete wallet coverage.
   curve-exit --mint <address> --raw-tokens <N> --rpc <URL>
     One-context curve/mint/fee read; conservative hypothetical sell, no authority.
   transaction-read --transaction <binary-file> --min-slot <N> --rpc <URL>
     Exact unsigned legacy simulation and message fee; JSON, no signing or sending.
-  evidence-read --wallet <address> --transaction <binary-file> --min-slot <N> --rpc <URL>
-    Collect wallet and exact transaction evidence together; no valuation or authority.
+  evidence-read --wallet <address> --transaction <binary-file> --min-slot <N> --rpc <URL> [--output <private-file>]
+    Collect wallet and exact transaction evidence; optional private atomic publication.
   settlement-read --wallet <address> --transaction <signed-binary-file> --min-slot <N> --rpc <URL>
     Exact finalized transaction and balance metadata; no claim release or USD accounting.
 
@@ -901,7 +925,16 @@ fn main() -> ExitCode {
         "study" => event_study(&args),
         "creator-index" => creator_index(&args),
         "dossier" => dossier::run(&args),
+        "alpaca-read" => alpaca_read::run(&args),
+        "alpaca-reconcile" => alpaca_reconcile::run(&args),
+        "alpaca-order-read" => alpaca_order_read::run(&args),
+        "alpaca-order-reserve" | "alpaca-order-journal" => alpaca_journal::run(&args),
+        "alpaca-assets-read" => alpaca_assets::run(&args),
+        "alpaca-market-read" | "alpaca-market-replay" => alpaca_market::run(&args),
+        "alpaca-quote" => alpaca_quote::run(&args),
         "wallet-read" => wallet_read::run(&args),
+        "portfolio-read" => portfolio_read::run(&args),
+        "sol-price-read" => sol_price_read::run(&args),
         "wallet-activity-read" => wallet_activity_read::run(&args),
         "curve-exit" => curve_exit::run(&args),
         "transaction-read" => transaction_read::run(&args),

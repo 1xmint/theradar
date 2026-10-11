@@ -59,7 +59,7 @@ fn with_linker(linker: radar_serve::link::Linker) -> axum::Router {
 #[tokio::test]
 async fn a_subscription_can_be_linked_before_an_inference_budget_exists() {
     let router = with_linker(radar_serve::link::Linker::from_vars(&|key| {
-        (key == "RADAR_MODEL_CODEX").then(|| "codex".to_owned())
+        (key == "RADAR_MODEL_CODEX").then(|| "radar-no-such-cli-7c38d2".to_owned())
     }));
     let response = router
         .clone()
@@ -71,7 +71,7 @@ async fn a_subscription_can_be_linked_before_an_inference_budget_exists() {
         )
         .await
         .expect("response");
-    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
     let body = response
         .into_body()
         .collect()
@@ -80,10 +80,98 @@ async fn a_subscription_can_be_linked_before_an_inference_budget_exists() {
         .to_bytes();
     assert_eq!(
         serde_json::from_slice::<serde_json::Value>(&body).expect("JSON"),
-        serde_json::json!({"state": "idle"})
+        serde_json::json!({"state": "failed", "status": "could not check CLI login status"})
     );
     let (status, _) = post(router, "/v1/chat", r#"{"question":"hello"}"#).await;
     assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn subscription_status_survives_a_server_restart_and_detects_logout() {
+    let directory = tempfile::tempdir().expect("fixture directory");
+    let script = directory.path().join("cli");
+    let command = format!("/bin/sh {}", script.display());
+    let router = || {
+        with_linker(radar_serve::link::Linker::from_vars(&|key| {
+            (key == "RADAR_MODEL_CODEX").then(|| command.clone())
+        }))
+    };
+    let status = |code| {
+        std::fs::write(
+            &script,
+            format!(
+                "[ \"$#\" = 2 ] && [ \"$1\" = login ] && [ \"$2\" = status ] || exit 9\nprintf secret-output\nprintf secret-error >&2\nexit {code}\n"
+            ),
+        )
+        .expect("fixture script");
+    };
+    // A fresh server has no device-login child. Its answer must come from the
+    // CLI, and a second fresh server must retain the same persisted state.
+    status(0);
+    for _ in 0..2 {
+        assert_eq!(
+            get_link(router()).await,
+            (StatusCode::OK, serde_json::json!({"state":"linked"}))
+        );
+    }
+    let existing = router();
+    status(1);
+    assert_eq!(
+        get_link(existing.clone()).await,
+        (StatusCode::OK, serde_json::json!({"state":"idle"}))
+    );
+    status(0);
+    assert_eq!(
+        get_link(existing).await,
+        (StatusCode::OK, serde_json::json!({"state":"linked"}))
+    );
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn a_failed_status_check_is_unknown_and_never_exposes_cli_output() {
+    let directory = tempfile::tempdir().expect("fixture directory");
+    let script = directory.path().join("cli");
+    let command = format!("/bin/sh {}", script.display());
+    for code in [2, 9, 127] {
+        std::fs::write(
+            &script,
+            format!("echo secret-output\necho secret-error >&2\nexit {code}\n"),
+        )
+        .expect("fixture script");
+        let router = with_linker(radar_serve::link::Linker::from_vars(&|key| {
+            (key == "RADAR_MODEL_CODEX").then(|| command.clone())
+        }));
+        assert_eq!(
+            get_link(router).await,
+            (
+                StatusCode::SERVICE_UNAVAILABLE,
+                serde_json::json!({"state":"failed", "status":"could not check CLI login status"})
+            )
+        );
+    }
+}
+
+#[cfg(unix)]
+async fn get_link(router: axum::Router) -> (StatusCode, serde_json::Value) {
+    let response = router
+        .oneshot(
+            Request::builder()
+                .uri("/v1/link")
+                .body(Body::empty())
+                .expect("request"),
+        )
+        .await
+        .expect("response");
+    let status = response.status();
+    let bytes = response
+        .into_body()
+        .collect()
+        .await
+        .expect("body")
+        .to_bytes();
+    (status, serde_json::from_slice(&bytes).expect("JSON"))
 }
 
 #[tokio::test]

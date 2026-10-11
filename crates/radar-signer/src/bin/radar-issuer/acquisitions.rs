@@ -124,8 +124,10 @@ fn sale(
     id: &radar_journal::OperationId,
     value: &Value,
 ) -> Result<HistoricalEffect, String> {
-    // Completed native spend cannot represent sale credits or reconcile basis.
-    if entry.state != OperationState::SubmissionUnknown {
+    let completion = super::cash_completion::reviewed(value)?;
+    if entry.state != OperationState::SubmissionUnknown
+        && entry.state != OperationState::Reconciled(completion)
+    {
         return Err("sale terminal state lacks economic reconciliation".into());
     }
     let proposal: radar_risk::Proposal = serde_json::from_value(

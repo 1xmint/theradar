@@ -147,10 +147,11 @@ fn capped() -> Policy {
         max_position: MicroUsd::from_dollars(250.0),
         max_deployed: MicroUsd::from_dollars(1_000.0),
         max_per_creator: MicroUsd::from_dollars(250.0),
-        max_daily_loss: MicroUsd::from_dollars(100.0),
+        max_daily_loss: Some(MicroUsd::from_dollars(100.0)),
         max_round_trip_cost_bps: 1_000,
         max_canary: MicroUsd::from_dollars(1.0),
         max_input_staleness: SlotDelta(6_000),
+        max_native_spend_lamports: None,
         max_consecutive_failures: 3,
     }
 }
@@ -161,6 +162,10 @@ struct FixedRoute(Result<Route, RouteError>);
 
 impl Routing for FixedRoute {
     fn build_buy(&self, _: &Address, _: &Address, _: u64) -> Result<Route, RouteError> {
+        self.0.clone()
+    }
+
+    fn build_sell(&self, _: &Address, _: &Address, _: u64) -> Result<Route, RouteError> {
         self.0.clone()
     }
 }

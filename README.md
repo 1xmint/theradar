@@ -1,9 +1,69 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # Radar
 
-Solana research and trading infrastructure, with an x402/MCP agent surface built
+Autonomous trading research, with **Alpaca paper stocks/ETFs as the primary next
+experiment**. Hyperliquid public-data research and Solana remain secondary;
+neither is the starting live venue for this U.S. owner. See the
+[accepted direction](docs/design/0022-alpaca-paper-first-experiment.md).
+
+The existing Solana infrastructure has an x402/MCP agent surface built
 in and, on the live instance, sitting behind Cloudflare Access rather than open
 to any outside agent (issue #186) — see [What is live](#what-is-live) below.
+
+`radar alpaca-read` reads a paper account, open positions and the US equity market
+clock. It requires private environment variables `RADAR_ALPACA_PAPER_KEY_ID` and
+`RADAR_ALPACA_PAPER_SECRET_KEY`; it always uses Alpaca's paper host and never
+places orders. See [setup and remaining work](docs/plans/0017-alpaca-paper-foundation.md).
+The command is not yet wired to the deployed site. Existing measurements below
+describe the Solana experiment, not Alpaca performance.
+
+`radar alpaca-market-read --symbols SPY,QQQ --output ./data/alpaca/capture-001.json`
+captures the explicitly requested IEX feed using the same private paper keys.
+Create the output directory first and use a new filename for each observation;
+existing captures are never replaced. Replay without credentials using
+`radar alpaca-market-replay --input ./data/alpaca/capture-001.json --as-of-unix-ms <N>`.
+The replay gate uses host availability time, preserves missing symbols as null,
+and does not certify exchange timestamps, quote freshness or consolidated coverage.
+These are operator tools; unattended scheduling and execution are still pending.
+
+`radar alpaca-quote --input ./data/alpaca/capture-001.json --symbol SPY --as-of-unix-ms <N> --max-age-ms 1000 --max-spread-bps 10`
+checks a captured quote against explicit age/spread bounds, the capture's requested
+symbols and availability, and its nanosecond UTC exchange timestamp. Prices and
+displayed sizes are parsed as exact integers at six decimal places; size units
+remain unverified and cannot yet bound executable share quantity. Unsupported
+precision and exponent notation are refused. This produces quote inputs only,
+not an account mandate, asset-eligibility verdict or permission to place orders.
+
+`radar alpaca-reconcile --account-id <expected-paper-account-id>` pins the account
+identity and brackets positions/market-clock reads with account and open-order
+reads. It preserves pending orders and nested legs, reports changes in selected
+fields, and refuses full 500-order responses. Stable fields do not prove an atomic
+snapshot or complete economic accounting. It uses the same private paper keys
+and cannot submit orders. See [reconciliation work](docs/plans/0018-alpaca-paper-reconciliation.md).
+
+The same report includes conservative exposure bounds for supported simple equity
+limit orders and long positions. It reserves original pending quantities, rounds
+funds down and exposure up, and reports unsupported or changing states with null
+bounds. Fees, durable local claims, freshness and complete economic reconciliation
+remain unresolved; these bounds are not available capital or trading authority.
+See [exposure accounting](docs/plans/0020-alpaca-paper-exposure.md).
+
+`radar alpaca-order-read --account-id <expected-paper-account-id> --client-order-id <retained-id>`
+queries a specific paper order between pinned account reads. It preserves selected
+fill/terminal observations without authorizing a retry or releasing claims.
+HTTP 404 means not visible, not proof that submission failed; other errors refuse
+without partial output. See [recovery reads](docs/plans/0021-alpaca-order-recovery-read.md).
+
+`radar alpaca-order-reserve --journal <private-file> --account-id <paper-id> --intent <typed-intent>`
+records an immutable paper claim. `radar alpaca-order-journal --journal <private-file> --account-id <paper-id>`
+reopens and verifies it under exclusive cooperative ownership. These operator
+commands need no broker keys and cannot submit, retry or release an order.
+See [durable paper claims](docs/plans/0022-alpaca-order-journal.md).
+
+`radar alpaca-assets-read --account-id <paper-id> --symbols SPY,QQQ` reads
+identity-bound equity assets between pinned paper account observations. Missing
+tradability and fractional-share flags remain unknown. This does not authorize
+orders. See [asset checks](docs/plans/0023-alpaca-asset-observations.md).
 
 **Status: recording, and refusing to trade.** The pipeline runs end to end on a
 live instance — recording launches, measuring what became of them, and running
@@ -120,6 +180,7 @@ again. This needs nothing from any vendor and it is the largest saving available
 | `radar-research` | Replay. Re-runs a recorded decision at its original watermark and separates a store that gained history from a strategy that is not a pure function of its inputs. Also builds and reads the creator index and the base-rate snapshot — moved here from `radar-roast` when the bot that read them left for its own repository (ADR-0024). |
 | `radar-signer` | A separate process holding the key. Re-decodes every transaction and trusts nothing the caller said about it. |
 | `radar-exec` | Route, gate, sign, submit, reconcile. The last stage, and the one holding the least authority. |
+| `radar-pda` | Pure Solana program-derived address calculation shared by transaction builders and the independent signer. |
 | `radar-pumpfun` | Builds pump.fun instructions and prices them off the bonding curve. Pure: no clock, no network, no key. The curve is `x·y=k` over published reserves, so a fill is computed rather than quoted — see ADR 0009. |
 | `radar-customer` | The customer model. Pure: a bounded grant derived from the kernel's authorisation, and a signature meter. No account table — see ADR 0006. |
 | `radar-onchain` | The on-demand chain read behind `radar dossier`. Rebuilds a token's launch block and prices its curve from RPC in a bounded number of calls, for a mint that may be forty seconds old — which the store cannot answer, being minutes behind by design and holding the launch-block verdict rather than the number. Also reads mint/curve/fees in one RPC context for the hypothetical `radar curve-exit` command. Read-only: no key, no signer in its tree. |

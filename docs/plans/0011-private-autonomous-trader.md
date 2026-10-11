@@ -68,15 +68,52 @@ choosing a real capital budget. Live configuration must separately supply:
 |---|---|
 | Account and wallet | Dedicated own-capital experimental identity; verified ownership and recovery path; no customer/prize funds. |
 | Capital and denominations | Maximum funded principal, base reporting currency, allowed quote assets and minimum SOL operating reserve. No assumed $1 USDC valuation. |
-| Risk mandate | Position, aggregate exposure, correlated-group exposure, trade size, turnover, session/daily loss and drawdown limits; maximum holding duration. |
+| Risk mandate | Owner-selected or explicitly agent-selected allocation and sizing; adaptive risk preference, concentration, turnover, exit and reserve rules; optional owner-enabled daily loss cap. Record the effective choices and enforce the resulting authorized policy independently. |
 | Intelligence budget | Per-job, daily and session caps across all agents, tools, retries and rejected candidates; independent from principal and protection reserve. |
 | Session | Start/end, entry stop, renewal and unwind behaviour; no silent permanent authority or automatic refill. |
 | Protection | Admitted exit routes, reduction constraints, retry/fee budget, freshness/reconciliation limits and escalation channel. |
 | Evidence policy | Strategy/model/tool versions, frozen experiment, allowed sources and cohorts, timestamps, retention and read coverage. |
 | Conflicts | Community-token exclusion and enforcement of GOAL's no-hold/comment rule across private trader and public analyst. |
 
-Numbers remain **unset**, which blocks real spending rather than inviting an agent
-to pick them. This does not block implementation of disabled live machinery.
+Numbers remain **unset**. The owner chooses manual versus Agent decides per
+option on the website; do not request the same numbers in chat. An agent-selected
+value remains a proposal until validated against the owner's mandate and verified
+wallet state, converted to an enforceable policy and independently authorized.
+Saved draft choices alone cannot enable signing. This does not block disabled
+live machinery. Unlimited subscription inference was selected separately; provider
+limits still apply, and this does not authorize paid tools or wallet spending.
+
+### Owner-approved smart-panel checklist (2026-10-10)
+
+Josh accepted adaptive risk management by default, optional daily loss limits,
+and conversational research assistance. These are required private-trader work,
+not an optional dashboard polish phase. See design 0017 section 1 for the decision.
+
+- [ ] Make the daily loss cap optional in new site drafts and persisted settings;
+  preserve older saved caps and validate enabled caps independently from who
+  chooses their amount. Carry explicit cap state into live policy construction;
+  do not implement absence as an enormous dollar sentinel.
+- [ ] Connect a risk preference to actual sizing, concentration, liquidity/exit,
+  evidence and reserve decisions. Show current effective choices and reasons.
+  Test de-risking, abstention and evidence-based recovery after deterioration;
+  prevent unsupported loss-chasing or calendar-only recovery.
+- [ ] Show verified wallet equity, available capital, open exposure, performance
+  after costs, uncertainty and current activity/waiting reasons. Missing prices
+  remain unknown. Keep direct entry-pause and revocation outside the model.
+- [ ] Connect the research chat to the autonomous supervisor: attributed user
+  leads, provenance/token/chain/liquidity/exit/cost checks, follow-up questions
+  where necessary, and actions within the existing mandate without per-trade
+  confirmation. Test malicious posts and tips that do not justify a trade.
+- [ ] Measure net outcomes against credible controls, drawdowns and recovery,
+  realistic execution costs and no-trade periods. Compare frozen risk profiles
+  in shadow before changing live behavior; promote research-tool improvements
+  through tested review rather than model edits to live authority or protections.
+
+Activation still requires live verified inputs and durable economic accounting
+(P2), the investigative consumer (P3), evidence and evaluation (P4/P5), isolated
+authority (P6), supported entries and exits (P7), recovery/protection (P8), and
+owner activation with verified funding/delegation and reconciled canaries (P9/P10).
+Passing a UI test or saving preferences proves none of those remaining gates.
 
 ## Dependency sequence
 

@@ -8,7 +8,7 @@ use radar_types::Address;
 use serde_json::{Value, json};
 use std::time::Duration;
 
-fn estimate(market: &CurveMarket, raw_tokens: u64) -> Result<Value, String> {
+pub(super) fn estimate(market: &CurveMarket, raw_tokens: u64) -> Result<Value, String> {
     if market.mint_authority_active || market.token.freeze_authority.is_some() {
         return Err("mint or freeze authority remains active".into());
     }

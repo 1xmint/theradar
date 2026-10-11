@@ -1,10 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 //! The PumpSwap AMM (`pump_amm`), where a pump.fun token goes when it graduates.
 //!
-//! # This table is a proposal, not a capture
+//! # One captured trade; the remaining table is a proposal
 //!
 //! Every discriminator in [`pumpfun`](crate::pumpfun) was observed on mainnet.
-//! **None of these were.** The names come from the vendor's published IDL
+//! Here, `buy_exact_quote_in` is also observed in the successful mainnet
+//! transaction retained at `tests/fixtures/pumpswap_buy_exact_quote_in_raw.json`.
+//! `pumpswap_capture_holds` resolves its inner instruction's actual program and
+//! decodes the captured bytes. This establishes discriminator identity, not
+//! verified trade arguments, account semantics or signing support. The other
+//! rows remain reference-derived. The names come from the vendor's published IDL
 //! (`pump-fun/pump-public-docs`, `idl/pump_amm.json`, fetched 2026-09-09) and the
 //! bytes are Anchor's `sha256("global:" + name)[..8]` recomputed from those
 //! names, which `the_table_follows_anchors_naming_rule` re-derives rather than
@@ -112,8 +117,9 @@ pub enum Instruction {
 
 /// Every known instruction with its discriminator and Anchor name.
 ///
-/// Unlike [`pumpfun::KNOWN`](crate::pumpfun::KNOWN), the bytes here are derived
-/// rather than observed — see the module documentation. The name is carried for
+/// Unlike [`pumpfun::KNOWN`](crate::pumpfun::KNOWN), all except
+/// `buy_exact_quote_in` remain reference-derived — see the module documentation.
+/// The name is carried for
 /// the same reason: a test recomputes `sha256("global:" + name)[..8]` and fails
 /// if a row is ever hand-edited.
 pub const KNOWN: &[(Instruction, [u8; 8], &str)] = &[
