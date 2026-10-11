@@ -38,3 +38,24 @@ Alpaca's JSON schema and all report semantics. No waiver or new dependency.
 Wait for all jobs to finish before pushing and require fresh complete CI.
 Hyperliquid public-reader correction 05a5e17 passed complete CI 38177609139;
 that branch remains secondary and unmerged. No production changes.
+
+### IEX capture and replay increment
+
+CI 38178028897 at correction 07f8c1c completed: build, tests, MSRV and every
+mutation shard passed. Lint now reached the process test and requires assert_eq
+for its empty byte vector (alpaca_read_process.rs:19). Apply that assertion form
+without changing refusal behavior; no waiver. The next source adds actual CLI callers for IEX
+snapshots and offline replay. Fixed data host and feed, paper credentials only,
+exact response bytes retained as a JSON string, host availability rounded up
+to the next millisecond, immutable filenames and synced-file publication.
+Replay admits captures only at/after their host availability watermark. Missing
+symbols stay null; exchange timestamps, freshness and tradability stay unverified.
+This is an operator capture tool, not an unattended data service or order loop.
+
+Five market unit regressions and one additional process regression bring the
+test floor to 2299. They cover query binding, raw precision, watermark equality
+and future refusal, clock reversal, null/malformed data, no-overwrite publication,
+format and exact size boundaries, and the actual replay command without keys.
+Require complete GitHub CI and mutation results. No local jobs, production
+changes, broker account access, orders or paid data. Follow with validated quote
+inputs and durable paper execution/reconciliation; the full goal remains open.

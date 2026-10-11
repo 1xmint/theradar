@@ -17,6 +17,15 @@ places orders. See [setup and remaining work](docs/plans/0017-alpaca-paper-found
 The command is not yet wired to the deployed site. Existing measurements below
 describe the Solana experiment, not Alpaca performance.
 
+`radar alpaca-market-read --symbols SPY,QQQ --output ./data/alpaca/capture-001.json`
+captures the explicitly requested IEX feed using the same private paper keys.
+Create the output directory first and use a new filename for each observation;
+existing captures are never replaced. Replay without credentials using
+`radar alpaca-market-replay --input ./data/alpaca/capture-001.json --as-of-unix-ms <N>`.
+The replay gate uses host availability time, preserves missing symbols as null,
+and does not certify exchange timestamps, quote freshness or consolidated coverage.
+These are operator tools; unattended scheduling and execution are still pending.
+
 **Status: recording, and refusing to trade.** The pipeline runs end to end on a
 live instance — recording launches, measuring what became of them, and running
 the full decision lane over what it has recorded. 479,564 launches, 1,326,862 outcome measurements and 7,543

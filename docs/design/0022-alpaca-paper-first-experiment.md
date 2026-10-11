@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # 0022 — Alpaca paper first, measured profit as the objective
 
-**Status:** owner-approved direction; first read connector pending GitHub verification.
+**Status:** owner-approved direction; account reader and IEX capture/replay pending complete GitHub verification.
 
 On 2026-10-11 Josh accepted the recommendation to start with Alpaca paper
 stocks/ETFs. The objective is durable profit after costs when learned intelligence
@@ -51,6 +51,16 @@ accounting or a freshness verdict. Optional absent values remain null. The reads
 are sequential, not an atomic snapshot; open positions omit pending orders and
 closed-position history. Buying power is not a capital mandate. The reader has
 no order path, withdrawal path, eligibility decision or execution authority.
+
+The IEX market-data caller is `radar alpaca-market-read`, using the fixed
+data host and explicit `feed=iex`. Each capture retains the exact response JSON
+as a string, requested symbols and host read/availability times. Publication
+syncs the file before linking a new final filename; existing captures are never
+overwritten. Offline `radar alpaca-market-replay` rejects captures unavailable
+at the specified millisecond watermark and keeps missing symbols null. This is
+a host-availability gate, not exchange-time validation or a fresh-quote verdict.
+It does not treat Solana slots as equity timestamps. The operator tools are not
+yet an unattended collector, historical database or execution-data service.
 
 Preserve the smart panel: manual inputs with per-option Agent decides checkboxes,
 adaptive risk by default, optional daily loss cap, research chat, visible reasons

@@ -41,13 +41,13 @@ struct Clock {
     next_close: String,
 }
 
-fn credential(value: Option<String>) -> Result<String, String> {
+pub(super) fn credential(value: Option<String>) -> Result<String, String> {
     value
         .filter(|v| !v.trim().is_empty())
         .ok_or_else(|| "configure both Alpaca paper credentials privately".into())
 }
 
-fn agent() -> ureq::Agent {
+pub(super) fn agent() -> ureq::Agent {
     // Alpaca's custom credential headers must never follow a redirect.
     ureq::Agent::config_builder()
         .max_redirects(0)
@@ -56,7 +56,12 @@ fn agent() -> ureq::Agent {
         .into()
 }
 
-fn get(agent: &ureq::Agent, url: &str, key: &str, secret: &str) -> Result<String, String> {
+pub(super) fn get(
+    agent: &ureq::Agent,
+    url: &str,
+    key: &str,
+    secret: &str,
+) -> Result<String, String> {
     let mut response = agent
         .get(url)
         .header("APCA-API-KEY-ID", key)

@@ -11,6 +11,7 @@ use std::process::ExitCode;
 
 use radar_asof::AsOf;
 use radar_instruments::{Context, CreatorHistory, CreatorTrackRecord, Registry, SimulateExit};
+mod alpaca_market;
 mod alpaca_read;
 mod audit;
 mod basis;
@@ -120,6 +121,8 @@ commands:
                                  re-derives the 850 bps constant and says
                                  whether it is fixed or proportional
   alpaca-read (paper account, positions and US equity market clock; credentials from environment)
+  alpaca-market-read --symbols SPY,QQQ --output <new-capture-file>
+  alpaca-market-replay --input <capture-file> --as-of-unix-ms <N>
   wallet-read --wallet <address> --rpc <URL>
        [--value-sol --min-slot <N> --max-age-secs <N> --max-confidence-bps <0..10000>]
     Finalized balances/raw token verification; optional native USD band, read-only.
@@ -911,6 +914,7 @@ fn main() -> ExitCode {
         "creator-index" => creator_index(&args),
         "dossier" => dossier::run(&args),
         "alpaca-read" => alpaca_read::run(&args),
+        "alpaca-market-read" | "alpaca-market-replay" => alpaca_market::run(&args),
         "wallet-read" => wallet_read::run(&args),
         "portfolio-read" => portfolio_read::run(&args),
         "sol-price-read" => sol_price_read::run(&args),
