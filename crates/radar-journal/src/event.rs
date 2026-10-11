@@ -28,6 +28,8 @@ pub const MAX_REDACTED: usize = 512;
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Stage {
+    /// A brokerage order intent or ambiguous submission, separate from Solana operations.
+    BrokerOrder,
     /// Caller-verified external plain SOL activity, not an operation or authority.
     NativeTransfer,
     /// Immutable opening inventory, before any operation in the owned journal.
@@ -327,6 +329,9 @@ pub struct Event {
     /// journal already on disk.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub operation: Option<crate::operation::OperationEntry>,
+    /// Typed paper brokerage intent/state. Omitted from historical event hashes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub broker: Option<crate::broker::BrokerEntry>,
 }
 
 impl Event {
@@ -390,6 +395,10 @@ impl Event {
                     .unwrap_or_default()
                     .as_bytes(),
             );
+        }
+        if let Some(broker) = &self.broker {
+            out.push(2);
+            out.extend_from_slice(serde_json::to_string(broker).unwrap_or_default().as_bytes());
         }
         out
     }

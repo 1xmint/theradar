@@ -312,6 +312,7 @@ const fn stage_label(stage: Stage) -> &'static str {
         Stage::Claim => "claim        ",
         Stage::Payout => "payout       ",
         Stage::Operation => "operation    ",
+        Stage::BrokerOrder => "broker_order ",
     }
 }
 

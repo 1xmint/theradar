@@ -90,6 +90,19 @@ fields still do not establish atomicity, economic completeness or capital
 authority. Future risk-state production must reconcile local durable reservations,
 broker fills and unsupported account/order states before releasing any capital.
 
+The separate broker journal records typed paper intents with nanoshares and
+micro-USD price/fee units. Its actual operator callers are alpaca-order-reserve
+and alpaca-order-journal. Reserved and SubmissionUnknown both retain their full
+claim. Client IDs bind immutable intents; a repeated reservation never creates
+another claim or resets uncertainty. The library persists uncertainty before an
+effect and invokes it with the retained intent, then refuses another submission
+even after an error/restart. No production order-submission caller exists yet.
+Uncertain writes poison the current owner; torn, mixed-domain and invalid replay
+refuse. Existing ownership/hash-chain storage is reused, with no new broker bytes
+in historical hashes when absent. These controls establish ordering and identity,
+not capital permission, complete reconciliation or resistance to host rollback.
+There is no release API until intent/fill/cash reconciliation is established.
+
 Preserve the smart panel: manual inputs with per-option Agent decides checkboxes,
 adaptive risk by default, optional daily loss cap, research chat, visible reasons
 and direct pause/revoke. The model may recommend a budget from observed funds;

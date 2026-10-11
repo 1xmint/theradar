@@ -100,6 +100,7 @@ use serde::{Deserialize, Serialize};
 use crate::Verified;
 use crate::event::{Correlation, Event, Outcome};
 use crate::file::{Journal, JournalError};
+use crate::ownership::Owner;
 
 /// Which operation an event is about.
 ///
@@ -247,6 +248,9 @@ pub struct OperationEntry {
 /// What stopped an operation.
 #[derive(Debug, thiserror::Error)]
 pub enum OperationError {
+    /// Brokerage claims must not be interpreted as empty Solana operation history.
+    #[error("broker history belongs to the separate broker journal owner")]
+    BrokerHistory,
     /// External transfer identity, association or immutable evidence conflicts.
     #[error("native transfer record is inconsistent or duplicates an operation")]
     NativeTransfer,
@@ -383,29 +387,6 @@ struct Live {
     claim: Option<ReservationId>,
 }
 
-struct Owner {
-    file: std::fs::File,
-    process: u32,
-}
-
-impl Owner {
-    fn release(&self) {
-        // Close alone leaves flock held by descriptors inherited during a
-        // concurrent fork. End ownership here even if such a duplicate survives.
-        // A forked child's destructor must not unlock its parent's ownership.
-        // Failure remains closed: the OS still releases on the last close.
-        if self.process == std::process::id() {
-            let _ = self.file.unlock();
-        }
-    }
-}
-
-impl Drop for Owner {
-    fn drop(&mut self) {
-        self.release();
-    }
-}
-
 /// Operations, and the journal they are recorded in.
 ///
 /// The caller is `radar consider`, which reopens the log before the risk kernel
@@ -490,55 +471,19 @@ impl OperationLog {
     /// [`OperationError::Orphan`] or [`OperationError::IllegalTransition`] if
     /// what it records is not a history an operation could have had.
     pub fn open(path: impl Into<std::path::PathBuf>) -> Result<Self, OperationError> {
-        let path = path.into();
-        let parent = path
-            .parent()
-            .filter(|p| !p.as_os_str().is_empty())
-            .unwrap_or(std::path::Path::new("."));
-        let directory = parent.canonicalize().map_err(|source| JournalError::Io {
-            path: parent.display().to_string(),
-            source,
-        })?;
-        let name = path.file_name().ok_or_else(|| JournalError::Io {
-            path: path.display().to_string(),
-            source: std::io::Error::new(
-                std::io::ErrorKind::InvalidInput,
-                "an operation journal needs a filename",
-            ),
-        })?;
-        let path = directory.join(name);
-        let mut lock_path = path.as_os_str().to_os_string();
-        lock_path.push(".lock");
-        let lock_path = std::path::PathBuf::from(lock_path);
-        let mut options = std::fs::OpenOptions::new();
-        options.read(true).write(true).create(true).truncate(false);
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::OpenOptionsExt as _;
-            options.mode(0o600);
-        }
-        let owner = options
-            .open(&lock_path)
-            .map_err(|source| JournalError::Io {
-                path: lock_path.display().to_string(),
-                source,
-            })?;
-        // Nonblocking: another owner is a refusal, never a queued stale reader.
-        owner.try_lock().map_err(|source| JournalError::Io {
-            path: lock_path.display().to_string(),
-            source: source.into(),
-        })?;
-        // Also release explicitly if replay fails after acquiring ownership.
-        let owner = Owner {
-            file: owner,
-            process: std::process::id(),
-        };
+        let (owner, path) = Owner::acquire(path.into())?;
         let journal = Journal::open(&path)?;
         let integrity = journal.verify()?;
         if !matches!(integrity, Verified::Intact { .. }) {
             return Err(OperationError::HistoryNotIntact(integrity));
         }
         let events = journal.events()?;
+        if events
+            .iter()
+            .any(|event| event.broker.is_some() || event.stage == crate::Stage::BrokerOrder)
+        {
+            return Err(OperationError::BrokerHistory);
+        }
         let opening_inventory = replay_opening(&events)?;
         let operations = replay(&events)?;
         let native_transfers = native_transfers::replay(&events, &operations)?;
