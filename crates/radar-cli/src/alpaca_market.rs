@@ -157,6 +157,15 @@ fn load(path: &Path) -> Result<Capture, String> {
     serde_json::from_slice(&bytes).map_err(|_| "invalid market capture".into())
 }
 
+pub(super) fn quote_input(path: &Path, symbol: &str, as_of: u64) -> Result<(String, u64), String> {
+    let capture = load(path)?;
+    view(&capture, as_of)?;
+    if !capture.symbols.iter().any(|requested| requested == symbol) {
+        return Err("quote symbol was not requested in this capture".into());
+    }
+    Ok((capture.raw_response, capture.available_at_unix_ms))
+}
+
 pub(super) fn run(args: &[String]) -> Result<(), String> {
     let report = match args.iter().map(String::as_str).collect::<Vec<_>>().as_slice() {
         ["alpaca-market-read", "--symbols", tickers, "--output", path] => {

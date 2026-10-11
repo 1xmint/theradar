@@ -66,3 +66,65 @@ fn market_replay_enforces_watermark_in_the_operator_command() {
         }
     }
 }
+
+#[test]
+fn quote_command_uses_capture_universe_and_availability_before_validating_prices() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("capture.json");
+    let at = 1_792_540_800_000_u64;
+    let quote =
+        r#"{"latestQuote":{"t":"2026-10-21T00:00:00Z","bp":100,"ap":100.01,"bs":20,"as":30}}"#;
+    let capture = serde_json::json!({"format":"alpaca-iex-snapshot-v1",
+        "read_started_unix_ms":at-1,"available_at_unix_ms":at,"symbols":["SPY"],
+        "raw_response":format!("{{\"SPY\":{quote},\"QQQ\":{quote}}}")});
+    std::fs::write(&path, capture.to_string()).unwrap();
+    for (symbol, watermark, success, error) in [
+        ("SPY", at, true, ""),
+        (
+            "QQQ",
+            at,
+            false,
+            "quote symbol was not requested in this capture",
+        ),
+        (
+            "SPY",
+            at - 1,
+            false,
+            "market capture was unavailable at the replay watermark",
+        ),
+        ("SPY", at + 2, false, "quote exceeds configured age"),
+    ] {
+        let output = Command::new(env!("CARGO_BIN_EXE_radar"))
+            .args(["alpaca-quote", "--input"])
+            .arg(&path)
+            .args([
+                "--symbol",
+                symbol,
+                "--as-of-unix-ms",
+                &watermark.to_string(),
+                "--max-age-ms",
+                "1",
+                "--max-spread-bps",
+                "1",
+            ])
+            .env_remove("RADAR_ALPACA_PAPER_KEY_ID")
+            .env_remove("RADAR_ALPACA_PAPER_SECRET_KEY")
+            .output()
+            .unwrap();
+        assert_eq!(
+            output.status.success(),
+            success,
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        if success {
+            let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+            assert_eq!(report["ask_microusd_per_share"], "100010000");
+            assert_eq!(report["symbol"], "SPY");
+            assert_eq!(report["execution_authority"], false);
+        } else {
+            assert_eq!(output.stdout, Vec::<u8>::new());
+            assert!(String::from_utf8(output.stderr).unwrap().contains(error));
+        }
+    }
+}

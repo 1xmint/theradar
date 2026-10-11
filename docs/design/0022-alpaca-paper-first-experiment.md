@@ -62,6 +62,23 @@ a host-availability gate, not exchange-time validation or a fresh-quote verdict.
 It does not treat Solana slots as equity timestamps. The operator tools are not
 yet an unattended collector, historical database or execution-data service.
 
+`radar alpaca-quote` consumes that recorded capture through the same availability
+gate and only for a symbol originally requested. It uses serde_json's raw_value
+feature to parse original price/size digits without f64, producing micro-USD per
+share and millionths of displayed size. Size units remain null: the
+[stream schema](https://docs.alpaca.markets/us/docs/real-time-stock-pricing-data)
+says round lots, whereas the
+[CTA/UTP changelog](https://docs.alpaca.markets/us/v1.1/changelog/marketdata-bid-and-ask-size-display-change)
+announces shares from November 2025 without explicitly settling IEX normalization.
+Resolve this against the actual feed before deriving executable share capacity.
+Six decimal places are supported; more precision,
+exponents, nonpositive prices/sizes, crossed quotes, excessive spread/age and
+future exchange timestamps are refused. UTC timestamps retain nanoseconds;
+canonical date round-trip validation rejects impossible dates and leap seconds.
+Age and spread bounds are explicit operator inputs, not autonomous capital
+mandates. Quote conditions, tradability, market hours, complete account state,
+costs, reservations and execution permissions still need their own checks.
+
 Preserve the smart panel: manual inputs with per-option Agent decides checkboxes,
 adaptive risk by default, optional daily loss cap, research chat, visible reasons
 and direct pause/revoke. The model may recommend a budget from observed funds;

@@ -26,6 +26,14 @@ The replay gate uses host availability time, preserves missing symbols as null,
 and does not certify exchange timestamps, quote freshness or consolidated coverage.
 These are operator tools; unattended scheduling and execution are still pending.
 
+`radar alpaca-quote --input ./data/alpaca/capture-001.json --symbol SPY --as-of-unix-ms <N> --max-age-ms 1000 --max-spread-bps 10`
+checks a captured quote against explicit age/spread bounds, the capture's requested
+symbols and availability, and its nanosecond UTC exchange timestamp. Prices and
+displayed sizes are parsed as exact integers at six decimal places; size units
+remain unverified and cannot yet bound executable share quantity. Unsupported
+precision and exponent notation are refused. This produces quote inputs only,
+not an account mandate, asset-eligibility verdict or permission to place orders.
+
 **Status: recording, and refusing to trade.** The pipeline runs end to end on a
 live instance — recording launches, measuring what became of them, and running
 the full decision lane over what it has recorded. 479,564 launches, 1,326,862 outcome measurements and 7,543

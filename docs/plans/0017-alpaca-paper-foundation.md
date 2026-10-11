@@ -68,3 +68,31 @@ Also scope GOAL's historical 456 bps bar explicitly to the original Solana
 experiment, consistent with the accepted venue-specific profit objective.
 Do not push these corrections until the current run is terminal and all
 failure/mutation diagnostics have been read. No production or account access.
+
+### Quote inputs for paper execution
+
+After reading the terminal CI 38178443684 failure (lint only, every build/test/
+mutation job green), publish correction 2389c36 and require a fresh complete run.
+The next increment adds the actual alpaca-quote CLI consumer: fixed-point price
+and displayed size parsing from original JSON digits, nanosecond UTC date checks,
+capture universe/availability binding, positive two-sided quote, no crossed book,
+and explicit inclusive age/spread bounds. Unsupported precision/exponents are
+refused. This is not order authorization or a consolidated-market quote.
+
+Use serde_json's existing raw_value feature only; no new package or lockfile
+resolution. Four unit regressions and one actual process regression bring the
+floor to 2304. Verify exact decimal/u64 boundaries, impossible dates/nanoseconds,
+zero/unknown/crossed inputs, equality and exceeded bounds, sub-millisecond future
+quotes, and a raw response containing an unrequested symbol. All verification
+remains on GitHub. No account creation, private keys, live orders, service
+deployment or paid data. Complete verification before integrating; next are
+paper policy/account reconciliation, reservations and durable order submission.
+
+The capture/replay correction 2389c36 passed complete GitHub CI 38178691796.
+Before publishing quote inputs, primary-source review found unresolved displayed
+size units: stream docs still say round lots, the November 2025 CTA/UTP changelog
+says shares, and neither explicitly establishes IEX normalization. Keep displayed
+size millionths with null units, not microshares or executable capacity. Verify
+the actual feed/instrument units before paper execution sizes use this field.
+Prices retain explicit micro-USD per share. Record this limitation rather than
+manufacturing a conversion; all other quote checks remain necessary.
