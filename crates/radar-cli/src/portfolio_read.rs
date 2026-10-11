@@ -375,7 +375,7 @@ mod tests {
             "freeze_authority":null,"delegate":null})
     }
 
-    fn inventory(rows: Vec<Value>) -> Value {
+    fn inventory(rows: &[Value]) -> Value {
         json!({"raw_token_verification":{"accounts":rows}})
     }
 
@@ -384,12 +384,7 @@ mod tests {
         let original = raw();
         let mut extended = original.clone();
         extended["program"] = json!(TOKEN_2022_PROGRAM);
-        let grouped = groups(&inventory(vec![
-            original.clone(),
-            original.clone(),
-            extended,
-        ]))
-        .unwrap();
+        let grouped = groups(&inventory(&[original.clone(), original.clone(), extended])).unwrap();
         let classic = Asset::spl(Address::new([9; 32]));
         assert_eq!(grouped[&classic].raw, 14);
         assert_eq!(grouped[&classic].decimals.get(), 6);
@@ -404,7 +399,7 @@ mod tests {
         ] {
             let mut bad = original.clone();
             bad[field] = value;
-            assert!(groups(&inventory(vec![original.clone(), bad])).is_err());
+            assert!(groups(&inventory(&[original.clone(), bad])).is_err());
         }
         for (field, value) in [
             ("state", json!("frozen")),
@@ -415,7 +410,7 @@ mod tests {
         ] {
             let mut bad = original.clone();
             bad[field] = value;
-            assert!(!groups(&inventory(vec![bad, original.clone()])).unwrap()[&classic].eligible);
+            assert!(!groups(&inventory(&[bad, original.clone()])).unwrap()[&classic].eligible);
         }
     }
 

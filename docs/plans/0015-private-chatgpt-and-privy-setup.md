@@ -6132,3 +6132,14 @@ RPC program identifiers in production; keep pumpfun fixture imports test-only.
 Add the already-workspace serde edge and matching CLI lockfile entry, not a new
 package or production pumpfun edge. Let the old run finish before publishing the
 correction; require fresh GitHub verification. Floor 2283 is unchanged.
+
+Correction CI 38161340796 at 4f2b349 completed with build/tests/MSRV, formatting,
+dependencies and site/web passing. Lint rejected a test helper's unconsumed Vec;
+borrow a slice. Mutation shard 1 found portfolio_read.rs:99:20 (< to <=) survived:
+the success fixture only used market 778 after raw holdings 53. Exercise both
+market 53 (exactly equal) and 778 in the actual successful CLI regression;
+keep the existing older-context refusal. The exact diagnostic diff confirms the
+curve_mark market-floor operator, not the later oracle-floor comparison.
+Retain diagnostics outside the checkout in radar-mutation-38161340796/shard1.
+Other mutation shards passed; no production logic change, new test count or
+mutation waiver. Publish only after this terminal run and require fresh CI.

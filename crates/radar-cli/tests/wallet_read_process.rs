@@ -115,55 +115,59 @@ fn portfolio_wallet(
 
 #[test]
 fn portfolio_command_marks_whole_curve_holding_and_preserves_unknown_historical_results() {
-    let mut answers = portfolio_wallet(radar_types::Address::new([0x22; 32]), 1000, 6, 1);
-    answers.push(curve_response());
-    answers.push(portfolio_price(778, 777));
-    let (endpoint, server) = fixture(answers);
-    let output = portfolio_command(&endpoint);
-    assert!(output.status.success(), "{:?}", output.stderr);
-    let packet: Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(
-        packet["observed_holdings_usd_band"],
-        json!({"lower_micro_usd":115_375_075,
+    for market_slot in [53, 778] {
+        let mut answers = portfolio_wallet(radar_types::Address::new([0x22; 32]), 1000, 6, 1);
+        let mut market = curve_response();
+        market["result"]["context"]["slot"] = json!(market_slot);
+        answers.push(market);
+        answers.push(portfolio_price(778, 777));
+        let (endpoint, server) = fixture(answers);
+        let output = portfolio_command(&endpoint);
+        assert!(output.status.success(), "{:?}", output.stderr);
+        let packet: Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(
+            packet["observed_holdings_usd_band"],
+            json!({"lower_micro_usd":115_375_075,
         "upper_micro_usd":115_407_839,"oldest_slot":50})
-    );
-    let rows = packet["holdings"].as_array().unwrap();
-    assert_eq!(rows.len(), 2);
-    let position = rows
-        .iter()
-        .find(|row| row["holding"]["role"] == "position")
-        .unwrap();
-    assert_eq!(position["mark"]["raw_tokens"], "1000");
-    assert_eq!(
-        position["mark"]["net_lamports_at_observed_state"],
-        "29595403"
-    );
-    assert_eq!(
-        position["holding"]["value"]["known"],
-        json!({"value":3_316_421,"as_of":53})
-    );
-    assert_eq!(
-        position["upper_value"]["known"],
-        json!({"value":3_317_363,"as_of":53})
-    );
-    assert_eq!(position["holding"]["cost"], json!({"unknown":"no_price"}));
-    for field in [
-        "wallet_inventory_complete",
-        "inventory_atomic",
-        "economic_reconciliation_complete",
-        "execution_guaranteed",
-    ] {
-        assert_eq!(packet[field], false);
+        );
+        let rows = packet["holdings"].as_array().unwrap();
+        assert_eq!(rows.len(), 2);
+        let position = rows
+            .iter()
+            .find(|row| row["holding"]["role"] == "position")
+            .unwrap();
+        assert_eq!(position["mark"]["raw_tokens"], "1000");
+        assert_eq!(
+            position["mark"]["net_lamports_at_observed_state"],
+            "29595403"
+        );
+        assert_eq!(
+            position["holding"]["value"]["known"],
+            json!({"value":3_316_421,"as_of":53})
+        );
+        assert_eq!(
+            position["upper_value"]["known"],
+            json!({"value":3_317_363,"as_of":53})
+        );
+        assert_eq!(position["holding"]["cost"], json!({"unknown":"no_price"}));
+        for field in [
+            "wallet_inventory_complete",
+            "inventory_atomic",
+            "economic_reconciliation_complete",
+            "execution_guaranteed",
+        ] {
+            assert_eq!(packet[field], false);
+        }
+        for field in [
+            "realised_pnl",
+            "equity_micro_usd",
+            "usable_capital_micro_usd",
+        ] {
+            assert!(packet[field].is_null());
+        }
+        assert_eq!(packet["authority"], "read_only");
+        assert_eq!(server.join().unwrap().len(), 6);
     }
-    for field in [
-        "realised_pnl",
-        "equity_micro_usd",
-        "usable_capital_micro_usd",
-    ] {
-        assert!(packet[field].is_null());
-    }
-    assert_eq!(packet["authority"], "read_only");
-    assert_eq!(server.join().unwrap().len(), 6);
 }
 
 #[test]
