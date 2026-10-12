@@ -65,6 +65,14 @@ extended hours disabled can match. Missing orders stay unresolved; matching does
 not reconcile fills/fees, free a claim or authorize execution. See
 [intent binding](docs/plans/0026-alpaca-intent-binding.md).
 
+`radar alpaca-order-reconcile --journal <private-file> --account-id <paper-id> --client-order-id <retained-id> --max-pages 10`
+connects retained intent, matched order reads and paginated activities under journal
+ownership. It requires unchanged selected order/account observations, matches
+execution quantity intervals and computes gross USD bounds with exact arithmetic.
+It retains the entire original cash/share claim. Gross execution consistency does
+not establish final fees, account cash, complete history or permission to trade.
+See [execution reconciliation](docs/plans/0028-alpaca-fill-reconciliation.md).
+
 `radar alpaca-order-reserve --journal <private-file> --account-id <paper-id> --intent <typed-intent>`
 records an immutable paper claim. `radar alpaca-order-journal --journal <private-file> --account-id <paper-id>`
 reopens and verifies it under exclusive cooperative ownership. These operator

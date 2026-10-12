@@ -12,22 +12,22 @@ const ACTIVITIES: &str = "/v2/account/activities?direction=asc&page_size=100";
 const PAGE_SIZE: usize = 100;
 
 #[derive(Deserialize, Serialize)]
-struct Activity {
-    id: String,
+pub(super) struct Activity {
+    pub(super) id: String,
     #[serde(rename = "activity_type")]
-    category: String,
+    pub(super) category: String,
     account_id: Option<String>,
-    order_id: Option<String>,
+    pub(super) order_id: Option<String>,
     transaction_time: Option<String>,
     date: Option<String>,
     #[serde(rename = "type")]
-    kind: Option<String>,
-    side: Option<String>,
-    symbol: Option<String>,
-    qty: Option<String>,
-    price: Option<String>,
-    cum_qty: Option<String>,
-    leaves_qty: Option<String>,
+    pub(super) kind: Option<String>,
+    pub(super) side: Option<String>,
+    pub(super) symbol: Option<String>,
+    pub(super) qty: Option<String>,
+    pub(super) price: Option<String>,
+    pub(super) cum_qty: Option<String>,
+    pub(super) leaves_qty: Option<String>,
     net_amount: Option<String>,
     status: Option<String>,
 }
@@ -46,7 +46,7 @@ fn encoded(token: &str) -> String {
     result
 }
 
-fn collect(
+pub(super) fn collect(
     expected: &str,
     max_pages: u16,
     mut read: impl FnMut(&str) -> Result<String, String>,
@@ -105,6 +105,14 @@ fn collect(
     )
 }
 
+pub(super) fn page_limit(pages: &str) -> Result<u16, String> {
+    pages
+        .parse()
+        .ok()
+        .filter(|pages| *pages > 0)
+        .ok_or_else(|| "activity page limit must be a positive u16".into())
+}
+
 pub(super) fn run(args: &[String]) -> Result<(), String> {
     let values: Vec<&str> = args.iter().map(String::as_str).collect();
     let [
@@ -117,11 +125,7 @@ pub(super) fn run(args: &[String]) -> Result<(), String> {
     else {
         return Err("usage: radar alpaca-activities-read --account-id <paper-id> --max-pages <positive-u16>".into());
     };
-    let max_pages: u16 = pages
-        .parse()
-        .ok()
-        .filter(|pages| *pages > 0)
-        .ok_or("activity page limit must be a positive u16")?;
+    let max_pages = page_limit(pages)?;
     let key = super::alpaca_read::credential(std::env::var("RADAR_ALPACA_PAPER_KEY_ID").ok())?;
     let secret =
         super::alpaca_read::credential(std::env::var("RADAR_ALPACA_PAPER_SECRET_KEY").ok())?;

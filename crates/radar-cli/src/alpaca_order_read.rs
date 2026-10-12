@@ -8,7 +8,7 @@ use super::alpaca_reconcile::BrokerOrder;
 
 const PAPER_API: &str = "https://paper-api.alpaca.markets";
 
-fn query(client_id: &str) -> Result<String, String> {
+pub(super) fn query(client_id: &str) -> Result<String, String> {
     // Radar's own retained identifiers use this query-safe subset. This is not
     // a claim about every client ID accepted by the broker.
     if client_id.is_empty()
@@ -104,7 +104,7 @@ fn payload_matches(intent: &BrokerIntent, order: &BrokerOrder) -> Result<(), Str
     Ok(())
 }
 
-fn retained(log: &BrokerLog, client_id: &str) -> Result<BrokerIntent, String> {
+pub(super) fn retained(log: &BrokerLog, client_id: &str) -> Result<BrokerIntent, String> {
     log.entries()
         .map_err(|e| e.to_string())?
         .find(|entry| entry.intent.client_order_id == client_id)
@@ -112,7 +112,7 @@ fn retained(log: &BrokerLog, client_id: &str) -> Result<BrokerIntent, String> {
         .ok_or_else(|| "client order ID has no retained journal intent".into())
 }
 
-fn collect_bound(
+pub(super) fn collect_bound(
     expected: &str,
     client_id: &str,
     intent: Option<&BrokerIntent>,
@@ -168,7 +168,7 @@ fn collect_bound(
     )
 }
 
-fn read_path(
+pub(super) fn read_path(
     agent: &ureq::Agent,
     base: &str,
     path: &str,
@@ -184,6 +184,13 @@ fn read_path(
     }
 }
 
+pub(super) fn open_existing(path: &str, expected: &str) -> Result<BrokerLog, String> {
+    if !std::path::Path::new(path).is_file() {
+        return Err("paper order journal is missing".into());
+    }
+    BrokerLog::open(path, expected).map_err(|e| e.to_string())
+}
+
 pub(super) fn run(args: &[String]) -> Result<(), String> {
     let values: Vec<&str> = args.iter().map(String::as_str).collect();
     let (expected, client_id, journal_path) = match values.as_slice() {
@@ -195,12 +202,7 @@ pub(super) fn run(args: &[String]) -> Result<(), String> {
     // Hold the cooperative journal owner across the broker reads. Never create
     // a missing log and turn it into a claim of no outstanding intent.
     let log = journal_path
-        .map(|path| {
-            if !std::path::Path::new(path).is_file() {
-                return Err("paper order journal is missing".to_owned());
-            }
-            BrokerLog::open(path, expected).map_err(|e| e.to_string())
-        })
+        .map(|path| open_existing(path, expected))
         .transpose()?;
     let intent = log
         .as_ref()

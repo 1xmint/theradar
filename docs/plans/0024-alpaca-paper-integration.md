@@ -1,12 +1,12 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # 0024 — Integrate the paper foundation, then complete autonomous execution
 
-**Status:** combined source verified and merged to parent; parent CI pending.
+**Status:** combined source and parent verified; autonomous execution remains pending.
 
 Branch: feat/alpaca-paper-integration. Full CI 38183693452 passed at f9553a8.
 PR 380 merged to integration parent 3a4ba61; both trees are
-70aa0602901a56ea2862294d4866a11670105a8d. Parent CI 38184135535 is pending.
-The source base stays f9553a8 while intent-binding PR 382 runs.
+70aa0602901a56ea2862294d4866a11670105a8d. Parent CI 38184135535 passed fully.
+The source base stayed f9553a8 while intent-binding PR 382 ran and passed.
 All tests/builds/lint/mutations run on GitHub.
 The preceding goal turns made progress through source fixes and verified CI.
 
@@ -38,7 +38,7 @@ Do not replace a sum with either child's floor.
 - [x] Incorporate directory sync only after full source CI 38183410146 passed.
 - [x] Combined directory-sync f9553a8 passed all CI 38183693452 jobs.
 - [x] Advance the parent via PR 380 only after full source CI; verified tree identity.
-- [ ] Read parent CI 38184135535 before further parent advancement.
+- [x] Read parent CI 38184135535: all jobs passed at 3a4ba61.
 - [ ] Produce and deploy a verified artifact through the fixed deployment path.
 
 ## Remaining work toward the full goal
