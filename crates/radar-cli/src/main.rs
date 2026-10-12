@@ -19,6 +19,7 @@ mod alpaca_fills;
 mod alpaca_journal;
 mod alpaca_market;
 mod alpaca_order_read;
+mod alpaca_positions;
 mod alpaca_quote;
 mod alpaca_read;
 mod alpaca_reconcile;
