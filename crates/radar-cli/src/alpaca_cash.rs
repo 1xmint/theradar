@@ -26,6 +26,18 @@ struct Snapshot {
     activities: Vec<Activity>,
 }
 
+fn cash(account: &BrokerAccount) -> Result<u64, String> {
+    if account.currency.as_deref() != Some("USD") {
+        return Err("paper cash USD currency is unknown".into());
+    }
+    nanos(
+        account
+            .cash
+            .as_deref()
+            .ok_or("paper cash balance is unknown")?,
+    )
+}
+
 fn snapshot(report: &Value, expected: &str) -> Result<Snapshot, String> {
     if expected.trim().is_empty()
         || report["version"] != 1
@@ -42,15 +54,10 @@ fn snapshot(report: &Value, expected: &str) -> Result<Snapshot, String> {
     }
     let account: BrokerAccount = serde_json::from_value(report["account_before"].clone())
         .map_err(|_| "invalid selected paper cash account")?;
-    if account.id != expected || account.currency.as_deref() != Some("USD") {
-        return Err("paper cash account identity or USD currency is unknown".into());
+    if account.id != expected {
+        return Err("paper cash account identity is unknown".into());
     }
-    nanos(
-        account
-            .cash
-            .as_deref()
-            .ok_or("paper cash balance is unknown")?,
-    )?;
+    cash(&account)?;
     let started = report["read_started_unix_secs"]
         .as_u64()
         .ok_or("cash read start is unknown")?;
@@ -188,20 +195,8 @@ fn delta(
             _ => return Err("unsupported new cash activity; reconciliation unresolved".into()),
         }
     }
-    let starting = nanos(
-        baseline
-            .account
-            .cash
-            .as_deref()
-            .ok_or("baseline cash is unknown")?,
-    )?;
-    let actual = nanos(
-        current
-            .account
-            .cash
-            .as_deref()
-            .ok_or("observed cash is unknown")?,
-    )?;
+    let starting = cash(&baseline.account)?;
+    let actual = cash(&current.account)?;
     let mut expected = i128::from(starting) * SCALE;
     add(&mut expected, trade_scaled)?;
     add(
@@ -337,10 +332,12 @@ mod tests {
     }
 
     fn report(cash: &str, activities: Value, started: u64, completed: u64) -> Value {
-        json!({"version":1,"venue":"alpaca","environment":"paper","source":PAPER_API,
+        let mut report = json!({"version":1,"venue":"alpaca","environment":"paper","source":PAPER_API,
             "expected_account_id":"paper-id","pagination_exhausted":true,"pages_read":1,
             "selected_account_fields_unchanged":true,"account_before":account(cash),"account_after":account(cash),
-            "activities":activities,"read_started_unix_secs":started,"read_completed_unix_secs":completed})
+            "read_started_unix_secs":started,"read_completed_unix_secs":completed});
+        report["activities"] = activities;
+        report
     }
 
     fn prior() -> Value {

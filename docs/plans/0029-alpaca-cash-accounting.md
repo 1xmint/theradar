@@ -36,10 +36,18 @@ regression repair and verified tests/mutations. All jobs run on GitHub.
   cutoff so equal/past/future boundaries are deterministic tests. Reverify on
   GitHub; no exclusions or cancellations. Unviable cases were unused/dead code,
   absent Default and ambiguous numeric types after deleted match arms.
+  CI 38202146550 at c55b5d0 passed 2772 tests and all mutation shards: 83 caught,
+  24 compiler-unviable, zero missed/timeouts. The exact negative-cash floor
+  variants and relocated future-time boundary were caught; all diagnostics read.
+  Remaining lint diagnostics named the 108-line delta and needless by-value
+  fixture input. Share the actual USD cash parser across snapshot/delta and let
+  the fixture constructor consume its owned activity value. Full recheck pending.
 - [ ] Connect protected durable baseline/checkpoints and economic claim transitions
   with restart/error replay; late events/corrections must remain recoverable.
-- [ ] Complete pure equity risk, isolated executor, supervisor/site handover and
-  held-out/forward evaluation from plan 0024 before autonomous activation.
+- [ ] Complete pure equity risk, isolated executor and supervisor/site handover
+  for autonomous paper activation. Use paper operation to gather forward learning
+  evidence; held-out/forward evaluation and explicit eligible live setup remain
+  separate gates before real-money activation, as in plan 0024.
 
 ## Handback
 
