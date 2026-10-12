@@ -63,6 +63,8 @@ class ResearchTests(unittest.TestCase):
             self.assertEqual(self.tick(run=provider)["outcome"], "decision")
         self.assertEqual([call[0][1] for call in self.calls], ["alpaca-market-read", "alpaca-paper-propose"])
         market, model = self.calls
+        self.assertEqual(market[0][0], "/usr/local/lib/radar-research/radar")
+        self.assertEqual(model[0][0], "/usr/local/lib/radar-research/radar")
         self.assertEqual(market[1], dict(check=True, capture_output=True, text=True, timeout=20,
             env={"PATH": "/usr/bin:/bin", "RADAR_ALPACA_PAPER_KEY_ID": "paper-fixture",
                  "RADAR_ALPACA_PAPER_SECRET_KEY": "secret-fixture"}))

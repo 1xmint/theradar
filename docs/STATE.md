@@ -42,6 +42,11 @@ slot as decision, failed, missed or interrupted_unknown, without automatic retry
 GitHub verifies its schedule/persistence/credential boundaries; it is not yet
 installed or enabled. Cost-aware cohort scoring and actual model runs remain
 unverified. See [plan 0043](plans/0043-alpaca-research-campaign.md).
+A GitHub-verified setup helper and exact-member bundle are staged on the VPS.
+They provision the research reader separately from the running recorder and set
+up twelve hypothetical research slots. Owner sudo execution and actual installed
+worker/model results remain unverified; see
+[plan 0044](plans/0044-alpaca-research-provisioning.md).
 No actual broker orders, effective autonomous handover or Alpaca learning results
 have been verified. The autonomous goal remains incomplete.
 
