@@ -344,11 +344,24 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let mut log = BrokerLog::open(dir.path().join("orders.jsonl"), "paper").unwrap();
         let mut calls = 0;
-        assert!(execute(&mut log, &intent, &state, || Ok(policy.clone()), || {
-            calls += 1;
-            Ok(if calls == 1 { 1_000 } else { 1_001 })
-        }, |_| panic!("closed session must not send")).is_err());
-        assert_eq!(log.entries().unwrap().next().unwrap().state, BrokerState::SubmissionUnknown);
+        assert!(
+            execute(
+                &mut log,
+                &intent,
+                &state,
+                || Ok(policy.clone()),
+                || {
+                    calls += 1;
+                    Ok(if calls == 1 { 1_000 } else { 1_001 })
+                },
+                |_| panic!("closed session must not send")
+            )
+            .is_err()
+        );
+        assert_eq!(
+            log.entries().unwrap().next().unwrap().state,
+            BrokerState::SubmissionUnknown
+        );
     }
 
     #[test]

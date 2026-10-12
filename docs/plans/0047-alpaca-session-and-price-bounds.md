@@ -57,5 +57,26 @@ Six new Rust tests cover offset/nanosecond parsing, freshness and chronology,
 increment boundaries, actual collector refusal, pure permission close and
 submission crossing close after durable writes. All jobs run on GitHub only;
 verification pending. No new credentials, deployment or broker effect.
+First source d29ec1f, CI 38307389254 completed failure, all 14 jobs inspected.
+Build, MSRV, lint and web checks passed. Formatting hunks applied from GitHub
+output, without a workstation job. New kernel test incorrectly placed its
+oldest input after availability; existing time gate refused it. Corrected the
+fixture availability, preserving the gate. Shard three failed that baseline;
+no mutation coverage is claimed for its unexecuted workload. Other shards:
+42 caught, 9 compiler-unviable (missing State Default or unused code/arguments),
+three missed, no timeouts. All four artifacts and refusal diagnostics inspected.
+Exact survivors alpaca_session.rs:10:25 (|| to &&), 22:14 and 22:30 (> to >=)
+exposed absent short-ASCII input and valid maximum-offset boundary cases. Added
+those cases and GitHub-only exact predicate reapplications requiring execution
+and failure of the focused test, with finally restoration. Repair pending.
+Owner's real cohort report at 1791838676742, frozen campaign hash
+2bb51f42cfc025a03f8f529800127caaa948feee72df76a838006008e1e0f789:
+slot zero unscoreable because selected exit quote exceeds configured age;
+slots one through four failed and seven future. Aggregate profit remains null,
+not zero. The first wait proposal cites lack of a directional signal from one
+quote and stress costs. The next research campaign needs regular-session timing
+and historical context; this after-hours quote-only campaign does not establish
+strategy expectancy. Reporter remains offline_simulation, execution authority
+false and decision origin unverified. Failed/unscoreable slots stay in the cohort.
 Next: verified capacity/cost model for paper execution, isolated supervisor and
 effective website controls, plus forward strategy evaluation. Goal active.

@@ -351,16 +351,24 @@ mod tests {
     fn session_close_caps_permission_and_refuses_unknown_or_elapsed_session() {
         let (order, mut state, policy) = fixture();
         state.oldest_input_unix_ms = 100;
+        state.available_at_unix_ms = 100;
         state.session_close_unix_ms = Some(103);
         let permission = evaluate(&order, &state, &policy).unwrap();
         assert!(permission.permits(&order, 102));
         assert!(!permission.permits(&order, 103));
         for close in [None, Some(0), Some(99), Some(100)] {
             state.session_close_unix_ms = close;
-            assert!(matches!(evaluate(&order, &state, &policy), Err(Refusal::Session)));
+            assert!(matches!(
+                evaluate(&order, &state, &policy),
+                Err(Refusal::Session)
+            ));
         }
         state.session_close_unix_ms = Some(101);
-        assert!(evaluate(&order, &state, &policy).unwrap().permits(&order, 100));
+        assert!(
+            evaluate(&order, &state, &policy)
+                .unwrap()
+                .permits(&order, 100)
+        );
     }
 
     #[test]
