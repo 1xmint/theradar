@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # 0039 — IEX quote provenance in actual preflight
 
-**Status:** Implemented; GitHub verification pending.
+**Status:** GitHub verified; no VPS release or autonomous activation.
 
 Branch: feat/alpaca-quote-provenance, based on 6fda92e. Previous turn made
 verified progress: bounded recorder passed all 14 GitHub jobs at c99bb62 and
@@ -17,7 +17,7 @@ with gh run view --json jobs before this branch's checks.
   authority separate from the supported metadata pattern.
 - [x] Exercise independent invalid fields, missing fields and supported tapes,
   plus actual preflight refusal without reserving an intent.
-- [ ] Inspect all GitHub jobs and exact mutation results.
+- [x] Inspect all GitHub jobs and exact mutation results.
 
 ## Handback
 
@@ -53,5 +53,22 @@ All four mutation shards completed: nine mutants, seven caught, two unviable,
 no misses/timeouts. Inspected shard 0 artifact outcomes and both compiler logs:
 collect_state's default return fails because State has no Default implementation;
 validate's default return fails denied dead-code warnings after removing its
-parser callers. These are compiler refusals, not test kills. Remaining checks
-must finish before the correction push; final all-job verification is pending.
+parser callers. These are compiler refusals, not test kills. The run finished
+with 13 jobs passed and fmt failed; tests reported 2,806 Rust and 27 Python tests.
+Correction f5a0d38 was pushed only after terminal status. Its GitHub run
+38270384888 passed all 14 jobs. Inspected every job via gh run view --json jobs,
+tests job 114882896648, and all three mutation-diagnostics artifacts: 2,806 Rust
+tests, 27 Python tests, all 32 existing targeted Python mutations caught, and
+systemd unit verification passed. Rust mutations again totaled nine, seven
+caught and two unviable for the same inspected compiler reasons, zero misses or
+timeouts; shard 3 had zero mutants. All seven changed metadata guard mutations
+were test kills (three != inversions, three || to &&, and tape-negation removal).
+
+Code proof is f5a0d3856d380d06ef899207c5f17860322d4405. This final handback
+update is documentation only; its run is separate from code verification.
+Draft PR 400 is attached to the chat and stacked on PR 399. No new release build,
+VPS binary replacement, order or execution authority. Recorder installation
+still needs the owner's already supplied sudo command; ordinary SSH inspected
+timer inactive and worker LoadState=not-found during this turn. The sudo password
+is never requested in chat. The objective remains fully autonomous trading;
+validated quote metadata alone does not complete it.
