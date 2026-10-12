@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # 0034 — Protected paper submission after deterministic risk
 
-**Status:** first GitHub run inspected; routing repair awaiting verification; activation closed.
+**Status:** protected paper submission path verified on GitHub; activation closed.
 
 Branch: feat/alpaca-paper-submit, based on 08943b5. Previous goal turn was
 verified progress on equity risk and the actual preflight caller. Parent run
@@ -24,7 +24,7 @@ verified progress on equity risk and the actual preflight caller. Parent run
 - [x] Add payload precision, unknown-evidence, expiry/revocation, uncertainty,
   restart/no-retry and response mismatch tests. Actual collector-to-submit test
   proves unknown costs/capacity prevent any reservation or network effect.
-- [ ] Inspect GitHub tests/build/lint/mutation diagnostics and repair findings.
+- [x] Inspect GitHub tests/build/lint/mutation diagnostics and repair findings.
 - [ ] Establish actual account/feed capacity, conditions, session times, order
   increments and costs. Add service isolation/authenticated supervisor transport,
   durable owner handover/revocation, paper cancellation/recovery and site controls.
@@ -46,6 +46,21 @@ check, and extended the actual collector test to exercise submit, preflight
 and unknown commands. Inverting either selection now changes a required result
 or invokes a forbidden effect. No mutation exclusion was added. Repair CI
 remains pending; 2,804 is the observed test floor.
+
+Repair verification: `gh run view 38255906570 --json status,conclusion,jobs`
+at 5002b637cd3cac76cf608397cc64fa76a17aca56 passed all 14 jobs. All four
+mutation artifacts were inspected: 33 total, 19 caught, 14 compiler-unviable,
+zero missed and zero timeouts. All unviable reasons were inspected: unused or
+dead code and unavailable Default implementations, never counted as test kills.
+The earlier exact command-selection survivor is covered by actual dispatch tests.
+This evidence verifies the protected CLI path, not a live account, authenticated
+daemon, economic edge or unattended activation.
+
+Transport review matched Cargo.lock's ureq 3.4.2 to its
+[request loop source](https://github.com/algesten/ureq/blob/3.4.2/src/run.rs).
+That loop repeats for redirects, not automatic request-error retries; the actual
+caller uses the existing redirect-disabled agent. This source review supplements
+the journal ordering tests and does not claim exactly-once broker execution.
 
 No account credentials, actual orders, deposits, deployment or activation.
 `radar alpaca-paper-submit --journal <existing-private-file> --intent <typed-intent>
