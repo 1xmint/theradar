@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # 0045 — Retain the complete research denominator in outcome reports
 
-**Status:** Implementation prepared; GitHub verification pending. Research timer running.
+**Status:** GitHub verified; real VPS cohort inventory owner-verified. First outcome pending.
 
 Branch feat/alpaca-cohort-report from 19cded4, stacked on PR 405. Parent
 documentation CI 38287366026 completed successfully in all 14 jobs, inspected.
@@ -16,16 +16,19 @@ manual read-only evaluator, not order authority or a portfolio simulator.
 - [x] Select the latest uniquely available exit capture by the exact fixed horizon.
 - [x] Delegate quote/cost arithmetic to the existing pinned Rust scorer.
 - [x] Keep missing comparisons and aggregate portfolio profit unknown.
-- [ ] Inspect GitHub tests and all nine exact cohort mutation reapplications.
-- [ ] Stage the verified reporter and demonstrate a real fixed-horizon report.
+- [x] Inspect GitHub tests and all nine exact cohort mutation reapplications:
+  5b189b9, run 38303144460.
+- [x] Stage the verified reporter and demonstrate real cohort inventory:
+  owner report at 1791836517845 ms retains all twelve slots.
+- [ ] Observe first fixed-horizon comparison and complete campaign outcomes.
 
 ## Runtime evidence
 
 Owner setup succeeded. Independent SSH reads on 2026-10-12 verified timer active
 and enabled, worker Result=success and ExecMainStatus=0. Installed CLI SHA-256
 12efd7e4fd958138840dc0056f84fe6ba5690cb7de01ce02065131e6cb2112d0
-matches release 38285575372. Worker/unit hashes are recorded below for comparison
-with exact committed 4c733c5 bytes:
+matches release 38285575372. Worker/unit hashes below match exact committed
+4c733c5 bytes, independently hashed with git show:
 
 - Worker: 0afcfaefbaa88c384bb4fd62272bfb0fe879e70448a9575c5dc1d749d5089014.
 - Service: 3ac21ffa29b3a8a5789b2330fa612cb1e02761611f3e2cf3c50f84bdf2ec70b3.
@@ -63,6 +66,28 @@ recovery, and site handover still remain before autonomous trading activation.
 
 ## Handback
 
-Implementation prepared; no local test, build, lint or mutation jobs run. GitHub
-proof and real evaluation are pending. Current timer remains active, the old
-recorder is preserved, and no broker order or website deployment was made.
+Code proof: 5b189b900f3133f27b828060856d1b12688bb4db, GitHub run
+38303144460 passed all 14 jobs, inspected. Tests job 114990684569 passed 2817
+Rust and 47 Python tests, including six new cohort tests. Nine cohort, twelve
+campaign, eight installer and 32 prior Python mutation reapplications caught;
+both exact subscription regressions caught. Both systemd unit pairs verified.
+All four Rust shard logs explicitly say no changed Rust source; no test kills
+are inferred from those skipped workloads. No workstation jobs run.
+
+Reporter packaged from exact git show bytes at 5b189b9 and staged as
+/tmp/radar-alpaca-cohort-report.py, SHA-256
+d38554e5a57bb94f9d235682cef80107333e3ddd8feba4c31eee6e08c0874409,
+independently matched over SSH. No service changes or executable install made.
+The owner ran it with private sudo to read the recorder's private tape. Their
+report at 1791836517845 retained twelve slots: one awaiting_horizon and eleven
+future, aggregate profit null and execution_authority false. First horizon
+1791836592311 had not elapsed; this is real inventory evidence, not a scored
+outcome. No claim of complete campaign outcomes or measured strategy edge.
+
+Draft PR 406 is attached, stacked on PR 405. Later handback documentation checks
+are separate from this source proof. This goal turn made concrete progress:
+research deployment and first real linked-model decision independently verified,
+complete cohort reporter GitHub verified and exercised on real VPS storage.
+The goal remains active. Next: observe fixed-horizon outcomes, then add usable
+historical signals and held-out comparison; execution inputs, isolation/recovery
+and website handover still remain. No broker order or website deployment made.

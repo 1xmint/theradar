@@ -53,7 +53,8 @@ existing captures are never replaced. Replay without credentials using
 `radar alpaca-market-replay --input ./data/alpaca/capture-001.json --as-of-unix-ms <N>`.
 The replay gate uses host availability time, preserves missing symbols as null,
 and does not certify exchange timestamps, quote freshness or consolidated coverage.
-These are operator tools; unattended scheduling and execution are still pending.
+The commands are operator tools. A separate bounded recorder schedules research
+captures; autonomous broker execution remains pending.
 
 `radar alpaca-quote --input ./data/alpaca/capture-001.json --symbol SPY --as-of-unix-ms <N> --max-age-ms 1000 --max-spread-bps 10`
 checks a captured quote against explicit age/spread bounds, the capture's requested

@@ -70,8 +70,12 @@ Local forward research commands now copy a versioned proposal and explicit cost
 assumptions into a new record, retaining raw entry data and the host cutoff.
 Enter/Wait is compared with same-size always-enter and cash at exactly the frozen
 horizon. Unknown exit evidence remains unscoreable. Records are mutable local
-files, not authenticated model provenance, and no unattended producer or cohort
-completeness has been verified. See [plan 0041](../plans/0041-alpaca-forward-decision.md).
+files, not authenticated model provenance. A separately installed scheduled
+producer has retained its first actual linked-model decision; cohort reporting
+now preserves planned slots, including failures and unknown outcomes. This does
+not establish complete campaign outcomes or learned profit. See
+[forward records](../plans/0041-alpaca-forward-decision.md) and
+[cohort evaluation](../plans/0045-alpaca-cohort-report.md).
 
 The subscription research caller `radar alpaca-paper-propose` now connects the
 existing linked-model adapter to strict inert Enter/Wait records. Size, horizon
@@ -79,9 +83,11 @@ and costs stay fixed by the experiment; completion revalidates the same quote
 and starts the forward horizon. It requires the owner's explicit unlimited
 subscription allowance and adequate per-call bound. Finite daily budgets need
 shared durable metering first. Invalid experiments refuse before a model call.
-GitHub verifies this against subprocess stubs and exact bug reapplications;
-deployment, real model behavior and complete scheduled failure/outcome records
-remain unverified. See [plan 0042](../plans/0042-alpaca-model-proposal.md).
+GitHub verifies this against subprocess stubs and exact bug reapplications.
+Independent VPS inspection verified installed hashes, active scheduling and the
+first retained real model wait decision. Complete outcomes and measured strategy
+expectancy remain unverified. See [model proposals](../plans/0042-alpaca-model-proposal.md)
+and [research provisioning](../plans/0044-alpaca-research-provisioning.md).
 
 `radar alpaca-quote` consumes that recorded capture through the same availability
 gate and only for a symbol originally requested. It uses serde_json's raw_value
