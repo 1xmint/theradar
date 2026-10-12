@@ -22,6 +22,9 @@ pub struct BrokerCash {
     pub completed: u64,
     /// Normalized selected facts only; never credentials or raw provider bodies.
     pub observation: serde_json::Value,
+    /// Complete selected progress for retained orders; absent in older checkpoints.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub orders: Option<BTreeMap<String, crate::BrokerProgress>>,
 }
 
 impl BrokerCash {
@@ -109,7 +112,8 @@ impl BrokerIntent {
     }
 }
 
-/// Both states retain the entire immutable reservation. No release exists yet.
+/// Submission state never resets. Original intent remains immutable; verified
+/// cash checkpoints separately derive residual claims without authorizing retries.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum BrokerState {
@@ -184,6 +188,7 @@ impl BrokerLog {
         for event in journal.events()? {
             if let Some(observed) = &event.correlation.broker_cash {
                 observed.validate(account, cash.as_ref(), event.at)?;
+                crate::broker_claims::validate(observed, cash.as_ref(), &entries)?;
                 if event.schema != crate::SCHEMA_VERSION
                     || event.stage != Stage::BrokerCash
                     || event.outcome != Outcome::Ok
@@ -254,6 +259,23 @@ impl BrokerLog {
         Ok(self.cash.as_ref())
     }
 
+    /// Residual claims relative to the last durable caller-verified observation.
+    /// Original intents and submission uncertainty remain immutable; no retry.
+    ///
+    /// # Errors
+    /// Poisoned ownership or unsupported claim arithmetic.
+    pub fn claims(&self) -> Result<BTreeMap<String, crate::BrokerClaim>, BrokerError> {
+        self.healthy()?;
+        let orders = self.cash.as_ref().and_then(|cash| cash.orders.as_ref());
+        self.entries
+            .iter()
+            .map(|(id, entry)| {
+                crate::broker_claims::claim(entry, orders.and_then(|p| p.get(id)))
+                    .map(|claim| (id.clone(), claim))
+            })
+            .collect()
+    }
+
     /// Append a caller-verified observation before advancing the in-memory baseline.
     /// Genesis must precede retained orders; repeats are inert. Claims stay held.
     ///
@@ -266,6 +288,7 @@ impl BrokerLog {
             return Ok(Applied::AlreadySeen);
         }
         cash.validate(&self.account, self.cash.as_ref(), at)?;
+        crate::broker_claims::validate(&cash, self.cash.as_ref(), &self.entries)?;
         if self.cash.is_none() && !self.entries.is_empty() {
             return Err(BrokerError::History);
         }
@@ -358,6 +381,7 @@ mod tests {
             started,
             completed,
             observation: serde_json::json!({"cash":"100"}),
+            orders: None,
         }
     }
 
@@ -501,6 +525,7 @@ mod tests {
         std::fs::create_dir(&path).unwrap();
         assert!(log.observe_cash(cash(2, 3), 3).is_err());
         assert!(matches!(log.cash(), Err(BrokerError::Poisoned)));
+        assert!(matches!(log.claims(), Err(BrokerError::Poisoned)));
         assert!(matches!(log.entries(), Err(BrokerError::Poisoned)));
         assert!(matches!(
             log.observe_cash(cash(2, 3), 3),

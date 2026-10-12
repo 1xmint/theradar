@@ -25,6 +25,13 @@ Use protected storage in an existing durably provisioned directory. This does
 not release claims, establish profit or authorize trading. See
 [durable cash work](docs/plans/0030-alpaca-durable-cash.md).
 
+Cash checkpoints now retain complete bound execution progress and derive the
+remaining order liabilities: unfilled buy limit cost, unfilled sell shares, and
+the full fee reserve. Confirmed terminal orders have no unfilled quantity claim.
+Original intents and submission uncertainty remain; retries are still refused.
+These observations are not available capital or trading authority. See
+[economic claim work](docs/plans/0031-alpaca-economic-claims.md).
+
 `radar alpaca-market-read --symbols SPY,QQQ --output ./data/alpaca/capture-001.json`
 captures the explicitly requested IEX feed using the same private paper keys.
 Create the output directory first and use a new filename for each observation;

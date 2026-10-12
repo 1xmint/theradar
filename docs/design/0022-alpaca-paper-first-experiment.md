@@ -229,6 +229,18 @@ poisons the owner until integrity-checked replay. This provides local restart
 continuity, not broker atomicity, complete economics, rollback resistance or
 claim release. Generic storage trusts the protected caller's normalization.
 
+Cash checkpoints also retain the private caller's complete selected progress for
+every retained order, atomically with the cash baseline. Residual buy claims ceil
+the unfilled limit notional; residual sell claims hold unfilled shares. Every
+order keeps its full fee reserve. Filled/canceled/expired/rejected observations
+end unfilled quantity claims; pending_cancel and done_for_day do not, following
+[Alpaca's lifecycle](https://docs.alpaca.markets/us/docs/orders-at-alpaca).
+Progress cannot change broker identity, decrease fills, reopen a terminal order,
+forget prior progress or cover an unsubmitted reservation. Original payloads and
+submission uncertainty persist. Unknown historical progress holds original claims.
+This is local economic accounting, not profit, fee finality, settlement or an
+available-capital verdict; pure equity risk and execution integration remain.
+
 `radar alpaca-assets-read` reads each requested equity between pinned paper
 account reads. It binds symbol, nonempty unique asset ID and us_equity class;
 nullable status, exchange, tradability, fractional, margin, short and attribute
