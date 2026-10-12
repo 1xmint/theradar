@@ -71,9 +71,9 @@ check: _disk build tests lint fmt
 # Everything runnable off a GitHub runner.
 ci: build tests lint fmt cargo-deny licence-headers
 
-# Linux-only socket and subprocess boundary; a fake CLI uses no credentials.
+# Private setup boundaries; fake CLI/account reads use no credentials.
 private-setup:
-    setpriv --no-new-privs python3 -m unittest discover -s deploy -p 'test_codex_bridge.py' -v
+    setpriv --no-new-privs python3 -m unittest discover -s deploy -p 'test_*.py' -v
 
 # --- required checks, one recipe per status-check context ---------------------
 
