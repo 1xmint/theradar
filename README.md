@@ -45,6 +45,15 @@ does not establish that filling stopped. This is a private operator command,
 not an installed unattended supervisor. See
 [paper cancellation](docs/plans/0046-alpaca-paper-cancellation.md).
 
+`radar alpaca-paper-maintain --journal <private-file> --account-id <paper-id> --max-pages <positive-u16> [--cancel-working]`
+performs one recovery tick under the existing journal owner. It refreshes the
+cash/share/order checkpoint, reports working, terminal and unresolved orders,
+and optionally requests cancellation of at most one working order. Pending
+cancellation uncertainty is observed rather than retried. Checkpoint failure
+stops the tick; cancellation acceptance retains claims. This is the maintenance
+phase for a future isolated supervisor, with no new-order authority or installed
+timer. See [paper maintenance](docs/plans/0051-alpaca-paper-maintenance.md).
+
 Use protected storage in an existing durably provisioned directory. This does
 not establish available capital, profit or trading authority. See
 [durable cash work](docs/plans/0030-alpaca-durable-cash.md).
