@@ -19,9 +19,15 @@ recovery, durable claims, asset observations and setup changes still require
 verified integration. Owner-reported isolated VPS reads verified an active paper
 account with no positions and retained SPY/QQQ IEX snapshots; root-only credential
 permissions and installed reader hash were inspected independently. A bounded
-continuous research recorder is GitHub-verified and uploaded, with administrator
-installation pending. See [plan 0038](plans/0038-alpaca-market-recorder.md).
-Quote metadata checks are the current increment, [plan 0039](plans/0039-alpaca-quote-provenance.md).
+continuous research recorder is installed: direct SSH verified its enabled active
+timer, successful worker exits and consecutive reports of distinct captures.
+Installed script/unit hashes match the verified bundle; private capture contents
+were not independently read. See [plan 0038](plans/0038-alpaca-market-recorder.md)
+and the runtime handback in [plan 0040](plans/0040-alpaca-paper-scoring.md).
+Quote metadata checks and cost-aware offline outcome scoring are GitHub-verified.
+The scorer keeps size units, participation, fees and slippage as explicit research
+assumptions, never broker execution facts. Forward decisions and matched baseline
+evaluation remain incomplete.
 No actual broker orders, effective autonomous handover or Alpaca learning results
 have been verified. The autonomous goal remains incomplete.
 

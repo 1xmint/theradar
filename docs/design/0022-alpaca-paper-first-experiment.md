@@ -61,8 +61,10 @@ syncs the file before linking a new final filename; existing captures are never
 overwritten. Offline `radar alpaca-market-replay` rejects captures unavailable
 at the specified millisecond watermark and keeps missing symbols null. This is
 a host-availability gate, not exchange-time validation or a fresh-quote verdict.
-It does not treat Solana slots as equity timestamps. The operator tools are not
-yet an unattended collector, historical database or execution-data service.
+It does not treat Solana slots as equity timestamps. A bounded minute-scale IEX
+research recorder now runs on the VPS; its timer, successful worker reports and
+installed hashes were inspected (plan 0040). This is not yet a historical
+database or execution-data service.
 
 `radar alpaca-quote` consumes that recorded capture through the same availability
 gate and only for a symbol originally requested. It uses serde_json's raw_value

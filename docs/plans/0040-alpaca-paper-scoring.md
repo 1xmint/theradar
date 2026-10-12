@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # 0040 — Cost-aware offline equity outcome scoring
 
-**Status:** Implemented; GitHub verification pending.
+**Status:** Implemented and GitHub-verified; forward evaluation incomplete.
 
 Branch: feat/alpaca-paper-scoring, based on 1c609e7. Previous turn made verified
 progress with actual preflight quote metadata checks. Parent documentation run
@@ -17,7 +17,7 @@ progress with actual preflight quote metadata checks. Parent documentation run
 - [x] Reject excess assumed participation and overflow; preserve negative results.
 - [x] Exercise real CLI without credentials, future capture refusal, unsupported
   symbols, quantity limits, rounding, chronology and friction boundaries.
-- [ ] Inspect all GitHub checks and mutation diagnostics.
+- [x] Inspect all GitHub checks and mutation diagnostics.
 
 ## Handback
 
@@ -77,3 +77,23 @@ unviable, zero missed or timed out. Main replacement caused denied dead code;
 amount replacements caused unused quote/field; bounded replacements unused
 value; score replacement unused json/arguments and dead helpers; run replacement
 unused Path/args and dead helpers. These are compiler refusals, not test kills.
+
+Code proof is 90e1c40843cee6ba11dc806a7188a9f2fe4131d1. GitHub run
+38272913359 passed all 14 jobs. Inspected every job and tests job 114891303793:
+2,810 Rust tests, 27 Python tests, all 32 targeted Python mutations caught.
+Downloaded all four Rust mutation artifacts: 38 caught, seven unviable, no
+misses/timeouts. Inspected each unviable compiler log; reasons remain those
+above (run moved to line 107). No workstation tests/build/lint/mutation jobs.
+Draft PR 401 is attached and stacked on PR 400. This final handback is docs only;
+its CI is separate from the verified code run. No new binary release or orders.
+
+The owner installed the previously verified recorder during this turn. Direct
+SSH verified timer active/enabled, worker loaded/result success/exit 0, and
+three consecutive journal entries reporting distinct captures at availability
+1791823162741, 1791823227268 and 1791823287984. Each reports no unknown symbols
+or missing quotes and execution_authority=false. These are worker reports;
+the private retained file contents were not read. Installed recorder and both
+unit SHA256 values match the committed-byte bundle, with root 755/644/644 modes.
+The recorder still uses the earlier verified reader and does not run this scorer.
+The previous goal turn made concrete progress; no repeated blocking condition.
+The full autonomous-trading objective remains active and incomplete.
