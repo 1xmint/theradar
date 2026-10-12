@@ -67,6 +67,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod equity;
 mod kernel;
 mod policy;
 

@@ -60,7 +60,7 @@ fn collect(
     collect_bound(expected, client_id, None, read)
 }
 
-fn payload_matches(intent: &BrokerIntent, order: &BrokerOrder) -> Result<(), String> {
+pub(super) fn payload_matches(intent: &BrokerIntent, order: &BrokerOrder) -> Result<(), String> {
     let side = match intent.side {
         BrokerSide::Buy => "buy",
         BrokerSide::Sell => "sell",

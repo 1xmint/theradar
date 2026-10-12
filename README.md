@@ -24,6 +24,10 @@ against the retained baseline. Rejected reads leave the baseline unchanged.
 Checkpoints also retain share quantities and require subsequent changes to match
 new bound fills, with account/position reads bracketing collection. Legacy cash
 baselines without share quantities require explicit reconciliation before use.
+`radar alpaca-order-preflight` joins these observations and local liabilities to
+the pure equity risk kernel. It performs paper-host reads and reports refusals;
+unverified capacity/cost inputs remain unknown. It cannot submit an order. See
+[equity risk work](docs/plans/0033-alpaca-equity-risk.md).
 Use protected storage in an existing durably provisioned directory. This does
 not establish available capital, profit or trading authority. See
 [durable cash work](docs/plans/0030-alpaca-durable-cash.md).

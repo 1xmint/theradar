@@ -20,6 +20,7 @@ mod alpaca_journal;
 mod alpaca_market;
 mod alpaca_order_read;
 mod alpaca_positions;
+mod alpaca_preflight;
 mod alpaca_quote;
 mod alpaca_read;
 mod alpaca_reconcile;
@@ -138,6 +139,7 @@ commands:
   alpaca-order-reconcile --journal <private-file> --account-id <paper-id> --client-order-id <retained-id> --max-pages <positive-u16>
   alpaca-order-read --account-id <expected-paper-account-id> --client-order-id <retained-id> [--journal <private-file>]
   alpaca-order-reserve --journal <private-file> --account-id <paper-id> --intent <typed-intent>
+  alpaca-order-preflight --journal <private-file> --intent <typed-intent> --policy <private-policy> --max-pages <positive-u16>
   alpaca-order-journal --journal <private-file> --account-id <paper-id>
   alpaca-assets-read --account-id <paper-id> --symbols SPY,QQQ
   alpaca-market-read --symbols SPY,QQQ --output <new-capture-file>
@@ -940,6 +942,7 @@ fn main() -> ExitCode {
         "alpaca-cash-checkpoint" => alpaca_cash::checkpoint_run(&args),
         "alpaca-order-reconcile" => alpaca_fills::run(&args),
         "alpaca-order-read" => alpaca_order_read::run(&args),
+        "alpaca-order-preflight" => alpaca_preflight::run(&args),
         "alpaca-order-reserve" | "alpaca-order-journal" => alpaca_journal::run(&args),
         "alpaca-assets-read" => alpaca_assets::run(&args),
         "alpaca-market-read" | "alpaca-market-replay" => alpaca_market::run(&args),
