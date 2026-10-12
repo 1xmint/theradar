@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # 0033 — Pure equity risk and the protected paper preflight caller
 
-**Status:** first GitHub run inspected; repairs awaiting verification; activation closed.
+**Status:** risk boundary and protected preflight verified on GitHub; activation closed.
 
 Branch: feat/alpaca-equity-risk, based on 8d7790e. All 14 jobs in
 `gh run view 38207446630 --json status,conclusion,jobs` passed before branching.
@@ -28,7 +28,7 @@ Previous goal turn made verified progress on durable share/cash accounting.
 - [x] Add kernel boundary/unknown/overflow/payload/expiry/reduction tests and actual
   caller tests for fresh normalized reads, local liabilities, pending identities,
   restrictions and private input bounds.
-- [ ] Run/inspect full GitHub tests, build, lint and mutation diagnostics; repair
+- [x] Run/inspect full GitHub tests, build, lint and mutation diagnostics; repair
   real findings and record precise evidence before claiming verification.
 - [ ] Resolve actual account/feed capacity units, conditions, session timestamps,
   price/quantity increments and fee/cost adequacy, then pass verified facts.
@@ -57,9 +57,18 @@ exercise exact cost/spread boundaries and one unit beyond them. No mutation
 exclusions were added. The next GitHub run must verify these repairs; the
 observed test floor is 2,797, not a prediction of the next count.
 
+Repair verification: `gh run view 38209405303 --json status,conclusion,jobs`
+at 845384b89ac228df58367ef4b8625e3ca2c1b583 passed all 14 jobs. The tests
+job log measured 2,798 passing tests. All four mutation artifacts were read:
+169 total, 134 caught, 35 compiler-unviable, zero missed and zero timeouts.
+Every compiler-unviable reason was inspected (unused/dead code or unavailable
+Default implementations); no exclusion or test-kill claim was substituted.
+This verifies the code at that SHA, not actual broker responses, execution
+authority, account eligibility or positive expectancy.
+
 No account keys, actual orders, deposits, deployment or activation. Owner account
-creation remains pending; independent code work continued. GitHub verification
-pending. Preflight emits a report, never a portable signing/execution token. It
+creation remains pending; independent code work continued. Preflight emits a
+report, never a portable signing/execution token. It
 does not reserve the proposed order or authorize retries. It may advance a valid
 observation checkpoint before a later risk refusal; existing order claims remain.
 Capacity units/quote conditions and cost/fee adequacy have not been verified on
