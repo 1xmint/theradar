@@ -76,7 +76,9 @@ private-setup:
     setpriv --no-new-privs python3 -m unittest discover -s deploy -p 'test_*.py' -v
     setpriv --no-new-privs python3 deploy/mutate_alpaca_reader.py
     setpriv --no-new-privs python3 deploy/mutate_alpaca_recorder.py
+    setpriv --no-new-privs python3 deploy/mutate_alpaca_research.py
     systemd-analyze verify deploy/radar-paper-market.service deploy/radar-paper-market.timer
+    systemd-analyze verify deploy/radar-paper-research.service deploy/radar-paper-research.timer
 
 # --- required checks, one recipe per status-check context ---------------------
 
