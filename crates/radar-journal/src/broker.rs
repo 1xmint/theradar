@@ -9,6 +9,34 @@ use serde::{Deserialize, Serialize};
 use crate::ownership::Owner;
 use crate::{Applied, Journal, JournalError, Outcome, Stage, Verified};
 
+/// Protected caller's selected paper observation, retained with order claims.
+/// This binds local history; the caller verifies broker identity and economics.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BrokerCash {
+    /// Pinned paper account.
+    pub account_id: String,
+    /// Host start of selected provider reads.
+    pub started: u64,
+    /// Host completion of selected provider reads.
+    pub completed: u64,
+    /// Normalized selected facts only; never credentials or raw provider bodies.
+    pub observation: serde_json::Value,
+}
+
+impl BrokerCash {
+    fn validate(&self, account: &str, prior: Option<&Self>, at: u64) -> Result<(), BrokerError> {
+        if self.account_id != account
+            || self.completed < self.started
+            || self.completed > at
+            || prior.is_some_and(|last| self.started < last.completed)
+        {
+            return Err(BrokerError::History);
+        }
+        Ok(())
+    }
+}
+
 /// Direction in the initial long-only equity lane.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -132,6 +160,7 @@ pub struct BrokerLog {
     journal: Journal,
     account: String,
     entries: BTreeMap<String, BrokerEntry>,
+    cash: Option<BrokerCash>,
     poisoned: bool,
 }
 
@@ -151,7 +180,28 @@ impl BrokerLog {
             return Err(BrokerError::History);
         }
         let mut entries: BTreeMap<String, BrokerEntry> = BTreeMap::new();
+        let mut cash = None;
         for event in journal.events()? {
+            if let Some(observed) = &event.correlation.broker_cash {
+                observed.validate(account, cash.as_ref(), event.at)?;
+                if event.schema != crate::SCHEMA_VERSION
+                    || event.stage != Stage::BrokerCash
+                    || event.outcome != Outcome::Ok
+                    || event.broker.is_some()
+                    || event.operation.is_some()
+                    || cash.as_ref() == Some(observed)
+                    || (cash.is_none() && !entries.is_empty())
+                    || event.correlation
+                        != (crate::Correlation {
+                            broker_cash: Some(observed.clone()),
+                            ..crate::Correlation::default()
+                        })
+                {
+                    return Err(BrokerError::History);
+                }
+                cash = Some(observed.clone());
+                continue;
+            }
             let entry = event.broker.ok_or(BrokerError::History)?;
             entry.intent.validate(account)?;
             let outcome = match entry.state {
@@ -182,6 +232,7 @@ impl BrokerLog {
             journal,
             account: account.to_owned(),
             entries,
+            cash,
             poisoned: false,
         })
     }
@@ -192,6 +243,37 @@ impl BrokerLog {
         } else {
             Ok(())
         }
+    }
+
+    /// Last durable selected cash observation. No claim release or authority.
+    ///
+    /// # Errors
+    /// A previous write outcome remains unknown.
+    pub fn cash(&self) -> Result<Option<&BrokerCash>, BrokerError> {
+        self.healthy()?;
+        Ok(self.cash.as_ref())
+    }
+
+    /// Append a caller-verified observation before advancing the in-memory baseline.
+    /// Genesis must precede retained orders; repeats are inert. Claims stay held.
+    ///
+    /// # Errors
+    /// Account/time/history mismatch, failed persistence, or poisoned ownership.
+    pub fn observe_cash(&mut self, cash: BrokerCash, at: u64) -> Result<Applied, BrokerError> {
+        self.healthy()?;
+        cash.validate(&self.account, None, at)?;
+        if self.cash.as_ref() == Some(&cash) {
+            return Ok(Applied::AlreadySeen);
+        }
+        cash.validate(&self.account, self.cash.as_ref(), at)?;
+        if self.cash.is_none() && !self.entries.is_empty() {
+            return Err(BrokerError::History);
+        }
+        self.poisoned = true;
+        self.journal.record_broker_cash(cash.clone(), at)?;
+        self.cash = Some(cash);
+        self.poisoned = false;
+        Ok(Applied::Advanced)
     }
 
     fn append(&mut self, entry: BrokerEntry, at: u64) -> Result<(), BrokerError> {
@@ -269,6 +351,162 @@ impl BrokerLog {
 mod tests {
     use super::*;
     use crate::{Correlation, Event, OperationLog};
+
+    fn cash(started: u64, completed: u64) -> BrokerCash {
+        BrokerCash {
+            account_id: "paper-id".into(),
+            started,
+            completed,
+            observation: serde_json::json!({"cash":"100"}),
+        }
+    }
+
+    #[test]
+    fn cash_genesis_and_later_observations_replay_with_unchanged_claims() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("cash.jsonl");
+        let mut log = BrokerLog::open(&path, "paper-id").unwrap();
+        assert_eq!(log.cash().unwrap(), None);
+        assert_eq!(log.observe_cash(cash(1, 2), 2).unwrap(), Applied::Advanced);
+        let bytes = std::fs::read(&path).unwrap();
+        assert_eq!(
+            log.observe_cash(cash(1, 2), 3).unwrap(),
+            Applied::AlreadySeen
+        );
+        assert_eq!(std::fs::read(&path).unwrap(), bytes);
+        log.reserve(intent(), 3).unwrap();
+        log.submit("radar_1", 4, |_| ()).unwrap();
+        assert_eq!(log.observe_cash(cash(2, 2), 5).unwrap(), Applied::Advanced);
+        drop(log);
+        let mut log = BrokerLog::open(&path, "paper-id").unwrap();
+        assert_eq!(log.cash().unwrap(), Some(&cash(2, 2)));
+        let entry = log.entries().unwrap().next().unwrap();
+        assert_eq!(entry.intent, intent());
+        assert_eq!(entry.state, BrokerState::SubmissionUnknown);
+        assert!(
+            log.submit("radar_1", 6, |_| panic!("must not retry"))
+                .is_err()
+        );
+        drop(log);
+        assert!(OperationLog::open(&path).is_err());
+        assert!(BrokerLog::open(&path, "other").is_err());
+    }
+
+    #[test]
+    fn invalid_cash_time_identity_and_late_genesis_do_not_change_history() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("cash.jsonl");
+        let mut log = BrokerLog::open(&path, "paper-id").unwrap();
+        log.observe_cash(cash(1, 2), 2).unwrap();
+        let bytes = std::fs::read(&path).unwrap();
+        let mut wrong = cash(2, 3);
+        wrong.account_id = "other".into();
+        for invalid in [cash(3, 2), cash(2, 4), cash(1, 3), wrong] {
+            assert!(log.observe_cash(invalid, 3).is_err());
+            assert_eq!(log.cash().unwrap(), Some(&cash(1, 2)));
+            assert_eq!(std::fs::read(&path).unwrap(), bytes);
+        }
+        drop(log);
+        let legacy = dir.path().join("legacy.jsonl");
+        let mut log = BrokerLog::open(&legacy, "paper-id").unwrap();
+        log.reserve(intent(), 1).unwrap();
+        assert!(log.observe_cash(cash(2, 3), 3).is_err());
+        drop(log);
+        Journal::open(&legacy)
+            .unwrap()
+            .record_broker_cash(cash(2, 3), 3)
+            .unwrap();
+        assert!(BrokerLog::open(&legacy, "paper-id").is_err());
+        let duplicate = dir.path().join("duplicate.jsonl");
+        let mut journal = Journal::open(&duplicate).unwrap();
+        journal.record_broker_cash(cash(2, 2), 2).unwrap();
+        journal.record_broker_cash(cash(2, 2), 2).unwrap();
+        assert!(BrokerLog::open(&duplicate, "paper-id").is_err());
+    }
+
+    #[test]
+    fn cash_replay_rejects_rehashed_illegal_events_and_changed_unhashed_payloads() {
+        for case in 0..11 {
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path().join("cash.jsonl");
+            let mut log = BrokerLog::open(&path, "paper-id").unwrap();
+            log.observe_cash(cash(1, 2), 2).unwrap();
+            log.observe_cash(cash(2, 3), 3).unwrap();
+            drop(log);
+            rewrite(&path, |event| {
+                if event.sequence != 2 {
+                    return;
+                }
+                match case {
+                    0 => event.schema = 2,
+                    1 => event.stage = Stage::BrokerOrder,
+                    2 => event.outcome = Outcome::Uncertain,
+                    3 => {
+                        event.broker = Some(BrokerEntry {
+                            intent: intent(),
+                            state: BrokerState::Reserved,
+                        });
+                    }
+                    4 => event.correlation.receipt = Some("extra".into()),
+                    5 => event.correlation.broker_cash = Some(cash(1, 2)),
+                    6 => {
+                        event.correlation.broker_cash.as_mut().unwrap().account_id = "other".into();
+                    }
+                    7 => event.correlation.broker_cash.as_mut().unwrap().started = 1,
+                    8 => event.correlation.broker_cash.as_mut().unwrap().completed = 4,
+                    9 => event.correlation.broker_cash.as_mut().unwrap().started = 4,
+                    _ => {
+                        event.operation = Some(crate::OperationEntry {
+                            intent: crate::Intent {
+                                asset: radar_types::Asset::Sol,
+                                amount: radar_types::TokenQuantity::new(
+                                    1,
+                                    radar_types::Decimals::NATIVE_SOL,
+                                ),
+                                at: radar_types::Slot(1),
+                            },
+                            reserved: None,
+                            state: crate::OperationState::Proposed,
+                        });
+                    }
+                }
+            });
+            assert!(BrokerLog::open(&path, "paper-id").is_err(), "case {case}");
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("cash.jsonl");
+        Journal::open(&path)
+            .unwrap()
+            .record_broker_cash(cash(1, 2), 2)
+            .unwrap();
+        let mut event = Journal::open(&path).unwrap().events().unwrap().remove(0);
+        event.correlation.broker_cash.as_mut().unwrap().observation["cash"] =
+            serde_json::json!("999");
+        assert_ne!(event.id, event.digest());
+        std::fs::write(
+            &path,
+            format!("{}\n", serde_json::to_string(&event).unwrap()),
+        )
+        .unwrap();
+        assert!(BrokerLog::open(&path, "paper-id").is_err());
+    }
+
+    #[test]
+    fn failed_cash_append_poison_requires_reopen_before_any_use() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("cash.jsonl");
+        let mut log = BrokerLog::open(&path, "paper-id").unwrap();
+        log.observe_cash(cash(1, 2), 2).unwrap();
+        std::fs::remove_file(&path).unwrap();
+        std::fs::create_dir(&path).unwrap();
+        assert!(log.observe_cash(cash(2, 3), 3).is_err());
+        assert!(matches!(log.cash(), Err(BrokerError::Poisoned)));
+        assert!(matches!(log.entries(), Err(BrokerError::Poisoned)));
+        assert!(matches!(
+            log.observe_cash(cash(2, 3), 3),
+            Err(BrokerError::Poisoned)
+        ));
+    }
 
     fn intent() -> BrokerIntent {
         BrokerIntent {

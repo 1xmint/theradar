@@ -28,6 +28,53 @@ fn refused(args: &[&str], expected: &str) {
 }
 
 #[test]
+fn durable_cash_command_validates_setup_without_echoing_or_writing_a_baseline() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("cash.jsonl");
+    let path = path.to_str().unwrap();
+    refused(&["alpaca-cash-checkpoint"], "usage:");
+    for pages in ["0", "65536", "-1", "one"] {
+        refused(
+            &[
+                "alpaca-cash-checkpoint",
+                "--journal",
+                path,
+                "--account-id",
+                "paper-id",
+                "--max-pages",
+                pages,
+            ],
+            "positive",
+        );
+    }
+    refused(
+        &[
+            "alpaca-cash-checkpoint",
+            "--journal",
+            path,
+            "--account-id",
+            "paper-id",
+            "--max-pages",
+            "1",
+        ],
+        "configure both Alpaca paper credentials privately",
+    );
+    assert!(!std::path::Path::new(path).exists());
+    refused(
+        &[
+            "alpaca-cash-checkpoint",
+            "--journal",
+            path,
+            "--account-id",
+            " ",
+            "--max-pages",
+            "1",
+        ],
+        "invalid",
+    );
+}
+
+#[test]
 fn cash_command_requires_existing_claims_valid_baseline_and_private_paper_credentials() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("claims.jsonl");

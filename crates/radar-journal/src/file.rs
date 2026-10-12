@@ -242,6 +242,37 @@ impl Journal {
         self.record_broker_synced(entry, at, sync_parent)
     }
 
+    pub(crate) fn record_broker_cash(
+        &mut self,
+        cash: crate::BrokerCash,
+        at: u64,
+    ) -> Result<Recorded, JournalError> {
+        self.record_broker_cash_synced(cash, at, sync_parent)
+    }
+
+    fn record_broker_cash_synced(
+        &mut self,
+        cash: crate::BrokerCash,
+        at: u64,
+        sync: impl FnOnce(&Path) -> Result<(), JournalError>,
+    ) -> Result<Recorded, JournalError> {
+        let recorded = self.record(
+            Stage::BrokerCash,
+            Outcome::Ok,
+            at,
+            Correlation {
+                broker_cash: Some(cash),
+                ..Correlation::default()
+            },
+            None,
+            Vec::new(),
+            None,
+            None,
+        )?;
+        sync(&self.path)?;
+        Ok(recorded)
+    }
+
     fn record_broker_synced(
         &mut self,
         entry: crate::BrokerEntry,
@@ -471,6 +502,53 @@ fn verify(path: &Path) -> Result<Verified, JournalError> {
 mod broker_sync_tests {
     use super::*;
     use crate::{BrokerEntry, BrokerIntent, BrokerLog, BrokerSide, BrokerState};
+
+    #[test]
+    fn cash_receipt_waits_for_directory_sync_and_failure_is_replayable() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("cash.jsonl");
+        let cash = crate::BrokerCash {
+            account_id: "paper-id".into(),
+            started: 1,
+            completed: 2,
+            observation: serde_json::json!({"cash":"100"}),
+        };
+        let mut journal = Journal::open(&path).unwrap();
+        let mut called = false;
+        journal
+            .record_broker_cash_synced(cash.clone(), 2, |recorded_path| {
+                assert_eq!(recorded_path, path);
+                assert_eq!(
+                    Journal::open(recorded_path).unwrap().events().unwrap()[0]
+                        .correlation
+                        .broker_cash,
+                    Some(cash.clone())
+                );
+                sync_parent(recorded_path)?;
+                called = true;
+                Ok(())
+            })
+            .unwrap();
+        assert!(called);
+        let later = crate::BrokerCash {
+            started: 2,
+            completed: 3,
+            ..cash
+        };
+        assert!(
+            journal
+                .record_broker_cash_synced(later.clone(), 3, |_| {
+                    Err(JournalError::Io {
+                        path: "injected".into(),
+                        source: std::io::Error::other("directory sync failed"),
+                    })
+                })
+                .is_err()
+        );
+        drop(journal);
+        let recovered = BrokerLog::open(&path, "paper-id").unwrap();
+        assert_eq!(recovered.cash().unwrap(), Some(&later));
+    }
 
     fn entry(state: BrokerState) -> BrokerEntry {
         BrokerEntry {

@@ -17,6 +17,14 @@ places orders. See [setup and remaining work](docs/plans/0017-alpaca-paper-found
 The command is not yet wired to the deployed site. Existing measurements below
 describe the Solana experiment, not Alpaca performance.
 
+`radar alpaca-cash-checkpoint --journal <private-file> --account-id <paper-id>
+--max-pages <positive-u16>` retains selected broker observations durably beside
+order claims. Initialize before reserving any order; subsequent calls reconcile
+against the retained baseline. Rejected reads leave the baseline unchanged.
+Use protected storage in an existing durably provisioned directory. This does
+not release claims, establish profit or authorize trading. See
+[durable cash work](docs/plans/0030-alpaca-durable-cash.md).
+
 `radar alpaca-market-read --symbols SPY,QQQ --output ./data/alpaca/capture-001.json`
 captures the explicitly requested IEX feed using the same private paper keys.
 Create the output directory first and use a new filename for each observation;

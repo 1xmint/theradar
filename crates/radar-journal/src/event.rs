@@ -28,6 +28,8 @@ pub const MAX_REDACTED: usize = 512;
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Stage {
+    /// Protected caller's paper cash observation, without releasing order claims.
+    BrokerCash,
     /// A brokerage order intent or ambiguous submission, separate from Solana operations.
     BrokerOrder,
     /// Caller-verified external plain SOL activity, not an operation or authority.
@@ -98,6 +100,9 @@ pub enum Outcome {
 /// find that run from a mint, a week, or a transaction they are holding.
 #[derive(Clone, Default, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub struct Correlation {
+    /// Normalized paper observations; generic storage does not validate economics.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub broker_cash: Option<crate::BrokerCash>,
     /// Immutable caller-verified native transfer; absent from older event hashes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub native_transfer: Option<NativeTransferRecord>,
@@ -152,7 +157,8 @@ impl Correlation {
     /// [`Journal::record`](crate::Journal::record) can say so.
     #[must_use]
     pub const fn is_empty(&self) -> bool {
-        self.native_transfer.is_none()
+        self.broker_cash.is_none()
+            && self.native_transfer.is_none()
             && self.opening_inventory.is_none()
             && self.valuation.is_none()
             && self.settlement.is_none()

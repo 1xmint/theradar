@@ -63,7 +63,9 @@ mod file;
 mod operation;
 mod ownership;
 
-pub use broker::{BrokerEntry, BrokerError, BrokerIntent, BrokerLog, BrokerSide, BrokerState};
+pub use broker::{
+    BrokerCash, BrokerEntry, BrokerError, BrokerIntent, BrokerLog, BrokerSide, BrokerState,
+};
 
 pub use event::{
     Correlation, Event, ExecutionBinding, MAX_REDACTED, NativeTransferRecord,

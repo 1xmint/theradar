@@ -479,10 +479,14 @@ impl OperationLog {
             return Err(OperationError::HistoryNotIntact(integrity));
         }
         let events = journal.events()?;
-        if events
-            .iter()
-            .any(|event| event.broker.is_some() || event.stage == crate::Stage::BrokerOrder)
-        {
+        if events.iter().any(|event| {
+            event.broker.is_some()
+                || event.correlation.broker_cash.is_some()
+                || matches!(
+                    event.stage,
+                    crate::Stage::BrokerOrder | crate::Stage::BrokerCash
+                )
+        }) {
             return Err(OperationError::BrokerHistory);
         }
         let opening_inventory = replay_opening(&events)?;
