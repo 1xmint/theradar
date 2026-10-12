@@ -286,7 +286,7 @@ pub(super) fn collect_state(
         daily_loss_microusd: None,
         bid_microusd_per_share: number(&quote["bid_microusd_per_share"])?,
         ask_microusd_per_share: number(&quote["ask_microusd_per_share"])?,
-        // Feed size units/conditions and fee/cost adequacy have not yet been
+        // Feed size units and fee/cost adequacy have not yet been
         // verified against this account. Never mint capacity or zero costs.
         capacity_nanoshares: None,
         required_fee_microusd: None,
@@ -443,7 +443,7 @@ mod tests {
         } else if url.ends_with("/v2/assets/SPY") {
             json!({"id":"asset","symbol":"SPY","class":"us_equity","status":"active","tradable":true,"fractionable":true,"attributes":[],"exchange":"ARCA"})
         } else if url.starts_with(SNAPSHOTS) {
-            json!({"SPY":{"latestQuote":{"t":radar_types::civil::timestamp_from_seconds(seconds),"bp":100,"ap":100,"bs":10,"as":10}}})
+            json!({"SPY":{"latestQuote":{"t":radar_types::civil::timestamp_from_seconds(seconds),"bp":100,"ap":100,"bs":10,"as":10,"bx":"V","ax":"V","c":["R"],"z":"B"}}})
         } else {
             panic!("unexpected fixture URL {url}")
         }
@@ -544,6 +544,39 @@ mod tests {
             )
             .is_err()
         );
+    }
+
+    #[test]
+    fn actual_preflight_rejects_unsupported_quote_metadata_before_authorization() {
+        for (field, bad) in [
+            ("bx", json!("Q")),
+            ("ax", json!("Q")),
+            ("c", json!(["H"])),
+            ("z", json!("D")),
+        ] {
+            let dir = tempfile::tempdir().unwrap();
+            let mut log = BrokerLog::open(dir.path().join("paper.jsonl"), "paper").unwrap();
+            let seconds = 1_791_813_600;
+            let result = collect_state(
+                &mut log,
+                &intent(BrokerSide::Buy),
+                &policy(),
+                1,
+                |url| {
+                    let mut value = fixture(url, seconds);
+                    if url.starts_with(SNAPSHOTS) {
+                        value["SPY"]["latestQuote"][field] = bad.clone();
+                    }
+                    Ok(Some(value.to_string()))
+                },
+                || Ok(seconds * 1_000),
+            );
+            assert_eq!(
+                result.unwrap_err(),
+                "unsupported IEX quote exchange, conditions or tape"
+            );
+            assert!(log.entries().unwrap().next().is_none());
+        }
     }
 
     #[test]

@@ -21,6 +21,10 @@ struct Quote {
     bs: Box<RawValue>,
     #[serde(rename = "as")]
     ask_size: Box<RawValue>,
+    bx: String,
+    ax: String,
+    c: Vec<String>,
+    z: String,
 }
 
 // Refuse unsupported precision/exponents instead of silently rounding a risk
@@ -92,6 +96,15 @@ pub(super) fn validate(
         .and_then(Option::as_ref)
         .and_then(|s| s.latest_quote.as_ref())
         .ok_or("requested quote is unknown")?;
+    // Support only the IEX pattern observed in our retained feed. A matching
+    // condition is not proof of market hours, tradability or routed capacity.
+    if quote.bx != "V"
+        || quote.ax != "V"
+        || quote.c.as_slice() != ["R"]
+        || !matches!(quote.z.as_str(), "A" | "B" | "C")
+    {
+        return Err("unsupported IEX quote exchange, conditions or tape".into());
+    }
     let bid = fixed6(quote.bp.get())
         .filter(|v| *v > 0)
         .ok_or("invalid bid price")?;
@@ -120,6 +133,8 @@ pub(super) fn validate(
         "bid_microusd_per_share":bid.to_string(),"ask_microusd_per_share":ask.to_string(),
         "bid_displayed_size_millionths":bid_size.to_string(),"ask_displayed_size_millionths":ask_size.to_string(),
         "displayed_size_unit":null,
+        "bid_exchange":quote.bx,"ask_exchange":quote.ax,
+        "conditions":quote.c,"tape":quote.z,
         "exchange_timestamp":quote.t,"age_ns":age_ns.to_string(),
         "available_at_unix_ms":available,"as_of_unix_ms":as_of,
         "max_age_ms":max_age_ms,"max_spread_bps":max_spread_bps,
@@ -160,7 +175,7 @@ mod tests {
     const AT: u64 = 1_792_540_800_000; // 2026-10-21T00:00:00Z
 
     fn raw() -> &'static str {
-        r#"{"SPY":{"latestQuote":{"t":"2026-10-21T00:00:00Z","bp":100.000001,"ap":100.01,"bs":20.5,"as":30}}}"#
+        r#"{"SPY":{"latestQuote":{"t":"2026-10-21T00:00:00Z","bp":100.000001,"ap":100.01,"bs":20.5,"as":30,"bx":"V","ax":"V","c":["R"],"z":"B"}}}"#
     }
 
     #[test]
@@ -229,6 +244,7 @@ mod tests {
             "bid_microusd_per_share":"100000001","ask_microusd_per_share":"100010000",
             "bid_displayed_size_millionths":"20500000","ask_displayed_size_millionths":"30000000",
             "displayed_size_unit":null,
+            "bid_exchange":"V","ask_exchange":"V","conditions":["R"],"tape":"B",
             "exchange_timestamp":"2026-10-21T00:00:00Z","age_ns":"5000000",
             "available_at_unix_ms":AT,"as_of_unix_ms":AT+5,"max_age_ms":5,"max_spread_bps":1,
             "consolidated_market":false,"execution_authority":false})
@@ -295,5 +311,39 @@ mod tests {
         }
         let locked = raw().replace("100.01", "100.000001");
         assert!(validate(&locked, "SPY", AT, AT, 0, 0).is_ok());
+    }
+
+    #[test]
+    fn each_exchange_condition_and_tape_must_match_supported_iex_pattern() {
+        for (field, bad) in [
+            ("bx", json!("Q")),
+            ("ax", json!("Q")),
+            ("c", json!([])),
+            ("c", json!(["R", "H"])),
+            ("c", json!(["H"])),
+            ("c", json!(["R", "R"])),
+            ("c", json!("R")),
+            ("z", json!("D")),
+        ] {
+            let mut value: Value = serde_json::from_str(raw()).unwrap();
+            value["SPY"]["latestQuote"][field] = bad;
+            assert!(validate(&value.to_string(), "SPY", AT, AT, 0, 1).is_err());
+        }
+        for field in ["bx", "ax", "c", "z"] {
+            let mut value: Value = serde_json::from_str(raw()).unwrap();
+            value["SPY"]["latestQuote"]
+                .as_object_mut()
+                .unwrap()
+                .remove(field);
+            assert!(validate(&value.to_string(), "SPY", AT, AT, 0, 1).is_err());
+        }
+        for tape in ["A", "B", "C"] {
+            let mut value: Value = serde_json::from_str(raw()).unwrap();
+            value["SPY"]["latestQuote"]["z"] = json!(tape);
+            let report = validate(&value.to_string(), "SPY", AT, AT, 0, 1).unwrap();
+            assert_eq!(report["tape"], tape);
+            assert!(report["displayed_size_unit"].is_null());
+            assert_eq!(report["execution_authority"], false);
+        }
     }
 }

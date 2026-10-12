@@ -76,7 +76,12 @@ exponents, nonpositive prices/sizes, crossed quotes, excessive spread/age and
 future exchange timestamps are refused. UTC timestamps retain nanoseconds;
 canonical date round-trip validation rejects impossible dates and leap seconds.
 Age and spread bounds are explicit operator inputs, not autonomous capital
-mandates. Quote conditions, tradability, market hours, complete account state,
+mandates. The quote adapter also requires both exchange fields V, exactly one
+condition R and tape A/B/C, and retains those fields in its report. This is the
+supported IEX pattern observed in the owner's captures, not a claim that every
+valid IEX quote has that pattern or that it proves session/tradability/capacity.
+Unsupported or missing metadata refuses in both offline quote and actual
+preflight callers. Tradability, market hours, complete account state,
 costs, reservations and execution permissions still need their own checks.
 
 `radar alpaca-reconcile` collects account, open orders, positions, clock, open
