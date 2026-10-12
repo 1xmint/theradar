@@ -66,6 +66,13 @@ research recorder now runs on the VPS; its timer, successful worker reports and
 installed hashes were inspected (plan 0040). This is not yet a historical
 database or execution-data service.
 
+Local forward research commands now copy a versioned proposal and explicit cost
+assumptions into a new record, retaining raw entry data and the host cutoff.
+Enter/Wait is compared with same-size always-enter and cash at exactly the frozen
+horizon. Unknown exit evidence remains unscoreable. Records are mutable local
+files, not authenticated model provenance, and no unattended producer or cohort
+completeness has been verified. See [plan 0041](../plans/0041-alpaca-forward-decision.md).
+
 `radar alpaca-quote` consumes that recorded capture through the same availability
 gate and only for a symbol originally requested. It uses serde_json's raw_value
 feature to parse original price/size digits without f64, producing micro-USD per

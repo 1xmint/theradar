@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # 0041 — Freeze equity research decisions before outcomes
 
-**Status:** In progress; no forward results or execution authority.
+**Status:** Implemented and GitHub-verified; no forward results or execution authority.
 
 Branch feat/alpaca-forward-decision from 577de97, stacked on PR 401. Previous
 goal turn made verified progress: cost-aware scorer passed all GitHub checks and
@@ -16,7 +16,7 @@ branch remains untouched.
 - [x] Bind a same-size always-enter baseline and cash baseline at decision time.
 - [x] Score at exactly the frozen horizon watermark; retain unscoreable cases.
 - [x] Add tests of actual commands, publication refusal, chronology and comparison.
-- [ ] Inspect GitHub tests, lint, builds and every mutation diagnostic.
+- [x] Inspect GitHub tests, lint, builds and every mutation diagnostic.
 
 ## Handback
 
@@ -49,3 +49,23 @@ link; it is not a cryptographic before-outcome guarantee. Unscoreable comparison
 stay unknown, including a Wait choice when its matched baseline cannot be priced.
 Next: an unattended producer and complete cohort evaluator; execution inputs,
 protected recovery/cancellation and effective website handover remain unfinished.
+
+Code proof: 06a06fd756e83fd5917707414e42afb382bae0e9, GitHub run
+38280825246 passed all 14 jobs. Inspected every job and tests job 114917406637:
+2,813 Rust tests, 27 Python tests, all 32 targeted Python mutations caught,
+systemd unit verification passed. Downloaded all four mutation artifacts and
+inspected each unviable compiler log: 36 caught, twelve unviable for the same
+reasons above, zero misses/timeouts. No test-only mutation exclusions added.
+The process test uses synthetic future exit fixtures to exercise the offline
+comparison; it does not claim a real forward result or wait for a market move.
+Test setup was split into a helper in the correction; production behavior stayed
+the same. Draft PR 402 is attached and stacked on PR 401.
+
+No release, VPS replacement, model call or order in this increment. The continuous
+VPS recorder still runs the earlier verified reader. New decision commands are
+source/GitHub verified, not deployed or automatically produced. Next work must
+connect the existing linked-model boundary to inert equity proposals and record
+complete scheduled cohorts, while finishing executable paper risk inputs and
+broker supervision/recovery. This handback is documentation only; its CI is
+separate from the code proof. Previous goal turn and this turn made concrete
+progress; no blocker audit applies. Fully autonomous trading remains incomplete.

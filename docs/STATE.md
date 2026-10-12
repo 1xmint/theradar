@@ -26,8 +26,12 @@ were not independently read. See [plan 0038](plans/0038-alpaca-market-recorder.m
 and the runtime handback in [plan 0040](plans/0040-alpaca-paper-scoring.md).
 Quote metadata checks and cost-aware offline outcome scoring are GitHub-verified.
 The scorer keeps size units, participation, fees and slippage as explicit research
-assumptions, never broker execution facts. Forward decisions and matched baseline
-evaluation remain incomplete.
+assumptions, never broker execution facts. Local forward-decision commands now
+freeze Enter/Wait, same-size always-enter and cash baselines, assumptions and an
+exact horizon cutoff; offline comparisons retain unscoreable cases. They are
+GitHub-verified but not deployed or produced by the linked model. Complete
+scheduled cohorts and held-out/forward evaluation remain incomplete. See
+[plan 0041](plans/0041-alpaca-forward-decision.md).
 No actual broker orders, effective autonomous handover or Alpaca learning results
 have been verified. The autonomous goal remains incomplete.
 
