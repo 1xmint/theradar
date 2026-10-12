@@ -66,6 +66,17 @@ remain unverified and cannot yet bound executable share quantity. Unsupported
 precision and exponent notation are refused. This produces quote inputs only,
 not an account mandate, asset-eligibility verdict or permission to place orders.
 
+`radar alpaca-paper-score --entry <capture> --entry-as-of-unix-ms <N> --exit <capture> --exit-as-of-unix-ms <N> --symbol SPY --quantity-nanoshares <N> --assumptions <json>`
+scores one offline long trade at entry ask and later exit bid. Each capture must
+have been available at its own watermark and pass the quote checks above. Required
+assumptions include model_id, displayed_size_unit (shares), participation_bps,
+slippage_bps_per_side, fee_per_side_microusd, max_quote_age_ms and max_spread_bps.
+There are no defaults. Fees and adverse slippage are charged on both sides;
+spread is already included in ask-to-bid prices. The report retains both quotes
+and all assumptions. Capacity is explicitly assumed, broker P&L is not claimed,
+and nothing from this scorer enters execution risk state. It is an outcome
+measurement tool; it does not establish held-out performance or choose trades.
+
 `radar alpaca-reconcile --account-id <expected-paper-account-id>` pins the account
 identity and brackets positions/market-clock reads with account and open-order
 reads. It preserves pending orders and nested legs, reports changes in selected
