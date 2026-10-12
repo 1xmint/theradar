@@ -21,7 +21,8 @@ Branch: feat/alpaca-paper-provisioning, based on 80258a3. Parent GitHub run
   overwrite/symlink refusal and credential injection.
 - [x] Inspect GitHub verification and upload the exact verified setup script.
 - [x] Owner enters paper credentials privately and confirms provisioning.
-- [ ] Actual protected Radar reader verifies the account. Trading activation
+- [x] Actual protected Radar reader verifies the account (owner-provided successful
+  runtime output recorded in plan 0036). Trading activation
   remains dependent on the unchecked items in plan 0034 and forward evaluation.
 
 ## Handback
