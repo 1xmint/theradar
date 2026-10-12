@@ -1276,3 +1276,27 @@ ssh guardian-vps-tail 'sudo ss -tlnp | grep radar-signer'
 
 That must print nothing. If it prints anything, something was added that should
 not have been.
+
+## Scheduled Alpaca research (source only)
+
+`run-alpaca-research.py` invokes the verified reader's market-read and
+paper-propose commands for an explicit campaign in `/etc/radar/alpaca-research.json`.
+The example `alpaca-research.json.example` requires a deliberately chosen future
+start timestamp; zero refuses. Quantity/costs are hypothetical research inputs,
+not capital authorization. The optional `radar-paper-research.service` and timer
+are not installed or enabled by the existing recorder setup.
+
+Each slot publishes a synced begin record before calls and a terminal decision,
+failed or missed record afterward. A claimed slot without a terminal record is
+interrupted_unknown and is never retried. Future and storage-limited slots stay
+visible. No automatic deletion; the logical storage cap reserves 4 MiB per
+attempt. Capture/decision partial files are retained and never imply success.
+Vendor errors and credentials are not recorded. The campaign bytes are frozen;
+changes require another store. A private local file is not authenticated provenance.
+
+The service runs as guardian for the existing bridge's peer-UID check, and loads
+only the paper credential file. The worker separates reader and model environments.
+It neither submits orders nor scores complete cohorts yet. Use a verified new
+reader artifact and verify config/state ownership before provisioning these units;
+the installed earlier recorder binary does not contain the new proposal command.
+See [plan 0043](../docs/plans/0043-alpaca-research-campaign.md).
