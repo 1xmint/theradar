@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # 0030 — Retain broker cash checkpoints beside order claims
 
-**Status:** implementation complete; GitHub verification pending.
+**Status:** durable cash caller verified on GitHub; economic transitions/execution pending.
 
 Branch: feat/alpaca-durable-cash, based on 2c62e4c. All 14 jobs in
 `gh run view 38202895943 --json status,conclusion,jobs` passed on that base.
@@ -19,7 +19,7 @@ this turn connects provider reads to durable state. Tests/jobs run on GitHub.
 - [x] Refuse changed/disappeared history, unsupported new events, failed reads,
   cash mismatches and invalid checkpoint identity/time. Rejections retain the last
   baseline so late fees and valid new history can be reconciled later.
-- [ ] Verify ten new tests on GitHub: durable replay/idempotency, illegal history,
+- [x] Verify ten new tests on GitHub: durable replay/idempotency, illegal history,
   hash coverage, domain separation, sync failure, poison, actual caller deposits/
   late fees/read failures, retained-order claims and command credential refusal.
   First CI 38204170897 at b972e76 found the new BrokerCash stage missing from
@@ -31,15 +31,18 @@ this turn connects provider reads to durable state. Tests/jobs run on GitHub.
   (absent Default, unused arguments, dead code). Lint found three missing test
   statement semicolons; correct those and raise the observed test floor to 2782.
   Full verification of that repair remains pending; no mutation exclusions.
+  `gh run view 38204609543 --json status,conclusion,jobs` verified all 14 jobs
+  passed at 2ab0628. 2782 tests passed; 45 mutations caught, 14 compiler-unviable,
+  zero missed/timeouts. Inspected every shard and compiler reason; no exclusions.
 - [ ] Add durable economic claim transitions and pure equity risk, then wire the
   separate executor and supervisor/site handover for autonomous paper operation.
   Forward paper evidence and eligible explicit live setup gate real money later.
 
 ## Handback
 
-No actual broker account, credentials, order, deployment or activation. Tests and
-mutations passed at 486b762; the small lint/floor repair needs full GitHub checks.
-Inspect exact failures/mutations before claiming complete verification.
+No actual broker account, credentials, order, deployment or activation. Code at
+2ab0628 passed every job in CI 38204609543. This documentation follow-up records
+that evidence; inspect its own CI before advancing the parent branch.
 This is a durable observation baseline, not complete settlement, profit or
 available capital. All claims remain held and all authority flags remain false.
 The generic storage accepts caller-normalized facts; the private caller validates
