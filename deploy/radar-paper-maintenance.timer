@@ -1,0 +1,12 @@
+# SPDX-License-Identifier: Apache-2.0
+[Unit]
+Description=Radar paper maintenance cadence
+
+[Timer]
+OnBootSec=45s
+OnUnitInactiveSec=60s
+RandomizedDelaySec=3s
+Unit=radar-paper-maintenance.service
+
+[Install]
+WantedBy=timers.target
