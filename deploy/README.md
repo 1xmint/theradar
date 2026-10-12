@@ -1313,3 +1313,14 @@ Failed setup can leave installed files; inspect before any explicit upgrade.
 Do not run until the installer/bundle have passed GitHub verification. This
 neither authorizes orders nor changes the site's autonomous handover. See
 [plan 0044](../docs/plans/0044-alpaca-research-provisioning.md).
+
+The separate contextual campaign source uses `radar-context-research.service`
+and timer, the worker's fixed `--context-campaign` option, reader under
+`/usr/local/lib/radar-context-research`, config `/etc/radar/alpaca-context-research.json`
+and state `/var/lib/radar-paper-context`. It preserves the earlier installation
+and history. For `snapshot-context-v1` the worker first runs the read-only
+`alpaca-research-session` clock guard; the regular session must have room for
+capture/model deadlines plus the full forward horizon. Failed guards retain a
+failed slot and never call the model. These units are source only until verified
+provisioning; the earlier context release lacks the new guard command. See
+[plan 0049](../docs/plans/0049-alpaca-regular-campaign.md).

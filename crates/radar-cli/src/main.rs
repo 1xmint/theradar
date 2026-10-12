@@ -138,6 +138,7 @@ commands:
                                  re-derives the 850 bps constant and says
                                  whether it is fixed or proportional
   alpaca-read (paper account, positions and US equity market clock; credentials from environment)
+  alpaca-research-session --horizon-ms <positive-ms> (read-only regular-session research guard)
   alpaca-reconcile --account-id <expected-paper-account-id>
   alpaca-activities-read --account-id <paper-id> --max-pages <positive-u16>
   alpaca-cash-reconcile --journal <private-file> --account-id <paper-id> --baseline <activity-report> --max-pages <positive-u16>
@@ -952,6 +953,7 @@ fn main() -> ExitCode {
         "creator-index" => creator_index(&args),
         "dossier" => dossier::run(&args),
         "alpaca-read" => alpaca_read::run(&args),
+        "alpaca-research-session" => alpaca_session::run(&args),
         "alpaca-reconcile" => alpaca_reconcile::run(&args),
         "alpaca-activities-read" => alpaca_activities::run(&args),
         "alpaca-cash-reconcile" => alpaca_cash::run(&args),

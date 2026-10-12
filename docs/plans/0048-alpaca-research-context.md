@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # 0048 — Give the subscription analyst bounded historical snapshot context
 
-**Status:** Source prepared; GitHub verification pending. No deployment or activation.
+**Status:** Source verified on GitHub; no deployment or activation.
 
 Branch feat/alpaca-research-context from 9e0f3fe, stacked on PR 408. Previous
 turn added session/price bounds and repaired GitHub findings. Its repair run
@@ -21,7 +21,7 @@ artifacts and refusal diagnostics inspected. Test floor rises to observed 2831.
 - [x] Gate by capture availability, then recheck minute freshness at model completion.
 - [x] Retain original raw snapshot in the decision for replay/scoring validation.
 - [x] Keep context untrusted and explicitly incomplete; no execution authority.
-- [ ] Inspect GitHub build, tests, lint, format and mutation artifacts.
+- [x] Inspect GitHub build, tests, lint, format and mutation artifacts.
 - [ ] Schedule/deploy a separate regular-session campaign after verification.
 
 The installed quote-only campaign's first wait decision explicitly lacked
@@ -56,6 +56,15 @@ does not populate the execution kernel's capacity field or certify exit liquidit
 
 ## Handback
 
+Final source e5ecb060ae9266e42d1596890887debda465c7bc, GitHub run 38309801068:
+all 14 jobs passed, 2835 Rust and 47 Python tests; all nine exact context
+regressions and six prior exact regressions caught. Both systemd pairs verified.
+All four mutation artifacts inspected: 39 caught, nine compiler-unviable, no
+survivors or timeouts. Release 38309896074 succeeded at the same source; downloaded
+radar SHA-256 a9cdf8d91a261a1ccf01b36eeb6d076f5cec058b88d7f6ac5ca57afa91d9308b.
+This release does not yet include the next regular-session campaign guard.
+Parent head is kept stable; verified handback is committed on the next branch.
+
 Initial GitHub run 38308803627 completed with failures: the context injection
 test accidentally searched for words already present in the trusted instruction
 ("change permissions"). It now uses a unique injected marker and asserts that
@@ -80,7 +89,7 @@ Three new Rust unit tests cover exact/context time boundaries, malformed bars,
 versioned decision replay and completion-age refusal. Existing real CLI/provider
 process test now also proves missing context refuses before the model, valid
 context reaches the fenced prompt, and the decision preserves the original raw
-bars. GitHub verification pending; no workstation jobs, deployment or orders.
+bars. GitHub verification complete; no workstation jobs, deployment or orders.
 Next: separate regular-session forward cohort, longer historical feature series
 and held-out comparisons, alongside capacity/cost inputs, isolated supervision
 and website handover. Goal active; no measured profitable edge claimed.
