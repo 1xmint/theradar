@@ -1170,7 +1170,8 @@ radar-paper-market.timer; an already running worker may finish its bounded read.
 
 Snapshots accumulate in the private systemd StateDirectory radar-paper-tape,
 separate from manual captures. Collection pauses before exceeding 256 MiB or
-65,536 files; nothing is deleted. Sampling is roughly once a minute, including
+65,536 files; nothing is deleted. The byte cap measures file lengths; filesystem
+allocation and metadata can use more disk. Sampling is roughly once a minute, including
 closed sessions. IEX is partial coverage; quote presence is not a freshness,
 size-unit or executable-capacity guarantee. This enables research collection
 only and leaves trading disabled.
