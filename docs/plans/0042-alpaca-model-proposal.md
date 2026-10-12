@@ -33,6 +33,21 @@ mutation (now line 105 after formatting), requires the executed test to fail,
 and restores source in finally. It also reapplies the omitted-system-framing
 bug against a focused provider subprocess test. No workstation jobs ran.
 
+Correction 65f64c3 run 38283136600: all mutation shards and aggregate passed.
+Artifacts inspected: 23 caught, 12 compiler-unviable with the same reasons,
+zero missed/timeouts. Formatting requested two test layout changes; lint found
+one needless closure borrow. Applied the exact formatter and clippy suggestions;
+wait for the entire run before pushing so no verification job is cancelled.
+The run finished with 12 successful jobs, only fmt/lint failed. Tests job
+114924993892 passed 2817 Rust, 27 Python, 32 targeted Python mutations and
+systemd verification. Both exact regression reapplications were caught by
+executed focused tests. Source restoration completed normally.
+
+Runtime recheck via SSH found the recorder timer active/enabled, worker result
+success and ExecMainStatus=0. Three consecutive worker reports at availability
+1791825252808, 1791825315538 and 1791825378922 named distinct captures without
+unknown symbols/quotes. This verifies worker reports, not private file contents.
+
 ## Handback
 
 Official OpenAI [non-interactive mode](https://learn.chatgpt.com/docs/non-interactive-mode)

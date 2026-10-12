@@ -545,7 +545,11 @@ mod tests {
         let request = Request::new("trusted framing", "operator question")
             .observing("feed", "untrusted observation");
         let answer = codex.ask(&request).unwrap();
-        assert!(answer.text.starts_with("trusted framing\n\noperator question\n\n"));
+        assert!(
+            answer
+                .text
+                .starts_with("trusted framing\n\noperator question\n\n")
+        );
         assert!(answer.text.contains("untrusted observation"));
         assert_eq!(request.fences(), 2);
     }

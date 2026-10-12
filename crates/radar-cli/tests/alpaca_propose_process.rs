@@ -89,7 +89,14 @@ fn subscription_command_receives_instructions_and_only_records_valid_research() 
     let script = path("stub.sh");
     let prompt = path("prompt.txt");
     let reply = path("reply.json");
-    inputs(&capture, &experiment, &assumptions, &script, &prompt, &reply);
+    inputs(
+        &capture,
+        &experiment,
+        &assumptions,
+        &script,
+        &prompt,
+        &reply,
+    );
     let invoke = |daily: &str| -> Output {
         Command::new(env!("CARGO_BIN_EXE_radar"))
             .args(["alpaca-paper-propose", "--capture"])
@@ -110,7 +117,7 @@ fn subscription_command_receives_instructions_and_only_records_valid_research() 
             .output()
             .unwrap()
     };
-    refuse_bad_experiments(&experiment, &prompt, &invoke);
+    refuse_bad_experiments(&experiment, &prompt, invoke);
     assert!(!invoke("1.00").status.success());
     assert!(!prompt.exists());
     std::fs::write(
