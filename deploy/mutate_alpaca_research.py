@@ -23,6 +23,16 @@ mutations = [
     ('env=model_env', 'env=market_env'),
     ('read(capture, 1024 * 1024)', 'pass'),
     ('report.get("execution_authority") is not False', 'False'),
+    ('if plan["experiment"]["strategy_id"] == "snapshot-context-v1":\n            session = run',
+     'if False:\n            session = run'),
+    ('guard.get("environment") != "paper"', 'False'),
+    ('guard.get("execution_authority") is not False', 'False'),
+    ('guard.get("regular_session_eligible") is not True', 'False'),
+    ('type(guard.get("session_close_unix_ms")) is not int', 'False'),
+    ('guard["session_close_unix_ms"] <= 0', 'False'),
+    ('guard.get("horizon_ms") != plan["experiment"]["horizon_ms"]', 'False'),
+    ('type(outcome) is not int', 'False'),
+    ('outcome >= guard["session_close_unix_ms"]', 'outcome > guard["session_close_unix_ms"]'),
 ]
 for old, new in mutations:
     if old not in source:
@@ -33,7 +43,7 @@ for old, new in mutations:
         (target / "test_alpaca_research.py").write_text(tests)
         result = subprocess.run([sys.executable, "-m", "unittest", "discover", "-s", temporary,
                                  "-p", "test_alpaca_research.py"], capture_output=True, text=True)
-        if (result.returncode == 0 or "Ran 9 tests" not in result.stderr
+        if (result.returncode == 0 or "Ran 13 tests" not in result.stderr
                 or not any(marker in result.stderr for marker in ("FAIL: test_", "ERROR: test_"))
                 or "SyntaxError" in result.stderr or "ImportError" in result.stderr):
             print(result.stdout)

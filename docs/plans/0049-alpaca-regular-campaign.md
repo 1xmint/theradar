@@ -33,6 +33,10 @@ The worker checks this report for context experiments before market capture or
 model calls. Failure is retained as an ordinary failed scheduled slot; there is
 no retry or silent rescheduling. The model environment still excludes broker
 credentials. Existing quote-only experiments retain their two-command flow.
+After model completion, the retained decision's outcome watermark is checked
+against the guarded close again, so process/setup overhead cannot silently push
+an accepted outcome past close. A late/unknown horizon keeps its partial files
+and failed slot, without adopting the decision as valid campaign output.
 
 The fixed --context-campaign worker option selects a separate installation,
 config and state store. It does not accept arbitrary reader/config/store paths.
@@ -43,8 +47,23 @@ provisioning; no source-only unit is represented as running.
 ## Handback
 
 Prepared one Rust actual-collector test for timing/closure/failure boundaries,
-plus Python real-dispatch tests for guard order, invalid reports, credential
+plus four Python real-dispatch tests for guard order, invalid reports, credential
 separation and fixed entry paths. Run tests/build/lint/mutations on GitHub only.
 Do not deploy the parent e5ecb06 release for this worker: it lacks the session
 guard command. Next: inspect this branch's CI, produce its release, then stage
 the separate root provisioning and frozen campaign. No broker orders enabled.
+
+Initial run 38310848091 was still live when two runner-reported formatting
+hunks were repaired. Review also added a retained-completion horizon check and
+boundary tests. Wait for this run to finish before pushing these repairs.
+The Python mutation harness's fixed executed-test count also needs to rise from
+nine to thirteen with the new dispatch tests. Nine new targeted mutations cover
+guard omission, report fields and the post-completion close boundary. Rust
+mutation shards inspected: two caught, three compiler-unviable (main/run dead
+code and the research stub's unused arguments); shard 3 selected zero mutants
+and therefore produced no artifact. These are not skipped mutation diagnostics.
+The run then completed: Rust 2836 and Python 50 passed, but the mutation harness
+refused its old nine-test count after actually running twelve tests and catching
+the first injected bug. Repair count is thirteen, including the new completion
+test. All remaining initial jobs passed except the two formatting hunks. No
+workstation jobs, production changes or orders.

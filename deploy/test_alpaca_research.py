@@ -86,8 +86,12 @@ class ResearchTests(unittest.TestCase):
                 self.assertIn("RADAR_ALPACA_PAPER_SECRET_KEY", kwargs["env"])
                 self.assertEqual(kwargs["timeout"], 10)
                 return types.SimpleNamespace(stdout=json.dumps({"environment":"paper",
-                    "execution_authority":False,"regular_session_eligible":True,"horizon_ms":60000}))
-            return self.provider(argv, **kwargs)
+                    "execution_authority":False,"regular_session_eligible":True,"horizon_ms":60000,
+                    "session_close_unix_ms":1000000}))
+            result = self.provider(argv, **kwargs)
+            if argv[1] == "alpaca-paper-propose":
+                Path(argv[-1]).write_text('{"outcome_not_before_unix_ms":999999}')
+            return result
         self.assertEqual(self.tick(run=provider)["outcome"], "decision")
         self.assertEqual([call[0][1] for call in self.calls],
                          ["alpaca-research-session", "alpaca-market-read", "alpaca-paper-propose"])
@@ -97,20 +101,34 @@ class ResearchTests(unittest.TestCase):
     def test_context_bad_or_closed_session_never_calls_capture_or_model(self):
         self.plan["experiment"]["strategy_id"] = "snapshot-context-v1"
         self.config.write_text(json.dumps(self.plan))
-        for report in ({}, {"environment":"live","execution_authority":False,
-                           "regular_session_eligible":True,"horizon_ms":60000},
-                       {"environment":"paper","execution_authority":True,
-                        "regular_session_eligible":True,"horizon_ms":60000},
-                       {"environment":"paper","execution_authority":False,
-                        "regular_session_eligible":False,"horizon_ms":60000},
-                       {"environment":"paper","execution_authority":False,
-                        "regular_session_eligible":True,"horizon_ms":1}):
+        valid = {"environment":"paper","execution_authority":False,
+                 "regular_session_eligible":True,"horizon_ms":60000,"session_close_unix_ms":1000000}
+        for changes in ({"environment":"live"}, {"execution_authority":True},
+                        {"regular_session_eligible":False}, {"horizon_ms":1},
+                        {"session_close_unix_ms":None}, {"session_close_unix_ms":True},
+                        {"session_close_unix_ms":0}):
             def provider(argv, **kwargs):
                 self.assertEqual(argv[1], "alpaca-research-session")
-                return types.SimpleNamespace(stdout=json.dumps(report))
+                return types.SimpleNamespace(stdout=json.dumps(valid | changes))
             self.assertEqual(worker.attempt(self.store, "guard", self.plan, provider, {}), "failed")
             (self.store / "guard.experiment.json").unlink()
             (self.store / "guard.assumptions.json").unlink()
+
+    def test_context_completed_decision_cannot_extend_outcome_to_close(self):
+        self.plan["experiment"]["strategy_id"] = "snapshot-context-v1"
+        for outcome in (1000000, 1000001, None, True):
+            def provider(argv, **kwargs):
+                if argv[1] == "alpaca-research-session":
+                    return types.SimpleNamespace(stdout=json.dumps({"environment":"paper",
+                        "execution_authority":False,"regular_session_eligible":True,"horizon_ms":60000,
+                        "session_close_unix_ms":1000000}))
+                Path(argv[-1]).write_text(json.dumps({"outcome_not_before_unix_ms":outcome}))
+                return types.SimpleNamespace(stdout=json.dumps({"execution_authority":False,
+                                                               "record":{"decision_written":True}}))
+            self.assertEqual(worker.attempt(self.store, "late", self.plan, provider, {}), "failed")
+            self.assertTrue((self.store / "late.decision.json").exists())
+            for suffix in ("experiment", "assumptions", "capture", "decision"):
+                (self.store / ("late." + suffix + ".json")).unlink()
 
     def test_context_entry_uses_separate_fixed_paths_and_rejects_arbitrary_arguments(self):
         with patch.object(worker.sys, "argv", ["worker", "--context-campaign"]), \

@@ -169,6 +169,8 @@ def attempt(directory, prefix, plan, run, environment):
             guard = json.loads(session.stdout)
             if (guard.get("environment") != "paper" or guard.get("execution_authority") is not False
                     or guard.get("regular_session_eligible") is not True
+                    or type(guard.get("session_close_unix_ms")) is not int
+                    or guard["session_close_unix_ms"] <= 0
                     or guard.get("horizon_ms") != plan["experiment"]["horizon_ms"]):
                 raise ValueError("Research session not eligible")
         run([READER, "alpaca-market-read", "--symbols", plan["symbol"], "--output", str(capture)],
@@ -182,7 +184,11 @@ def attempt(directory, prefix, plan, run, environment):
         if (report.get("execution_authority") is not False
                 or report.get("record", {}).get("decision_written") is not True):
             raise ValueError("Invalid research response")
-        read(decision, 2 * 1024 * 1024)
+        retained = read(decision, 2 * 1024 * 1024)
+        if plan["experiment"]["strategy_id"] == "snapshot-context-v1":
+            outcome = json.loads(retained).get("outcome_not_before_unix_ms")
+            if type(outcome) is not int or outcome >= guard["session_close_unix_ms"]:
+                raise ValueError("Recorded research outcome reaches session close")
         sync(directory)
         return "decision"
     except (subprocess.SubprocessError, OSError, ValueError, TypeError, AttributeError):

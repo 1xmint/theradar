@@ -12,7 +12,8 @@ fn research(
         return Err("research horizon must be positive".into());
     }
     let raw = read()?;
-    let broker: Value = serde_json::from_str(&raw).map_err(|_| "invalid research session response")?;
+    let broker: Value =
+        serde_json::from_str(&raw).map_err(|_| "invalid research session response")?;
     let now = clock()?;
     let (_, close) = validate(&broker, now, 5000)?;
     // Bound the worker's 20-second capture and 100-second model deadlines,
@@ -36,7 +37,8 @@ pub(super) fn run(args: &[String]) -> Result<(), String> {
     };
     let horizon: u64 = horizon.parse().map_err(|_| "invalid research horizon")?;
     let key = super::alpaca_read::credential(std::env::var("RADAR_ALPACA_PAPER_KEY_ID").ok())?;
-    let secret = super::alpaca_read::credential(std::env::var("RADAR_ALPACA_PAPER_SECRET_KEY").ok())?;
+    let secret =
+        super::alpaca_read::credential(std::env::var("RADAR_ALPACA_PAPER_SECRET_KEY").ok())?;
     let agent = super::alpaca_read::agent();
     let report = research(
         horizon,
