@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # 0044 — Provision the verified research worker separately
 
-**Status:** GitHub-verified setup staged; awaiting owner sudo execution. No installation verified.
+**Status:** Owner installation completed; hashes, scheduling and first real model decision independently verified.
 
 Branch feat/alpaca-research-setup from e748281, stacked on PR 404. Previous
 goal turn made concrete progress: campaign worker verified, release built and
@@ -18,9 +18,20 @@ The fully autonomous trading goal remains active; this is research provisioning.
 - [x] Add GitHub tests and eight exact installer mutation reapplications.
 - [x] Inspect GitHub results and prepare owner-terminal setup command:
   4c733c5, run 38286704736.
-- [ ] Independently verify installed hashes, timer and real research attempts.
+- [x] Independently verify installed hashes, timer and first real research decision:
+  SSH inspection on 2026-10-12, retained evidence in plan 0045.
 
 ## Handback
+
+Update after owner execution: the installation and first scheduled linked-model
+decision were independently inspected over SSH. Binary hash matches the release;
+worker, service and timer hashes match exact 4c733c5 git bytes. Both recorder and
+research timers remain active; the research timer is enabled, and its worker
+Result=success/ExecMainStatus=0. First attempt retained a wait proposal, with
+actual quote, claim/completion times and frozen outcome horizon. This proves the
+unattended model path, not profit, live execution or complete cohort outcomes.
+See [runtime evidence and reporting](0045-alpaca-cohort-report.md). The earlier
+staging handback below describes the state before the owner ran setup.
 
 Code proof: 4c733c56efbad892beaa163bd7f8533a18944ecf, CI 38286704736
 passed all 14 jobs. Tests job 114936691467 passed 2817 Rust and 41 Python tests,

@@ -78,6 +78,7 @@ private-setup:
     setpriv --no-new-privs python3 deploy/mutate_alpaca_recorder.py
     setpriv --no-new-privs python3 deploy/mutate_alpaca_research.py
     setpriv --no-new-privs python3 deploy/mutate_alpaca_research_setup.py
+    setpriv --no-new-privs python3 deploy/mutate_alpaca_cohort.py
     systemd-analyze verify deploy/radar-paper-market.service deploy/radar-paper-market.timer
     systemd-analyze verify deploy/radar-paper-research.service deploy/radar-paper-research.timer
 

@@ -53,7 +53,8 @@ existing captures are never replaced. Replay without credentials using
 `radar alpaca-market-replay --input ./data/alpaca/capture-001.json --as-of-unix-ms <N>`.
 The replay gate uses host availability time, preserves missing symbols as null,
 and does not certify exchange timestamps, quote freshness or consolidated coverage.
-These are operator tools; unattended scheduling and execution are still pending.
+The commands are operator tools. A separate bounded recorder schedules research
+captures; autonomous broker execution remains pending.
 
 `radar alpaca-quote --input ./data/alpaca/capture-001.json --symbol SPY --as-of-unix-ms <N> --max-age-ms 1000 --max-spread-bps 10`
 checks a captured quote against explicit age/spread bounds, the capture's requested
@@ -100,9 +101,20 @@ cutoff starts the evaluation horizon; there are no pre-answer simulated fills.
 The caller requires explicit unlimited subscription allowance with an adequate
 per-call bound. Finite daily allowances need shared durable metering first; paid
 API providers cannot use this path. No credentials are handled by this caller.
-Malformed/late/failed answers refuse without creating a decision; these failures
-still need durable cohort retention. There is no scheduler, automatic deployment,
-verified model edge or execution authority from this command.
+Malformed/late/failed answers refuse without creating a decision. The separate
+research worker retains scheduled attempts, including failures, under a frozen
+campaign; see [research provisioning](docs/plans/0044-alpaca-research-provisioning.md).
+There is no verified model edge or execution authority from this command.
+
+`python3 deploy/report-alpaca-cohort.py <research-store> <capture-tape> <as-of-unix-ms>`
+reports every planned slot, including failed, missed, interrupted and unrecorded
+attempts. Completed decisions are compared at their exact frozen horizons using
+the latest capture available by that horizon. Ties or absent/invalid exit quotes
+remain unscoreable. Scoring uses the separately installed research CLI and receives
+no brokerage credentials. This is a manual read-only report, not an installed
+scoring service. Overlapping hypothetical outcomes are not added into portfolio
+profit; aggregate profit remains unknown. Local records do not authenticate model
+provenance. See [cohort evaluation](docs/plans/0045-alpaca-cohort-report.md).
 
 `radar alpaca-reconcile --account-id <expected-paper-account-id>` pins the account
 identity and brackets positions/market-clock reads with account and open-order
