@@ -1300,3 +1300,16 @@ It neither submits orders nor scores complete cohorts yet. Use a verified new
 reader artifact and verify config/state ownership before provisioning these units;
 the installed earlier recorder binary does not contain the new proposal command.
 See [plan 0043](../docs/plans/0043-alpaca-research-campaign.md).
+
+`setup-alpaca-research.py` provisions this separately under
+`/usr/local/lib/radar-research`, preserving the old recorder binary/hash. It
+requires the verified `/tmp/radar-research.new` and exact-member
+`/tmp/radar-research-bundle.tar` with the bundle SHA-256 as its sole argument.
+The bundle contains the worker, service, timer and research JSON example. Setup
+sets the example start two minutes ahead, probes the service and enables the
+timer for twelve research attempts under the existing unlimited subscription
+allowance. It refuses existing targets and never overwrites or deletes history.
+Failed setup can leave installed files; inspect before any explicit upgrade.
+Do not run until the installer/bundle have passed GitHub verification. This
+neither authorizes orders nor changes the site's autonomous handover. See
+[plan 0044](../docs/plans/0044-alpaca-research-provisioning.md).

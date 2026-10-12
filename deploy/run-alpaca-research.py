@@ -12,7 +12,7 @@ import subprocess
 import sys
 import time
 
-READER = "/usr/local/lib/radar-paper/radar"
+READER = "/usr/local/lib/radar-research/radar"
 STORE = Path("/var/lib/radar-paper-research")
 CONFIG = Path("/etc/radar/alpaca-research.json")
 MAX_BYTES = 256 * 1024 * 1024
