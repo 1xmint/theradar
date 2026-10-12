@@ -12,6 +12,7 @@ use radar_asof::AsOf;
 use radar_instruments::{Context, CreatorHistory, CreatorTrackRecord, Registry, SimulateExit};
 mod alpaca_activities;
 mod alpaca_assets;
+mod alpaca_cancel;
 mod alpaca_cash;
 mod alpaca_decision;
 mod alpaca_exposure;
@@ -141,6 +142,7 @@ commands:
   alpaca-cash-checkpoint --journal <private-file> --account-id <paper-id> --max-pages <positive-u16>
   alpaca-order-reconcile --journal <private-file> --account-id <paper-id> --client-order-id <retained-id> --max-pages <positive-u16>
   alpaca-order-read --account-id <expected-paper-account-id> --client-order-id <retained-id> [--journal <private-file>]
+  alpaca-paper-cancel --journal <private-file> --account-id <paper-id> --client-order-id <retained-id>
   alpaca-order-reserve --journal <private-file> --account-id <paper-id> --intent <typed-intent>
   alpaca-order-preflight --journal <private-file> --intent <typed-intent> --policy <private-policy> --max-pages <positive-u16>
   alpaca-paper-submit --journal <private-file> --intent <typed-intent> --policy <private-policy> --max-pages <positive-u16>
@@ -954,6 +956,7 @@ fn main() -> ExitCode {
         "alpaca-cash-checkpoint" => alpaca_cash::checkpoint_run(&args),
         "alpaca-order-reconcile" => alpaca_fills::run(&args),
         "alpaca-order-read" => alpaca_order_read::run(&args),
+        "alpaca-paper-cancel" => alpaca_cancel::run(&args),
         "alpaca-order-preflight" | "alpaca-paper-submit" => alpaca_preflight::run(&args),
         "alpaca-order-reserve" | "alpaca-order-journal" => alpaca_journal::run(&args),
         "alpaca-assets-read" => alpaca_assets::run(&args),
