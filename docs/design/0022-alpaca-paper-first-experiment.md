@@ -157,7 +157,8 @@ and alpaca-order-journal. Reserved and SubmissionUnknown both retain their full
 claim. Client IDs bind immutable intents; a repeated reservation never creates
 another claim or resets uncertainty. The library persists uncertainty before an
 effect and invokes it with the retained intent, then refuses another submission
-even after an error/restart. No production order-submission caller exists yet.
+even after an error/restart. The private paper submission caller is described
+below; actual unknown risk inputs still prevent it from releasing an effect.
 Uncertain writes poison the current owner; torn, mixed-domain and invalid replay
 refuse. Existing ownership/hash-chain storage is reused, with no new broker bytes
 in historical hashes when absent. These controls establish ordering and identity,
@@ -325,3 +326,15 @@ their kernel inputs are absent and orders remain refused. Session timestamps,
 price/quantity increments, actual-response verification, effective site handover,
 revocation and isolated execution are still required before activation. See
 [equity risk work](../plans/0033-alpaca-equity-risk.md).
+
+`radar alpaca-paper-submit` uses the same collector and protected journal owner
+as preflight. It checks deterministic risk, re-decodes the serialized request
+against the opaque authorization, durably reserves the intent, and records
+submission uncertainty before any network effect. It reloads owner policy/time
+after those writes, checks the original permission and re-evaluates the aged
+provider facts under the latest policy before the fixed paper-only POST. A
+matching response is neither reconciled fills nor permission to retry/release.
+Actual capacity/cost inputs remain unknown and refuse before reservation. This
+private CLI process is not yet an isolated authenticated execution service or
+unattended supervisor; site handover, cancellation/recovery and forward evaluation
+remain required. See [paper submission](../plans/0034-alpaca-paper-submit.md).

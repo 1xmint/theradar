@@ -1,10 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 //! The operator command line.
 //!
-//! Everything here reads live state and computes nothing it does not have. The
-//! point is that `radar-cli` can never be stale: it opens the store and reports
-//! what is actually in it, so a claim about what Radar has recorded is checkable
-//! rather than remembered.
+//! Readers report captured facts rather than remembered state. The private
+//! paper submission command additionally requires directly collected broker
+//! facts, deterministic risk and durable journal ordering before any effect.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::process::ExitCode;
@@ -24,6 +23,7 @@ mod alpaca_preflight;
 mod alpaca_quote;
 mod alpaca_read;
 mod alpaca_reconcile;
+mod alpaca_submit;
 mod audit;
 mod basis;
 mod brief;
@@ -140,6 +140,7 @@ commands:
   alpaca-order-read --account-id <expected-paper-account-id> --client-order-id <retained-id> [--journal <private-file>]
   alpaca-order-reserve --journal <private-file> --account-id <paper-id> --intent <typed-intent>
   alpaca-order-preflight --journal <private-file> --intent <typed-intent> --policy <private-policy> --max-pages <positive-u16>
+  alpaca-paper-submit --journal <private-file> --intent <typed-intent> --policy <private-policy> --max-pages <positive-u16>
   alpaca-order-journal --journal <private-file> --account-id <paper-id>
   alpaca-assets-read --account-id <paper-id> --symbols SPY,QQQ
   alpaca-market-read --symbols SPY,QQQ --output <new-capture-file>
@@ -942,7 +943,7 @@ fn main() -> ExitCode {
         "alpaca-cash-checkpoint" => alpaca_cash::checkpoint_run(&args),
         "alpaca-order-reconcile" => alpaca_fills::run(&args),
         "alpaca-order-read" => alpaca_order_read::run(&args),
-        "alpaca-order-preflight" => alpaca_preflight::run(&args),
+        "alpaca-order-preflight" | "alpaca-paper-submit" => alpaca_preflight::run(&args),
         "alpaca-order-reserve" | "alpaca-order-journal" => alpaca_journal::run(&args),
         "alpaca-assets-read" => alpaca_assets::run(&args),
         "alpaca-market-read" | "alpaca-market-replay" => alpaca_market::run(&args),
