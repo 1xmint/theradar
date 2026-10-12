@@ -65,6 +65,17 @@ All four mutation shards stopped at that same failing unmutated baseline;
 no mutation result is claimed. Build, MSRV, site, web, licence and cargo-deny
 passed. Repair verification must complete before deployment.
 
+Repair source dd2fb8e, run 38309254603: build, MSRV, lint, format, web, site,
+licence and cargo-deny passed. All four mutation artifacts inspected: 48 tested,
+30 caught, nine missed and nine compiler-unviable (unused/dead code, unsigned
+type-limit comparisons and missing Request Default). The nine survivors are
+all OHLC range predicates at original alpaca_context.rs:48 columns 12, 19, 26,
+34, 42 and 57. A new test independently exercises each open/close equality and
+outside bound for both bars. The regression script reapplies all nine exact
+predicates and requires an executed failing focused test, restoring source
+bytes in finally. No exclusions added. The full test job was still live when
+these repairs were prepared; do not push over it. No new source is deployed.
+
 Three new Rust unit tests cover exact/context time boundaries, malformed bars,
 versioned decision replay and completion-age refusal. Existing real CLI/provider
 process test now also proves missing context refuses before the model, valid

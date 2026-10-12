@@ -135,6 +135,26 @@ mod tests {
     }
 
     #[test]
+    fn ohlc_edges_accept_equality_and_reject_each_outside_price() {
+        let at = 1_791_813_600_000;
+        for period in ["minuteBar", "prevDailyBar"] {
+            for field in ["o", "c"] {
+                for edge in [99, 102] {
+                    let mut exact = raw();
+                    for (name, value) in [("l", 99), ("h", 102), ("o", 100), ("c", 101)] {
+                        exact["SPY"][period][name] = json!(value);
+                    }
+                    exact["SPY"][period][field] = json!(edge);
+                    validate(&exact.to_string(), "SPY", at, at, 1000).unwrap();
+                    let outside = if edge == 99 { 98 } else { 103 };
+                    exact["SPY"][period][field] = json!(outside);
+                    assert!(validate(&exact.to_string(), "SPY", at, at, 1000).is_err());
+                }
+            }
+        }
+    }
+
+    #[test]
     fn future_incomplete_or_malformed_bars_refuse() {
         let at = 1_791_813_600_000;
         for (period, field, value) in [
