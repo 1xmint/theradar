@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # 0046 — Cancel retained paper orders without inferring settlement
 
-**Status:** Implementation prepared; GitHub verification pending. Activation remains closed.
+**Status:** Implemented and GitHub verified; not deployed. Activation remains closed.
 
 Branch feat/alpaca-paper-cancel from 6028241, stacked on PR 406. Previous goal
 turn made concrete progress: installed research worker verified, actual model
@@ -17,7 +17,7 @@ inspected. The fully autonomous trading goal remains active.
 - [x] Persist cancellation uncertainty before DELETE; retain claims and no retry.
 - [x] Replay cancellation transitions without changing submission state or old hashes.
 - [x] Bind subsequent checkpoints to the cancellation's broker order identity.
-- [ ] Inspect GitHub build, tests, lint, formatting and mutation diagnostics.
+- [x] Inspect GitHub build, tests, lint, formatting and mutation diagnostics.
 - [ ] Complete isolated supervisor, verified execution inputs and website handover.
 
 ## Boundary
@@ -54,7 +54,7 @@ claimed by these tests; no deployed order was observed to exist.
 Source prepared. Eight new Rust tests cover actual CLI dispatch, supported and
 rejected broker observations, durable-before-effect ordering, response loss,
 restart/refusal, unchanged claims, checkpoint identity and poisoned persistence.
-Tests and mutation reapplications run on GitHub only; results pending. The test
+Tests and mutation reapplications run on GitHub only. The test
 floor rises to the first run's observed 2824, not an inferred new count.
 Real research outcome report requested in the prior turn remains pending;
 independent replay of slot one's retained capture returned quote exceeds
@@ -77,4 +77,31 @@ replay check. New focused test appends an intact-hash final cancellation against
 either a different broker ID or an already-terminal checkpoint; both must
 refuse. Added GitHub-only exact predicate reapplication requiring this executed
 test to fail, with source bytes restored in finally. No exclusion added.
-Repair verification remains pending; no cancellation deployment or broker effect.
+Repair verification is recorded below; no cancellation deployment or broker effect.
+
+Repair source 0ef633afbb02f3069c63897ef4f9c4fdd4a6655b, GitHub run
+38306187381 passed all 14 jobs, inspected. Tests job 115000696684 passed
+2825 Rust tests and 47 Python tests. Exact cancellation replay reapplication
+broker.rs:251:88 caught by the executed focused test. Both existing exact
+subscription regressions caught; 9 cohort, 12 campaign, 8 installer and 32 prior
+Python reapplications caught. Both systemd unit pairs verified.
+All four mutation shards inspected, 54 total, 38 caught,
+16 compiler-unviable, no missed or timed-out mutants. Compiler refusals were
+unused/dead code or arguments, unreachable statements, and missing Default
+implementations for BrokerLog, Applied or generic T. They are not test kills.
+Build, MSRV, lint, format, web, site, license and dependency checks passed.
+No workstation jobs, broker effects, deployment or activation.
+
+Independent VPS read at 20:44 UTC found slot zero decision and slots one through
+three failed. Replaying each failed slot's retained capture with the installed
+alpaca-quote command at its own availability watermark, max age 120000 ms and
+max spread 20 bps returned quote exceeds configured age. Both recorder and
+research timers remained active. These are retained failures, not skipped
+observations or retries. Complete cohort outcome report remains pending.
+
+Draft PR 407 attached, stacked on PR 406. Documentation handback commits are
+separate from the code proof above. Next: close the actual execution-input gaps
+and isolated supervisor/site handover; obtain complete fixed-horizon cohort
+results and improve the quote-only research baseline with usable historical
+signals and held-out comparisons. No measured profitable edge is claimed.
+The fully autonomous trading goal remains active.
