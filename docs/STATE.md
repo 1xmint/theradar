@@ -37,6 +37,11 @@ strict output; no actual model run is claimed. Complete scheduled cohorts,
 durable failed-attempt records and held-out/forward evaluation remain incomplete.
 See [plan 0041](plans/0041-alpaca-forward-decision.md) and
 [plan 0042](plans/0042-alpaca-model-proposal.md).
+An optional scheduled research worker now freezes a campaign and retains each
+slot as decision, failed, missed or interrupted_unknown, without automatic retry.
+GitHub verifies its schedule/persistence/credential boundaries; it is not yet
+installed or enabled. Cost-aware cohort scoring and actual model runs remain
+unverified. See [plan 0043](plans/0043-alpaca-research-campaign.md).
 No actual broker orders, effective autonomous handover or Alpaca learning results
 have been verified. The autonomous goal remains incomplete.
 
