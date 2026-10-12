@@ -13,6 +13,20 @@ fn baseline() -> Value {
         "read_started_unix_secs":1,"read_completed_unix_secs":2})
 }
 
+fn refused(args: &[&str], expected: &str) {
+    let output = Command::new(env!("CARGO_BIN_EXE_radar"))
+        .args(args)
+        .env_remove("RADAR_ALPACA_PAPER_KEY_ID")
+        .env("RADAR_ALPACA_PAPER_SECRET_KEY", "sentinel-private-secret")
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert_eq!(output.stdout, Vec::<u8>::new());
+    let error = String::from_utf8(output.stderr).unwrap();
+    assert!(error.contains(expected), "{error}");
+    assert!(!error.contains("sentinel-private-secret"));
+}
+
 #[test]
 fn cash_command_requires_existing_claims_valid_baseline_and_private_paper_credentials() {
     let directory = tempfile::tempdir().unwrap();
@@ -66,17 +80,7 @@ fn cash_command_requires_existing_claims_valid_baseline_and_private_paper_creden
     ] {
         let mut args = base.clone();
         args[index] = replacement;
-        let output = Command::new(env!("CARGO_BIN_EXE_radar"))
-            .args(args)
-            .env_remove("RADAR_ALPACA_PAPER_KEY_ID")
-            .env("RADAR_ALPACA_PAPER_SECRET_KEY", "sentinel-private-secret")
-            .output()
-            .unwrap();
-        assert!(!output.status.success());
-        assert_eq!(output.stdout, Vec::<u8>::new());
-        let error = String::from_utf8(output.stderr).unwrap();
-        assert!(error.contains(expected), "{error}");
-        assert!(!error.contains("sentinel-private-secret"));
+        refused(&args, expected);
     }
     let mut future = baseline();
     future["read_completed_unix_secs"] = json!(u64::MAX);
@@ -92,34 +96,14 @@ fn cash_command_requires_existing_claims_valid_baseline_and_private_paper_creden
         ),
     ] {
         std::fs::write(&input, body).unwrap();
-        let output = Command::new(env!("CARGO_BIN_EXE_radar"))
-            .args(&base)
-            .env_remove("RADAR_ALPACA_PAPER_KEY_ID")
-            .env_remove("RADAR_ALPACA_PAPER_SECRET_KEY")
-            .output()
-            .unwrap();
-        assert!(!output.status.success());
-        assert_eq!(output.stdout, Vec::<u8>::new());
-        let error = String::from_utf8(output.stderr).unwrap();
-        assert!(error.contains(expected), "{error}");
-        assert!(!error.contains("sentinel-private-secret"));
+        refused(&base, expected);
     }
     for args in [vec!["alpaca-cash-reconcile"], {
         let mut args = base;
         args.extend(["--url", "https://api.alpaca.markets"]);
         args
     }] {
-        let output = Command::new(env!("CARGO_BIN_EXE_radar"))
-            .args(args)
-            .output()
-            .unwrap();
-        assert!(!output.status.success());
-        assert_eq!(output.stdout, Vec::<u8>::new());
-        assert!(
-            String::from_utf8(output.stderr)
-                .unwrap()
-                .contains("usage: radar alpaca-cash-reconcile")
-        );
+        refused(&args, "usage: radar alpaca-cash-reconcile");
     }
     assert!(!missing_path.exists());
 }

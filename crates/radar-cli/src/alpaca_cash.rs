@@ -74,7 +74,7 @@ fn snapshot(report: &Value, expected: &str) -> Result<Snapshot, String> {
     })
 }
 
-fn load(path: &str, expected: &str) -> Result<Snapshot, String> {
+fn load(path: &str, expected: &str, now: u64) -> Result<Snapshot, String> {
     let file = std::fs::File::open(path).map_err(|_| "paper cash baseline unavailable")?;
     let mut bytes = Vec::new();
     file.take(MAX_BASELINE_BYTES + 1)
@@ -85,7 +85,11 @@ fn load(path: &str, expected: &str) -> Result<Snapshot, String> {
     }
     let value: Value =
         serde_json::from_slice(&bytes).map_err(|_| "invalid paper cash baseline JSON")?;
-    snapshot(&value, expected)
+    let baseline = snapshot(&value, expected)?;
+    if baseline.read_completed_unix_secs > now {
+        return Err("paper cash baseline is in the future".into());
+    }
+    Ok(baseline)
 }
 
 fn signed(text: &str) -> Result<i128, String> {
@@ -307,10 +311,7 @@ pub(super) fn run(args: &[String]) -> Result<(), String> {
     };
     let max_pages = super::alpaca_activities::page_limit(pages)?;
     let log = recovery::open_existing(path, expected)?;
-    let baseline = load(input, expected)?;
-    if baseline.read_completed_unix_secs > super::wallet_read::now()? {
-        return Err("paper cash baseline is in the future".into());
-    }
+    let baseline = load(input, expected, super::wallet_read::now()?)?;
     let key = super::alpaca_read::credential(std::env::var("RADAR_ALPACA_PAPER_KEY_ID").ok())?;
     let secret =
         super::alpaca_read::credential(std::env::var("RADAR_ALPACA_PAPER_SECRET_KEY").ok())?;
@@ -434,6 +435,18 @@ mod tests {
         assert_eq!(bounds(-1), (-1, 0));
         assert_eq!(bounds(SCALE), (1, 1));
         assert_eq!(bounds(-SCALE), (-1, -1));
+        let empty = snapshot(&report("0", json!([]), 1, 1), "paper-id").unwrap();
+        let zero = snapshot(&report("0", json!([]), 2, 2), "paper-id").unwrap();
+        assert_eq!(
+            delta(&empty, &zero, &BTreeMap::new()).unwrap()["observed_cash_nanos"],
+            "0"
+        );
+        let mut tiny_buy = fill(BrokerSide::Buy);
+        tiny_buy["qty"] = json!("0.000000001");
+        tiny_buy["price"] = json!("0.1");
+        let negative_fraction =
+            snapshot(&report("0", json!([tiny_buy]), 2, 2), "paper-id").unwrap();
+        assert!(delta(&empty, &negative_fraction, &bindings()).is_err());
         let base = snapshot(&report("1", json!([]), 1, 1), "paper-id").unwrap();
         for side in [BrokerSide::Buy, BrokerSide::Sell] {
             let mut event = fill(side);
@@ -779,19 +792,26 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("baseline.json");
         let name = path.to_str().unwrap();
-        assert!(load(name, "paper-id").is_err());
+        assert!(load(name, "paper-id", 2).is_err());
         std::fs::write(&path, "sentinel-private-secret").unwrap();
         assert_eq!(
-            load(name, "paper-id").err().unwrap(),
+            load(name, "paper-id", 2).err().unwrap(),
             "invalid paper cash baseline JSON"
         );
         let valid = report("500", json!([prior()]), 1, 2).to_string();
+        std::fs::write(&path, &valid).unwrap();
+        assert!(load(name, "paper-id", 2).is_ok());
+        assert!(load(name, "paper-id", 3).is_ok());
+        assert_eq!(
+            load(name, "paper-id", 1).err().unwrap(),
+            "paper cash baseline is in the future"
+        );
         let padding = usize::try_from(MAX_BASELINE_BYTES).unwrap() - valid.len();
         std::fs::write(&path, format!("{valid}{}", " ".repeat(padding))).unwrap();
-        assert!(load(name, "paper-id").is_ok());
+        assert!(load(name, "paper-id", 2).is_ok());
         std::fs::write(&path, format!("{valid}{}", " ".repeat(padding + 1))).unwrap();
         assert_eq!(
-            load(name, "paper-id").err().unwrap(),
+            load(name, "paper-id", 2).err().unwrap(),
             "paper cash baseline exceeds 16 MiB"
         );
     }

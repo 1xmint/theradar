@@ -26,6 +26,16 @@ regression repair and verified tests/mutations. All jobs run on GitHub.
   observed floor from 2763 to 2772. Cover both sides, signed fractional bounds,
   changed/missing/unknown history, baseline shape/size/time, multiorder ownership,
   duplicate broker IDs, every read failure, exact arithmetic and private setup.
+  First CI 38201628804 at e79f641 passed 2772 tests and build/web/site/MSRV/
+  dependency/license/format jobs. Lint found a 107-line process test; share its
+  repeated refusal assertions rather than bypass the lint. Mutations: 80 caught,
+  24 compiler-unviable, three survivors. Inspected every unviable reason and the
+  exact diffs at alpaca_cash.rs:214:14 (floor < 0 to == / <=) and :311:42
+  (future-baseline > to >=). Add valid zero cash and negative fractional cash
+  cases. Move the same future predicate into the loader with an explicit host
+  cutoff so equal/past/future boundaries are deterministic tests. Reverify on
+  GitHub; no exclusions or cancellations. Unviable cases were unused/dead code,
+  absent Default and ambiguous numeric types after deleted match arms.
 - [ ] Connect protected durable baseline/checkpoints and economic claim transitions
   with restart/error replay; late events/corrections must remain recoverable.
 - [ ] Complete pure equity risk, isolated executor, supervisor/site handover and
@@ -40,6 +50,7 @@ alpaca-activities-read JSON report in protected operator storage, not authentica
 provenance or a durable checkpoint. Cash-flow consistency is not measured P&L.
 Initial new nontrade support deliberately covers CSD, CSW and FEE; other new types
 refuse visibly. Actual broker precision/booking and late fees remain to verify.
-The next action is GitHub verification and exact failure/mutation repair, then
+The first GitHub run found the lint/test gaps recorded above; repairs are in
+source and await full reverification. The next action is verification, then
 durable economic state and the executor. The owner still needs to create the
 paper account for actual responses; independent implementation remains available.
