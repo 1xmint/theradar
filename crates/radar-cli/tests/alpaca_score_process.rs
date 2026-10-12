@@ -22,9 +22,14 @@ fn score_cli_gates_capture_availability_and_charges_explicit_costs_without_keys(
             "available_at_unix_ms":time,"symbols":["SPY"],"raw_response":raw.to_string()});
         std::fs::write(path, capture.to_string()).unwrap();
     }
-    std::fs::write(&assumptions, json!({"model_id":"explicit-test","displayed_size_unit":"shares",
+    std::fs::write(
+        &assumptions,
+        json!({"model_id":"explicit-test","displayed_size_unit":"shares",
         "participation_bps":1_000,"slippage_bps_per_side":1,"fee_per_side_microusd":7,
-        "max_quote_age_ms":1_000,"max_spread_bps":10}).to_string()).unwrap();
+        "max_quote_age_ms":1_000,"max_spread_bps":10})
+        .to_string(),
+    )
+    .unwrap();
     for (entry_at, quantity, symbol, expected) in [
         (at, "1000000000", "SPY", None),
         (
@@ -62,7 +67,7 @@ fn score_cli_gates_capture_availability_and_charges_explicit_costs_without_keys(
             .unwrap();
         if let Some(error) = expected {
             assert!(!output.status.success());
-            assert!(output.stdout.is_empty());
+            assert_eq!(output.stdout, Vec::<u8>::new());
             assert!(String::from_utf8(output.stderr).unwrap().contains(error));
         } else {
             assert!(

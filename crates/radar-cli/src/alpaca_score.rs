@@ -70,11 +70,12 @@ fn score(
             .div_ceil(1_000_000_000),
     )?;
     let exit_value = bounded(
-        u128::from(quantity) * u128::from(amount(exit, "bid_microusd_per_share")?)
-            / 1_000_000_000,
+        u128::from(quantity) * u128::from(amount(exit, "bid_microusd_per_share")?) / 1_000_000_000,
     )?;
     let slippage = |value: u64| {
-        bounded((u128::from(value) * u128::from(assumptions.slippage_bps_per_side)).div_ceil(10_000))
+        bounded(
+            (u128::from(value) * u128::from(assumptions.slippage_bps_per_side)).div_ceil(10_000),
+        )
     };
     let entry_slippage = slippage(entry_value)?;
     let exit_slippage = slippage(exit_value)?;
@@ -88,7 +89,8 @@ fn score(
         .ok_or("paper cost overflow")?;
     let gross = i128::from(exit_value) - i128::from(entry_value);
     let net = gross - i128::from(costs);
-    Ok(json!({"version":1,"venue":"alpaca","environment":"offline_simulation",
+    Ok(
+        json!({"version":1,"venue":"alpaca","environment":"offline_simulation",
         "symbol":entry["symbol"],"quantity_nanoshares":quantity.to_string(),
         "entry_as_of_unix_ms":entry_at,"exit_as_of_unix_ms":exit_at,
         "entry_quote":entry,"exit_quote":exit,"assumptions":assumptions,
@@ -97,7 +99,8 @@ fn score(
         "entry_slippage_microusd":entry_slippage.to_string(),"exit_slippage_microusd":exit_slippage.to_string(),
         "fees_microusd":fees.to_string(),"extra_cost_microusd":costs.to_string(),
         "gross_pnl_microusd":gross.to_string(),"net_pnl_microusd":net.to_string(),
-        "realized_broker_pnl":false,"execution_authority":false}))
+        "realized_broker_pnl":false,"execution_authority":false}),
+    )
 }
 
 pub(super) fn run(args: &[String]) -> Result<(), String> {
@@ -167,7 +170,8 @@ mod tests {
             .replace("100.01", "102")
             .replace("\"bp\":100,", "\"bp\":101.99,");
         let exit =
-            super::super::alpaca_quote::validate(&later, "SPY", at + 1_000, at + 1_000, 0, 100).unwrap();
+            super::super::alpaca_quote::validate(&later, "SPY", at + 1_000, at + 1_000, 0, 100)
+                .unwrap();
         (entry, exit)
     }
 

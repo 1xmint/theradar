@@ -67,3 +67,13 @@ paper fills as verification. No credentials, network, service change or orders.
 
 Next: score recorded forward decisions and matched baselines, resolve actual
 execution inputs, protected broker supervisor/recovery, and website handover.
+
+Initial verification at 66742ad: GitHub run 38271926517 completed all 14 jobs.
+Twelve passed, including 2,810 Rust tests, 27 Python tests and all 32 targeted
+Python mutations. Formatting and one assert_is_empty lint failed; the exact
+formatter changes and explicit empty-vector assertion are corrected for rerun.
+All four Rust mutation artifacts were inspected: 38 caught, seven compiler
+unviable, zero missed or timed out. Main replacement caused denied dead code;
+amount replacements caused unused quote/field; bounded replacements unused
+value; score replacement unused json/arguments and dead helpers; run replacement
+unused Path/args and dead helpers. These are compiler refusals, not test kills.
