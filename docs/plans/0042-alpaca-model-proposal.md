@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # 0042 — Linked subscription equity research proposals
 
-**Status:** In progress; no live model run or trading authority.
+**Status:** GitHub-verified research caller; not deployed, no live model run or trading authority.
 
 Branch feat/alpaca-model-proposal from d83f8f6, stacked on PR 402. Previous goal
 turn completed GitHub-verified forward decision recording and matched scoring.
@@ -15,7 +15,7 @@ turn completed GitHub-verified forward decision recording and matched scoring.
 - [x] Require explicit unlimited subscription allowance and per-call adequacy;
   finite daily budgets need a shared durable meter, not a per-process reset.
 - [x] Add real command/provider subprocess tests with deterministic GitHub stubs.
-- [ ] Inspect all GitHub jobs and mutation diagnostics.
+- [x] Inspect all GitHub jobs and mutation diagnostics: b0a4271, run 38283680965.
 
 Initial code a43bd5a CI 38282204500 finished with 11 successful jobs, formatting
 failure and a mutation survivor (shard 3 and aggregate failed). Tests passed
@@ -49,6 +49,23 @@ success and ExecMainStatus=0. Three consecutive worker reports at availability
 unknown symbols/quotes. This verifies worker reports, not private file contents.
 
 ## Handback
+
+Code proof: b0a42715f0ff32a488395dd0439a5bbe6b3b0d35, GitHub run
+38283680965 passed all 14 jobs. Tests job 114926799236 passed 2817 Rust and
+27 Python tests, 32 targeted Python mutation catches, systemd verification and
+both exact regression reapplications. All four mutation artifacts and unviable
+compiler reasons inspected: 23 caught, 12 compiler-unviable, zero misses/timeouts.
+Draft PR 403 is attached and stacked on PR 402. No exclusions added.
+
+No release, VPS binary replacement, actual model invocation or broker order.
+The running recorder continues to use its earlier verified reader. This handback
+changes documentation only; later documentation CI is separate from code proof.
+Next: schedule complete model research cohorts with durable failure records,
+fresh captures and cost-aware outcomes. Then finish executable broker capacity/
+cost evidence, isolated submission/recovery/cancellation and effective website
+handover with the owner's Agent decides controls before unattended paper orders.
+Live-money readiness and positive expectancy remain unverified. The overall
+autonomous-trading goal is incomplete; this increment made concrete progress.
 
 Official OpenAI [non-interactive mode](https://learn.chatgpt.com/docs/non-interactive-mode)
 confirms exec stdin/final-stdout and saved CLI authentication. Reuse the existing
