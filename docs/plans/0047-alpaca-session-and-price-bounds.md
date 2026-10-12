@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # 0047 — Bind paper permission to validated broker session and price increments
 
-**Status:** Source prepared; GitHub verification pending. Trading remains disabled.
+**Status:** Implemented and GitHub verified; not deployed. Trading remains disabled.
 
 Branch feat/alpaca-session-bounds from 926b746, stacked on PR 407. Previous turn
 implemented private cancellation, source 0ef633a verified by GitHub run
@@ -17,7 +17,7 @@ remains active.
 - [x] Make pure equity authorization expire strictly before broker session close.
 - [x] Reuse submission's final time check to refuse a close after durable writes.
 - [x] Reject unsupported limit increments before provider reads or reservation.
-- [ ] Inspect GitHub build, tests, lint, formatter and all mutation artifacts.
+- [x] Inspect GitHub build, tests, lint, formatter and all mutation artifacts.
 - [ ] Verify actual capacity/cost inputs, isolated supervisor and site handover.
 
 The actual preflight caller previously used only is_open, ignoring the broker
@@ -80,3 +80,14 @@ strategy expectancy. Reporter remains offline_simulation, execution authority
 false and decision origin unverified. Failed/unscoreable slots stay in the cohort.
 Next: verified capacity/cost model for paper execution, isolated supervisor and
 effective website controls, plus forward strategy evaluation. Goal active.
+
+Repair code 9e0f3fe0c8d7c9eab54499f1e15e38b9dce6e420 verified by GitHub run
+38307990221, all 14 jobs inspected and passed. Tests job 115006555749 passed
+2831 Rust and 47 Python tests. All three exact clock survivors, cancellation
+survivor and both subscription regressions caught. Prior Python mutation
+reapplications and both systemd unit verifications passed. All four mutation
+artifacts inspected: 70 total, 58 caught, 12 compiler-unviable, no survivors or
+timeouts. Unviable reasons: absent State Default or unused/dead code/arguments,
+never counted as test catches. No workstation jobs, deployment or orders.
+Handback recorded on the child research-context branch to keep PR 408's verified
+head stable while the child CI runs. PR 408 attached; full goal remains active.

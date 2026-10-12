@@ -303,6 +303,12 @@ limits in chat instead of implementing the agreed website controls.
 
 ## Next evidence
 
+The explicitly versioned snapshot-context-v1 subscription experiment now adds
+completed minute and previous daily bars, validated against availability and
+rechecked at completion. Original raw bars remain in the forward decision for
+replay; the existing quote-only campaign keeps its original inputs. These two
+bars are context, not a learned edge. See [research context](../plans/0048-alpaca-research-context.md).
+
 Connect private paper credentials, verify real account observations, then build
 market-data recording with coverage labels and time gates. Add isolated paper
 execution with deterministic sizing, durable client-order IDs, fills and restart
