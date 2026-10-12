@@ -24,6 +24,24 @@ uses the two variables documented in `deploy/alpaca-paper.env.example`; service
 isolation, owner handover and remaining execution checks must be completed
 before unattended operation. See plan 0035 for verification and handback.
 
+For the next selected account/positions/clock observation, use the verified
+`deploy/read-alpaca-paper.py` and the `radar` executable from the GitHub
+release-linux artifact at the verified branch SHA. Upload them as
+/tmp/radar-alpaca-paper-read.py and /tmp/radar-paper-reader.new. Use the reader
+SHA256 recorded in that artifact's BUILD-INFO.txt, then run in your own terminal:
+
+```bash
+sudo python3 /tmp/radar-alpaca-paper-read.py <verified-reader-sha256>
+```
+
+This stages exact hash-checked bytes into root-owned /usr/local/lib/radar-paper,
+then runs only `alpaca-read` in a transient systemd DynamicUser unit. The system
+manager loads the protected paper environment; it is never sourced into your
+SSH shell or passed to the website/model. It adds no timer, listening endpoint,
+sudo permission or service enablement. It requires systemd isolation support
+(the inspected VPS has systemd 255). Review the selected report; observations
+do not authorize trades. See plan 0036 for verification and limitations.
+
 Radar runs on the shared `clawguard` VPS alongside Cortex and Pulse. That shapes
 every choice here: it is a 2-core box with 3.8 GiB of RAM running other people's
 production services, so Radar is memory-capped, sandboxed, and installed without

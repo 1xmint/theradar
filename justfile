@@ -74,6 +74,7 @@ ci: build tests lint fmt cargo-deny licence-headers
 # Private setup boundaries; fake CLI/account reads use no credentials.
 private-setup:
     setpriv --no-new-privs python3 -m unittest discover -s deploy -p 'test_*.py' -v
+    setpriv --no-new-privs python3 deploy/mutate_alpaca_reader.py
 
 # --- required checks, one recipe per status-check context ---------------------
 
