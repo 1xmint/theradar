@@ -23,7 +23,7 @@ struct Asset {
     attributes: Option<Vec<String>>,
 }
 
-fn collect(
+pub(super) fn collect(
     expected: &str,
     requested: &str,
     mut read: impl FnMut(&str) -> Result<String, String>,

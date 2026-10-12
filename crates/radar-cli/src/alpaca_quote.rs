@@ -74,7 +74,7 @@ fn timestamp_ns(text: &str) -> Option<u128> {
     Some(u128::from(seconds) * 1_000_000_000 + nanos.parse::<u128>().ok()?)
 }
 
-fn validate(
+pub(super) fn validate(
     raw: &str,
     symbol: &str,
     available: u64,

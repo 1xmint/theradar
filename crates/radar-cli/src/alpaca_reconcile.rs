@@ -71,7 +71,7 @@ pub(super) fn account(raw: &str, expected: &str) -> Result<BrokerAccount, String
     Ok(account)
 }
 
-fn collect(
+pub(super) fn collect(
     expected: &str,
     mut read: impl FnMut(&str) -> Result<String, String>,
 ) -> Result<Value, String> {

@@ -14,7 +14,7 @@ use super::alpaca_read::Position;
 #[serde(deny_unknown_fields)]
 pub(super) struct Holding {
     asset_id: String,
-    nanoshares: u64,
+    pub(super) nanoshares: u64,
 }
 
 pub(super) type Holdings = BTreeMap<String, Holding>;

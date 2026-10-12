@@ -312,7 +312,7 @@ fn retained_snapshot(prior: &BrokerCash, expected: &str, now: u64) -> Result<Sna
     Ok(baseline)
 }
 
-fn checkpoint(
+pub(super) fn checkpoint(
     log: &mut BrokerLog,
     expected: &str,
     max_pages: u16,

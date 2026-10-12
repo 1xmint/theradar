@@ -293,3 +293,35 @@ Genesis establishes selected opening quantities, not historical cost or profit.
 Older checkpoints without quantities remain readable but refuse automatic
 baseline replacement. Corporate actions/transfers need explicit reconciliation.
 See [position accounting](../plans/0032-alpaca-position-accounting.md).
+
+## Equity risk boundary
+
+`radar-risk::equity` judges inert simple day limit proposals using Unix
+milliseconds, nanoshares and micro-USD. Its effective owner policy defaults
+closed. It checks account identity, pause, freshness/availability, session,
+marketable limit distance, spread, capacity, cost/fee evidence, available cash
+and owned shares, and order/symbol/portfolio ceilings. Optional loss stops gate
+entries; independent reduction checks remain. Authorization has private fields,
+binds the exact order and time interval, and cannot be deserialized from model
+output. The separate authenticated executor is still required.
+
+Its actual caller is `radar alpaca-order-preflight --journal <private-file>
+--intent <typed-intent> --policy <private-policy> --max-pages <positive-u16>`.
+It requires an existing protected journal and reads provider facts directly on
+the fixed paper and IEX hosts; there is no operator/model evidence-file shortcut.
+It joins the existing cash/share checkpoint with bracketed pending orders,
+positions, asset observations, quote checks and a final pinned account. Retained
+cash claims are subtracted from cash before independently bounding by buying
+power/equity, and retained sells subtract owned shares. Unknown/unbound pending
+orders or changed execution progress refuse. Current selected account/quantity
+matches detect visible races, not atomicity. Selected asset exchange values are
+from the [official SDK enums](https://github.com/alpacahq/alpaca-py/blob/master/alpaca/trading/enums.py);
+unknown exchanges and asset restrictions refuse.
+
+Preflight does not reserve or submit the proposed order and reports no execution
+authority. It may durably update a valid observation before a later refusal.
+Actual feed capacity units/conditions and fee/cost adequacy remain unknown, so
+their kernel inputs are absent and orders remain refused. Session timestamps,
+price/quantity increments, actual-response verification, effective site handover,
+revocation and isolated execution are still required before activation. See
+[equity risk work](../plans/0033-alpaca-equity-risk.md).
