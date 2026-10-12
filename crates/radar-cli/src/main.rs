@@ -23,6 +23,7 @@ mod alpaca_preflight;
 mod alpaca_quote;
 mod alpaca_read;
 mod alpaca_reconcile;
+mod alpaca_score;
 mod alpaca_submit;
 mod audit;
 mod basis;
@@ -146,6 +147,9 @@ commands:
   alpaca-market-read --symbols SPY,QQQ --output <new-capture-file>
   alpaca-market-replay --input <capture-file> --as-of-unix-ms <N>
   alpaca-quote --input <capture-file> --symbol SPY --as-of-unix-ms <N> --max-age-ms <N> --max-spread-bps <N>
+  alpaca-paper-score --entry <capture> --entry-as-of-unix-ms <N> --exit <capture> --exit-as-of-unix-ms <N> --symbol SPY --quantity-nanoshares <N> --assumptions <json>
+                                 offline ask-to-bid outcome under explicit cost
+                                 and participation assumptions; no orders
   wallet-read --wallet <address> --rpc <URL>
        [--value-sol --min-slot <N> --max-age-secs <N> --max-confidence-bps <0..10000>]
     Finalized balances/raw token verification; optional native USD band, read-only.
@@ -948,6 +952,7 @@ fn main() -> ExitCode {
         "alpaca-assets-read" => alpaca_assets::run(&args),
         "alpaca-market-read" | "alpaca-market-replay" => alpaca_market::run(&args),
         "alpaca-quote" => alpaca_quote::run(&args),
+        "alpaca-paper-score" => alpaca_score::run(&args),
         "wallet-read" => wallet_read::run(&args),
         "portfolio-read" => portfolio_read::run(&args),
         "sol-price-read" => sol_price_read::run(&args),
