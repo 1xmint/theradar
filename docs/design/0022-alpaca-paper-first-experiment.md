@@ -293,4 +293,3 @@ Genesis establishes selected opening quantities, not historical cost or profit.
 Older checkpoints without quantities remain readable but refuse automatic
 baseline replacement. Corporate actions/transfers need explicit reconciliation.
 See [position accounting](../plans/0032-alpaca-position-accounting.md).
-

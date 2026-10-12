@@ -547,7 +547,7 @@ mod tests {
                         json!([position(
                             &intent.symbol,
                             match (side, completed) {
-                                (BrokerSide::Buy, true) | (BrokerSide::Sell, true) => "1",
+                                (_, true) => "1",
                                 (BrokerSide::Buy, false) => "0.5",
                                 (BrokerSide::Sell, false) => "1.5",
                             }
