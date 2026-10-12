@@ -411,18 +411,25 @@ mod tests {
                 "{field}={value}"
             );
         }
-        let mut intent = intent();
-        intent.side = BrokerSide::Sell;
-        let mut events = events();
-        for event in events.as_array_mut().unwrap() {
+        let mut sell_intent = intent();
+        sell_intent.side = BrokerSide::Sell;
+        let mut sell_events = events();
+        for event in sell_events.as_array_mut().unwrap() {
             event["side"] = json!("sell");
         }
-        assert!(matched(&intent, order(), events).is_err());
-        for (status, qty) in [("future-status", "3"), ("filled", "2"), ("new", "4")] {
+        assert!(matched(&sell_intent, order(), sell_events).is_err());
+        for (status, qty) in [
+            ("future-status", "3"),
+            ("future-status", "0"),
+            ("filled", "2"),
+            ("new", "4"),
+        ] {
             let mut order = order();
             order["status"] = json!(status);
             order["filled_qty"] = json!(qty);
-            assert!(matched(&intent, order, json!([])).is_err());
+            // Unknown status must refuse even with otherwise consistent history.
+            let history = if qty == "3" { events() } else { json!([]) };
+            assert!(matched(&intent(), order, history).is_err());
         }
     }
 

@@ -24,11 +24,21 @@ All verification runs on GitHub; no local jobs.
   response order, instead of assuming timestamps uniquely order executions.
 - [x] Derive gross fill amounts with exact arithmetic and conservative USD bounds.
 - [ ] Verify the actual caller and arithmetic on GitHub, including mutation jobs.
-  Six unit tests and one actual-command test raise the floor from 2347 to 2354.
+  Six unit tests and one actual-command test initially raised the floor from
+  2347 to 2354. CI 38199868775 measured 2763 passing tests; use that actual floor.
   First run 38199605432 at 73f450a exposed a missing required account status in
   the fixture and unnecessary Option wrapping in its response helper. The
   mutation baselines failed the same fixture; no mutants ran. Repair supplies
   status, simplifies the helper and adds a filled-status/partial-history case.
+  Repair 0738e5b passed all nonmutation jobs in CI 38199868775. Mutation results:
+  104 caught, 20 compiler-unviable, one survivor at alpaca_fills.rs:36:9, changing
+  the first OR to AND. Its unknown-status fixture also had mismatched quantity,
+  hiding the weakened status gate. The repaired case has consistent full/empty
+  histories and the buy side, so only the unknown status causes refusal.
+  Downloaded all four diagnostics; inspected the exact survivor diff and every
+  unviable compiler reason. No exclusions or cancellations. Unviable cases are
+  unused/dead code after no-op bodies, missing Default implementations, invalid
+  let-chain OR syntax and useless unsigned comparisons. Reverification pending.
 - [ ] Reconcile fees/nontrade cash and baseline account cash without attributing
   deposits/withdrawals to strategy returns. Late fees/corrections remain possible.
 - [ ] Persist verified economic transitions before claim release, with replay and
