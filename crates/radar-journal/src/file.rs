@@ -563,6 +563,7 @@ mod broker_sync_tests {
                 fee_bound_microusd: 1,
             },
             state,
+            cancel_unknown_order_id: None,
         }
     }
 

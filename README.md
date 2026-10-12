@@ -35,6 +35,16 @@ the effect and refuses existing client IDs. Actual capacity/cost inputs remain
 unknown, so this path currently refuses before reserving or sending. Service
 isolation, site handover and unattended recovery remain required; see
 [paper submission work](docs/plans/0034-alpaca-paper-submit.md).
+
+`radar alpaca-paper-cancel --journal <private-file> --account-id <paper-id> --client-order-id <retained-id>`
+binds a working simple order to Radar's retained intent before requesting its
+cancellation on the fixed paper host. It records cancellation uncertainty before
+DELETE, refuses repeated requests, and retains cash/share claims even after HTTP
+204 acceptance. Reconcile fills and terminal observations separately; acceptance
+does not establish that filling stopped. This is a private operator command,
+not an installed unattended supervisor. See
+[paper cancellation](docs/plans/0046-alpaca-paper-cancellation.md).
+
 Use protected storage in an existing durably provisioned directory. This does
 not establish available capital, profit or trading authority. See
 [durable cash work](docs/plans/0030-alpaca-durable-cash.md).

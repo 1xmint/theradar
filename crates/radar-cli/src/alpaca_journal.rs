@@ -35,6 +35,7 @@ pub(super) fn report(log: &BrokerLog, account: &str, changed: bool) -> Result<Va
             .cash_claim_microusd()
             .map_err(|e| e.to_string())?;
         claims.push(json!({"intent":entry.intent,"state":entry.state,
+        "cancel_unknown_order_id":entry.cancel_unknown_order_id,
         "cash_claim_microusd":cash.to_string(),
         "observed_remaining_cash_claim_microusd":remaining.cash_microusd.to_string(),
         "observed_remaining_share_claim_nanoshares":remaining.shares_nanoshares.to_string(),
