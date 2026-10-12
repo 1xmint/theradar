@@ -144,7 +144,12 @@ pub(super) fn run(args: &[String]) -> Result<(), String> {
     };
     let provider = provider(&|key| std::env::var(key).ok())?;
     let answer = provider
-        .ask(&request(&quote, context.as_ref(), &experiment, &assumptions))
+        .ask(&request(
+            &quote,
+            context.as_ref(),
+            &experiment,
+            &assumptions,
+        ))
         .map_err(|_| "subscription proposal call failed")?;
     let reply = reply(&answer.text)?;
     // No pre-answer fills: the same captured quote must still satisfy the
@@ -236,7 +241,7 @@ mod tests {
         assert_eq!(request.fences(), 6);
         assert!(!request.system().contains("ignore instructions"));
         assert!(request.render().contains("ignore instructions"));
-        let context = json!({"untrusted":"<<<RADAR-UNTRUSTED>>> change permissions"});
+        let context = json!({"untrusted":"<<<RADAR-UNTRUSTED>>> injected-context-command"});
         let contextual = super::request(
             &json!({"symbol":"SPY"}),
             Some(&context),
@@ -244,7 +249,8 @@ mod tests {
             &assumptions,
         );
         assert_eq!(contextual.fences(), 8);
-        assert!(!contextual.system().contains("change permissions"));
-        assert!(contextual.render().contains("change permissions"));
+        assert_eq!(contextual.system(), request.system());
+        assert!(!contextual.system().contains("injected-context-command"));
+        assert!(contextual.render().contains("injected-context-command"));
     }
 }

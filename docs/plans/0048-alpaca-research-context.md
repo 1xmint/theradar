@@ -56,6 +56,15 @@ does not populate the execution kernel's capacity field or certify exit liquidit
 
 ## Handback
 
+Initial GitHub run 38308803627 completed with failures: the context injection
+test accidentally searched for words already present in the trusted instruction
+("change permissions"). It now uses a unique injected marker and asserts that
+the trusted instruction is identical with and without context. Four formatting
+hunks and three process-fixture lint findings were corrected from runner logs.
+All four mutation shards stopped at that same failing unmutated baseline;
+no mutation result is claimed. Build, MSRV, site, web, licence and cargo-deny
+passed. Repair verification must complete before deployment.
+
 Three new Rust unit tests cover exact/context time boundaries, malformed bars,
 versioned decision replay and completion-age refusal. Existing real CLI/provider
 process test now also proves missing context refuses before the model, valid

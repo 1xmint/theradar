@@ -87,10 +87,12 @@ pub(super) fn validate(
         return Err("context minute bar exceeds age bound".into());
     }
     let (_, previous_day) = bar(&snapshot.previous_day, available, 93_600_000_000_000)?;
-    Ok(json!({"version":STRATEGY,"symbol":symbol,"feed":"iex","consolidated_market":false,
+    Ok(
+        json!({"version":STRATEGY,"symbol":symbol,"feed":"iex","consolidated_market":false,
         "minute_bar":minute,"previous_daily_bar":previous_day,
         "available_at_unix_ms":available,"as_of_unix_ms":as_of,
-        "coverage_complete":false,"learned_edge_verified":false,"execution_authority":false}))
+        "coverage_complete":false,"learned_edge_verified":false,"execution_authority":false}),
+    )
 }
 
 #[cfg(test)]
@@ -108,7 +110,10 @@ mod tests {
     fn historical_context_is_exact_bounded_and_explicitly_incomplete() {
         let at = 1_791_813_600_000;
         let context = validate(&raw().to_string(), "SPY", at, at, 1000).unwrap();
-        assert_eq!(context["minute_bar"]["close_microusd_per_share"], "101000000");
+        assert_eq!(
+            context["minute_bar"]["close_microusd_per_share"],
+            "101000000"
+        );
         assert_eq!(context["previous_daily_bar"]["reported_volume"], "50000");
         for field in [
             "execution_authority",

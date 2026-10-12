@@ -79,6 +79,7 @@ fn refuse_bad_experiments(experiment: &Path, prompt: &Path, invoke: impl Fn(&str
 }
 
 #[test]
+#[allow(clippy::too_many_lines)] // Keep the sequential real-process fixture and its assertions together.
 fn subscription_command_receives_instructions_and_only_records_valid_research() {
     let dir = tempfile::tempdir().unwrap();
     let path = |name| dir.path().join(name);
@@ -174,12 +175,12 @@ fn subscription_command_receives_instructions_and_only_records_valid_research() 
     let mut raw: Value = serde_json::from_str(captured["raw_response"].as_str().unwrap()).unwrap();
     raw["SPY"]["minuteBar"] = json!({"t":radar_types::civil::timestamp_from_seconds(at / 60000 * 60 - 60),
         "o":99,"h":101,"l":98,"c":100,"v":100});
-    raw["SPY"]["prevDailyBar"] = json!({"t":radar_types::civil::timestamp_from_seconds(at / 1000 - 172800),
+    raw["SPY"]["prevDailyBar"] = json!({"t":radar_types::civil::timestamp_from_seconds(at / 1000 - 172_800),
         "o":98,"h":101,"l":97,"c":99,"v":5000});
     captured["raw_response"] = json!(raw.to_string());
     std::fs::write(&capture, captured.to_string()).unwrap();
     let mut costs: Value = serde_json::from_slice(&std::fs::read(&assumptions).unwrap()).unwrap();
-    costs["max_quote_age_ms"] = json!(120000);
+    costs["max_quote_age_ms"] = json!(120_000);
     std::fs::write(&assumptions, costs.to_string()).unwrap();
     let result = invoke("unlimited");
     assert!(
@@ -188,7 +189,10 @@ fn subscription_command_receives_instructions_and_only_records_valid_research() 
         String::from_utf8_lossy(&result.stderr)
     );
     let contextual_prompt = std::fs::read_to_string(&prompt).unwrap();
-    assert_eq!(contextual_prompt.matches("<<<RADAR-UNTRUSTED>>>").count(), 8);
+    assert_eq!(
+        contextual_prompt.matches("<<<RADAR-UNTRUSTED>>>").count(),
+        8
+    );
     assert!(contextual_prompt.contains("incomplete IEX coverage"));
     assert!(contextual_prompt.contains("close_microusd_per_share"));
     let record: Value = serde_json::from_slice(&std::fs::read(&output).unwrap()).unwrap();
