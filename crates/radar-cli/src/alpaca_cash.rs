@@ -4,7 +4,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::Read as _;
 
-use radar_journal::{Applied, BrokerCash, BrokerIntent, BrokerLog};
+use radar_journal::{Applied, BrokerCash, BrokerIntent, BrokerLog, BrokerProgress};
 use serde::Serialize;
 use serde_json::{Value, json};
 
@@ -254,6 +254,7 @@ fn collect(
     let current = snapshot(&activity, expected)?;
     let mut orders = Vec::new();
     let mut bindings = BTreeMap::new();
+    let mut progress = BTreeMap::new();
     for (intent, first) in intents.iter().zip(before) {
         let last =
             recovery::collect_bound(expected, &intent.client_order_id, Some(intent), &mut read)?;
@@ -272,6 +273,17 @@ fn collect(
         let order: BrokerOrder = serde_json::from_value(first["order"].clone())
             .map_err(|_| "invalid selected cash order")?;
         let executions = super::alpaca_fills::executions(intent, &order, &current.activities)?;
+        progress.insert(
+            intent.client_order_id.clone(),
+            BrokerProgress {
+                broker_order_id: order.id.clone(),
+                filled_nanoshares: executions.filled_nanoshares,
+                terminal: matches!(
+                    order.status.as_str(),
+                    "filled" | "canceled" | "expired" | "rejected"
+                ),
+            },
+        );
         if bindings.insert(order.id, intent.clone()).is_some() {
             return Err("broker cash order identity is repeated".into());
         }
@@ -282,6 +294,7 @@ fn collect(
     Ok(
         json!({"version":1,"venue":"alpaca","environment":"paper","source":PAPER_API,
         "baseline":baseline,"activity_observations":activity,"orders":orders,"cash":cash,"claims":claims,
+        "order_progress":progress,
         "atomic_snapshot":false,"baseline_provenance_verified":false,"economic_history_complete":false,
         "cash_reconciled":false,"fees_final":false,"claim_release_authorized":false,
         "retry_authorized":false,"execution_authority":false}),
@@ -325,6 +338,11 @@ fn checkpoint(
         started: selected.read_started_unix_secs,
         completed: selected.read_completed_unix_secs,
         observation,
+        orders: Some(match &reconciliation {
+            Some(report) => serde_json::from_value(report["order_progress"].clone())
+                .map_err(|_| "invalid selected paper order progress")?,
+            None => BTreeMap::new(),
+        }),
     };
     let applied = log
         .observe_cash(cash, super::wallet_read::now()?)
@@ -421,6 +439,94 @@ mod tests {
             account(balance).to_string()
         } else {
             activities.to_string()
+        }
+    }
+
+    #[test]
+    fn cash_checkpoint_derives_residual_claims_from_verified_fills_and_order_lifecycle() {
+        let dir = tempfile::tempdir().unwrap();
+        for side in [BrokerSide::Buy, BrokerSide::Sell] {
+            for status in [
+                "new",
+                "accepted",
+                "pending_new",
+                "partially_filled",
+                "pending_cancel",
+                "done_for_day",
+                "canceled",
+                "expired",
+                "rejected",
+                "filled",
+            ] {
+                let path = dir.path().join(format!("{side:?}-{status}.jsonl"));
+                let mut log = BrokerLog::open(&path, "paper-id").unwrap();
+                checkpoint(&mut log, "paper-id", 1, |p| {
+                    Ok(Some(observation_reader("500", &json!([prior()]), p)))
+                })
+                .unwrap();
+                let intent = intent(side);
+                let id = intent.client_order_id.clone();
+                let now = super::super::wallet_read::now().unwrap();
+                log.reserve(intent.clone(), now).unwrap();
+                log.submit(&id, now, |_| ()).unwrap();
+                let completed = status == "filled";
+                let quantity = if completed { "1" } else { "0.5" };
+                let mut fill = fill(side);
+                fill["qty"] = json!(quantity);
+                fill["cum_qty"] = json!(quantity);
+                fill["leaves_qty"] = json!(if completed { "0" } else { "0.5" });
+                fill["price"] = json!("100");
+                let mut order = order(side);
+                order["status"] = json!(status);
+                order["filled_qty"] = json!(quantity);
+                let balance = match (side, completed) {
+                    (BrokerSide::Buy, true) => "400",
+                    (BrokerSide::Buy, false) => "450",
+                    (BrokerSide::Sell, true) => "600",
+                    (BrokerSide::Sell, false) => "550",
+                };
+                let result = checkpoint(&mut log, "paper-id", 1, |p| {
+                    Ok(Some(if p == "/v2/account" {
+                        account(balance).to_string()
+                    } else if p.starts_with("/v2/orders:") {
+                        order.to_string()
+                    } else {
+                        json!([prior(), fill]).to_string()
+                    }))
+                })
+                .unwrap();
+                let terminal = matches!(status, "canceled" | "expired" | "rejected" | "filled");
+                let cash = if side == BrokerSide::Buy && !terminal {
+                    50_000_007
+                } else {
+                    7
+                };
+                let shares = if side == BrokerSide::Sell && !terminal {
+                    500_000_000
+                } else {
+                    0
+                };
+                assert_eq!(
+                    result["claims"]["claims"][0]["observed_remaining_cash_claim_microusd"],
+                    cash.to_string()
+                );
+                assert_eq!(
+                    result["claims"]["claims"][0]["observed_remaining_share_claim_nanoshares"],
+                    shares.to_string()
+                );
+                assert_eq!(result["claim_release_authorized"], false);
+                drop(log);
+                let mut log = BrokerLog::open(&path, "paper-id").unwrap();
+                let residual = log.claims().unwrap().remove(&id).unwrap();
+                assert_eq!(residual.cash_microusd, cash);
+                assert_eq!(residual.shares_nanoshares, shares);
+                assert_eq!(residual.progress.unwrap().terminal, terminal);
+                assert_eq!(log.entries().unwrap().next().unwrap().intent, intent);
+                assert!(
+                    log.submit(&id, now, |_| panic!("reconciled does not mean retry"))
+                        .is_err()
+                );
+            }
         }
     }
 
@@ -554,6 +660,7 @@ mod tests {
             started: 1,
             completed: 2,
             observation: report("100", json!([]), 1, 2),
+            orders: None,
         };
         assert!(retained_snapshot(&valid, "paper-id", 2).is_ok());
         assert!(retained_snapshot(&valid, "paper-id", 3).is_ok());
@@ -577,6 +684,7 @@ mod tests {
                         started: 1,
                         completed: 2,
                         observation,
+                        orders: None,
                     },
                     2,
                 )

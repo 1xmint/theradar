@@ -58,6 +58,7 @@
 #![forbid(unsafe_code)]
 
 mod broker;
+mod broker_claims;
 mod event;
 mod file;
 mod operation;
@@ -66,6 +67,7 @@ mod ownership;
 pub use broker::{
     BrokerCash, BrokerEntry, BrokerError, BrokerIntent, BrokerLog, BrokerSide, BrokerState,
 };
+pub use broker_claims::{BrokerClaim, BrokerProgress};
 
 pub use event::{
     Correlation, Event, ExecutionBinding, MAX_REDACTED, NativeTransferRecord,

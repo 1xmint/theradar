@@ -24,14 +24,21 @@ fn intent(path: &str) -> Result<BrokerIntent, String> {
 
 pub(super) fn report(log: &BrokerLog, account: &str, changed: bool) -> Result<Value, String> {
     let entries = log.entries().map_err(|e| e.to_string())?;
+    let residual = log.claims().map_err(|e| e.to_string())?;
     let mut claims = Vec::new();
     for entry in entries {
+        let remaining = residual
+            .get(&entry.intent.client_order_id)
+            .ok_or("missing retained paper claim")?;
         let cash = entry
             .intent
             .cash_claim_microusd()
             .map_err(|e| e.to_string())?;
         claims.push(json!({"intent":entry.intent,"state":entry.state,
         "cash_claim_microusd":cash.to_string(),
+        "observed_remaining_cash_claim_microusd":remaining.cash_microusd.to_string(),
+        "observed_remaining_share_claim_nanoshares":remaining.shares_nanoshares.to_string(),
+        "retained_execution_progress":remaining.progress,
         "share_claim_nanoshares":match entry.intent.side {
             BrokerSide::Buy => "0".to_owned(),
             BrokerSide::Sell => entry.intent.quantity_nanoshares.to_string(),

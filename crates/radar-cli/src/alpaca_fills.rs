@@ -17,7 +17,7 @@ const PAPER_API: &str = "https://paper-api.alpaca.markets";
 #[derive(Debug, PartialEq, Eq, Serialize)]
 pub(super) struct Executions {
     count: usize,
-    filled_nanoshares: u64,
+    pub(super) filled_nanoshares: u64,
     gross_floor_microusd: u64,
     gross_ceil_microusd: u64,
 }

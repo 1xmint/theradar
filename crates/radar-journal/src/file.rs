@@ -512,6 +512,7 @@ mod broker_sync_tests {
             started: 1,
             completed: 2,
             observation: serde_json::json!({"cash":"100"}),
+            orders: None,
         };
         let mut journal = Journal::open(&path).unwrap();
         let mut called = false;
