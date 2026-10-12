@@ -51,12 +51,30 @@ claimed by these tests; no deployed order was observed to exist.
 
 ## Handback
 
-Source prepared. Seven new Rust tests cover actual CLI dispatch, supported and
+Source prepared. Eight new Rust tests cover actual CLI dispatch, supported and
 rejected broker observations, durable-before-effect ordering, response loss,
 restart/refusal, unchanged claims, checkpoint identity and poisoned persistence.
 Tests and mutation reapplications run on GitHub only; results pending. The test
-floor rises to the previously observed 2817, not an inferred new count.
+floor rises to the first run's observed 2824, not an inferred new count.
 Real research outcome report requested in the prior turn remains pending;
 independent replay of slot one's retained capture returned quote exceeds
 configured age. Failed slot retained, no retry or relaxed quote-age bound.
 No broker effect, deployment or activation performed. Goal active.
+
+First verification: code 1213e52, CI 38305306698. Tests passed 2824 Rust tests;
+build, MSRV and ordinary website checks passed. Lint found an unnecessarily
+wrapped fixture result and an empty-output assertion; formatting changes were
+applied from GitHub's exact formatter output, with no local formatting job.
+All four mutation artifacts and compiler-unviable diagnostics inspected:
+54 total, 37 caught, 16 unviable, one missed, no timeouts. Unviable reasons were
+unused/dead code, unreachable statements or absent Default implementations,
+never counted as test catches.
+
+Exact survivor broker.rs:251:88 replaced && with || between broker identity
+equality and nonterminal checkpoint state. Existing tests added a later
+checkpoint, whose own identity validation masked that weakened final-record
+replay check. New focused test appends an intact-hash final cancellation against
+either a different broker ID or an already-terminal checkpoint; both must
+refuse. Added GitHub-only exact predicate reapplication requiring this executed
+test to fail, with source bytes restored in finally. No exclusion added.
+Repair verification remains pending; no cancellation deployment or broker effect.

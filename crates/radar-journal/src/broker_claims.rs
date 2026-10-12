@@ -48,7 +48,9 @@ pub(crate) fn validate(
     for (id, entry) in entries {
         let order = orders.get(id).ok_or(BrokerError::History)?;
         if entry.state != BrokerState::SubmissionUnknown
-            || entry.cancel_unknown_order_id.as_ref()
+            || entry
+                .cancel_unknown_order_id
+                .as_ref()
                 .is_some_and(|id| id != &order.broker_order_id)
             || order.broker_order_id.trim().is_empty()
             || !identities.insert(&order.broker_order_id)

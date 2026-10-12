@@ -246,9 +246,12 @@ impl BrokerLog {
                         && entry.state == BrokerState::SubmissionUnknown
                         && prior.cancel_unknown_order_id.is_none()
                         && entry.cancel_unknown_order_id.as_ref().is_some_and(|id| {
-                            cash.as_ref().and_then(|cash| cash.orders.as_ref())
+                            cash.as_ref()
+                                .and_then(|cash| cash.orders.as_ref())
                                 .and_then(|orders| orders.get(&entry.intent.client_order_id))
-                                .is_none_or(|progress| progress.broker_order_id == *id && !progress.terminal)
+                                .is_none_or(|progress| {
+                                    progress.broker_order_id == *id && !progress.terminal
+                                })
                         }) => {}
                 _ => return Err(BrokerError::History),
             }
@@ -400,15 +403,25 @@ impl BrokerLog {
     ) -> Result<T, BrokerError> {
         self.healthy()?;
         if broker_id.is_empty()
-            || !broker_id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
+            || !broker_id
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b == b'-')
         {
             return Err(BrokerError::InvalidIntent);
         }
-        let mut entry = self.entries.get(client_id)
-            .filter(|entry| entry.state == BrokerState::SubmissionUnknown
-                && entry.cancel_unknown_order_id.is_none())
-            .cloned().ok_or(BrokerError::NotReserved)?;
-        if self.cash.as_ref().and_then(|cash| cash.orders.as_ref())
+        let mut entry = self
+            .entries
+            .get(client_id)
+            .filter(|entry| {
+                entry.state == BrokerState::SubmissionUnknown
+                    && entry.cancel_unknown_order_id.is_none()
+            })
+            .cloned()
+            .ok_or(BrokerError::NotReserved)?;
+        if self
+            .cash
+            .as_ref()
+            .and_then(|cash| cash.orders.as_ref())
             .and_then(|orders| orders.get(client_id))
             .is_some_and(|progress| progress.broker_order_id != broker_id || progress.terminal)
         {
@@ -611,17 +624,29 @@ mod tests {
         let path = dir.path().join("cancel.jsonl");
         let mut log = BrokerLog::open(&path, "paper-id").unwrap();
         log.reserve(intent(), 1).unwrap();
-        assert!(log.cancel("radar_1", "broker-1", 2, |_| panic!("unsubmitted")).is_err());
+        assert!(
+            log.cancel("radar_1", "broker-1", 2, |_| panic!("unsubmitted"))
+                .is_err()
+        );
         log.submit("radar_1", 2, |_| ()).unwrap();
-        assert!(log.cancel("missing", "broker-1", 3, |_| panic!("missing")).is_err());
+        assert!(
+            log.cancel("missing", "broker-1", 3, |_| panic!("missing"))
+                .is_err()
+        );
         for id in ["", "../orders", "broker_id", "broker?x"] {
             assert!(log.cancel("radar_1", id, 3, |_| panic!("invalid")).is_err());
         }
         assert_eq!(Journal::open(&path).unwrap().events().unwrap().len(), 2);
         std::fs::remove_file(&path).unwrap();
         std::fs::create_dir(&path).unwrap();
-        assert!(log.cancel("radar_1", "broker-1", 3, |_| panic!("write failed")).is_err());
-        assert!(matches!(log.cancel("radar_1", "broker-1", 4, |_| panic!("poisoned")), Err(BrokerError::Poisoned)));
+        assert!(
+            log.cancel("radar_1", "broker-1", 3, |_| panic!("write failed"))
+                .is_err()
+        );
+        assert!(matches!(
+            log.cancel("radar_1", "broker-1", 4, |_| panic!("poisoned")),
+            Err(BrokerError::Poisoned)
+        ));
         assert!(matches!(log.entries(), Err(BrokerError::Poisoned)));
     }
 
@@ -635,26 +660,59 @@ mod tests {
             log.reserve(intent(), 3).unwrap();
             log.submit("radar_1", 4, |_| ()).unwrap();
             let mut observed = cash(3, 4);
-            observed.orders = Some(BTreeMap::from([("radar_1".into(), crate::BrokerProgress {
-                broker_order_id: "broker-1".into(), filled_nanoshares: 0, terminal,
-            })]));
+            observed.orders = Some(BTreeMap::from([(
+                "radar_1".into(),
+                crate::BrokerProgress {
+                    broker_order_id: "broker-1".into(),
+                    filled_nanoshares: 0,
+                    terminal,
+                },
+            )]));
             log.observe_cash(observed.clone(), 4).unwrap();
             let before = log.claims().unwrap();
-            assert!(log.cancel("radar_1", "other", 5, |_| panic!("wrong identity")).is_err());
+            assert!(
+                log.cancel("radar_1", "other", 5, |_| panic!("wrong identity"))
+                    .is_err()
+            );
             if terminal {
-                assert!(log.cancel("radar_1", "broker-1", 5, |_| panic!("terminal")).is_err());
+                assert!(
+                    log.cancel("radar_1", "broker-1", 5, |_| panic!("terminal"))
+                        .is_err()
+                );
             } else {
-                log.cancel("radar_1", "broker-1", 5, |id| assert_eq!(id, "broker-1")).unwrap();
+                log.cancel("radar_1", "broker-1", 5, |id| assert_eq!(id, "broker-1"))
+                    .unwrap();
                 assert_eq!(log.claims().unwrap(), before);
                 observed.started = 4;
                 observed.completed = 5;
-                observed.orders.as_mut().unwrap().get_mut("radar_1").unwrap().broker_order_id = "other".into();
+                observed
+                    .orders
+                    .as_mut()
+                    .unwrap()
+                    .get_mut("radar_1")
+                    .unwrap()
+                    .broker_order_id = "other".into();
                 assert!(log.observe_cash(observed.clone(), 5).is_err());
-                observed.orders.as_mut().unwrap().get_mut("radar_1").unwrap().broker_order_id = "broker-1".into();
-                observed.orders.as_mut().unwrap().get_mut("radar_1").unwrap().terminal = true;
+                observed
+                    .orders
+                    .as_mut()
+                    .unwrap()
+                    .get_mut("radar_1")
+                    .unwrap()
+                    .broker_order_id = "broker-1".into();
+                observed
+                    .orders
+                    .as_mut()
+                    .unwrap()
+                    .get_mut("radar_1")
+                    .unwrap()
+                    .terminal = true;
                 log.observe_cash(observed, 5).unwrap();
                 assert_eq!(log.claims().unwrap()["radar_1"].cash_microusd, 7);
-                assert_eq!(log.entries().unwrap().next().unwrap().state, BrokerState::SubmissionUnknown);
+                assert_eq!(
+                    log.entries().unwrap().next().unwrap().state,
+                    BrokerState::SubmissionUnknown
+                );
             }
             drop(log);
             BrokerLog::open(&path, "paper-id").unwrap();
@@ -683,7 +741,10 @@ mod tests {
             let entry = log.entries().unwrap().next().unwrap().clone();
             drop(log);
             if case == 7 {
-                Journal::open(&path).unwrap().record_broker(entry, 4).unwrap();
+                Journal::open(&path)
+                    .unwrap()
+                    .record_broker(entry, 4)
+                    .unwrap();
             } else {
                 rewrite(&path, |event| {
                     let entry = event.broker.as_mut().unwrap();
@@ -699,6 +760,38 @@ mod tests {
                 });
             }
             assert!(BrokerLog::open(&path, "paper-id").is_err(), "case {case}");
+        }
+    }
+
+    #[test]
+    fn final_cancellation_record_must_match_nonterminal_checkpoint_identity() {
+        for (target, terminal) in [("other", false), ("broker-1", true)] {
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path().join("cancel.jsonl");
+            let mut log = BrokerLog::open(&path, "paper-id").unwrap();
+            log.observe_cash(cash(1, 2), 2).unwrap();
+            log.reserve(intent(), 3).unwrap();
+            log.submit("radar_1", 4, |_| ()).unwrap();
+            let mut observed = cash(3, 4);
+            observed.orders = Some(BTreeMap::from([(
+                "radar_1".into(),
+                crate::BrokerProgress {
+                    broker_order_id: "broker-1".into(),
+                    filled_nanoshares: 0,
+                    terminal,
+                },
+            )]));
+            log.observe_cash(observed, 4).unwrap();
+            let mut entry = log.entries().unwrap().next().unwrap().clone();
+            drop(log);
+            // Intact hashes cannot excuse the wrong identity or a cancellation
+            // appended after the checkpoint already established a terminal order.
+            entry.cancel_unknown_order_id = Some(target.into());
+            Journal::open(&path)
+                .unwrap()
+                .record_broker(entry, 5)
+                .unwrap();
+            assert!(BrokerLog::open(&path, "paper-id").is_err());
         }
     }
 
