@@ -1,11 +1,12 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # 0044 — Provision the verified research worker separately
 
-**Status:** Implementation awaiting GitHub; no installation or activation.
+**Status:** GitHub-verified setup staged; awaiting owner sudo execution. No installation verified.
 
 Branch feat/alpaca-research-setup from e748281, stacked on PR 404. Previous
 goal turn made concrete progress: campaign worker verified, release built and
-staged. Parent documentation run 38286203010 must finish before moving its branch.
+staged. Parent documentation run 38286203010 passed all 14 jobs, inspected;
+its branch was not moved while that run was live.
 The fully autonomous trading goal remains active; this is research provisioning.
 
 ## Checklist
@@ -15,10 +16,37 @@ The fully autonomous trading goal remains active; this is research provisioning.
 - [x] Refuse unsafe directories, credentials and existing installation files.
 - [x] Use initial service probe before enabling timer; retain partial installs.
 - [x] Add GitHub tests and eight exact installer mutation reapplications.
-- [ ] Inspect GitHub results and prepare owner-terminal setup command.
+- [x] Inspect GitHub results and prepare owner-terminal setup command:
+  4c733c5, run 38286704736.
 - [ ] Independently verify installed hashes, timer and real research attempts.
 
 ## Handback
+
+Code proof: 4c733c56efbad892beaa163bd7f8533a18944ecf, CI 38286704736
+passed all 14 jobs. Tests job 114936691467 passed 2817 Rust and 41 Python tests,
+including five new setup tests. Eight installer, twelve campaign and 32 previous
+Python mutations caught; both exact subscription regression checks passed. Both
+unit pairs verified. All four Rust shard logs explicitly report no changed Rust
+source; no mutation catches inferred from those skipped workloads.
+
+Packaged exact committed deploy bytes (git show) in a plain four-member tar:
+/tmp/radar-research-bundle.tar SHA-256
+0cc7a5db48615b63873dea622292255cc6f27b481d4bab2e18a7e54373b0ffff.
+Staged installer /tmp/radar-alpaca-research-setup.py SHA-256
+dbe1203f80cc88e756ac90711309e440ea4287f971831676251003cb872b410a.
+Independent SSH hashes match both and the previously staged release CLI. Old
+recorder timer remains active. New research library, config and units were absent
+when inspected; existing paper credentials stat root:root 0600, contents unread.
+
+Owner-terminal command (already requested; private sudo password required):
+`sudo python3 /tmp/radar-alpaca-research-setup.py 0cc7a5db48615b63873dea622292255cc6f27b481d4bab2e18a7e54373b0ffff`.
+Await its output, then independently inspect installed hashes, state/config
+ownership, timer and actual per-slot records. No installation, real model call,
+broker order or performance result is claimed yet. Draft PR 405 is attached,
+stacked on PR 404. This handback changes documentation only; later documentation
+CI is separate from the code proof. This turn made concrete progress; the owner
+sudo step is newly pending, not a repeated three-turn blocker. While pending,
+complete cohort outcome collection/scoring remains available independent work.
 
 Installer pins the CLI from release run 38285575372, code 99085c7, SHA-256
 12efd7e4fd958138840dc0056f84fe6ba5690cb7de01ce02065131e6cb2112d0.
