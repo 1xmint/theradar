@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # 0025 — Persist broker journal directory entries before receipts
 
-**Status:** source verified on GitHub; combined integration verification pending.
+**Status:** source and combined integration verified on GitHub; merged to parent.
 
 Branch: feat/broker-journal-directory-sync, based on verified journal eadb500
 (full CI 38182537437). Independent of combined-source CI 38183043973 at 61f82b2.
@@ -27,7 +27,8 @@ Actual callers are BrokerLog reserve/submit, via Journal::record_broker.
   These compile refusals are not behavioral mutation kills. No exclusions added.
 - [x] Incorporate into verified combined Alpaca 61f82b2 (CI 38183043973).
   Both source runs completed before the merge. Combined test floor is 2337.
-- [ ] Read full CI for the resulting merged tree before advancing the parent.
+- [x] Combined f9553a8 passed full CI 38183693452 before PR 380 advanced the
+  parent to 3a4ba61. Source and parent tree identity verified.
 
 ## Handback
 

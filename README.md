@@ -48,11 +48,30 @@ bounds. Fees, durable local claims, freshness and complete economic reconciliati
 remain unresolved; these bounds are not available capital or trading authority.
 See [exposure accounting](docs/plans/0020-alpaca-paper-exposure.md).
 
+`radar alpaca-activities-read --account-id <paper-id> --max-pages 10` retrieves
+paginated fill and nontrade cash/fee observations between pinned account reads.
+The page limit bounds requests, not capital; hitting it refuses partial history.
+Exhausting pagination does not prove economic completeness or final fees, and
+never releases reservations. See [activity reconciliation inputs](docs/plans/0027-alpaca-account-activities.md).
+
 `radar alpaca-order-read --account-id <expected-paper-account-id> --client-order-id <retained-id>`
 queries a specific paper order between pinned account reads. It preserves selected
 fill/terminal observations without authorizing a retry or releasing claims.
 HTTP 404 means not visible, not proof that submission failed; other errors refuse
 without partial output. See [recovery reads](docs/plans/0021-alpaca-order-recovery-read.md).
+Add `--journal <private-file>` to compare the broker payload with a retained
+intent under journal ownership. Only exact simple day equity limit payloads with
+extended hours disabled can match. Missing orders stay unresolved; matching does
+not reconcile fills/fees, free a claim or authorize execution. See
+[intent binding](docs/plans/0026-alpaca-intent-binding.md).
+
+`radar alpaca-order-reconcile --journal <private-file> --account-id <paper-id> --client-order-id <retained-id> --max-pages 10`
+connects retained intent, matched order reads and paginated activities under journal
+ownership. It requires unchanged selected order/account observations, matches
+execution quantity intervals and computes gross USD bounds with exact arithmetic.
+It retains the entire original cash/share claim. Gross execution consistency does
+not establish final fees, account cash, complete history or permission to trade.
+See [execution reconciliation](docs/plans/0028-alpaca-fill-reconciliation.md).
 
 `radar alpaca-order-reserve --journal <private-file> --account-id <paper-id> --intent <typed-intent>`
 records an immutable paper claim. `radar alpaca-order-journal --journal <private-file> --account-id <paper-id>`

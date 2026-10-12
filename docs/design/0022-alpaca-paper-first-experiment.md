@@ -125,6 +125,32 @@ is not proof that an ambiguous submission never reached the broker. This lookup
 alone supplies neither durable intent history, payload binding nor complete
 fill/cash reconciliation.
 
+The optional --journal recovery path holds a verified BrokerLog owner across the
+reads and loads the requested immutable intent before broker credentials. A found
+order must match account/client identity, ticker, side, exact nanoshares and exact
+micro-USD limit. The initial supported payload is a simple quantity-based US
+equity limit order, day time-in-force, extended_hours explicitly false; notional,
+stop, replacement and nonempty nested-leg fields refuse. Missing/null required
+fields never match. A changed account refuses binding; HTTP 404 remains unresolved.
+The report's intent_payload_verified covers these order fields only. The local
+fee bound has no broker order-field equivalent; fee adequacy, fills, cash,
+freshness, eligibility and authority remain separate. A matching order never
+releases a reservation or permits retry. See the broker's
+[order semantics](https://docs.alpaca.markets/us/docs/orders-at-alpaca).
+
+Account activities are an additional required input for reconciliation, collected
+by radar alpaca-activities-read on the fixed paper host. The command reads all
+activity types in ascending pages of 100 between pinned account observations;
+it percent-encodes the last activity ID as the next cursor and refuses duplicate
+IDs, mismatched explicit account IDs, oversized pages and the operator's request
+limit. Exact string amounts and nullable fields remain observations, not inferred
+zeros. Unknown activity types remain visible. A short page exhausts pagination,
+not economic history: pages are not atomic, late events/corrections can appear,
+and fees can be created the following day. No claim release or final cash/fee
+accounting follows from this command. See the
+[activity endpoint](https://docs.alpaca.markets/us/reference/getaccountactivities-2)
+and [activity schemas/pagination](https://docs.alpaca.markets/us/docs/account-activities).
+
 The separate broker journal records typed paper intents with nanoshares and
 micro-USD price/fee units. Its actual operator callers are alpaca-order-reserve
 and alpaca-order-journal. Reserved and SubmissionUnknown both retain their full
@@ -137,6 +163,32 @@ refuse. Existing ownership/hash-chain storage is reused, with no new broker byte
 in historical hashes when absent. These controls establish ordering and identity,
 not capital permission, complete reconciliation or resistance to host rollback.
 There is no release API until intent/fill/cash reconciliation is established.
+
+The actual alpaca-order-reconcile caller now holds that journal owner while it
+collects a bound order, paginated activities, then another bound order. All six
+selected account observations and both selected order observations must match.
+This rejects visible races but does not establish an atomic snapshot or detect
+changes outside selected fields. Missing orders and any failed read refuse
+without a partial report. Activities use strict GET behavior; HTTP 404 is only
+an unresolved observation for the order lookup.
+
+For this order's FILL events, execution identity, ticker, side and fill type must
+be present. Missing fill order IDs cannot be assumed unrelated; identified other
+orders and nontrade events are preserved without contributing to this order's
+gross amount. Each cumulative quantity defines an interval ending at cum_qty and
+starting at cum_qty minus qty. Sorted intervals must cover zero through the order's
+observed filled_qty without gaps or overlaps; leaves_qty must equal original
+quantity minus cumulative quantity. Execution prices must respect the retained
+limit. Unsupported status/decimal shapes refuse. Filled status requires the full
+original quantity; other accepted statuses are observations, not finality claims.
+
+Products of exact nanoshares and nano-USD prices are summed before conversion to
+floor/ceiling micro-USD gross bounds. Broker average-price strings are preserved
+but are not used to infer execution amounts. The execution_quantities_matched
+flag covers this bounded consistency check only. Fees, cash/baseline accounting,
+late events/corrections, finality and durable claim release remain unresolved;
+fills_reconciled and all authority/retry/release flags remain false. Even a fully
+filled observed order retains its entire original cash/share reservation.
 
 `radar alpaca-assets-read` reads each requested equity between pinned paper
 account reads. It binds symbol, nonempty unique asset ID and us_equity class;
