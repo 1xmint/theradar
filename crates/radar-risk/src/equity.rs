@@ -181,13 +181,12 @@ pub fn evaluate(order: &Order, state: &State, policy: &Policy) -> Result<Authori
     if value > policy.max_order_microusd {
         return Err(Refusal::Limit);
     }
-    if state
-        .required_fee_microusd
-        .is_none_or(|fee| fee > order.fee_bound_microusd)
-        || state.round_trip_cost_microusd.is_none_or(|cost| {
-            u128::from(cost) * 10_000
-                > u128::from(value) * u128::from(policy.max_round_trip_cost_bps)
-        })
+    let fee = state.required_fee_microusd.ok_or(Refusal::Costs)?;
+    let cost = state.round_trip_cost_microusd.ok_or(Refusal::Costs)?;
+    if fee > order.fee_bound_microusd
+        || cost < fee
+        || u128::from(cost) * 10_000
+            > u128::from(value) * u128::from(policy.max_round_trip_cost_bps)
     {
         return Err(Refusal::Costs);
     }
@@ -231,8 +230,8 @@ fn liquidity(order: &Order, state: &State, policy: &Policy) -> Result<(), Refusa
     let bid = state.bid_microusd_per_share;
     let ask = state.ask_microusd_per_share;
     let spread = ask.checked_sub(bid).ok_or(Refusal::Liquidity)?;
+    // With ask >= bid already established, a positive bid also proves ask > 0.
     if bid == 0
-        || ask == 0
         || u128::from(spread) * 10_000 > u128::from(bid) * u128::from(policy.max_spread_bps)
         || state
             .capacity_nanoshares
@@ -637,6 +636,39 @@ mod tests {
             Refusal::Liquidity
         );
         order.limit_microusd_per_share = 100_000_001;
+        assert_eq!(
+            evaluate(&order, &state, &policy).unwrap_err(),
+            Refusal::Liquidity
+        );
+    }
+
+    #[test]
+    fn cost_and_spread_ratios_hold_at_nonunit_basis_point_boundaries() {
+        let (mut order, mut state, mut policy) = fixture();
+        state.round_trip_cost_microusd = Some(0);
+        assert_eq!(
+            evaluate(&order, &state, &policy).unwrap_err(),
+            Refusal::Costs
+        );
+        policy.max_round_trip_cost_bps = 2;
+        state.round_trip_cost_microusd = Some(20_000);
+        assert!(evaluate(&order, &state, &policy).is_ok());
+        state.round_trip_cost_microusd = Some(20_001);
+        assert_eq!(
+            evaluate(&order, &state, &policy).unwrap_err(),
+            Refusal::Costs
+        );
+        state.round_trip_cost_microusd = Some(1);
+        policy.max_spread_bps = 100;
+        state.ask_microusd_per_share = 101_000_000;
+        order.limit_microusd_per_share = 101_000_000;
+        policy.max_order_microusd = u64::MAX;
+        policy.max_capital_microusd = u64::MAX;
+        policy.max_position_microusd = u64::MAX;
+        state.available_cash_microusd = Some(u64::MAX);
+        assert!(evaluate(&order, &state, &policy).is_ok());
+        state.ask_microusd_per_share += 1;
+        order.limit_microusd_per_share += 1;
         assert_eq!(
             evaluate(&order, &state, &policy).unwrap_err(),
             Refusal::Liquidity

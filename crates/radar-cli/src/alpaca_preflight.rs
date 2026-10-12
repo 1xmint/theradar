@@ -185,7 +185,8 @@ fn eligible(report: &Value, account: &Value, intent: &BrokerIntent) -> Result<()
         || asset["attributes"]
             .as_array()
             .is_none_or(|attributes| !attributes.is_empty())
-        || (intent.quantity_nanoshares % 1_000_000_000 != 0 && asset["fractionable"] != true)
+        || (!intent.quantity_nanoshares.is_multiple_of(1_000_000_000)
+            && asset["fractionable"] != true)
     {
         return Err("paper equity eligibility is unknown or unsupported".into());
     }
@@ -409,6 +410,9 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let mut log = BrokerLog::open(dir.path().join("paper.jsonl"), "paper").unwrap();
         let seconds = super::super::wallet_read::now().unwrap();
+        let observed_ms = now_ms().unwrap();
+        assert!(observed_ms >= seconds * 1_000);
+        assert!(observed_ms < (super::super::wallet_read::now().unwrap() + 1) * 1_000);
         let mut tick = seconds * 1_000;
         let mut urls = Vec::new();
         let report = collect(
@@ -450,6 +454,27 @@ mod tests {
                 .count(),
             3
         );
+        assert!(
+            collect(
+                &mut log,
+                &intent(BrokerSide::Buy),
+                &policy(),
+                1,
+                |url| {
+                    let mut value = fixture(url, seconds);
+                    if url.ends_with("/v2/assets/SPY") {
+                        value["id"] = json!("changed");
+                    }
+                    Ok(Some(value.to_string()))
+                },
+                || {
+                    tick += 10;
+                    Ok(tick)
+                }
+            )
+            .is_err()
+        );
+        assert!(log.entries().unwrap().next().is_none());
         let mut closed = policy();
         closed.enabled = false;
         assert!(
@@ -507,7 +532,7 @@ mod tests {
                 3 => wrong["positions"][0]["qty"] = json!("1"),
                 _ => {
                     wrong["open_orders_before"] =
-                        json!([{"id":"external","status":"new","client_order_id":"external"}])
+                        json!([{"id":"external","status":"new","client_order_id":"external"}]);
                 }
             }
             assert!(account_bounds(&log, &intent(BrokerSide::Buy), &wrong).is_err());

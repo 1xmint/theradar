@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # 0033 — Pure equity risk and the protected paper preflight caller
 
-**Status:** implementation ready for GitHub verification; activation closed.
+**Status:** first GitHub run inspected; repairs awaiting verification; activation closed.
 
 Branch: feat/alpaca-equity-risk, based on 8d7790e. All 14 jobs in
 `gh run view 38207446630 --json status,conclusion,jobs` passed before branching.
@@ -37,6 +37,25 @@ Previous goal turn made verified progress on durable share/cash accounting.
   requires separate eligible live setup and measured performance evidence.
 
 ## Handback
+
+First verification: `gh run view 38208616867 --json status,conclusion,jobs`
+at adb84e2a8e278f0503942bcbb96136a1c4380514. Tests passed (2,797), as did
+build, MSRV, format, web, site, dependency and license checks. Lint found a
+manual multiple-of check and a missing fixture semicolon; both are repaired.
+Mutation totals: 169, with 128 caught, 35 compiler-unviable, six missed and
+zero timeouts. All four artifacts, exact missed diffs and every unviable
+compiler reason were inspected. Unviable replacements introduced unused
+arguments/imports/dead code or required unavailable Default implementations;
+none is counted as a test kill.
+
+Repairs cover nonunit cost ratios (the original one-basis-point fixture hid
+multiply-to-add/divide replacements), actual host milliseconds, and a changed
+asset ID for the selected held symbol. Removed the redundant ask-zero guard:
+checked ask-minus-bid plus positive bid already establishes positive ask.
+Also refuse round-trip cost below the required fee reserve. New ratio tests
+exercise exact cost/spread boundaries and one unit beyond them. No mutation
+exclusions were added. The next GitHub run must verify these repairs; the
+observed test floor is 2,797, not a prediction of the next count.
 
 No account keys, actual orders, deposits, deployment or activation. Owner account
 creation remains pending; independent code work continued. GitHub verification
