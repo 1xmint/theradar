@@ -57,7 +57,10 @@ These are operator tools; unattended scheduling and execution are still pending.
 
 `radar alpaca-quote --input ./data/alpaca/capture-001.json --symbol SPY --as-of-unix-ms <N> --max-age-ms 1000 --max-spread-bps 10`
 checks a captured quote against explicit age/spread bounds, the capture's requested
-symbols and availability, and its nanosecond UTC exchange timestamp. Prices and
+symbols and availability, and its nanosecond UTC exchange timestamp. Quote
+provenance must match the supported IEX pattern: both exchanges V,
+exactly condition R and tape A/B/C. Missing or other metadata is refused;
+matching it does not establish market hours or tradability. Prices and
 displayed sizes are parsed as exact integers at six decimal places; size units
 remain unverified and cannot yet bound executable share quantity. Unsupported
 precision and exponent notation are refused. This produces quote inputs only,

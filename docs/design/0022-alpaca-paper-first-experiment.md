@@ -1,11 +1,13 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # 0022 — Alpaca paper first, measured profit as the objective
 
-**Status:** owner-approved direction; account/market/quote foundation verified on GitHub; reconciliation increment in progress.
+**Status:** owner-approved direction; isolated account and market reads owner-verified; execution and evaluation incomplete.
 
 On 2026-10-11 Josh accepted the recommendation to start with Alpaca paper
 stocks/ETFs. The objective is durable profit after costs when learned intelligence
-is applied, not loyalty to a venue. The owner needs to create the paper account.
+is applied, not loyalty to a venue. The owner created the paper account and
+provisioned its keys privately; isolated account and IEX reads succeeded in
+owner-supplied output (plans 0036 and 0037).
 
 ## Choice and alternatives
 
@@ -76,7 +78,12 @@ exponents, nonpositive prices/sizes, crossed quotes, excessive spread/age and
 future exchange timestamps are refused. UTC timestamps retain nanoseconds;
 canonical date round-trip validation rejects impossible dates and leap seconds.
 Age and spread bounds are explicit operator inputs, not autonomous capital
-mandates. Quote conditions, tradability, market hours, complete account state,
+mandates. The quote adapter also requires both exchange fields V, exactly one
+condition R and tape A/B/C, and retains those fields in its report. This is the
+supported IEX pattern observed in the owner's captures, not a claim that every
+valid IEX quote has that pattern or that it proves session/tradability/capacity.
+Unsupported or missing metadata refuses in both offline quote and actual
+preflight callers. Tradability, market hours, complete account state,
 costs, reservations and execution permissions still need their own checks.
 
 `radar alpaca-reconcile` collects account, open orders, positions, clock, open

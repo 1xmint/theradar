@@ -145,8 +145,7 @@ fn quote_command_uses_capture_universe_and_availability_before_validating_prices
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("capture.json");
     let at = 1_792_540_800_000_u64;
-    let quote =
-        r#"{"latestQuote":{"t":"2026-10-21T00:00:00Z","bp":100,"ap":100.01,"bs":20,"as":30}}"#;
+    let quote = r#"{"latestQuote":{"t":"2026-10-21T00:00:00Z","bp":100,"ap":100.01,"bs":20,"as":30,"bx":"V","ax":"V","c":["R"],"z":"B"}}"#;
     let capture = serde_json::json!({"format":"alpaca-iex-snapshot-v1",
         "read_started_unix_ms":at-1,"available_at_unix_ms":at,"symbols":["SPY"],
         "raw_response":format!("{{\"SPY\":{quote},\"QQQ\":{quote}}}")});

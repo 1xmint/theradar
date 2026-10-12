@@ -16,8 +16,14 @@ Hyperliquid public-data research are secondary. See [GOAL](../GOAL.md) and
 [the accepted experiment](design/0022-alpaca-paper-first-experiment.md).
 Account/market/quote and bracket reconciliation source is integrated; exposure,
 recovery, durable claims, asset observations and setup changes still require
-verified integration. No Alpaca account/keys or actual broker execution have
-been verified. The autonomous goal remains incomplete.
+verified integration. Owner-reported isolated VPS reads verified an active paper
+account with no positions and retained SPY/QQQ IEX snapshots; root-only credential
+permissions and installed reader hash were inspected independently. A bounded
+continuous research recorder is GitHub-verified and uploaded, with administrator
+installation pending. See [plan 0038](plans/0038-alpaca-market-recorder.md).
+Quote metadata checks are the current increment, [plan 0039](plans/0039-alpaca-quote-provenance.md).
+No actual broker orders, effective autonomous handover or Alpaca learning results
+have been verified. The autonomous goal remains incomplete.
 
 The measurements below describe the existing Solana research, recorder and
 execution infrastructure; they do not establish an Alpaca edge.
