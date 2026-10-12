@@ -8,14 +8,29 @@ use serde_json::{Value, json};
 
 #[derive(Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
-struct Assumptions {
+pub(super) struct Assumptions {
     model_id: String,
     displayed_size_unit: String,
     participation_bps: u16,
     slippage_bps_per_side: u16,
     fee_per_side_microusd: u64,
-    max_quote_age_ms: u64,
-    max_spread_bps: u64,
+    pub(super) max_quote_age_ms: u64,
+    pub(super) max_spread_bps: u64,
+}
+
+impl Assumptions {
+    pub(super) fn validate(&self, quantity: u64) -> Result<(), String> {
+        if quantity == 0
+            || self.model_id.trim().is_empty()
+            || self.displayed_size_unit != "shares"
+            || self.participation_bps == 0
+            || self.participation_bps > 10_000
+            || self.slippage_bps_per_side > 10_000
+        {
+            return Err("invalid explicit paper scoring assumptions".into());
+        }
+        Ok(())
+    }
 }
 
 fn amount(quote: &Value, field: &str) -> Result<u64, String> {
@@ -30,21 +45,13 @@ fn bounded(value: u128) -> Result<u64, String> {
     u64::try_from(value).map_err(|_| "paper scoring amount overflow".into())
 }
 
-fn score(
+pub(super) fn score(
     entry: &Value,
     exit: &Value,
     quantity: u64,
     assumptions: &Assumptions,
 ) -> Result<Value, String> {
-    if quantity == 0
-        || assumptions.model_id.trim().is_empty()
-        || assumptions.displayed_size_unit != "shares"
-        || assumptions.participation_bps == 0
-        || assumptions.participation_bps > 10_000
-        || assumptions.slippage_bps_per_side > 10_000
-    {
-        return Err("invalid explicit paper scoring assumptions".into());
-    }
+    assumptions.validate(quantity)?;
     let entry_at = entry["as_of_unix_ms"]
         .as_u64()
         .ok_or("entry watermark missing")?;

@@ -13,6 +13,7 @@ use radar_instruments::{Context, CreatorHistory, CreatorTrackRecord, Registry, S
 mod alpaca_activities;
 mod alpaca_assets;
 mod alpaca_cash;
+mod alpaca_decision;
 mod alpaca_exposure;
 mod alpaca_fills;
 mod alpaca_journal;
@@ -150,6 +151,10 @@ commands:
   alpaca-paper-score --entry <capture> --entry-as-of-unix-ms <N> --exit <capture> --exit-as-of-unix-ms <N> --symbol SPY --quantity-nanoshares <N> --assumptions <json>
                                  offline ask-to-bid outcome under explicit cost
                                  and participation assumptions; no orders
+  alpaca-paper-decision --capture <capture> --symbol SPY --proposal <json> --assumptions <json> --output <new-file>
+  alpaca-paper-decision-score --decision <record> --exit <capture> --exit-as-of-unix-ms <N>
+                                 freeze research choices and compare outcomes;
+                                 no broker permissions or orders
   wallet-read --wallet <address> --rpc <URL>
        [--value-sol --min-slot <N> --max-age-secs <N> --max-confidence-bps <0..10000>]
     Finalized balances/raw token verification; optional native USD band, read-only.
@@ -953,6 +958,7 @@ fn main() -> ExitCode {
         "alpaca-market-read" | "alpaca-market-replay" => alpaca_market::run(&args),
         "alpaca-quote" => alpaca_quote::run(&args),
         "alpaca-paper-score" => alpaca_score::run(&args),
+        "alpaca-paper-decision" | "alpaca-paper-decision-score" => alpaca_decision::run(&args),
         "wallet-read" => wallet_read::run(&args),
         "portfolio-read" => portfolio_read::run(&args),
         "sol-price-read" => sol_price_read::run(&args),
