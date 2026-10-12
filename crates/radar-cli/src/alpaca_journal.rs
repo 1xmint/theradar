@@ -22,7 +22,7 @@ fn intent(path: &str) -> Result<BrokerIntent, String> {
         .map_err(|_| "invalid typed paper intent; do not include credentials".into())
 }
 
-fn report(log: &BrokerLog, account: &str, changed: bool) -> Result<Value, String> {
+pub(super) fn report(log: &BrokerLog, account: &str, changed: bool) -> Result<Value, String> {
     let entries = log.entries().map_err(|e| e.to_string())?;
     let mut claims = Vec::new();
     for entry in entries {

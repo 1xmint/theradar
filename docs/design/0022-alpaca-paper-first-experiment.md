@@ -190,6 +190,35 @@ late events/corrections, finality and durable claim release remain unresolved;
 fills_reconciled and all authority/retry/release flags remain false. Even a fully
 filled observed order retains its entire original cash/share reservation.
 
+The alpaca-cash-reconcile caller compares a prior private activity report with
+current account-wide observations under journal ownership. It binds every retained
+order before and after paginated activity collection, checks unchanged selected
+current account/order fields, and reuses execution interval validation. All prior
+activity IDs must still exist with equal selected fields; new fills must belong
+to bound retained orders. New CSD deposits, CSW withdrawals and USD FEE entries
+are supported; unknown new activity types refuse instead of becoming zero. Fees
+may have either sign (including credits); deposits cannot be negative and
+withdrawals cannot be positive. This classification follows the official
+[activity schemas](https://docs.alpaca.markets/us/docs/account-activities).
+
+Cash checks require explicit USD currency and exact nonnegative account balances.
+Fill products are accumulated in signed integers at 18 decimal places; nontrade
+cash strings support nine. Expected cash and trade cash flow round outward to
+nano-USD only after aggregation. Current reported cash must lie within the exact
+floor/ceiling; no arbitrary discrepancy tolerance or unverified broker rounding
+rule is added. Actual broker cash precision/booking still needs capture validation.
+The prior report's account pin, stable selected fields, page exhaustion and host
+times are rechecked; it cannot overlap/follow the current read. A baseline file
+larger than 16 MiB refuses before network access.
+
+The baseline file is operator-provided evidence, not authenticated provenance or
+a durable execution checkpoint. Keep it in protected storage. Matching selected
+cash deltas does not prove complete or atomic history, final fees, fee-reserve
+adequacy, settlement, available capital or profit. Trade cash flow includes the
+cost of opening positions and is not P&L. External funding is separately labelled.
+All original claims and authority refusals remain. Durable economic transitions
+and complete risk state are still required before any claim release or execution.
+
 `radar alpaca-assets-read` reads each requested equity between pinned paper
 account reads. It binds symbol, nonempty unique asset ID and us_equity class;
 nullable status, exchange, tradability, fractional, margin, short and attribute
