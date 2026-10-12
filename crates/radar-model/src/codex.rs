@@ -538,6 +538,18 @@ mod tests {
         move |k: &str| map.get(k).cloned()
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn trusted_framing_reaches_cli_stdin() {
+        let codex = Codex::from_vars("sh -c cat", &vars(&[("PATH", "/usr/bin:/bin")])).unwrap();
+        let request = Request::new("trusted framing", "operator question")
+            .observing("feed", "untrusted observation");
+        let answer = codex.ask(&request).unwrap();
+        assert!(answer.text.starts_with("trusted framing\n\noperator question\n\n"));
+        assert!(answer.text.contains("untrusted observation"));
+        assert_eq!(request.fences(), 2);
+    }
+
     #[test]
     fn the_child_inherits_only_what_it_was_given() {
         // The property this module exists for. `radar-serve`'s environment

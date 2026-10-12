@@ -227,7 +227,9 @@ pub(super) fn record(
         symbol: input.symbol,
         frozen_at_unix_ms: input.as_of,
         recorded_at_unix_ms: now()?,
-        outcome_not_before_unix_ms: input.as_of.checked_add(proposal.horizon_ms)
+        outcome_not_before_unix_ms: input
+            .as_of
+            .checked_add(proposal.horizon_ms)
             .ok_or("decision horizon overflow")?,
         entry_available_at_unix_ms: input.available,
         entry_raw_response: input.raw,
@@ -236,10 +238,12 @@ pub(super) fn record(
         assumptions,
     };
     publish(output, &decision)?;
-    Ok(json!({"decision_written":true,"frozen_at_unix_ms":decision.frozen_at_unix_ms,
+    Ok(
+        json!({"decision_written":true,"frozen_at_unix_ms":decision.frozen_at_unix_ms,
         "outcome_not_before_unix_ms":decision.outcome_not_before_unix_ms,
         "model_observation_as_of_unix_ms":decision.model_observation_as_of_unix_ms,
-        "decision_origin_verified":false,"execution_authority":false}))
+        "decision_origin_verified":false,"execution_authority":false}),
+    )
 }
 
 #[cfg(test)]
@@ -311,7 +315,10 @@ mod tests {
         value.frozen_at_unix_ms += 1;
         value.recorded_at_unix_ms += 1;
         value.outcome_not_before_unix_ms += 1;
-        assert!(value.entry().is_err(), "quote age is rechecked after model completion");
+        assert!(
+            value.entry().is_err(),
+            "quote age is rechecked after model completion"
+        );
     }
 
     #[test]
