@@ -164,6 +164,7 @@ mod tests {
             available_at_unix_ms: 1_000,
             halted: false,
             market_open: true,
+            session_close_unix_ms: Some(10_000),
             available_cash_microusd: Some(500_000_000),
             available_nanoshares: Some(2_000_000_000),
             committed_microusd: Some(0),
@@ -334,6 +335,20 @@ mod tests {
             );
             assert!(log.entries().unwrap().next().is_none());
         }
+    }
+
+    #[test]
+    fn session_closing_after_durable_submission_refuses_network_effect() {
+        let (intent, mut state, policy) = fixture();
+        state.session_close_unix_ms = Some(1_001);
+        let dir = tempfile::tempdir().unwrap();
+        let mut log = BrokerLog::open(dir.path().join("orders.jsonl"), "paper").unwrap();
+        let mut calls = 0;
+        assert!(execute(&mut log, &intent, &state, || Ok(policy.clone()), || {
+            calls += 1;
+            Ok(if calls == 1 { 1_000 } else { 1_001 })
+        }, |_| panic!("closed session must not send")).is_err());
+        assert_eq!(log.entries().unwrap().next().unwrap().state, BrokerState::SubmissionUnknown);
     }
 
     #[test]

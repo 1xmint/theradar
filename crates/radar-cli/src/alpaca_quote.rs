@@ -51,7 +51,7 @@ fn fixed6(text: &str) -> Option<u64> {
         .checked_add(fraction.parse().ok()?)
 }
 
-fn timestamp_ns(text: &str) -> Option<u128> {
+pub(super) fn timestamp_ns(text: &str) -> Option<u128> {
     let utc = text.strip_suffix('Z')?;
     let (whole, fraction) = utc.split_once('.').unwrap_or((utc, ""));
     // Bound the year before calling the shared civil arithmetic.
