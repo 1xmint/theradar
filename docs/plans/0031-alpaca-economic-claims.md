@@ -23,6 +23,15 @@ test/build/lint/mutation jobs run on GitHub.
 - [ ] Verify four new tests and existing regressions on GitHub: exact fractional
   residual math, monotonic complete progress, atomic replay/refusal, and actual
   cash caller for both sides across ten lifecycle states with restart checks.
+  CI 38205493827 at 408a4ae passed 2786 tests and every nonlint/nonmutation job.
+  Lint named similar fixture bindings full/fill; rename the former completed.
+  Mutations: 16 caught, 13 compiler-unviable, one missed, zero timeouts. Read all
+  four artifacts and every compiler reason (unused/dead/absent Default and an
+  unsupported OR let-chain). Exact survivor broker_claims.rs:53:40 changed
+  filled > original to >=. The storage-only package tests lacked exact-full
+  acceptance, although the CLI exercised it. Add that precise boundary to the
+  validator test, retain the actual caller test, raise the observed floor to
+  2786 and rerun full GitHub verification; no exclusions.
 - [ ] Connect pure equity risk to complete fresh cash/positions/open-order/asset/
   session/quote observations, then the separate executor and supervisor/site.
   Measure learning through forward paper operation; eligible explicit live setup

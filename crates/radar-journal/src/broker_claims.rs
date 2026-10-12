@@ -184,6 +184,11 @@ mod tests {
         assert!(validate(&cash(None), Some(&cash(None)), &entries).is_ok());
         assert!(validate(&cash(None), Some(&prior), &entries).is_err());
         assert!(validate(&prior, Some(&prior), &entries).is_ok());
+        let complete = cash(Some(BTreeMap::from([(
+            id.clone(),
+            progress(entry.intent.quantity_nanoshares, true),
+        )])));
+        assert!(validate(&complete, Some(&prior), &entries).is_ok());
         assert!(validate(&cash(Some(BTreeMap::new())), None, &BTreeMap::new()).is_ok());
         assert!(validate(&cash(Some(BTreeMap::new())), None, &entries).is_err());
         let mut extra = orders.clone();

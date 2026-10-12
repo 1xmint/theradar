@@ -469,17 +469,17 @@ mod tests {
                 let now = super::super::wallet_read::now().unwrap();
                 log.reserve(intent.clone(), now).unwrap();
                 log.submit(&id, now, |_| ()).unwrap();
-                let full = status == "filled";
-                let quantity = if full { "1" } else { "0.5" };
+                let completed = status == "filled";
+                let quantity = if completed { "1" } else { "0.5" };
                 let mut fill = fill(side);
                 fill["qty"] = json!(quantity);
                 fill["cum_qty"] = json!(quantity);
-                fill["leaves_qty"] = json!(if full { "0" } else { "0.5" });
+                fill["leaves_qty"] = json!(if completed { "0" } else { "0.5" });
                 fill["price"] = json!("100");
                 let mut order = order(side);
                 order["status"] = json!(status);
                 order["filled_qty"] = json!(quantity);
-                let balance = match (side, full) {
+                let balance = match (side, completed) {
                     (BrokerSide::Buy, true) => "400",
                     (BrokerSide::Buy, false) => "450",
                     (BrokerSide::Sell, true) => "600",
