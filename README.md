@@ -77,6 +77,20 @@ and all assumptions. Capacity is explicitly assumed, broker P&L is not claimed,
 and nothing from this scorer enters execution risk state. It is an outcome
 measurement tool; it does not establish held-out performance or choose trades.
 
+`radar alpaca-paper-decision --capture <capture> --symbol SPY --proposal <json> --assumptions <json> --output <new-file>`
+records a local research choice using the host clock and a capture available at
+that cutoff. Proposal fields are strategy_id (include version), action (enter or
+wait), quantity_nanoshares, horizon_ms and reason. Quantity also fixes the
+same-size always-enter baseline; cash is the second baseline. Cost assumptions
+use the scoring schema above. All are copied into the new record, including raw
+entry data; existing files refuse publication. No model call or order is made.
+`radar alpaca-paper-decision-score --decision <record> --exit <capture> --exit-as-of-unix-ms <N>`
+requires exactly the frozen horizon watermark. Unavailable or invalid exit data
+and excess assumed participation produce an explicit unscoreable outcome, with
+unknown comparison values, rather than dropping the case or assigning zero.
+Records are mutable local research files, not authenticated strategy provenance.
+This does not yet prove cohort completeness, a learned strategy or forward gains.
+
 `radar alpaca-reconcile --account-id <expected-paper-account-id>` pins the account
 identity and brackets positions/market-clock reads with account and open-order
 reads. It preserves pending orders and nested legs, reports changes in selected
