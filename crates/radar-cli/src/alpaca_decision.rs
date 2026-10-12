@@ -59,7 +59,8 @@ fn now() -> Result<u64, String> {
 
 impl Decision {
     fn entry(&self) -> Result<Value, String> {
-        self.assumptions.validate(self.proposal.quantity_nanoshares)?;
+        self.assumptions
+            .validate(self.proposal.quantity_nanoshares)?;
         if self.proposal.strategy_id.trim().is_empty()
             || self.proposal.reason.trim().is_empty()
             || self.frozen_at_unix_ms > self.recorded_at_unix_ms
@@ -104,9 +105,12 @@ fn publish_at(
         use std::os::unix::fs::OpenOptionsExt as _;
         options.mode(0o600);
     }
-    let mut file = options.open(&pending).map_err(|_| "decision pending file unavailable")?;
+    let mut file = options
+        .open(&pending)
+        .map_err(|_| "decision pending file unavailable")?;
     let result = (|| {
-        file.write_all(&bytes).and_then(|()| file.sync_all())
+        file.write_all(&bytes)
+            .and_then(|()| file.sync_all())
             .map_err(|_| "decision write failed")?;
         drop(file);
         if clock()? >= decision.outcome_not_before_unix_ms {
@@ -122,7 +126,9 @@ fn publish_at(
 fn load(path: &str) -> Result<Decision, String> {
     let file = std::fs::File::open(path).map_err(|_| "decision unavailable")?;
     let mut bytes = Vec::new();
-    file.take(MAX_RECORD + 1).read_to_end(&mut bytes).map_err(|_| "decision read failed")?;
+    file.take(MAX_RECORD + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|_| "decision read failed")?;
     if u64::try_from(bytes.len()).map_err(|_| "decision size overflow")? > MAX_RECORD {
         return Err("decision exceeds two MiB".into());
     }
@@ -134,23 +140,42 @@ fn outcome(decision: &Decision, exit: Result<Value, String>, at: u64) -> Result<
     if at != decision.outcome_not_before_unix_ms {
         return Err("outcome watermark differs from frozen evaluation horizon".into());
     }
-    let baseline = exit.and_then(|exit| super::alpaca_score::score(
-        &entry, &exit, decision.proposal.quantity_nanoshares, &decision.assumptions,
-    ));
+    let baseline = exit.and_then(|exit| {
+        super::alpaca_score::score(
+            &entry,
+            &exit,
+            decision.proposal.quantity_nanoshares,
+            &decision.assumptions,
+        )
+    });
     let (status, baseline, strategy, delta, error) = match baseline {
         Ok(report) => {
-            let net: i128 = report["net_pnl_microusd"].as_str()
-                .ok_or("baseline result missing")?.parse().map_err(|_| "baseline result invalid")?;
-            let strategy = match decision.proposal.action { Action::Enter => net, Action::Wait => 0 };
-            ("scored", report, Some(strategy.to_string()), Some((strategy - net).to_string()), None)
+            let net: i128 = report["net_pnl_microusd"]
+                .as_str()
+                .ok_or("baseline result missing")?
+                .parse()
+                .map_err(|_| "baseline result invalid")?;
+            let strategy = match decision.proposal.action {
+                Action::Enter => net,
+                Action::Wait => 0,
+            };
+            (
+                "scored",
+                report,
+                Some(strategy.to_string()),
+                Some((strategy - net).to_string()),
+                None,
+            )
         }
         Err(error) => ("unscoreable", Value::Null, None, None, Some(error)),
     };
-    Ok(json!({"status":status,"decision":decision,"exit_as_of_unix_ms":at,
+    Ok(
+        json!({"status":status,"decision":decision,"exit_as_of_unix_ms":at,
         "always_enter_baseline":baseline,"cash_baseline_net_pnl_microusd":"0",
         "strategy_net_pnl_microusd":strategy,"strategy_minus_enter_microusd":delta,
         "unscoreable_reason":error,"environment":"offline_simulation",
-        "decision_origin_verified":false,"execution_authority":false}))
+        "decision_origin_verified":false,"execution_authority":false}),
+    )
 }
 
 pub(super) fn run(args: &[String]) -> Result<(), String> {
@@ -197,7 +222,7 @@ mod tests {
             "entry_available_at_unix_ms":at,
             "entry_raw_response":json!({"SPY":{"latestQuote":{"t":"2026-10-21T00:00:00Z",
                 "bp":100,"ap":100.01,"bs":20,"as":30,"bx":"V","ax":"V","c":["R"],"z":"B"}}}).to_string(),
-            "proposal":{"strategy_id":"unit-v1","action":"wait","quantity_nanoshares":1000000000_u64,
+            "proposal":{"strategy_id":"unit-v1","action":"wait","quantity_nanoshares":1_000_000_000_u64,
                 "horizon_ms":1000,"reason":"test"},
             "assumptions":{"model_id":"stress-v1","displayed_size_unit":"shares","participation_bps":1000,
                 "slippage_bps_per_side":1,"fee_per_side_microusd":7,"max_quote_age_ms":0,"max_spread_bps":10}})).unwrap()
@@ -207,7 +232,10 @@ mod tests {
     fn identity_and_all_chronology_boundaries_are_checked() {
         assert!(decision().entry().is_ok());
         for (field, value) in [
-            ("strategy_id", ""), ("strategy_id", " "), ("reason", ""), ("reason", " "),
+            ("strategy_id", ""),
+            ("strategy_id", " "),
+            ("reason", ""),
+            ("reason", " "),
         ] {
             let mut value_json = serde_json::to_value(decision()).unwrap();
             value_json["proposal"][field] = json!(value);
@@ -252,26 +280,47 @@ mod tests {
         value.recorded_at_unix_ms = 1_000;
         value.outcome_not_before_unix_ms = 2_000;
         value.entry_available_at_unix_ms = 1_000;
-        value.entry_raw_response = value.entry_raw_response.replace("2026-10-21T00:00:00Z", "1970-01-01T00:00:01Z");
-        assert_eq!(publish(&path, &value).unwrap_err(), "decision horizon passed before publication");
+        value.entry_raw_response = value
+            .entry_raw_response
+            .replace("2026-10-21T00:00:00Z", "1970-01-01T00:00:01Z");
+        assert_eq!(
+            publish(&path, &value).unwrap_err(),
+            "decision horizon passed before publication"
+        );
         assert!(!path.exists());
         for clock in [2_000, 2_001] {
-            assert_eq!(publish_at(&path, &value, || Ok(clock)).unwrap_err(), "decision horizon passed before publication");
+            assert_eq!(
+                publish_at(&path, &value, || Ok(clock)).unwrap_err(),
+                "decision horizon passed before publication"
+            );
         }
         assert!(publish_at(&path, &value, || Ok(1_999)).is_ok());
         std::fs::remove_file(&path).unwrap();
         let base = serde_json::to_vec(&value).unwrap().len();
-        value.entry_raw_response.push_str(&" ".repeat(usize::try_from(MAX_RECORD).unwrap() - base));
-        assert_eq!(publish_at(&path, &value, || Ok(2_000)).unwrap_err(), "decision horizon passed before publication");
+        value
+            .entry_raw_response
+            .push_str(&" ".repeat(usize::try_from(MAX_RECORD).unwrap() - base));
+        assert_eq!(
+            publish_at(&path, &value, || Ok(2_000)).unwrap_err(),
+            "decision horizon passed before publication"
+        );
         value.entry_raw_response.push(' ');
-        assert_eq!(publish_at(&path, &value, || Ok(1_999)).unwrap_err(), "decision exceeds two MiB");
+        assert_eq!(
+            publish_at(&path, &value, || Ok(1_999)).unwrap_err(),
+            "decision exceeds two MiB"
+        );
         std::fs::write(&path, vec![b' '; usize::try_from(MAX_RECORD).unwrap()]).unwrap();
-        assert_eq!(load(path.to_str().unwrap()).err().unwrap(), "invalid typed decision");
+        assert_eq!(
+            load(path.to_str().unwrap()).err().unwrap(),
+            "invalid typed decision"
+        );
         std::fs::write(&path, vec![b' '; usize::try_from(MAX_RECORD + 1).unwrap()]).unwrap();
-        assert_eq!(load(path.to_str().unwrap()).err().unwrap(), "decision exceeds two MiB");
+        assert_eq!(
+            load(path.to_str().unwrap()).err().unwrap(),
+            "decision exceeds two MiB"
+        );
         let mut encoded = serde_json::to_value(decision()).unwrap();
         encoded["format"] = json!("v2");
         assert!(serde_json::from_value::<Decision>(encoded).is_err());
     }
 }
-
