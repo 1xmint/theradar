@@ -1,6 +1,29 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # Deploying Radar
 
+## Private Alpaca paper setup
+
+Use `deploy/setup-alpaca-paper.py` only after its exact commit passes GitHub
+checks. Upload the script to `/tmp/radar-alpaca-paper-setup.py` on
+guardian-vps-tail, then run it in your own terminal:
+
+```powershell
+ssh -t guardian-vps-tail "sudo python3 /tmp/radar-alpaca-paper-setup.py"
+```
+
+Enter the Alpaca paper key ID and secret at the hidden prompts. Do not paste
+them in chat, command arguments or the repository. The script verifies the
+active USD paper account using one fixed HTTPS GET, refuses redirects, and
+saves `/etc/radar/alpaca-paper.env` with root-only permissions. It refuses
+existing credentials rather than rotating them. The existing `/etc/radar`
+directory and its parents must be root-owned without group/public write access.
+
+This provisions storage only. It does not give the website/model process
+credentials, install a service or enable trading. The protected operator reader
+uses the two variables documented in `deploy/alpaca-paper.env.example`; service
+isolation, owner handover and remaining execution checks must be completed
+before unattended operation. See plan 0035 for verification and handback.
+
 Radar runs on the shared `clawguard` VPS alongside Cortex and Pulse. That shapes
 every choice here: it is a 2-core box with 3.8 GiB of RAM running other people's
 production services, so Radar is memory-capped, sandboxed, and installed without
