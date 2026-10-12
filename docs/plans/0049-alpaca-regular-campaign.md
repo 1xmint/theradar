@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # 0049 — Keep contextual research inside regular market hours
 
-**Status:** Source prepared; GitHub verification pending. No deployment.
+**Status:** Source verified on GitHub; no deployment.
 
 The context change at e5ecb06 passed all 14 jobs in 38309801068: 2835 Rust,
 47 Python tests, 39 caught mutations, nine compiler-unviable, no survivors.
@@ -19,7 +19,7 @@ cost-adjusted forward outcomes; this campaign is one remaining component.
 - [x] Call that guard before capture/model for snapshot-context-v1 research attempts.
 - [x] Provide fixed separate context-campaign reader, config and state paths.
 - [x] Preserve legacy quote-only campaign behavior and its immutable history.
-- [ ] Verify new tests, all GitHub jobs and retained mutation diagnostics.
+- [x] Verify new tests, all GitHub jobs and retained mutation diagnostics.
 - [ ] Provision a verified new artifact and future regular-session campaign.
 
 `radar alpaca-research-session --horizon-ms <positive-ms>` reads only the fixed
@@ -45,6 +45,16 @@ campaign. Installation and an explicit future schedule still require reviewed
 provisioning; no source-only unit is represented as running.
 
 ## Handback
+
+Final source 7b13b49be508f3a8334ff9b6a375d574f79ae147: GitHub 38311232531
+passed all 14 jobs, 2836 Rust and 51 Python tests, 21 targeted campaign
+mutations, all prior exact regressions, and all three systemd unit pairs.
+Rust shards: two caught, three compiler-unviable, no survivors/timeouts. Three
+artifacts inspected; shard 3 explicitly selected zero mutants and had no
+artifact. Release 38311227624 passed at the same commit. Downloaded radar hash
+712a872adba5400b8744e7019af62817446a651a54bb40a57271ffeeaad0929b matches
+BUILD-INFO. Verified handback lives on the provisioning branch to keep parent
+source stable. No production changes or broker orders.
 
 Prepared one Rust actual-collector test for timing/closure/failure boundaries,
 plus four Python real-dispatch tests for guard order, invalid reports, credential
