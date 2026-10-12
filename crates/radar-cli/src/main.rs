@@ -27,6 +27,7 @@ mod alpaca_quote;
 mod alpaca_read;
 mod alpaca_reconcile;
 mod alpaca_score;
+mod alpaca_session;
 mod alpaca_submit;
 mod audit;
 mod basis;

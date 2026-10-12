@@ -214,6 +214,7 @@ pub(super) fn collect_state(
     if !policy.enabled || policy.account_id != intent.account_id {
         return Err("paper handover is closed or account differs".into());
     }
+    super::alpaca_session::limit(intent.limit_microusd_per_share)?;
     super::alpaca_market::symbols(&intent.symbol)?;
     super::alpaca_order_read::query(&intent.client_order_id)?;
     if log
@@ -269,16 +270,19 @@ pub(super) fn collect_state(
     }
     let available = clock()?.checked_add(1).ok_or("paper timestamp overflow")?;
     let now = clock()?;
+    let (session_observed, session_close) =
+        super::alpaca_session::validate(&reconcile["market_clock"], now, policy.max_input_age_ms)?;
     let exchange_ms = quote_available
         .checked_sub(number(&quote["age_ns"])?.div_ceil(1_000_000))
         .ok_or("paper quote time underflow")?;
     Ok(State {
         account_id: intent.account_id.clone(),
         now_unix_ms: now,
-        oldest_input_unix_ms: started.min(exchange_ms),
+        oldest_input_unix_ms: started.min(exchange_ms).min(session_observed),
         available_at_unix_ms: available,
         halted: false,
         market_open: reconcile["market_clock"]["is_open"] == true,
+        session_close_unix_ms: Some(session_close),
         available_cash_microusd: Some(cash),
         available_nanoshares: Some(shares),
         committed_microusd: Some(committed),
@@ -305,6 +309,7 @@ fn report(intent: &BrokerIntent, state: &State, policy: &Policy) -> Value {
         "symbol_committed_microusd":state.symbol_committed_microusd.map(|v| v.to_string()),
         "capacity_nanoshares":null,"required_fee_microusd":null,"round_trip_cost_microusd":null,
         "oldest_input_unix_ms":state.oldest_input_unix_ms,
+        "session_close_unix_ms":state.session_close_unix_ms,
         "available_at_unix_ms":state.available_at_unix_ms,"as_of_unix_ms":state.now_unix_ms})
 }
 
@@ -439,7 +444,9 @@ mod tests {
         } else if url.contains("/v2/orders?") || url.contains("/v2/account/activities?") {
             json!([])
         } else if url.ends_with("/v2/clock") {
-            json!({"timestamp":"2026-10-12T14:00:00Z","is_open":true,"next_open":"2026-10-13T13:30:00Z","next_close":"2026-10-12T20:00:00Z"})
+            json!({"timestamp":radar_types::civil::timestamp_from_seconds(seconds),"is_open":true,
+                "next_open":radar_types::civil::timestamp_from_seconds(seconds + 86400),
+                "next_close":radar_types::civil::timestamp_from_seconds(seconds + 3600)})
         } else if url.ends_with("/v2/assets/SPY") {
             json!({"id":"asset","symbol":"SPY","class":"us_equity","status":"active","tradable":true,"fractionable":true,"attributes":[],"exchange":"ARCA"})
         } else if url.starts_with(SNAPSHOTS) {
@@ -544,6 +551,56 @@ mod tests {
             )
             .is_err()
         );
+    }
+
+    #[test]
+    fn actual_collector_rejects_invalid_clock_and_limit_before_any_submission() {
+        let seconds = 1_791_813_600;
+        for (field, bad) in [
+            ("timestamp", json!("2026-10-12T13:59:00Z")),
+            ("timestamp", json!("2026-10-12T14:00:01Z")),
+            ("next_close", json!("2026-10-12T14:00:00Z")),
+            ("next_open", json!("2026-10-12T14:01:00Z")),
+            ("is_open", json!(false)),
+        ] {
+            let dir = tempfile::tempdir().unwrap();
+            let mut log = BrokerLog::open(dir.path().join("paper.jsonl"), "paper").unwrap();
+            let result = collect_state(
+                &mut log,
+                &intent(BrokerSide::Buy),
+                &policy(),
+                1,
+                |url| {
+                    let mut value = fixture(url, seconds);
+                    if url.ends_with("/v2/clock") {
+                        value[field] = bad.clone();
+                    }
+                    Ok(Some(value.to_string()))
+                },
+                || Ok(seconds * 1_000 + 10),
+            );
+            assert_eq!(
+                result.unwrap_err(),
+                "paper session is closed, stale or inconsistent"
+            );
+            assert!(log.entries().unwrap().next().is_none());
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let mut log = BrokerLog::open(dir.path().join("paper.jsonl"), "paper").unwrap();
+        let mut invalid = intent(BrokerSide::Buy);
+        invalid.limit_microusd_per_share += 1;
+        assert!(
+            collect_state(
+                &mut log,
+                &invalid,
+                &policy(),
+                1,
+                |_| panic!("invalid increment must refuse before reads"),
+                || Ok(0)
+            )
+            .is_err()
+        );
+        assert!(log.cash().unwrap().is_none());
     }
 
     #[test]

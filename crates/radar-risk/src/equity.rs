@@ -82,6 +82,8 @@ pub struct State {
     pub halted: bool,
     /// Broker regular-hours session is known open.
     pub market_open: bool,
+    /// Validated broker close; permissions expire strictly before this boundary.
+    pub session_close_unix_ms: Option<u64>,
     /// Cash after all local liabilities, independently bounded by broker funds.
     pub available_cash_microusd: Option<u64>,
     /// Reconciled shares after all pending local sell claims.
@@ -223,7 +225,11 @@ fn expires(state: &State, policy: &Policy) -> Result<u64, Refusal> {
     if !state.market_open {
         return Err(Refusal::Session);
     }
-    Ok(expiry)
+    let close = state.session_close_unix_ms.ok_or(Refusal::Session)?;
+    if state.now_unix_ms >= close {
+        return Err(Refusal::Session);
+    }
+    Ok(expiry.min(close - 1))
 }
 
 fn liquidity(order: &Order, state: &State, policy: &Policy) -> Result<(), Refusal> {
@@ -312,6 +318,7 @@ mod tests {
             available_at_unix_ms: 95,
             halted: false,
             market_open: true,
+            session_close_unix_ms: Some(1000),
             available_cash_microusd: Some(100_000_001),
             available_nanoshares: Some(1_000_000_000),
             committed_microusd: Some(0),
@@ -338,6 +345,30 @@ mod tests {
             max_round_trip_cost_bps: 1,
         };
         (order, state, policy)
+    }
+
+    #[test]
+    fn session_close_caps_permission_and_refuses_unknown_or_elapsed_session() {
+        let (order, mut state, policy) = fixture();
+        state.oldest_input_unix_ms = 100;
+        state.available_at_unix_ms = 100;
+        state.session_close_unix_ms = Some(103);
+        let permission = evaluate(&order, &state, &policy).unwrap();
+        assert!(permission.permits(&order, 102));
+        assert!(!permission.permits(&order, 103));
+        for close in [None, Some(0), Some(99), Some(100)] {
+            state.session_close_unix_ms = close;
+            assert!(matches!(
+                evaluate(&order, &state, &policy),
+                Err(Refusal::Session)
+            ));
+        }
+        state.session_close_unix_ms = Some(101);
+        assert!(
+            evaluate(&order, &state, &policy)
+                .unwrap()
+                .permits(&order, 100)
+        );
     }
 
     #[test]

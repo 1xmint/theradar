@@ -354,8 +354,11 @@ unknown exchanges and asset restrictions refuse.
 Preflight does not reserve or submit the proposed order and reports no execution
 authority. It may durably update a valid observation before a later refusal.
 Actual feed capacity units/conditions and fee/cost adequacy remain unknown, so
-their kernel inputs are absent and orders remain refused. Session timestamps,
-price/quantity increments, actual-response verification, effective site handover,
+their kernel inputs are absent and orders remain refused. Preflight now validates
+broker clock timestamps/offsets, freshness and session chronology; pure permission
+expires strictly before the selected close. Unsupported broker limit increments
+refuse before provider reads. See [session bounds](../plans/0047-alpaca-session-and-price-bounds.md).
+Actual-response verification, effective site handover,
 revocation and isolated execution are still required before activation. See
 [equity risk work](../plans/0033-alpaca-equity-risk.md).
 
