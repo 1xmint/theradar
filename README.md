@@ -21,6 +21,9 @@ describe the Solana experiment, not Alpaca performance.
 --max-pages <positive-u16>` retains selected broker observations durably beside
 order claims. Initialize before reserving any order; subsequent calls reconcile
 against the retained baseline. Rejected reads leave the baseline unchanged.
+Checkpoints also retain share quantities and require subsequent changes to match
+new bound fills, with account/position reads bracketing collection. Legacy cash
+baselines without share quantities require explicit reconciliation before use.
 Use protected storage in an existing durably provisioned directory. This does
 not establish available capital, profit or trading authority. See
 [durable cash work](docs/plans/0030-alpaca-durable-cash.md).

@@ -319,19 +319,61 @@ fn checkpoint(
     mut read: impl FnMut(&str) -> Result<Option<String>, String>,
 ) -> Result<Value, String> {
     let retained = log.cash().map_err(|e| e.to_string())?.cloned();
-    let (observation, reconciliation) = if let Some(prior) = retained {
-        let baseline = retained_snapshot(&prior, expected, super::wallet_read::now()?)?;
-        let report = collect(log, expected, &baseline, max_pages, read)?;
+    let prior_positions = retained
+        .as_ref()
+        .map(|prior| super::alpaca_positions::retained(&prior.observation))
+        .transpose()?;
+    if retained.is_none() && log.entries().map_err(|e| e.to_string())?.next().is_some() {
+        return Err("cash genesis must precede retained paper orders".into());
+    }
+    let started = super::wallet_read::now()?;
+    let first_account = super::alpaca_reconcile::account(
+        &read("/v2/account")?.ok_or("paper account observation is missing")?,
+        expected,
+    )?;
+    let first_positions = super::alpaca_positions::read(
+        &read("/v2/positions")?.ok_or("paper position observation is missing")?,
+    )?;
+    let (mut observation, reconciliation) = if let Some(prior) = &retained {
+        let baseline = retained_snapshot(prior, expected, super::wallet_read::now()?)?;
+        let report = collect(log, expected, &baseline, max_pages, &mut read)?;
         (report["activity_observations"].clone(), Some(report))
     } else {
-        if log.entries().map_err(|e| e.to_string())?.next().is_some() {
-            return Err("cash genesis must precede retained paper orders".into());
-        }
         let observation = super::alpaca_activities::collect(expected, max_pages, |path| {
             read(path)?.ok_or_else(|| "paper cash activity observation is missing".into())
         })?;
         (observation, None)
     };
+    let positions = super::alpaca_positions::read(
+        &read("/v2/positions")?.ok_or("paper position observation is missing")?,
+    )?;
+    let last_account = super::alpaca_reconcile::account(
+        &read("/v2/account")?.ok_or("paper account observation is missing")?,
+        expected,
+    )?;
+    if first_positions != positions
+        || first_account != last_account
+        || serde_json::to_value(&last_account).map_err(|_| "invalid selected account")?
+            != observation["account_before"]
+    {
+        return Err("selected account or positions changed during paper checkpoint".into());
+    }
+    let current = snapshot(&observation, expected)?;
+    if let (Some(prior), Some(holdings)) = (&retained, &prior_positions) {
+        let previous = retained_snapshot(prior, expected, super::wallet_read::now()?)?;
+        super::alpaca_positions::reconcile(
+            holdings,
+            &positions,
+            &previous.activities,
+            &current.activities,
+        )?;
+    }
+    // The retained watermark covers ALL selected reads, including the position
+    // brackets. It must not claim availability at the inner activity-read time.
+    observation["read_started_unix_secs"] = json!(started);
+    observation["read_completed_unix_secs"] = json!(super::wallet_read::now()?);
+    observation["position_quantities"] =
+        serde_json::to_value(positions).map_err(|_| "invalid selected positions")?;
     let selected = snapshot(&observation, expected)?;
     let cash = BrokerCash {
         account_id: expected.to_owned(),
@@ -351,6 +393,7 @@ fn checkpoint(
         "expected_account_id":expected,"checkpoint_written":applied == Applied::Advanced,
         "checkpoint":log.cash().map_err(|e| e.to_string())?,"reconciliation":reconciliation,
         "claims":super::alpaca_journal::report(log, expected, false)?,
+        "position_delta_consistent":prior_positions.is_some(),
         "economic_history_complete":false,"fees_final":false,"profit_measured":false,
         "claim_release_authorized":false,"retry_authorized":false,"execution_authority":false}))
 }
@@ -437,9 +480,16 @@ mod tests {
     fn observation_reader(balance: &str, activities: &Value, path: &str) -> String {
         if path == "/v2/account" {
             account(balance).to_string()
+        } else if path == "/v2/positions" {
+            json!([]).to_string()
         } else {
             activities.to_string()
         }
+    }
+
+    fn position(symbol: &str, qty: &str) -> Value {
+        json!({"asset_id":format!("asset_{symbol}"),"symbol":symbol,"asset_class":"us_equity",
+            "side":"long","qty":qty,"cost_basis":"0","market_value":"0"})
     }
 
     #[test]
@@ -461,6 +511,9 @@ mod tests {
                 let path = dir.path().join(format!("{side:?}-{status}.jsonl"));
                 let mut log = BrokerLog::open(&path, "paper-id").unwrap();
                 checkpoint(&mut log, "paper-id", 1, |p| {
+                    if p == "/v2/positions" && side == BrokerSide::Sell {
+                        return Ok(Some(json!([position("QQQ", "2")]).to_string()));
+                    }
                     Ok(Some(observation_reader("500", &json!([prior()]), p)))
                 })
                 .unwrap();
@@ -490,6 +543,16 @@ mod tests {
                         account(balance).to_string()
                     } else if p.starts_with("/v2/orders:") {
                         order.to_string()
+                    } else if p == "/v2/positions" {
+                        json!([position(
+                            &intent.symbol,
+                            match (side, completed) {
+                                (_, true) => "1",
+                                (BrokerSide::Buy, false) => "0.5",
+                                (BrokerSide::Sell, false) => "1.5",
+                            }
+                        )])
+                        .to_string()
                     } else {
                         json!([prior(), fill]).to_string()
                     }))
@@ -515,6 +578,7 @@ mod tests {
                     shares.to_string()
                 );
                 assert_eq!(result["claim_release_authorized"], false);
+                assert_eq!(result["position_delta_consistent"], true);
                 drop(log);
                 let mut log = BrokerLog::open(&path, "paper-id").unwrap();
                 let residual = log.claims().unwrap().remove(&id).unwrap();
@@ -601,7 +665,7 @@ mod tests {
         })
         .unwrap();
         let bytes = std::fs::read(&path).unwrap();
-        for stage in 0..3 {
+        for stage in 0..7 {
             for failure in 0..3 {
                 let mut index = 0;
                 assert!(
@@ -707,6 +771,9 @@ mod tests {
         let path = dir.path().join("cash.jsonl");
         let mut log = BrokerLog::open(&path, "paper-id").unwrap();
         checkpoint(&mut log, "paper-id", 1, |p| {
+            if p == "/v2/positions" {
+                return Ok(Some(json!([position("QQQ", "2")]).to_string()));
+            }
             Ok(Some(observation_reader("500", &json!([prior()]), p)))
         })
         .unwrap();
@@ -725,6 +792,8 @@ mod tests {
                 order(BrokerSide::Buy).to_string()
             } else if p.contains("retained_Sell") {
                 order(BrokerSide::Sell).to_string()
+            } else if p == "/v2/positions" {
+                json!([position("SPY", "1"), position("QQQ", "1")]).to_string()
             } else {
                 events().to_string()
             }))
@@ -754,6 +823,95 @@ mod tests {
                     .is_err()
             );
         }
+    }
+
+    #[test]
+    fn position_races_and_unexplained_changes_preserve_checkpoint_across_restart() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("positions.jsonl");
+        let mut log = BrokerLog::open(&path, "paper-id").unwrap();
+        let initial = checkpoint(&mut log, "paper-id", 1, |p| {
+            Ok(Some(if p == "/v2/positions" {
+                json!([position("SPY", "1")]).to_string()
+            } else {
+                observation_reader("100", &json!([]), p)
+            }))
+        })
+        .unwrap();
+        assert_eq!(initial["position_delta_consistent"], false);
+        let original = std::fs::read(&path).unwrap();
+        drop(log);
+        for case in 0..6 {
+            let mut log = BrokerLog::open(&path, "paper-id").unwrap();
+            let mut position_reads = 0;
+            let mut account_reads = 0;
+            assert!(
+                checkpoint(&mut log, "paper-id", 1, |p| {
+                    Ok(Some(if p == "/v2/positions" {
+                        position_reads += 1;
+                        let mut held = position("SPY", "1");
+                        match case {
+                            0 => held["qty"] = json!("2"), // Stable but unexplained.
+                            1 if position_reads == 2 => held["qty"] = json!("2"),
+                            2 => held["asset_id"] = json!("changed"),
+                            3 => return Ok(Some("[]".into())),
+                            _ => {}
+                        }
+                        json!([held]).to_string()
+                    } else if p == "/v2/account" {
+                        account_reads += 1;
+                        account(
+                            if (case == 4 && account_reads == 1)
+                                || (case == 5 && account_reads == 4)
+                            {
+                                "101"
+                            } else {
+                                "100"
+                            },
+                        )
+                        .to_string()
+                    } else {
+                        json!([]).to_string()
+                    }))
+                })
+                .is_err()
+            );
+            assert_eq!(std::fs::read(&path).unwrap(), original);
+            assert_eq!(
+                log.cash().unwrap().unwrap().observation["position_quantities"]["SPY"]["nanoshares"],
+                1_000_000_000_u64
+            );
+        }
+        let mut log = BrokerLog::open(&path, "paper-id").unwrap();
+        let result = checkpoint(&mut log, "paper-id", 1, |p| {
+            Ok(Some(if p == "/v2/positions" {
+                json!([position("SPY", "1")]).to_string()
+            } else {
+                observation_reader("100", &json!([]), p)
+            }))
+        })
+        .unwrap();
+        assert_eq!(result["position_delta_consistent"], true);
+        assert_eq!(result["execution_authority"], false);
+        drop(log);
+        let mut log = BrokerLog::open(dir.path().join("legacy.jsonl"), "paper-id").unwrap();
+        log.observe_cash(
+            BrokerCash {
+                account_id: "paper-id".into(),
+                started: 1,
+                completed: 2,
+                observation: report("100", json!([]), 1, 2),
+                orders: Some(BTreeMap::new()),
+            },
+            2,
+        )
+        .unwrap();
+        assert!(
+            checkpoint(&mut log, "paper-id", 1, |_| panic!(
+                "legacy balance cannot be silently replaced"
+            ))
+            .is_err()
+        );
     }
 
     fn report(cash: &str, activities: Value, started: u64, completed: u64) -> Value {

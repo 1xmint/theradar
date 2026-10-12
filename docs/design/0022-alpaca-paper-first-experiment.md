@@ -276,3 +276,20 @@ execution with deterministic sizing, durable client-order IDs, fills and restart
 reconciliation. Link the supervisor, research chat and website handover. Only
 after forward validation and explicit live setup can real-money activation be
 considered. The existing Solana risk types are not silently reused for shares.
+
+## Position quantities in durable checkpoints
+
+The existing cash checkpoint path now also brackets its selected cash/fill reads
+with pinned account and position-quantity reads. It retains long US equity asset
+IDs and exact nanoshares in the same durable observation. On subsequent calls,
+opening shares plus new bound fill quantities must equal current shares. Missing
+positions, unexplained additions, changed asset IDs, duplicates, unsupported
+positions and visible account/quantity races refuse without advancing the log.
+Host observation times cover the outer brackets. Price-dependent market values
+are not used to infer share quantities. This follows the broker's
+[positions endpoint](https://docs.alpaca.markets/us/docs/working-with-positions)
+and [fill activity schema](https://docs.alpaca.markets/us/docs/account-activities).
+Genesis establishes selected opening quantities, not historical cost or profit.
+Older checkpoints without quantities remain readable but refuse automatic
+baseline replacement. Corporate actions/transfers need explicit reconciliation.
+See [position accounting](../plans/0032-alpaca-position-accounting.md).
