@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # 0037 — Actual IEX capture and isolated replay
 
-**Status:** GitHub verified and uploaded; actual market capture pending.
+**Status:** GitHub verified and uploaded; owner reports successful actual IEX capture/replay.
 
 Branch: feat/alpaca-isolated-market, based on 799b85c. Previous goal turn made
 verified progress: owner supplied successful isolated paper account output.
@@ -21,7 +21,7 @@ Parent run 38265093637 passed all 14 jobs, inspected with gh run view --json job
 - [x] Add actual caller and capture-to-replay tests, and expand targeted Python
   mutation checks to exercise the new boundary behavior.
 - [x] Inspect GitHub results; upload exact verified helper with matching hash.
-- [ ] Owner runs protected market observation; inspect actual IEX coverage,
+- [x] Owner runs protected market observation; inspect actual IEX coverage,
   prices, timestamps, conditions and displayed sizes as observations.
 
 ## Handback
@@ -68,3 +68,16 @@ snapshot output only. Actual market report remains pending; no feed quality,
 capacity, cost or executable quote claim follows from green helper tests.
 
 This handback update is documentation only; code verification refers to d186a69.
+
+Owner supplied successful offline replay output for both SPY and QQQ. Capture
+read_started_unix_ms=1791817622619, available_at_unix_ms=1791817622835;
+replay as_of equals availability. SPY bid/ask 778.29/778.33, displayed sizes
+240/1560, quote time 2026-10-12T15:07:02.645102517Z. QQQ bid/ask
+746.54/746.57, displayed sizes 440/80, quote time
+2026-10-12T15:07:02.669247747Z. Both quotes report exchange V and condition R.
+These sizes are raw provider fields, not normalized executable quantities.
+Trade/minute/daily/prior-daily fields are present too. Execution authority,
+consolidated-market coverage and exchange-time validation remain false.
+Replay exited 0; runtime 62ms, CPU 51ms, memory peak 1020K. Retained file:
+/var/lib/radar-paper-market/capture-9087d1067b8a4207a7b9463dd9b17272.json.
+This is owner-provided runtime evidence. Continuous collection is plan 0038.

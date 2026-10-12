@@ -1140,6 +1140,42 @@ sudo systemctl disable --now radar-market-tape
 `radar-serve`, and `sudo systemctl enable --now radar-market-tape`. The store
 still holds what the tape collected before the feed.
 
+## Alpaca research recorder
+
+The private Alpaca paper recorder uses the already verified installed reader,
+not the web service. See [plan 0038](../docs/plans/0038-alpaca-market-recorder.md)
+for verification and installation status. Package the exact GitHub-verified
+versions of record-alpaca-market.py, radar-paper-market.service and
+radar-paper-market.timer as three top-level regular members of an uncompressed
+tar file, with no other entries. Upload it as /tmp/radar-paper-market-bundle.tar
+and the matching setup-alpaca-recorder.py as /tmp/radar-alpaca-recorder-setup.py.
+Compare local and remote SHA256 values before giving the administrator:
+
+```bash
+sudo python3 /tmp/radar-alpaca-recorder-setup.py VERIFIED_BUNDLE_SHA256
+```
+
+The installer checks the pinned reader, root-only credential permissions,
+bundle digest and destination ownership. It refuses existing destinations.
+It installs the three files, reloads systemd and starts one worker pass before
+enabling the timer. A failed pass leaves installed files and a disabled timer;
+inspect the service, fix the cause, then explicitly start the service and enable
+the timer. Do not delete the dataset as an installation shortcut.
+
+Inspect timer state with systemctl is-active radar-paper-market.timer and
+selected worker logs with sudo journalctl -u radar-paper-market.service -n 10
+--no-pager. Do not dump service Environment properties or the credential file.
+To stop collection while retaining data, use sudo systemctl disable --now
+radar-paper-market.timer; an already running worker may finish its bounded read.
+
+Snapshots accumulate in the private systemd StateDirectory radar-paper-tape,
+separate from manual captures. Collection pauses before exceeding 256 MiB or
+65,536 files; nothing is deleted. The byte cap measures file lengths; filesystem
+allocation and metadata can use more disk. Sampling is roughly once a minute, including
+closed sessions. IEX is partial coverage; quote presence is not a freshness,
+size-unit or executable-capacity guarantee. This enables research collection
+only and leaves trading disabled.
+
 ## Disk
 
 Recorded events run about 1 GiB a month. The box had 48 GiB free at the time of
