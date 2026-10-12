@@ -107,6 +107,7 @@ tests:
     # Linux peer credentials are exercised by the existing required tests job.
     if [ "$(uname -s)" = "Linux" ]; then
         just private-setup
+        python3 deploy/prove_codex_prompt_regression.py "{{ cargo }}"
     fi
 
 # Pedantic clippy, denied. The workspace lint table sets the levels; this runs them.

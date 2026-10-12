@@ -375,7 +375,9 @@ impl Provider for Codex {
         // The prompt goes in on stdin rather than as an argument. An argument
         // is visible in `ps` to every user on the box, and this one contains
         // token metadata a moment after a stranger chose it.
-        let prompt = request.render();
+        // The CLI has one stdin prompt rather than separate API roles. Retain
+        // Radar's trusted framing before the question and fenced observations.
+        let prompt = format!("{}\n\n{}", request.system(), request.render());
         child
             .stdin
             .take()
@@ -534,6 +536,22 @@ mod tests {
             .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
             .collect();
         move |k: &str| map.get(k).cloned()
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn trusted_framing_reaches_cli_stdin() {
+        let codex = Codex::from_vars("sh -c cat", &vars(&[("PATH", "/usr/bin:/bin")])).unwrap();
+        let request = Request::new("trusted framing", "operator question")
+            .observing("feed", "untrusted observation");
+        let answer = codex.ask(&request).unwrap();
+        assert!(
+            answer
+                .text
+                .starts_with("trusted framing\n\noperator question\n\n")
+        );
+        assert!(answer.text.contains("untrusted observation"));
+        assert_eq!(request.fences(), 2);
     }
 
     #[test]

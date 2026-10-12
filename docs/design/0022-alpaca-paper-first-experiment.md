@@ -73,6 +73,16 @@ horizon. Unknown exit evidence remains unscoreable. Records are mutable local
 files, not authenticated model provenance, and no unattended producer or cohort
 completeness has been verified. See [plan 0041](../plans/0041-alpaca-forward-decision.md).
 
+The subscription research caller `radar alpaca-paper-propose` now connects the
+existing linked-model adapter to strict inert Enter/Wait records. Size, horizon
+and costs stay fixed by the experiment; completion revalidates the same quote
+and starts the forward horizon. It requires the owner's explicit unlimited
+subscription allowance and adequate per-call bound. Finite daily budgets need
+shared durable metering first. Invalid experiments refuse before a model call.
+GitHub verifies this against subprocess stubs and exact bug reapplications;
+deployment, real model behavior and complete scheduled failure/outcome records
+remain unverified. See [plan 0042](../plans/0042-alpaca-model-proposal.md).
+
 `radar alpaca-quote` consumes that recorded capture through the same availability
 gate and only for a symbol originally requested. It uses serde_json's raw_value
 feature to parse original price/size digits without f64, producing micro-USD per

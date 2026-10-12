@@ -29,9 +29,14 @@ The scorer keeps size units, participation, fees and slippage as explicit resear
 assumptions, never broker execution facts. Local forward-decision commands now
 freeze Enter/Wait, same-size always-enter and cash baselines, assumptions and an
 exact horizon cutoff; offline comparisons retain unscoreable cases. They are
-GitHub-verified but not deployed or produced by the linked model. Complete
-scheduled cohorts and held-out/forward evaluation remain incomplete. See
-[plan 0041](plans/0041-alpaca-forward-decision.md).
+GitHub-verified but not deployed or produced by the linked model. A new
+subscription research CLI can request a strict Enter/Wait choice, retain fixed
+experiment size/horizon/cost assumptions and revalidate the quote at completion.
+GitHub subprocess tests verify framing, refusal before invalid model calls and
+strict output; no actual model run is claimed. Complete scheduled cohorts,
+durable failed-attempt records and held-out/forward evaluation remain incomplete.
+See [plan 0041](plans/0041-alpaca-forward-decision.md) and
+[plan 0042](plans/0042-alpaca-model-proposal.md).
 No actual broker orders, effective autonomous handover or Alpaca learning results
 have been verified. The autonomous goal remains incomplete.
 
