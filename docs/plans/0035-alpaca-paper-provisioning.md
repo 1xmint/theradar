@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # 0035 — Private Alpaca paper credential provisioning
 
-**Status:** GitHub verified and uploaded; private credential entry pending.
+**Status:** GitHub verified and uploaded; owner reports paper credential provisioning succeeded.
 
 Branch: feat/alpaca-paper-provisioning, based on 80258a3. Parent GitHub run
 38256428823 passed all 14 jobs; inspected with `gh run view --json jobs`.
@@ -20,7 +20,7 @@ Branch: feat/alpaca-paper-provisioning, based on 80258a3. Parent GitHub run
   setup job: account restrictions, transport sanitization, redirects, permissions,
   overwrite/symlink refusal and credential injection.
 - [x] Inspect GitHub verification and upload the exact verified setup script.
-- [ ] Owner enters paper credentials privately and confirms provisioning.
+- [x] Owner enters paper credentials privately and confirms provisioning.
 - [ ] Actual protected Radar reader verifies the account. Trading activation
   remains dependent on the unchecked items in plan 0034 and forward evaluation.
 
@@ -56,3 +56,11 @@ No credentials in GitHub, funded account changes or orders. Parent code remains
 verified separately by plan 0034. No claim of profit, runtime integration or
 unattended activation. The evidence update is documentation only; code evidence
 above is for 988643f, not an inferred later HEAD.
+
+Owner subsequently regenerated paper keys privately and reported the exact
+successful setup output: Paper account verified; saved root-only
+/etc/radar/alpaca-paper.env; no service changed; trading remains disabled.
+This is owner-reported runtime evidence. Values were never supplied in chat.
+Latest documentation HEAD 2a25e15 passed all 14 jobs in run 38261201037,
+inspected with `gh run view --json jobs`. Protected Radar reader verification
+continues in plan 0036; no /usr/local/bin/radar was installed on the VPS.
