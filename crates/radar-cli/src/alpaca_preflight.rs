@@ -366,20 +366,35 @@ pub(super) fn run(args: &[String]) -> Result<(), String> {
         },
         now_ms,
     )?;
-    let output = if *command == "alpaca-paper-submit" {
-        super::alpaca_submit::execute(
-            &mut log,
-            &intent,
-            &state,
-            || load(policy_path),
-            now_ms,
-            |body| super::alpaca_submit::post(&agent, &key, &secret, body),
-        )?
-    } else {
-        report(&intent, &state, &policy)
-    };
+    let output = dispatch(
+        command,
+        &mut log,
+        &intent,
+        &state,
+        || load(policy_path),
+        now_ms,
+        |body| super::alpaca_submit::post(&agent, &key, &secret, body),
+    )?;
     println!("{output}");
     Ok(())
+}
+
+fn dispatch(
+    command: &str,
+    log: &mut BrokerLog,
+    intent: &BrokerIntent,
+    state: &State,
+    mut policy: impl FnMut() -> Result<Policy, String>,
+    clock: impl FnMut() -> Result<u64, String>,
+    send: impl FnOnce(&str) -> Result<String, String>,
+) -> Result<Value, String> {
+    if command == "alpaca-paper-submit" {
+        super::alpaca_submit::execute(log, intent, state, policy, clock, send)
+    } else if command == "alpaca-order-preflight" {
+        Ok(report(intent, state, &policy()?))
+    } else {
+        Err("unsupported paper command".into())
+    }
 }
 
 #[cfg(test)]
@@ -550,7 +565,8 @@ mod tests {
         )
         .unwrap();
         assert!(
-            super::super::alpaca_submit::execute(
+            dispatch(
+                "alpaca-paper-submit",
                 &mut log,
                 &intent(BrokerSide::Buy),
                 &state,
@@ -561,6 +577,30 @@ mod tests {
             .is_err()
         );
         assert!(log.entries().unwrap().next().is_none());
+        let report = dispatch(
+            "alpaca-order-preflight",
+            &mut log,
+            &intent(BrokerSide::Buy),
+            &state,
+            || Ok(policy()),
+            || panic!("preflight never submits"),
+            |_| panic!("preflight never submits"),
+        )
+        .unwrap();
+        assert_eq!(report["risk_refusal"], "liquidity");
+        assert_eq!(report["execution_authority"], false);
+        assert!(
+            dispatch(
+                "unknown",
+                &mut log,
+                &intent(BrokerSide::Buy),
+                &state,
+                || panic!("unknown command"),
+                || panic!("unknown command"),
+                |_| panic!("unknown command")
+            )
+            .is_err()
+        );
     }
 
     #[test]

@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # 0034 — Protected paper submission after deterministic risk
 
-**Status:** implementation ready for GitHub verification; activation closed.
+**Status:** first GitHub run inspected; routing repair awaiting verification; activation closed.
 
 Branch: feat/alpaca-paper-submit, based on 08943b5. Previous goal turn was
 verified progress on equity risk and the actual preflight caller. Parent run
@@ -31,6 +31,21 @@ verified progress on equity risk and the actual preflight caller. Parent run
   Run forward learning/evaluation before considering eligible real-money trading.
 
 ## Handback
+
+First GitHub run: `gh run view 38210756455 --json status,conclusion,jobs`
+at 5888956c5d869ed0b5d59126456c700c6d71c308. All ordinary jobs passed;
+the tests job measured 2,804 passing tests. Mutation diagnostics across all
+four inspected artifacts: 31 total, 17 caught, 13 compiler-unviable, one missed,
+zero timeouts. Every unviable reason was read: removed bodies create unused
+arguments/imports/dead code or require missing Default implementations.
+
+The exact survivor was alpaca_preflight.rs:369:30, command equality changed
+to inequality. Library execution tests had not exercised CLI dispatch. Moved
+the actual dispatch boundary into a callable function, preserved the equality
+check, and extended the actual collector test to exercise submit, preflight
+and unknown commands. Inverting either selection now changes a required result
+or invokes a forbidden effect. No mutation exclusion was added. Repair CI
+remains pending; 2,804 is the observed test floor.
 
 No account credentials, actual orders, deposits, deployment or activation.
 `radar alpaca-paper-submit --journal <existing-private-file> --intent <typed-intent>
