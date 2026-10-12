@@ -60,7 +60,7 @@ cargo := env("RADAR_CARGO", "cargo")
 # in seven_days.rs, 6 in radar-backfill's analyst_log.rs and 3 for the watched
 # seven-day checkpoint in checkpoints.rs.
 # CI 38199868775 measured 2763, above the previously inferred floor of 2354.
-export MIN_TESTS := "2763"
+export MIN_TESTS := "2772"
 
 _default:
     @just --list --unsorted

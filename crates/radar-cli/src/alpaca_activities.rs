@@ -11,12 +11,12 @@ const PAPER_API: &str = "https://paper-api.alpaca.markets";
 const ACTIVITIES: &str = "/v2/account/activities?direction=asc&page_size=100";
 const PAGE_SIZE: usize = 100;
 
-#[derive(Deserialize, Serialize)]
+#[derive(Deserialize, Serialize, PartialEq, Eq)]
 pub(super) struct Activity {
     pub(super) id: String,
     #[serde(rename = "activity_type")]
     pub(super) category: String,
-    account_id: Option<String>,
+    pub(super) account_id: Option<String>,
     pub(super) order_id: Option<String>,
     transaction_time: Option<String>,
     date: Option<String>,
@@ -28,7 +28,7 @@ pub(super) struct Activity {
     pub(super) price: Option<String>,
     pub(super) cum_qty: Option<String>,
     pub(super) leaves_qty: Option<String>,
-    net_amount: Option<String>,
+    pub(super) net_amount: Option<String>,
     status: Option<String>,
 }
 
@@ -69,15 +69,7 @@ pub(super) fn collect(
             return Err("paper activities response exceeds requested page size".into());
         }
         for event in &page {
-            if event.id.trim().is_empty()
-                || event.category.trim().is_empty()
-                || !seen.insert(event.id.clone())
-                || event.account_id.as_deref().is_some_and(|id| id != expected)
-            {
-                return Err(
-                    "paper activities have missing, repeated or mismatched identities".into(),
-                );
-            }
+            identity(event, expected, &mut seen)?;
         }
         let short = page.len() < PAGE_SIZE;
         if let Some(last) = page.last() {
@@ -103,6 +95,21 @@ pub(super) fn collect(
         "fills_reconciled":false,"fees_final":false,"cash_reconciled":false,
         "claim_release_authorized":false,"execution_authority":false}),
     )
+}
+
+pub(super) fn identity(
+    event: &Activity,
+    expected: &str,
+    seen: &mut BTreeSet<String>,
+) -> Result<(), String> {
+    if event.id.trim().is_empty()
+        || event.category.trim().is_empty()
+        || !seen.insert(event.id.clone())
+        || event.account_id.as_deref().is_some_and(|id| id != expected)
+    {
+        return Err("paper activities have missing, repeated or mismatched identities".into());
+    }
+    Ok(())
 }
 
 pub(super) fn page_limit(pages: &str) -> Result<u16, String> {

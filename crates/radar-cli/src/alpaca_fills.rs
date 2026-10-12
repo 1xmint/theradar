@@ -15,7 +15,7 @@ use super::alpaca_reconcile::BrokerOrder;
 const PAPER_API: &str = "https://paper-api.alpaca.markets";
 
 #[derive(Debug, PartialEq, Eq, Serialize)]
-struct Executions {
+pub(super) struct Executions {
     count: usize,
     filled_nanoshares: u64,
     gross_floor_microusd: u64,
@@ -26,7 +26,7 @@ fn amount(value: Option<&str>) -> Result<u64, String> {
     nanos(value.ok_or("execution decimal is unknown")?)
 }
 
-fn executions(
+pub(super) fn executions(
     intent: &BrokerIntent,
     order: &BrokerOrder,
     activities: &[Activity],

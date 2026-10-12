@@ -73,6 +73,16 @@ It retains the entire original cash/share claim. Gross execution consistency doe
 not establish final fees, account cash, complete history or permission to trade.
 See [execution reconciliation](docs/plans/0028-alpaca-fill-reconciliation.md).
 
+`radar alpaca-cash-reconcile --journal <private-file> --account-id <paper-id> --baseline <prior-activities-report.json> --max-pages 10`
+compares a prior private `alpaca-activities-read` JSON report with current broker
+observations, binding every retained order around the activity reads. It refuses
+changed/disappeared baseline records, unbound new fills and unsupported new cash
+activity types. Exact trade cash flow, deposits/withdrawals and observed USD fees
+are reported separately. A matching cash balance is not measured profit or final
+economic reconciliation; all claims remain held. Baseline input is bounded to
+16 MiB and must remain in protected operator storage. See
+[cash accounting](docs/plans/0029-alpaca-cash-accounting.md).
+
 `radar alpaca-order-reserve --journal <private-file> --account-id <paper-id> --intent <typed-intent>`
 records an immutable paper claim. `radar alpaca-order-journal --journal <private-file> --account-id <paper-id>`
 reopens and verifies it under exclusive cooperative ownership. These operator
