@@ -22,7 +22,7 @@ describe the Solana experiment, not Alpaca performance.
 order claims. Initialize before reserving any order; subsequent calls reconcile
 against the retained baseline. Rejected reads leave the baseline unchanged.
 Use protected storage in an existing durably provisioned directory. This does
-not release claims, establish profit or authorize trading. See
+not establish available capital, profit or trading authority. See
 [durable cash work](docs/plans/0030-alpaca-durable-cash.md).
 
 Cash checkpoints now retain complete bound execution progress and derive the

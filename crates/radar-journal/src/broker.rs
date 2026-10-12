@@ -277,7 +277,7 @@ impl BrokerLog {
     }
 
     /// Append a caller-verified observation before advancing the in-memory baseline.
-    /// Genesis must precede retained orders; repeats are inert. Claims stay held.
+    /// Genesis precedes retained orders; repeats are inert. Fee reserves stay held.
     ///
     /// # Errors
     /// Account/time/history mismatch, failed persistence, or poisoned ownership.

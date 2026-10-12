@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # 0031 — Reconcile residual broker claims with durable cash observations
 
-**Status:** implemented; GitHub verification pending.
+**Status:** residual economic claims verified on GitHub; risk/execution pending.
 
 Branch: feat/alpaca-economic-claims, based on 6801ee8. All 14 jobs in
 `gh run view 38204871140 --json status,conclusion,jobs` passed before this change.
@@ -20,7 +20,7 @@ test/build/lint/mutation jobs run on GitHub.
   Missing historical progress means full original claims; no retry permission.
 - [x] Expose original and observed remaining claims to existing actual journal/
   cash callers. New reservations retain full claims until verified observation.
-- [ ] Verify four new tests and existing regressions on GitHub: exact fractional
+- [x] Verify four new tests and existing regressions on GitHub: exact fractional
   residual math, monotonic complete progress, atomic replay/refusal, and actual
   cash caller for both sides across ten lifecycle states with restart checks.
   CI 38205493827 at 408a4ae passed 2786 tests and every nonlint/nonmutation job.
@@ -32,6 +32,10 @@ test/build/lint/mutation jobs run on GitHub.
   acceptance, although the CLI exercised it. Add that precise boundary to the
   validator test, retain the actual caller test, raise the observed floor to
   2786 and rerun full GitHub verification; no exclusions.
+  `gh run view 38205765530 --json status,conclusion,jobs` verified all 14 jobs
+  passed at 2bccaca. 2786 tests passed; 17 mutations caught, 13 compiler-unviable,
+  zero missed/timeouts. Every artifact/compiler reason inspected; the exact
+  :53:40 >= survivor was caught. No exclusions or cancellations.
 - [ ] Connect pure equity risk to complete fresh cash/positions/open-order/asset/
   session/quote observations, then the separate executor and supervisor/site.
   Measure learning through forward paper operation; eligible explicit live setup
@@ -40,7 +44,8 @@ test/build/lint/mutation jobs run on GitHub.
 ## Handback
 
 No account credentials, actual orders, deposits, deployment or activation.
-GitHub verification is pending; inspect all jobs and exact mutation diagnostics.
+Code at 2bccaca passed every job in CI 38205765530. This follow-up only records
+evidence and clarifies reserve wording; inspect its CI before advancing the base.
 This advances economic state rather than adding another standalone read tool.
 The protected provider caller establishes facts; generic storage checks their
 association, monotonicity and durability. Remaining liabilities are relative to
