@@ -29,7 +29,7 @@ struct Quote {
 
 // Refuse unsupported precision/exponents instead of silently rounding a risk
 // input. JSON is decoded as RawValue so decimal digits never pass through f64.
-fn fixed6(text: &str) -> Option<u64> {
+pub(super) fn fixed6(text: &str) -> Option<u64> {
     let (whole, fraction) = text.split_once('.').unwrap_or((text, ""));
     if text.contains('.') && fraction.is_empty() {
         return None;

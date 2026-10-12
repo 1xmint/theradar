@@ -14,6 +14,7 @@ mod alpaca_activities;
 mod alpaca_assets;
 mod alpaca_cancel;
 mod alpaca_cash;
+mod alpaca_context;
 mod alpaca_decision;
 mod alpaca_exposure;
 mod alpaca_fills;

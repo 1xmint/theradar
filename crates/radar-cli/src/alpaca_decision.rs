@@ -82,6 +82,15 @@ impl Decision {
         {
             return Err("invalid forward decision identity or chronology".into());
         }
+        if self.proposal.strategy_id == super::alpaca_context::STRATEGY {
+            super::alpaca_context::validate(
+                &self.entry_raw_response,
+                &self.symbol,
+                self.entry_available_at_unix_ms,
+                self.frozen_at_unix_ms,
+                self.assumptions.max_quote_age_ms,
+            )?;
+        }
         super::alpaca_quote::validate(
             &self.entry_raw_response,
             &self.symbol,
@@ -261,6 +270,33 @@ mod tests {
                 "horizon_ms":1000,"reason":"test"},
             "assumptions":{"model_id":"stress-v1","displayed_size_unit":"shares","participation_bps":1000,
                 "slippage_bps_per_side":1,"fee_per_side_microusd":7,"max_quote_age_ms":0,"max_spread_bps":10}})).unwrap()
+    }
+
+    #[test]
+    fn contextual_decisions_require_replayable_context_and_recheck_completion_age() {
+        let mut value = decision();
+        value.proposal.strategy_id = super::super::alpaca_context::STRATEGY.into();
+        assert!(value.entry().is_err());
+        let mut raw: Value = serde_json::from_str(&value.entry_raw_response).unwrap();
+        raw["SPY"]["minuteBar"] = json!({"t":"2026-10-20T23:59:00Z",
+            "o":99,"h":101,"l":98,"c":100,"v":100});
+        raw["SPY"]["prevDailyBar"] = json!({"t":"2026-10-19T04:00:00Z",
+            "o":99,"h":102,"l":98,"c":101,"v":5000});
+        value.entry_raw_response = raw.to_string();
+        value.entry().unwrap();
+        // Keep the quote fresh while making only the completed minute too old.
+        raw["SPY"]["latestQuote"]["t"] = json!("2026-10-21T00:00:00.001Z");
+        value.entry_raw_response = raw.to_string();
+        value.entry_available_at_unix_ms += 1;
+        value.frozen_at_unix_ms += 1;
+        value.recorded_at_unix_ms += 1;
+        value.outcome_not_before_unix_ms += 1;
+        assert_eq!(
+            value.entry().unwrap_err(),
+            "context minute bar exceeds age bound"
+        );
+        value.proposal.strategy_id = "quote-only-abstention-control-v1".into();
+        value.entry().unwrap();
     }
 
     #[test]

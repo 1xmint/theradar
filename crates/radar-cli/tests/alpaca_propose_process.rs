@@ -79,6 +79,7 @@ fn refuse_bad_experiments(experiment: &Path, prompt: &Path, invoke: impl Fn(&str
 }
 
 #[test]
+#[allow(clippy::too_many_lines)] // Keep the sequential real-process fixture and its assertions together.
 fn subscription_command_receives_instructions_and_only_records_valid_research() {
     let dir = tempfile::tempdir().unwrap();
     let path = |name| dir.path().join(name);
@@ -158,4 +159,43 @@ fn subscription_command_receives_instructions_and_only_records_valid_research() 
     assert!(!invoke("unlimited").status.success());
     assert_eq!(std::fs::read(&output).unwrap(), bytes);
     assert_eq!(std::fs::read_to_string(&prompt).unwrap(), sent);
+
+    // A new, explicitly versioned experiment requires context before the model
+    // is called. The quote-only path above remains unchanged.
+    std::fs::remove_file(&output).unwrap();
+    std::fs::remove_file(&prompt).unwrap();
+    let mut plan: Value = serde_json::from_slice(&std::fs::read(&experiment).unwrap()).unwrap();
+    plan["strategy_id"] = json!("snapshot-context-v1");
+    std::fs::write(&experiment, plan.to_string()).unwrap();
+    assert!(!invoke("unlimited").status.success());
+    assert!(!prompt.exists(), "missing context must not call the model");
+    assert!(!output.exists());
+    let mut captured: Value = serde_json::from_slice(&std::fs::read(&capture).unwrap()).unwrap();
+    let at = captured["available_at_unix_ms"].as_u64().unwrap();
+    let mut raw: Value = serde_json::from_str(captured["raw_response"].as_str().unwrap()).unwrap();
+    raw["SPY"]["minuteBar"] = json!({"t":radar_types::civil::timestamp_from_seconds(at / 60000 * 60 - 60),
+        "o":99,"h":101,"l":98,"c":100,"v":100});
+    raw["SPY"]["prevDailyBar"] = json!({"t":radar_types::civil::timestamp_from_seconds(at / 1000 - 172_800),
+        "o":98,"h":101,"l":97,"c":99,"v":5000});
+    captured["raw_response"] = json!(raw.to_string());
+    std::fs::write(&capture, captured.to_string()).unwrap();
+    let mut costs: Value = serde_json::from_slice(&std::fs::read(&assumptions).unwrap()).unwrap();
+    costs["max_quote_age_ms"] = json!(120_000);
+    std::fs::write(&assumptions, costs.to_string()).unwrap();
+    let result = invoke("unlimited");
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    let contextual_prompt = std::fs::read_to_string(&prompt).unwrap();
+    assert_eq!(
+        contextual_prompt.matches("<<<RADAR-UNTRUSTED>>>").count(),
+        8
+    );
+    assert!(contextual_prompt.contains("incomplete IEX coverage"));
+    assert!(contextual_prompt.contains("close_microusd_per_share"));
+    let record: Value = serde_json::from_slice(&std::fs::read(&output).unwrap()).unwrap();
+    assert_eq!(record["proposal"]["strategy_id"], "snapshot-context-v1");
+    assert_eq!(record["entry_raw_response"], raw.to_string());
 }
