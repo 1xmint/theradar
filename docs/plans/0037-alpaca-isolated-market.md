@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # 0037 — Actual IEX capture and isolated replay
 
-**Status:** implementation awaiting GitHub verification and actual market capture.
+**Status:** GitHub verified and uploaded; actual market capture pending.
 
 Branch: feat/alpaca-isolated-market, based on 799b85c. Previous goal turn made
 verified progress: owner supplied successful isolated paper account output.
@@ -20,13 +20,13 @@ Parent run 38265093637 passed all 14 jobs, inspected with gh run view --json job
   explicitly unset broker credential variables and isolate its network.
 - [x] Add actual caller and capture-to-replay tests, and expand targeted Python
   mutation checks to exercise the new boundary behavior.
-- [ ] Inspect GitHub results; upload exact verified helper with matching hash.
+- [x] Inspect GitHub results; upload exact verified helper with matching hash.
 - [ ] Owner runs protected market observation; inspect actual IEX coverage,
   prices, timestamps, conditions and displayed sizes as observations.
 
 ## Handback
 
-Code verification pending. No workstation jobs. Existing verified reader release
+No workstation jobs. Existing verified reader release
 from 38263691902 can be reused: no Rust change in this branch. The helper retains
 all previous protected account mode behavior, including root-only credential
 checks and exact executable hash staging. The owner command adds --market.
@@ -49,3 +49,22 @@ before publishing; this helper adds no claim of directory power-loss durability.
 Next: continuous recording with storage/resource bounds and coverage diagnostics,
 time-gated research/forward evaluation, protected execution supervisor, website
 policy/handover/revoke and cancellation/recovery. Trading stays disabled.
+
+Verification: `gh run view 38266064496 --json jobs` at
+d186a69a568679a742165c6bd7afe7994579054b passed all 14 jobs. Inspected tests
+job 114868414338: 2,804 Rust tests, 20 Python tests, and all 17 targeted Python
+mutations caught by executed tests. No targeted survivors or import/compiler
+failures. All four Rust shards reported no changed Rust source; they do not
+provide Python coverage. No new release build: verified reader is unchanged.
+
+Direct server inspection confirmed /etc/radar/alpaca-paper.env root-owned,
+mode 600 and unreadable by guardian; contents never read. Installed reader and
+its directory are root-owned 755. Reader and pending upload both match
+1ac8285579e39d474aa1eaaccba2a0b480306d089a45eb6b43cf737a98fe8dc0.
+Uploaded this verified helper and matched local Get-FileHash with remote
+sha256sum: 8200c584f75cf9bf37ba6a6a099a73059b15cdc78bb719d802c6f3f05b84ab02.
+Owner received the exact sudo command with --market and a request for selected
+snapshot output only. Actual market report remains pending; no feed quality,
+capacity, cost or executable quote claim follows from green helper tests.
+
+This handback update is documentation only; code verification refers to d186a69.
