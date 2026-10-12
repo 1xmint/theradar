@@ -19,6 +19,7 @@ mod alpaca_decision;
 mod alpaca_exposure;
 mod alpaca_fills;
 mod alpaca_journal;
+mod alpaca_maintain;
 mod alpaca_market;
 mod alpaca_order_read;
 mod alpaca_positions;
@@ -146,6 +147,7 @@ commands:
   alpaca-order-reconcile --journal <private-file> --account-id <paper-id> --client-order-id <retained-id> --max-pages <positive-u16>
   alpaca-order-read --account-id <expected-paper-account-id> --client-order-id <retained-id> [--journal <private-file>]
   alpaca-paper-cancel --journal <private-file> --account-id <paper-id> --client-order-id <retained-id>
+  alpaca-paper-maintain --journal <private-file> --account-id <paper-id> --max-pages <positive-u16> [--cancel-working]
   alpaca-order-reserve --journal <private-file> --account-id <paper-id> --intent <typed-intent>
   alpaca-order-preflight --journal <private-file> --intent <typed-intent> --policy <private-policy> --max-pages <positive-u16>
   alpaca-paper-submit --journal <private-file> --intent <typed-intent> --policy <private-policy> --max-pages <positive-u16>
@@ -961,6 +963,7 @@ fn main() -> ExitCode {
         "alpaca-order-reconcile" => alpaca_fills::run(&args),
         "alpaca-order-read" => alpaca_order_read::run(&args),
         "alpaca-paper-cancel" => alpaca_cancel::run(&args),
+        "alpaca-paper-maintain" => alpaca_maintain::run(&args),
         "alpaca-order-preflight" | "alpaca-paper-submit" => alpaca_preflight::run(&args),
         "alpaca-order-reserve" | "alpaca-order-journal" => alpaca_journal::run(&args),
         "alpaca-assets-read" => alpaca_assets::run(&args),

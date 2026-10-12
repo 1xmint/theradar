@@ -30,7 +30,22 @@ fn accepted(status: u16) -> Result<(), String> {
     Ok(())
 }
 
-fn execute(
+pub(super) fn delete(
+    agent: &ureq::Agent,
+    key: &str,
+    secret: &str,
+    path: &str,
+) -> Result<(), String> {
+    let response = agent
+        .delete(format!("{PAPER_API}{path}"))
+        .header("APCA-API-KEY-ID", key)
+        .header("APCA-API-SECRET-KEY", secret)
+        .call()
+        .map_err(|_| "paper cancellation outcome unknown; reconcile retained client ID")?;
+    accepted(response.status().as_u16())
+}
+
+pub(super) fn execute(
     log: &mut BrokerLog,
     client: &str,
     read: impl FnMut(&str) -> Result<Option<String>, String>,
@@ -83,15 +98,7 @@ pub(super) fn run(args: &[String]) -> Result<(), String> {
         &mut log,
         client,
         |path| super::alpaca_order_read::read_path(&agent, PAPER_API, path, &key, &secret),
-        |path| {
-            let response = agent
-                .delete(format!("{PAPER_API}{path}"))
-                .header("APCA-API-KEY-ID", &key)
-                .header("APCA-API-SECRET-KEY", &secret)
-                .call()
-                .map_err(|_| "paper cancellation outcome unknown; reconcile retained client ID")?;
-            accepted(response.status().as_u16())
-        },
+        |path| delete(&agent, &key, &secret, path),
     )?;
     println!("{report}");
     Ok(())
