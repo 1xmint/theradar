@@ -42,6 +42,15 @@ sudo permission or service enablement. It requires systemd isolation support
 (the inspected VPS has systemd 255). Review the selected report; observations
 do not authorize trades. See plan 0036 for verification and limitations.
 
+The verified helper also accepts `--market` after the reader hash. This captures
+SPY/QQQ IEX snapshots into a fresh file under /var/lib/radar-paper-market using
+one temporary credential-bearing reader. A second temporary process replays that
+file at its original availability watermark with no broker credential environment
+and no network. Persistent state directories are managed by systemd, mode 0700.
+This captures only selected IEX coverage, not consolidated executable quotes.
+It installs no recorder timer, research agent, order authority or trading service.
+See plan 0037 for verification and actual feed findings.
+
 Radar runs on the shared `clawguard` VPS alongside Cortex and Pulse. That shapes
 every choice here: it is a 2-core box with 3.8 GiB of RAM running other people's
 production services, so Radar is memory-capped, sandboxed, and installed without
