@@ -22,6 +22,9 @@ this turn connects provider reads to durable state. Tests/jobs run on GitHub.
 - [ ] Verify ten new tests on GitHub: durable replay/idempotency, illegal history,
   hash coverage, domain separation, sync failure, poison, actual caller deposits/
   late fees/read failures, retained-order claims and command credential refusal.
+  First CI 38204170897 at b972e76 found the new BrokerCash stage missing from
+  the audit label match. Build/test/lint and shard 0's unmutated baseline refused
+  compilation; add the explicit audit label and rerun the full GitHub checks.
 - [ ] Add durable economic claim transitions and pure equity risk, then wire the
   separate executor and supervisor/site handover for autonomous paper operation.
   Forward paper evidence and eligible explicit live setup gate real money later.
