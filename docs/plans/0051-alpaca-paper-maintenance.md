@@ -58,3 +58,13 @@ this account. The
 check order quantity against NBBO size and omits regulatory fees and several
 live execution effects. A paper fill must not be used as live-liquidity proof;
 the existing risk inputs remain unknown until their semantics are established.
+
+Initial source 3029db4, GitHub 38313899616: formatting reported four test hunks,
+lint required an equality assertion for useful empty-output diagnostics, and
+the mutation baselines caught an invalid test fixture broker ID containing an
+underscore. The journal correctly refused that ID. Prepared formatting/assertion
+repairs and supported hyphenated fixture IDs; do not weaken journal validation.
+The entire run then completed; all remaining ordinary jobs passed. All four
+downloaded mutation artifacts and baseline logs confirmed the same fixture
+failure before testing mutants, so this run supplies no mutation-coverage claim.
+Repairs are ready for a fresh GitHub run; keep this branch stable while it runs.

@@ -24,7 +24,7 @@ fn maintenance_requires_existing_journal_and_rejects_endpoint_override_in_both_m
                 .output()
                 .unwrap();
             assert!(!output.status.success());
-            assert!(output.stdout.is_empty());
+            assert_eq!(output.stdout, Vec::<u8>::new());
             let error = String::from_utf8(output.stderr).unwrap();
             assert!(!error.contains("private-secret-sentinel"));
             assert!(

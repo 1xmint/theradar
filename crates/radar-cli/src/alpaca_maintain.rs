@@ -135,7 +135,8 @@ mod tests {
                 super::super::alpaca_cash::checkpoint(log, "paper", 1, |path| {
                     paths.push(path.to_owned());
                     Ok(Some(if path == "/v2/account" {
-                        json!({"id":"paper","status":"ACTIVE","currency":"USD","cash":"100"}).to_string()
+                        json!({"id":"paper","status":"ACTIVE","currency":"USD","cash":"100"})
+                            .to_string()
                     } else {
                         "[]".into()
                     }))
@@ -195,7 +196,7 @@ mod tests {
                         (
                             client.into(),
                             BrokerProgress {
-                                broker_order_id: format!("broker-{client}"),
+                                broker_order_id: format!("broker-{client}").replace('_', "-"),
                                 filled_nanoshares: 0,
                                 terminal: client == "a_terminal",
                             },
@@ -204,7 +205,8 @@ mod tests {
                     .into(),
             );
             log.observe_cash(observed, 4).unwrap();
-            log.cancel("b_pending", "broker-b_pending", 5, |_| ()).unwrap();
+            log.cancel("b_pending", "broker-b-pending", 5, |_| ())
+                .unwrap();
             let before = log.claims().unwrap();
             let report = maintain(
                 &mut log,
@@ -214,13 +216,16 @@ mod tests {
                 |log, client| {
                     assert!(stop);
                     assert_eq!(client, "c_working");
-                    log.cancel(client, "broker-c_working", 6, |_| ()).unwrap();
+                    log.cancel(client, "broker-c-working", 6, |_| ()).unwrap();
                     Ok(json!({"cancellation":"request_accepted"}))
                 },
             )
             .unwrap();
             assert_eq!(report["terminal"], json!(["a_terminal"]));
-            assert_eq!(report["cancellation_pending_before_tick"], json!(["b_pending"]));
+            assert_eq!(
+                report["cancellation_pending_before_tick"],
+                json!(["b_pending"])
+            );
             assert_eq!(
                 report["working_before_cancellation"],
                 json!(["c_working", "d_working"])
@@ -280,7 +285,10 @@ mod tests {
                     |_, _| panic!("uncertain cancellation must not retry"),
                 )
                 .unwrap();
-                assert_eq!(result["cancellation_pending_before_tick"], json!(["a_working"]));
+                assert_eq!(
+                    result["cancellation_pending_before_tick"],
+                    json!(["a_working"])
+                );
                 assert!(result["cancellation_attempt"].is_null());
             }
         }
