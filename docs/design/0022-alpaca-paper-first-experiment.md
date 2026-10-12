@@ -219,6 +219,16 @@ cost of opening positions and is not P&L. External funding is separately labelle
 All original claims and authority refusals remain. Durable economic transitions
 and complete risk state are still required before any claim release or execution.
 
+`radar alpaca-cash-checkpoint` connects the same verified provider reads to a
+durable baseline in the owned order journal. Genesis must precede retained orders;
+later calls revalidate the retained selected observations, bind all retained
+orders and verify cash deltas before advancing the baseline. Rejected corrections,
+missing records, unknown cash effects or failed reads preserve it for recovery.
+File and directory sync precede an updated baseline; uncertain persistence
+poisons the owner until integrity-checked replay. This provides local restart
+continuity, not broker atomicity, complete economics, rollback resistance or
+claim release. Generic storage trusts the protected caller's normalization.
+
 `radar alpaca-assets-read` reads each requested equity between pinned paper
 account reads. It binds symbol, nonempty unique asset ID and us_equity class;
 nullable status, exchange, tradability, fractional, margin, short and attribute

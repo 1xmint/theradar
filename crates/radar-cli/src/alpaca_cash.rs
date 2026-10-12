@@ -4,7 +4,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::Read as _;
 
-use radar_journal::{BrokerIntent, BrokerLog};
+use radar_journal::{Applied, BrokerCash, BrokerIntent, BrokerLog};
 use serde::Serialize;
 use serde_json::{Value, json};
 
@@ -288,6 +288,91 @@ fn collect(
     )
 }
 
+fn retained_snapshot(prior: &BrokerCash, expected: &str, now: u64) -> Result<Snapshot, String> {
+    let baseline = snapshot(&prior.observation, expected)?;
+    if baseline.read_started_unix_secs != prior.started
+        || baseline.read_completed_unix_secs != prior.completed
+        || prior.completed > now
+    {
+        return Err("durable cash baseline times are invalid".into());
+    }
+    Ok(baseline)
+}
+
+fn checkpoint(
+    log: &mut BrokerLog,
+    expected: &str,
+    max_pages: u16,
+    mut read: impl FnMut(&str) -> Result<Option<String>, String>,
+) -> Result<Value, String> {
+    let retained = log.cash().map_err(|e| e.to_string())?.cloned();
+    let (observation, reconciliation) = if let Some(prior) = retained {
+        let baseline = retained_snapshot(&prior, expected, super::wallet_read::now()?)?;
+        let report = collect(log, expected, &baseline, max_pages, read)?;
+        (report["activity_observations"].clone(), Some(report))
+    } else {
+        if log.entries().map_err(|e| e.to_string())?.next().is_some() {
+            return Err("cash genesis must precede retained paper orders".into());
+        }
+        let observation = super::alpaca_activities::collect(expected, max_pages, |path| {
+            read(path)?.ok_or_else(|| "paper cash activity observation is missing".into())
+        })?;
+        (observation, None)
+    };
+    let selected = snapshot(&observation, expected)?;
+    let cash = BrokerCash {
+        account_id: expected.to_owned(),
+        started: selected.read_started_unix_secs,
+        completed: selected.read_completed_unix_secs,
+        observation,
+    };
+    let applied = log
+        .observe_cash(cash, super::wallet_read::now()?)
+        .map_err(|e| e.to_string())?;
+    Ok(json!({"version":1,"venue":"alpaca","environment":"paper",
+        "expected_account_id":expected,"checkpoint_written":applied == Applied::Advanced,
+        "checkpoint":log.cash().map_err(|e| e.to_string())?,"reconciliation":reconciliation,
+        "claims":super::alpaca_journal::report(log, expected, false)?,
+        "economic_history_complete":false,"fees_final":false,"profit_measured":false,
+        "claim_release_authorized":false,"retry_authorized":false,"execution_authority":false}))
+}
+
+pub(super) fn checkpoint_run(args: &[String]) -> Result<(), String> {
+    let values: Vec<&str> = args.iter().map(String::as_str).collect();
+    let [
+        "alpaca-cash-checkpoint",
+        "--journal",
+        path,
+        "--account-id",
+        expected,
+        "--max-pages",
+        pages,
+    ] = values.as_slice()
+    else {
+        return Err("usage: radar alpaca-cash-checkpoint --journal <private-file> --account-id <paper-id> --max-pages <positive-u16>".into());
+    };
+    let max_pages = super::alpaca_activities::page_limit(pages)?;
+    let mut log = BrokerLog::open(*path, expected).map_err(|e| e.to_string())?;
+    if log.cash().map_err(|e| e.to_string())?.is_none()
+        && log.entries().map_err(|e| e.to_string())?.next().is_some()
+    {
+        return Err("cash genesis must precede retained paper orders".into());
+    }
+    let key = super::alpaca_read::credential(std::env::var("RADAR_ALPACA_PAPER_KEY_ID").ok())?;
+    let secret =
+        super::alpaca_read::credential(std::env::var("RADAR_ALPACA_PAPER_SECRET_KEY").ok())?;
+    let agent = super::alpaca_read::agent();
+    let report = checkpoint(&mut log, expected, max_pages, |path| {
+        if path.starts_with("/v2/orders:") {
+            recovery::read_path(&agent, PAPER_API, path, &key, &secret)
+        } else {
+            super::alpaca_read::get(&agent, &format!("{PAPER_API}{path}"), &key, &secret).map(Some)
+        }
+    })?;
+    println!("{report}");
+    Ok(())
+}
+
 pub(super) fn run(args: &[String]) -> Result<(), String> {
     let values: Vec<&str> = args.iter().map(String::as_str).collect();
     let [
@@ -329,6 +414,238 @@ mod tests {
 
     fn account(cash: &str) -> Value {
         json!({"id":"paper-id","status":"ACTIVE","currency":"USD","cash":cash,"private":"omit"})
+    }
+
+    fn observation_reader(balance: &str, activities: &Value, path: &str) -> String {
+        if path == "/v2/account" {
+            account(balance).to_string()
+        } else {
+            activities.to_string()
+        }
+    }
+
+    #[test]
+    fn durable_checkpoint_bootstraps_replays_and_accounts_for_deposits_and_late_fees() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("cash.jsonl");
+        let mut log = BrokerLog::open(&path, "paper-id").unwrap();
+        let boot = checkpoint(&mut log, "paper-id", 1, |p| {
+            Ok(Some(observation_reader("100", &json!([]), p)))
+        })
+        .unwrap();
+        assert_eq!(boot["checkpoint_written"], true);
+        assert_eq!(boot["reconciliation"], Value::Null);
+        assert!(boot["checkpoint"]["observation"]["account_before"]["private"].is_null());
+        drop(log);
+        let mut log = BrokerLog::open(&path, "paper-id").unwrap();
+        let deposit = json!([{"id":"deposit","activity_type":"CSD","net_amount":"10"}]);
+        let result = checkpoint(&mut log, "paper-id", 1, |p| {
+            Ok(Some(observation_reader("110", &deposit, p)))
+        })
+        .unwrap();
+        assert_eq!(
+            result["reconciliation"]["cash"]["external_cash_flow_nanos"],
+            "10000000000"
+        );
+        drop(log);
+        let mut log = BrokerLog::open(&path, "paper-id").unwrap();
+        let late = json!([deposit[0], {"id":"fee","activity_type":"FEE","net_amount":"-0.01"}]);
+        let result = checkpoint(&mut log, "paper-id", 1, |p| {
+            Ok(Some(observation_reader("109.99", &late, p)))
+        })
+        .unwrap();
+        assert_eq!(
+            result["reconciliation"]["cash"]["fee_cash_flow_nanos"],
+            "-10000000"
+        );
+        for flag in [
+            "economic_history_complete",
+            "fees_final",
+            "profit_measured",
+            "claim_release_authorized",
+            "retry_authorized",
+            "execution_authority",
+        ] {
+            assert_eq!(result[flag], false);
+        }
+        drop(log);
+        let log = BrokerLog::open(&path, "paper-id").unwrap();
+        assert_eq!(
+            log.cash().unwrap().unwrap().observation["account_before"]["cash"],
+            "109.99"
+        );
+        assert_eq!(
+            radar_journal::Journal::open(&path)
+                .unwrap()
+                .events()
+                .unwrap()
+                .len(),
+            3
+        );
+    }
+
+    #[test]
+    fn failed_observations_and_cash_corrections_keep_the_durable_baseline() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("cash.jsonl");
+        let mut log = BrokerLog::open(&path, "paper-id").unwrap();
+        let deposit = json!([{"id":"deposit","activity_type":"CSD","net_amount":"10"}]);
+        checkpoint(&mut log, "paper-id", 1, |p| {
+            Ok(Some(observation_reader("110", &deposit, p)))
+        })
+        .unwrap();
+        let bytes = std::fs::read(&path).unwrap();
+        for stage in 0..3 {
+            for failure in 0..3 {
+                let mut index = 0;
+                assert!(
+                    checkpoint(&mut log, "paper-id", 1, |p| {
+                        let current = index;
+                        index += 1;
+                        if current == stage {
+                            return match failure {
+                                0 => Err("transport".into()),
+                                1 => Ok(None),
+                                _ => Ok(Some("null".into())),
+                            };
+                        }
+                        Ok(Some(observation_reader("110", &deposit, p)))
+                    })
+                    .is_err()
+                );
+                assert!(index > stage);
+                assert_eq!(std::fs::read(&path).unwrap(), bytes);
+            }
+        }
+        for (balance, activities) in [
+            ("111", deposit.clone()),
+            ("110", json!([])),
+            (
+                "110",
+                json!([{"id":"deposit","activity_type":"CSD","net_amount":"11"}]),
+            ),
+            (
+                "110",
+                json!([deposit[0], {"id":"unknown","activity_type":"DIV","net_amount":"0"}]),
+            ),
+        ] {
+            assert!(
+                checkpoint(&mut log, "paper-id", 1, |p| Ok(Some(observation_reader(
+                    balance,
+                    &activities,
+                    p
+                ))))
+                .is_err()
+            );
+            assert_eq!(std::fs::read(&path).unwrap(), bytes);
+        }
+        // A successful unchanged observation remains usable after failures.
+        checkpoint(&mut log, "paper-id", 1, |p| {
+            Ok(Some(observation_reader("110", &deposit, p)))
+        })
+        .unwrap();
+    }
+
+    #[test]
+    fn checkpoint_revalidates_retained_selected_evidence_and_never_bootstraps_over_orders() {
+        let dir = tempfile::tempdir().unwrap();
+        let valid = BrokerCash {
+            account_id: "paper-id".into(),
+            started: 1,
+            completed: 2,
+            observation: report("100", json!([]), 1, 2),
+        };
+        assert!(retained_snapshot(&valid, "paper-id", 2).is_ok());
+        assert!(retained_snapshot(&valid, "paper-id", 3).is_ok());
+        assert!(retained_snapshot(&valid, "paper-id", 1).is_err());
+        for case in 0..4 {
+            let path = dir.path().join(format!("case-{case}.jsonl"));
+            let mut log = BrokerLog::open(&path, "paper-id").unwrap();
+            let mut observation = report("100", json!([]), 1, 2);
+            match case {
+                0 => observation["pagination_exhausted"] = json!(false),
+                1 => observation["read_started_unix_secs"] = json!(0),
+                2 => observation["read_completed_unix_secs"] = json!(1),
+                _ => {}
+            }
+            if case == 3 {
+                log.reserve(intent(BrokerSide::Buy), 1).unwrap();
+            } else {
+                log.observe_cash(
+                    BrokerCash {
+                        account_id: "paper-id".into(),
+                        started: 1,
+                        completed: 2,
+                        observation,
+                    },
+                    2,
+                )
+                .unwrap();
+            }
+            let bytes = std::fs::read(&path).unwrap();
+            assert!(
+                checkpoint(&mut log, "paper-id", 1, |_| panic!(
+                    "invalid baseline must not read"
+                ))
+                .is_err()
+            );
+            assert_eq!(std::fs::read(&path).unwrap(), bytes);
+        }
+    }
+
+    #[test]
+    fn durable_cash_updates_bind_retained_orders_and_preserve_unknown_submission_claims() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("cash.jsonl");
+        let mut log = BrokerLog::open(&path, "paper-id").unwrap();
+        checkpoint(&mut log, "paper-id", 1, |p| {
+            Ok(Some(observation_reader("500", &json!([prior()]), p)))
+        })
+        .unwrap();
+        for side in [BrokerSide::Buy, BrokerSide::Sell] {
+            let intent = intent(side);
+            let id = intent.client_order_id.clone();
+            log.reserve(intent, super::super::wallet_read::now().unwrap())
+                .unwrap();
+            log.submit(&id, super::super::wallet_read::now().unwrap(), |_| ())
+                .unwrap();
+        }
+        let result = checkpoint(&mut log, "paper-id", 1, |p| {
+            Ok(Some(if p == "/v2/account" {
+                account("457.99").to_string()
+            } else if p.contains("retained_Buy") {
+                order(BrokerSide::Buy).to_string()
+            } else if p.contains("retained_Sell") {
+                order(BrokerSide::Sell).to_string()
+            } else {
+                events().to_string()
+            }))
+        })
+        .unwrap();
+        assert_eq!(
+            result["reconciliation"]["cash"]["observed_cash_consistent"],
+            true
+        );
+        assert_eq!(result["claims"]["claims"].as_array().unwrap().len(), 2);
+        drop(log);
+        let mut log = BrokerLog::open(&path, "paper-id").unwrap();
+        assert_eq!(
+            log.cash().unwrap().unwrap().observation["account_before"]["cash"],
+            "457.99"
+        );
+        for side in [BrokerSide::Buy, BrokerSide::Sell] {
+            let intent = intent(side);
+            let entry = log
+                .entries()
+                .unwrap()
+                .find(|entry| entry.intent == intent)
+                .unwrap();
+            assert_eq!(entry.state, radar_journal::BrokerState::SubmissionUnknown);
+            assert!(
+                log.submit(&intent.client_order_id, 10, |_| panic!("no retry"))
+                    .is_err()
+            );
+        }
     }
 
     fn report(cash: &str, activities: Value, started: u64, completed: u64) -> Value {
