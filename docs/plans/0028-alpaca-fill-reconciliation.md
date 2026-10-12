@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # 0028 — Combine verified recovery inputs and reconcile executions
 
-**Status:** combined inputs verified; execution consistency caller implemented, GitHub verification pending.
+**Status:** execution consistency caller verified on GitHub; fee/cash reconciliation remains pending.
 
 Branch: feat/alpaca-fill-reconciliation. Sources d3f7975 (full CI 38184222577)
 and eb70903 (full CI 38184575296) both passed before combination. Parent 3a4ba61
@@ -23,7 +23,11 @@ All verification runs on GitHub; no local jobs.
   Use cumulative quantities to establish execution intervals, independent of
   response order, instead of assuming timestamps uniquely order executions.
 - [x] Derive gross fill amounts with exact arithmetic and conservative USD bounds.
-- [ ] Verify the actual caller and arithmetic on GitHub, including mutation jobs.
+- [x] Verify the actual caller and arithmetic on GitHub, including mutation jobs.
+  `gh run view 38200285274 --json status,conclusion,jobs` verified every job passed
+  at 6e555de. All 2763 tests passed; 105 mutations caught, 20 compiler-unviable,
+  zero missed/timeouts. The exact alpaca_fills.rs:36:9 OR-to-AND mutant was caught.
+  All four diagnostics and each unviable compiler reason were read.
   Six unit tests and one actual-command test initially raised the floor from
   2347 to 2354. CI 38199868775 measured 2763 passing tests; use that actual floor.
   First run 38199605432 at 73f450a exposed a missing required account status in
@@ -38,7 +42,8 @@ All verification runs on GitHub; no local jobs.
   Downloaded all four diagnostics; inspected the exact survivor diff and every
   unviable compiler reason. No exclusions or cancellations. Unviable cases are
   unused/dead code after no-op bodies, missing Default implementations, invalid
-  let-chain OR syntax and useless unsigned comparisons. Reverification pending.
+  let-chain OR syntax and useless unsigned comparisons. Reverification passed
+  in 38200285274 at 6e555de, as recorded above.
 - [ ] Reconcile fees/nontrade cash and baseline account cash without attributing
   deposits/withdrawals to strategy returns. Late fees/corrections remain possible.
 - [ ] Persist verified economic transitions before claim release, with replay and
@@ -52,10 +57,11 @@ No orders, credentials, deployment or activation. The actual command now connect
 the inputs and preserves full claims. Tests cover both sides, partial/full/empty
 executions, interval order, rounding, gross range, malformed/missing fields,
 unsupported status, all nine read stages, visible account/order changes and
-private configuration refusals. Initial GitHub verification found the fixture
-and lint failures above; repair verification remains pending.
-The next step is GitHub verification and repair, then fee/cash/baseline economic
-accounting and durable claim transitions. Gross consistency and exhausted pages
+private configuration refusals. Initial GitHub verification found the fixture,
+lint and status-test gaps above; repaired code passed the entire CI at 6e555de.
+This follow-up records that evidence without changing code. Read its own CI
+before advancing the integration parent. The next implementation is fee/cash/
+baseline economic accounting and durable claim transitions. Gross consistency and exhausted pages
 do not prove final history or fees. No release API exists. The owner still needs
 to create the paper account for actual response verification; independent code
 work remains available. Preserve the complete autonomous goal from plan 0024.
