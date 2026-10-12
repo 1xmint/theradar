@@ -54,6 +54,14 @@ stops the tick; cancellation acceptance retains claims. This is the maintenance
 phase for a future isolated supervisor, with no new-order authority or installed
 timer. See [paper maintenance](docs/plans/0051-alpaca-paper-maintenance.md).
 
+The separate maintenance worker and systemd pair now have source under deploy.
+Its root-owned configuration defaults to observation; optional cancel_working
+requests one retained-order cancellation per tick. It refuses a missing private
+journal and keeps brokerage credentials out of model processes. Provisioning,
+verified journal genesis and timer activation remain pending; these files do
+not enable unattended entries. See
+[scheduled maintenance](docs/plans/0052-alpaca-maintenance-worker.md).
+
 Use protected storage in an existing durably provisioned directory. This does
 not establish available capital, profit or trading authority. See
 [durable cash work](docs/plans/0030-alpaca-durable-cash.md).

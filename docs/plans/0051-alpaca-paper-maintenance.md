@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # 0051 — Recovery tick before unattended paper entries
 
-**Status:** implementation prepared; GitHub verification pending. Not installed.
+**Status:** GitHub verified at a92807a; not installed.
 
 Branch: feat/alpaca-paper-maintenance, base 9487fae. Parent documentation run
 38312767425 completed successfully. The previous goal turn established that
@@ -11,13 +11,16 @@ independent of this recovery work.
 
 ## Work
 
-- [ ] Verify actual maintenance CLI with fresh protected cash/share/order
+- [x] Verify actual maintenance CLI with fresh protected cash/share/order
   checkpoint before selecting any cancellation.
-- [ ] Verify observation mode has no DELETE; stop mode selects at most one
+- [x] Verify observation mode has no DELETE; stop mode selects at most one
   working retained order and never retries an uncertain cancellation.
-- [ ] Verify unknown observations abort, terminal orders are skipped, and
+- [x] Verify unknown observations abort, terminal orders are skipped, and
   retained capital claims survive cancellation acceptance or transport failure.
-- [ ] Inspect GitHub tests, lint, formatting and changed-behavior mutations.
+- [x] Inspect GitHub tests, lint, formatting and changed-behavior mutations.
+
+All four items proved by GitHub 38315068491 at a92807a, including four exact
+executed recovery regressions. No installed supervisor is claimed.
 
 The actual caller is radar alpaca-paper-maintain with an existing private
 journal, pinned account, bounded activity pages and optional --cancel-working.
@@ -36,6 +39,14 @@ without a locally recorded cancellation are refused by the underlying cancel
 caller rather than resent.
 
 ## Handback
+
+Source a92807aa7c20f4992494211aafb62bc113d6c9c9: GitHub 38315068491 passed
+all fourteen jobs, 2841 Rust and 59 Python tests, four new exact maintenance
+regressions, all previous exact regressions and three systemd pairs. All four
+mutation artifacts inspected: three caught, five compiler-unviable, no
+survivors/timeouts. Compiler failures are unused arguments/imports or dead code,
+not test kills. Verification is recorded on the worker child branch so the
+verified parent remains stable. Next: worker verification and provisioning.
 
 Prepared four coordinator tests, including the actual checkpoint collector on
 an empty existing journal, one actual-process test for both command modes and
