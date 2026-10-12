@@ -375,7 +375,9 @@ impl Provider for Codex {
         // The prompt goes in on stdin rather than as an argument. An argument
         // is visible in `ps` to every user on the box, and this one contains
         // token metadata a moment after a stranger chose it.
-        let prompt = request.render();
+        // The CLI has one stdin prompt rather than separate API roles. Retain
+        // Radar's trusted framing before the question and fenced observations.
+        let prompt = format!("{}\n\n{}", request.system(), request.render());
         child
             .stdin
             .take()

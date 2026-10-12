@@ -91,6 +91,19 @@ unknown comparison values, rather than dropping the case or assigning zero.
 Records are mutable local research files, not authenticated strategy provenance.
 This does not yet prove cohort completeness, a learned strategy or forward gains.
 
+`radar alpaca-paper-propose --capture <capture> --symbol SPY --experiment <json> --assumptions <json> --output <new-file>`
+calls the configured linked subscription provider for a strict Enter/Wait reply.
+The fixed experiment requires strategy_id, quantity_nanoshares and horizon_ms;
+the model controls only action and reason. Observations use the existing untrusted
+fences. The quote is revalidated when the answer returns, and that completion
+cutoff starts the evaluation horizon; there are no pre-answer simulated fills.
+The caller requires explicit unlimited subscription allowance with an adequate
+per-call bound. Finite daily allowances need shared durable metering first; paid
+API providers cannot use this path. No credentials are handled by this caller.
+Malformed/late/failed answers refuse without creating a decision; these failures
+still need durable cohort retention. There is no scheduler, automatic deployment,
+verified model edge or execution authority from this command.
+
 `radar alpaca-reconcile --account-id <expected-paper-account-id>` pins the account
 identity and brackets positions/market-clock reads with account and open-order
 reads. It preserves pending orders and nested legs, reports changes in selected

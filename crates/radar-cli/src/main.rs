@@ -21,6 +21,7 @@ mod alpaca_market;
 mod alpaca_order_read;
 mod alpaca_positions;
 mod alpaca_preflight;
+mod alpaca_propose;
 mod alpaca_quote;
 mod alpaca_read;
 mod alpaca_reconcile;
@@ -152,6 +153,7 @@ commands:
                                  offline ask-to-bid outcome under explicit cost
                                  and participation assumptions; no orders
   alpaca-paper-decision --capture <capture> --symbol SPY --proposal <json> --assumptions <json> --output <new-file>
+  alpaca-paper-propose --capture <capture> --symbol SPY --experiment <json> --assumptions <json> --output <new-file>
   alpaca-paper-decision-score --decision <record> --exit <capture> --exit-as-of-unix-ms <N>
                                  freeze research choices and compare outcomes;
                                  no broker permissions or orders
@@ -959,6 +961,7 @@ fn main() -> ExitCode {
         "alpaca-quote" => alpaca_quote::run(&args),
         "alpaca-paper-score" => alpaca_score::run(&args),
         "alpaca-paper-decision" | "alpaca-paper-decision-score" => alpaca_decision::run(&args),
+        "alpaca-paper-propose" => alpaca_propose::run(&args),
         "wallet-read" => wallet_read::run(&args),
         "portfolio-read" => portfolio_read::run(&args),
         "sol-price-read" => sol_price_read::run(&args),

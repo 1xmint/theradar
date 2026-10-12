@@ -20,20 +20,28 @@ enum Format {
 
 #[derive(Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
-enum Action {
+pub(super) enum Action {
     Enter,
     Wait,
 }
 
 #[derive(Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
-struct Proposal {
-    strategy_id: String,
-    action: Action,
-    quantity_nanoshares: u64,
-    horizon_ms: u64,
+pub(super) struct Proposal {
+    pub(super) strategy_id: String,
+    pub(super) action: Action,
+    pub(super) quantity_nanoshares: u64,
+    pub(super) horizon_ms: u64,
     // Untrusted explanation, stored as data; never instructions to an executor.
-    reason: String,
+    pub(super) reason: String,
+}
+
+pub(super) struct Input {
+    pub(super) symbol: String,
+    pub(super) raw: String,
+    pub(super) available: u64,
+    pub(super) as_of: u64,
+    pub(super) model_observed: Option<u64>,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -46,6 +54,7 @@ struct Decision {
     outcome_not_before_unix_ms: u64,
     entry_available_at_unix_ms: u64,
     entry_raw_response: String,
+    model_observation_as_of_unix_ms: Option<u64>,
     proposal: Proposal,
     assumptions: Assumptions,
 }
@@ -67,6 +76,9 @@ impl Decision {
             || self.recorded_at_unix_ms >= self.outcome_not_before_unix_ms
             || self.frozen_at_unix_ms.checked_add(self.proposal.horizon_ms)
                 != Some(self.outcome_not_before_unix_ms)
+            || self.model_observation_as_of_unix_ms.is_some_and(|at| {
+                at > self.frozen_at_unix_ms || self.entry_available_at_unix_ms > at
+            })
         {
             return Err("invalid forward decision identity or chronology".into());
         }
@@ -187,15 +199,8 @@ pub(super) fn run(args: &[String]) -> Result<(), String> {
             let proposal: Proposal = super::alpaca_preflight::load(proposal)?;
             let assumptions = super::alpaca_preflight::load(assumptions)?;
             let (raw, available) = super::alpaca_market::quote_input(Path::new(capture), symbol, frozen)?;
-            let decision = Decision { format: Format::V1, symbol: (*symbol).into(),
-                frozen_at_unix_ms:frozen, recorded_at_unix_ms:now()?,
-                outcome_not_before_unix_ms:frozen.checked_add(proposal.horizon_ms)
-                    .ok_or("decision horizon overflow")?,
-                entry_available_at_unix_ms:available, entry_raw_response:raw, proposal, assumptions };
-            publish(Path::new(output), &decision)?;
-            json!({"decision_written":true,"frozen_at_unix_ms":frozen,
-                "outcome_not_before_unix_ms":decision.outcome_not_before_unix_ms,
-                "decision_origin_verified":false,"execution_authority":false})
+            record(Input { symbol:(*symbol).into(), raw, available, as_of:frozen,
+                model_observed:None }, proposal, assumptions, Path::new(output))?
         }
         ["alpaca-paper-decision-score", "--decision", path, "--exit", exit, "--exit-as-of-unix-ms", at] => {
             let decision = load(path)?;
@@ -209,6 +214,32 @@ pub(super) fn run(args: &[String]) -> Result<(), String> {
     };
     println!("{report}");
     Ok(())
+}
+
+pub(super) fn record(
+    input: Input,
+    proposal: Proposal,
+    assumptions: Assumptions,
+    output: &Path,
+) -> Result<Value, String> {
+    let decision = Decision {
+        format: Format::V1,
+        symbol: input.symbol,
+        frozen_at_unix_ms: input.as_of,
+        recorded_at_unix_ms: now()?,
+        outcome_not_before_unix_ms: input.as_of.checked_add(proposal.horizon_ms)
+            .ok_or("decision horizon overflow")?,
+        entry_available_at_unix_ms: input.available,
+        entry_raw_response: input.raw,
+        model_observation_as_of_unix_ms: input.model_observed,
+        proposal,
+        assumptions,
+    };
+    publish(output, &decision)?;
+    Ok(json!({"decision_written":true,"frozen_at_unix_ms":decision.frozen_at_unix_ms,
+        "outcome_not_before_unix_ms":decision.outcome_not_before_unix_ms,
+        "model_observation_as_of_unix_ms":decision.model_observation_as_of_unix_ms,
+        "decision_origin_verified":false,"execution_authority":false}))
 }
 
 #[cfg(test)]
@@ -268,6 +299,19 @@ mod tests {
         let mut value = decision();
         value.proposal.quantity_nanoshares = 0;
         assert!(value.entry().is_err());
+        let mut value = decision();
+        value.model_observation_as_of_unix_ms = Some(value.frozen_at_unix_ms);
+        assert!(value.entry().is_ok());
+        value.model_observation_as_of_unix_ms = Some(value.frozen_at_unix_ms + 1);
+        assert!(value.entry().is_err());
+        value.model_observation_as_of_unix_ms = Some(value.entry_available_at_unix_ms - 1);
+        assert!(value.entry().is_err());
+        let mut value = decision();
+        value.model_observation_as_of_unix_ms = Some(value.frozen_at_unix_ms);
+        value.frozen_at_unix_ms += 1;
+        value.recorded_at_unix_ms += 1;
+        value.outcome_not_before_unix_ms += 1;
+        assert!(value.entry().is_err(), "quote age is rechecked after model completion");
     }
 
     #[test]
