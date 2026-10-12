@@ -1,7 +1,58 @@
 // SPDX-License-Identifier: Apache-2.0
 //! Validate selected broker clock evidence; never infer a session from local weekdays.
 
-use serde_json::Value;
+use serde_json::{Value, json};
+
+fn research(
+    horizon: u64,
+    mut read: impl FnMut() -> Result<String, String>,
+    mut clock: impl FnMut() -> Result<u64, String>,
+) -> Result<Value, String> {
+    if horizon == 0 {
+        return Err("research horizon must be positive".into());
+    }
+    let raw = read()?;
+    let broker: Value = serde_json::from_str(&raw).map_err(|_| "invalid research session response")?;
+    let now = clock()?;
+    let (_, close) = validate(&broker, now, 5000)?;
+    // Bound the worker's 20-second capture and 100-second model deadlines,
+    // then leave the entire forward outcome horizon inside this session.
+    let outcome = now
+        .checked_add(120_000)
+        .and_then(|at| at.checked_add(horizon))
+        .ok_or("research session horizon overflow")?;
+    if outcome >= close {
+        return Err("research outcome would reach the session close".into());
+    }
+    Ok(json!({"environment":"paper","execution_authority":false,
+        "regular_session_eligible":true,"as_of_unix_ms":now,
+        "session_close_unix_ms":close,"horizon_ms":horizon}))
+}
+
+pub(super) fn run(args: &[String]) -> Result<(), String> {
+    let values: Vec<_> = args.iter().map(String::as_str).collect();
+    let ["alpaca-research-session", "--horizon-ms", horizon] = values.as_slice() else {
+        return Err("usage: radar alpaca-research-session --horizon-ms <positive-ms>".into());
+    };
+    let horizon: u64 = horizon.parse().map_err(|_| "invalid research horizon")?;
+    let key = super::alpaca_read::credential(std::env::var("RADAR_ALPACA_PAPER_KEY_ID").ok())?;
+    let secret = super::alpaca_read::credential(std::env::var("RADAR_ALPACA_PAPER_SECRET_KEY").ok())?;
+    let agent = super::alpaca_read::agent();
+    let report = research(
+        horizon,
+        || {
+            super::alpaca_read::get(
+                &agent,
+                "https://paper-api.alpaca.markets/v2/clock",
+                &key,
+                &secret,
+            )
+        },
+        super::alpaca_preflight::now_ms,
+    )?;
+    println!("{report}");
+    Ok(())
+}
 
 fn timestamp(text: &str) -> Option<u128> {
     if text.ends_with('Z') {
@@ -77,6 +128,39 @@ mod tests {
     fn clock() -> Value {
         json!({"is_open":true,"timestamp":"2026-10-12T10:00:00.123456789-04:00",
             "next_close":"2026-10-12T16:00:00-04:00","next_open":"2026-10-13T09:30:00-04:00"})
+    }
+
+    #[test]
+    fn research_requires_fresh_open_session_and_outcome_strictly_before_close() {
+        let at = 1_791_813_600_124;
+        let raw = clock().to_string();
+        let report = research(600_000, || Ok(raw.clone()), || Ok(at)).unwrap();
+        assert_eq!(report["regular_session_eligible"], true);
+        assert_eq!(report["execution_authority"], false);
+        let close = report["session_close_unix_ms"].as_u64().unwrap();
+        let remaining = close - at - 120_000;
+        research(remaining - 1, || Ok(raw.clone()), || Ok(at)).unwrap();
+        assert!(research(remaining, || Ok(raw.clone()), || Ok(at)).is_err());
+        assert!(research(u64::MAX, || Ok(raw.clone()), || Ok(at)).is_err());
+        assert!(research(0, || panic!("must not read"), || Ok(at)).is_err());
+        for changed in [
+            json!({"is_open":false}),
+            Value::Null,
+            json!({"timestamp":"2026-10-12T09:59:00-04:00"}),
+        ] {
+            let mut bad = clock();
+            if let Some(fields) = changed.as_object() {
+                for (key, value) in fields {
+                    bad[key] = value.clone();
+                }
+            } else {
+                bad = changed;
+            }
+            assert!(research(1, || Ok(bad.to_string()), || Ok(at)).is_err());
+        }
+        assert!(research(1, || Err("unavailable".into()), || Ok(at)).is_err());
+        assert!(research(1, || Ok("{".into()), || Ok(at)).is_err());
+        assert!(research(1, || Ok(raw.clone()), || Err("clock".into())).is_err());
     }
 
     #[test]

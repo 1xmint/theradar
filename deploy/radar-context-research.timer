@@ -1,0 +1,12 @@
+# SPDX-License-Identifier: Apache-2.0
+[Unit]
+Description=Observe planned research slots and retained attempt outcomes
+
+[Timer]
+OnBootSec=30s
+OnUnitInactiveSec=15s
+AccuracySec=1s
+Unit=radar-context-research.service
+
+[Install]
+WantedBy=timers.target

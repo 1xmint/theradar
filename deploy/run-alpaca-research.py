@@ -162,6 +162,15 @@ def attempt(directory, prefix, plan, run, environment):
     model_env = {"PATH": "/usr/bin:/bin", "RADAR_MODEL_CODEX": "/usr/local/bin/radar-codex",
                  "RADAR_MODEL_DAILY_USD": "unlimited"}
     try:
+        if plan["experiment"]["strategy_id"] == "snapshot-context-v1":
+            session = run([READER, "alpaca-research-session", "--horizon-ms",
+                           str(plan["experiment"]["horizon_ms"])],
+                          check=True, capture_output=True, text=True, timeout=10, env=market_env)
+            guard = json.loads(session.stdout)
+            if (guard.get("environment") != "paper" or guard.get("execution_authority") is not False
+                    or guard.get("regular_session_eligible") is not True
+                    or guard.get("horizon_ms") != plan["experiment"]["horizon_ms"]):
+                raise ValueError("Research session not eligible")
         run([READER, "alpaca-market-read", "--symbols", plan["symbol"], "--output", str(capture)],
             check=True, capture_output=True, text=True, timeout=20, env=market_env)
         read(capture, 1024 * 1024)
@@ -183,9 +192,15 @@ def attempt(directory, prefix, plan, run, environment):
 
 
 def main():
-    if sys.argv[1:]:
+    global READER
+    directory, config = STORE, CONFIG
+    if sys.argv[1:] == ["--context-campaign"]:
+        READER = "/usr/local/lib/radar-context-research/radar"
+        directory = Path("/var/lib/radar-paper-context")
+        config = Path("/etc/radar/alpaca-context-research.json")
+    elif sys.argv[1:]:
         raise ValueError("Research worker accepts no arguments")
-    print(json.dumps(tick(STORE, CONFIG, subprocess.run,
+    print(json.dumps(tick(directory, config, subprocess.run,
                           lambda: time.time_ns() // 1000000, os.environ), sort_keys=True))
 
 

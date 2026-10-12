@@ -75,6 +75,56 @@ class ResearchTests(unittest.TestCase):
         self.assertEqual(self.tick()["slots"], ["decision", "future", "future"])
         self.assertEqual(len(self.calls), 2)
 
+    def test_context_session_guard_precedes_capture_and_model_and_failure_is_retained(self):
+        self.plan["experiment"]["strategy_id"] = "snapshot-context-v1"
+        self.config.write_text(json.dumps(self.plan))
+        def provider(argv, **kwargs):
+            if argv[1] == "alpaca-research-session":
+                self.calls.append((argv, kwargs))
+                self.assertTrue((self.store / "slot-0000.begin.json").exists())
+                self.assertEqual(argv[-2:], ["--horizon-ms", "60000"])
+                self.assertIn("RADAR_ALPACA_PAPER_SECRET_KEY", kwargs["env"])
+                self.assertEqual(kwargs["timeout"], 10)
+                return types.SimpleNamespace(stdout=json.dumps({"environment":"paper",
+                    "execution_authority":False,"regular_session_eligible":True,"horizon_ms":60000}))
+            return self.provider(argv, **kwargs)
+        self.assertEqual(self.tick(run=provider)["outcome"], "decision")
+        self.assertEqual([call[0][1] for call in self.calls],
+                         ["alpaca-research-session", "alpaca-market-read", "alpaca-paper-propose"])
+        self.assertNotIn("RADAR_ALPACA_PAPER_SECRET_KEY", self.calls[-1][1]["env"])
+        self.assertEqual(self.tick()["slots"], ["decision", "future", "future"])
+
+    def test_context_bad_or_closed_session_never_calls_capture_or_model(self):
+        self.plan["experiment"]["strategy_id"] = "snapshot-context-v1"
+        self.config.write_text(json.dumps(self.plan))
+        for report in ({}, {"environment":"live","execution_authority":False,
+                           "regular_session_eligible":True,"horizon_ms":60000},
+                       {"environment":"paper","execution_authority":True,
+                        "regular_session_eligible":True,"horizon_ms":60000},
+                       {"environment":"paper","execution_authority":False,
+                        "regular_session_eligible":False,"horizon_ms":60000},
+                       {"environment":"paper","execution_authority":False,
+                        "regular_session_eligible":True,"horizon_ms":1}):
+            def provider(argv, **kwargs):
+                self.assertEqual(argv[1], "alpaca-research-session")
+                return types.SimpleNamespace(stdout=json.dumps(report))
+            self.assertEqual(worker.attempt(self.store, "guard", self.plan, provider, {}), "failed")
+            (self.store / "guard.experiment.json").unlink()
+            (self.store / "guard.assumptions.json").unlink()
+
+    def test_context_entry_uses_separate_fixed_paths_and_rejects_arbitrary_arguments(self):
+        with patch.object(worker.sys, "argv", ["worker", "--context-campaign"]), \
+                patch.object(worker, "READER", worker.READER), \
+                patch.object(worker, "tick", return_value={}) as tick, patch("builtins.print"):
+            worker.main()
+            self.assertEqual(worker.READER, "/usr/local/lib/radar-context-research/radar")
+            self.assertEqual(tick.call_args.args[:2],
+                (Path("/var/lib/radar-paper-context"), Path("/etc/radar/alpaca-context-research.json")))
+        with patch.object(worker.sys, "argv", ["worker", "--store", "/tmp/unsafe"]), \
+                patch.object(worker, "tick", side_effect=AssertionError("must not tick")):
+            with self.assertRaises(ValueError):
+                worker.main()
+
     def test_future_and_missed_slots_do_not_call_provider(self):
         self.assertEqual(self.tick(999)["slots"], ["future"] * 3)
         self.assertEqual(self.tick(2000)["outcome"], "missed")
