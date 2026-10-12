@@ -338,7 +338,8 @@ impl BrokerLog {
     /// Records uncertainty before invoking an effect with the stored immutable intent.
     /// Never retries, even if the effect returns an error or the process restarts.
     /// The caller must separately obtain deterministic capital authorization;
-    /// this ordering API is not an execution permission. No production submit caller yet.
+    /// this ordering API is not an execution permission. Actual private caller:
+    /// radar alpaca-paper-submit, whose unknown live inputs currently refuse risk.
     ///
     /// # Errors
     /// Not a first reserved submission, poison, or failure to persist before the effect.

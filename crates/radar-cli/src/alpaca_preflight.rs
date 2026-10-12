@@ -11,7 +11,7 @@ use serde_json::{Value, json};
 const PAPER_API: &str = "https://paper-api.alpaca.markets";
 const SNAPSHOTS: &str = "https://data.alpaca.markets/v2/stocks/snapshots";
 
-fn load<T: DeserializeOwned>(path: &str) -> Result<T, String> {
+pub(super) fn load<T: DeserializeOwned>(path: &str) -> Result<T, String> {
     let mut bytes = Vec::new();
     std::fs::File::open(path)
         .map_err(|_| "private paper input unavailable")?
@@ -24,7 +24,7 @@ fn load<T: DeserializeOwned>(path: &str) -> Result<T, String> {
     serde_json::from_slice(&bytes).map_err(|_| "invalid typed private paper input".into())
 }
 
-fn order(intent: &BrokerIntent) -> Order {
+pub(super) fn order(intent: &BrokerIntent) -> Order {
     Order {
         account_id: intent.account_id.clone(),
         client_order_id: intent.client_order_id.clone(),
@@ -193,7 +193,7 @@ fn eligible(report: &Value, account: &Value, intent: &BrokerIntent) -> Result<()
     Ok(())
 }
 
-fn now_ms() -> Result<u64, String> {
+pub(super) fn now_ms() -> Result<u64, String> {
     u64::try_from(
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -203,14 +203,14 @@ fn now_ms() -> Result<u64, String> {
     .map_err(|_| "host timestamp overflow".into())
 }
 
-fn collect(
+pub(super) fn collect_state(
     log: &mut BrokerLog,
     intent: &BrokerIntent,
     policy: &Policy,
     pages: u16,
     mut read: impl FnMut(&str) -> Result<Option<String>, String>,
     mut clock: impl FnMut() -> Result<u64, String>,
-) -> Result<Value, String> {
+) -> Result<State, String> {
     if !policy.enabled || policy.account_id != intent.account_id {
         return Err("paper handover is closed or account differs".into());
     }
@@ -272,7 +272,7 @@ fn collect(
     let exchange_ms = quote_available
         .checked_sub(number(&quote["age_ns"])?.div_ceil(1_000_000))
         .ok_or("paper quote time underflow")?;
-    let state = State {
+    Ok(State {
         account_id: intent.account_id.clone(),
         now_unix_ms: now,
         oldest_input_unix_ms: started.min(exchange_ms),
@@ -291,23 +291,40 @@ fn collect(
         capacity_nanoshares: None,
         required_fee_microusd: None,
         round_trip_cost_microusd: None,
-    };
+    })
+}
+
+fn report(intent: &BrokerIntent, state: &State, policy: &Policy) -> Value {
     let proposed = order(intent);
-    let refusal = equity::evaluate(&proposed, &state, policy).err();
-    Ok(
-        json!({"version":1,"venue":"alpaca","environment":"paper","intent":intent,
+    let refusal = equity::evaluate(&proposed, state, policy).err();
+    json!({"version":1,"venue":"alpaca","environment":"paper","intent":intent,
         "risk_refusal":refusal,"provider_state_selected":true,"execution_authority":false,
-        "available_cash_microusd":cash.to_string(),"available_nanoshares":shares.to_string(),
-        "committed_microusd":committed.to_string(),"symbol_committed_microusd":symbol_committed.to_string(),
+        "available_cash_microusd":state.available_cash_microusd.map(|v| v.to_string()),
+        "available_nanoshares":state.available_nanoshares.map(|v| v.to_string()),
+        "committed_microusd":state.committed_microusd.map(|v| v.to_string()),
+        "symbol_committed_microusd":state.symbol_committed_microusd.map(|v| v.to_string()),
         "capacity_nanoshares":null,"required_fee_microusd":null,"round_trip_cost_microusd":null,
-        "read_started_unix_ms":started,"available_at_unix_ms":available,"as_of_unix_ms":now}),
-    )
+        "oldest_input_unix_ms":state.oldest_input_unix_ms,
+        "available_at_unix_ms":state.available_at_unix_ms,"as_of_unix_ms":state.now_unix_ms})
+}
+
+#[cfg(test)]
+fn collect(
+    log: &mut BrokerLog,
+    intent: &BrokerIntent,
+    policy: &Policy,
+    pages: u16,
+    read: impl FnMut(&str) -> Result<Option<String>, String>,
+    clock: impl FnMut() -> Result<u64, String>,
+) -> Result<Value, String> {
+    let state = collect_state(log, intent, policy, pages, read, clock)?;
+    Ok(report(intent, &state, policy))
 }
 
 pub(super) fn run(args: &[String]) -> Result<(), String> {
     let values: Vec<_> = args.iter().map(String::as_str).collect();
     let [
-        "alpaca-order-preflight",
+        command @ ("alpaca-order-preflight" | "alpaca-paper-submit"),
         "--journal",
         path,
         "--intent",
@@ -318,7 +335,7 @@ pub(super) fn run(args: &[String]) -> Result<(), String> {
         pages,
     ] = values.as_slice()
     else {
-        return Err("usage: radar alpaca-order-preflight --journal <private-file> --intent <typed-intent> --policy <private-policy> --max-pages <positive-u16>".into());
+        return Err("usage: radar <alpaca-order-preflight|alpaca-paper-submit> --journal <private-file> --intent <typed-intent> --policy <private-policy> --max-pages <positive-u16>".into());
     };
     let intent: BrokerIntent = load(input)?;
     let policy: Policy = load(policy_path)?;
@@ -328,7 +345,7 @@ pub(super) fn run(args: &[String]) -> Result<(), String> {
     let secret =
         super::alpaca_read::credential(std::env::var("RADAR_ALPACA_PAPER_SECRET_KEY").ok())?;
     let agent = super::alpaca_read::agent();
-    let report = collect(
+    let state = collect_state(
         &mut log,
         &intent,
         &policy,
@@ -349,8 +366,35 @@ pub(super) fn run(args: &[String]) -> Result<(), String> {
         },
         now_ms,
     )?;
-    println!("{report}");
+    let output = dispatch(
+        command,
+        &mut log,
+        &intent,
+        &state,
+        || load(policy_path),
+        now_ms,
+        |body| super::alpaca_submit::post(&agent, &key, &secret, body),
+    )?;
+    println!("{output}");
     Ok(())
+}
+
+fn dispatch(
+    command: &str,
+    log: &mut BrokerLog,
+    intent: &BrokerIntent,
+    state: &State,
+    mut policy: impl FnMut() -> Result<Policy, String>,
+    clock: impl FnMut() -> Result<u64, String>,
+    send: impl FnOnce(&str) -> Result<String, String>,
+) -> Result<Value, String> {
+    if command == "alpaca-paper-submit" {
+        super::alpaca_submit::execute(log, intent, state, policy, clock, send)
+    } else if command == "alpaca-order-preflight" {
+        Ok(report(intent, state, &policy()?))
+    } else {
+        Err("unsupported paper command".into())
+    }
 }
 
 #[cfg(test)]
@@ -497,6 +541,63 @@ mod tests {
                 1,
                 |_| panic!("retained ID is not a retry"),
                 || Ok(tick)
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn actual_unknown_provider_state_refuses_submit_before_reserving() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut log = BrokerLog::open(dir.path().join("paper.jsonl"), "paper").unwrap();
+        let seconds = super::super::wallet_read::now().unwrap();
+        let mut tick = seconds * 1_000;
+        let state = collect_state(
+            &mut log,
+            &intent(BrokerSide::Buy),
+            &policy(),
+            1,
+            |url| Ok(Some(fixture(url, seconds).to_string())),
+            || {
+                tick += 10;
+                Ok(tick)
+            },
+        )
+        .unwrap();
+        assert!(
+            dispatch(
+                "alpaca-paper-submit",
+                &mut log,
+                &intent(BrokerSide::Buy),
+                &state,
+                || Ok(policy()),
+                || Ok(tick),
+                |_| panic!("actual unknown evidence must not submit"),
+            )
+            .is_err()
+        );
+        assert!(log.entries().unwrap().next().is_none());
+        let report = dispatch(
+            "alpaca-order-preflight",
+            &mut log,
+            &intent(BrokerSide::Buy),
+            &state,
+            || Ok(policy()),
+            || panic!("preflight never submits"),
+            |_| panic!("preflight never submits"),
+        )
+        .unwrap();
+        assert_eq!(report["risk_refusal"], "liquidity");
+        assert_eq!(report["execution_authority"], false);
+        assert!(
+            dispatch(
+                "unknown",
+                &mut log,
+                &intent(BrokerSide::Buy),
+                &state,
+                || panic!("unknown command"),
+                || panic!("unknown command"),
+                |_| panic!("unknown command")
             )
             .is_err()
         );
