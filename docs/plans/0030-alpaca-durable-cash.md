@@ -25,14 +25,21 @@ this turn connects provider reads to durable state. Tests/jobs run on GitHub.
   First CI 38204170897 at b972e76 found the new BrokerCash stage missing from
   the audit label match. Build/test/lint and shard 0's unmutated baseline refused
   compilation; add the explicit audit label and rerun the full GitHub checks.
+  CI 38204357039 at 486b762 passed 2782 tests, build/MSRV/web/site/format/dependency/
+  license checks and every mutation shard: 45 caught, 14 compiler-unviable,
+  zero missed/timeouts. All four artifacts and compiler reasons inspected
+  (absent Default, unused arguments, dead code). Lint found three missing test
+  statement semicolons; correct those and raise the observed test floor to 2782.
+  Full verification of that repair remains pending; no mutation exclusions.
 - [ ] Add durable economic claim transitions and pure equity risk, then wire the
   separate executor and supervisor/site handover for autonomous paper operation.
   Forward paper evidence and eligible explicit live setup gate real money later.
 
 ## Handback
 
-No actual broker account, credentials, order, deployment or activation. Pending
-GitHub verification; inspect exact failures/mutations before claiming success.
+No actual broker account, credentials, order, deployment or activation. Tests and
+mutations passed at 486b762; the small lint/floor repair needs full GitHub checks.
+Inspect exact failures/mutations before claiming complete verification.
 This is a durable observation baseline, not complete settlement, profit or
 available capital. All claims remain held and all authority flags remain false.
 The generic storage accepts caller-normalized facts; the private caller validates

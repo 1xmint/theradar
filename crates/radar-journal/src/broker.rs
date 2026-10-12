@@ -445,12 +445,12 @@ mod tests {
                         event.broker = Some(BrokerEntry {
                             intent: intent(),
                             state: BrokerState::Reserved,
-                        })
+                        });
                     }
                     4 => event.correlation.receipt = Some("extra".into()),
                     5 => event.correlation.broker_cash = Some(cash(1, 2)),
                     6 => {
-                        event.correlation.broker_cash.as_mut().unwrap().account_id = "other".into()
+                        event.correlation.broker_cash.as_mut().unwrap().account_id = "other".into();
                     }
                     7 => event.correlation.broker_cash.as_mut().unwrap().started = 1,
                     8 => event.correlation.broker_cash.as_mut().unwrap().completed = 4,
@@ -467,7 +467,7 @@ mod tests {
                             },
                             reserved: None,
                             state: crate::OperationState::Proposed,
-                        })
+                        });
                     }
                 }
             });
