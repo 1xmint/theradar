@@ -6,6 +6,8 @@
 Branch: feat/alpaca-quote-provenance, based on 6fda92e. Previous turn made
 verified progress: bounded recorder passed all 14 GitHub jobs at c99bb62 and
 was uploaded with matching hashes. Administrator installation remains pending.
+Parent documentation run 38269361587 subsequently passed all 14 jobs, inspected
+with gh run view --json jobs before this branch's checks.
 
 ## Checklist
 
@@ -44,3 +46,12 @@ from simulator fills. Live eligibility and meaningful results remain separate.
 
 Next: resolve size normalization and paper cost model, protected execution
 supervisor/cancellation, forward evaluation, and website handover controls.
+
+Initial run 38269906722 at 58d7409 found one fmt-only fixture line-wrap issue;
+applied the exact GitHub formatter diff, without running a workstation job.
+All four mutation shards completed: nine mutants, seven caught, two unviable,
+no misses/timeouts. Inspected shard 0 artifact outcomes and both compiler logs:
+collect_state's default return fails because State has no Default implementation;
+validate's default return fails denied dead-code warnings after removing its
+parser callers. These are compiler refusals, not test kills. Remaining checks
+must finish before the correction push; final all-job verification is pending.

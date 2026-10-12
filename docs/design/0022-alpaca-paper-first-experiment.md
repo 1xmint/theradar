@@ -1,11 +1,13 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # 0022 — Alpaca paper first, measured profit as the objective
 
-**Status:** owner-approved direction; account/market/quote foundation verified on GitHub; reconciliation increment in progress.
+**Status:** owner-approved direction; isolated account and market reads owner-verified; execution and evaluation incomplete.
 
 On 2026-10-11 Josh accepted the recommendation to start with Alpaca paper
 stocks/ETFs. The objective is durable profit after costs when learned intelligence
-is applied, not loyalty to a venue. The owner needs to create the paper account.
+is applied, not loyalty to a venue. The owner created the paper account and
+provisioned its keys privately; isolated account and IEX reads succeeded in
+owner-supplied output (plans 0036 and 0037).
 
 ## Choice and alternatives
 
