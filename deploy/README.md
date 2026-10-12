@@ -1324,3 +1324,15 @@ capture/model deadlines plus the full forward horizon. Failed guards retain a
 failed slot and never call the model. These units are source only until verified
 provisioning; the earlier context release lacks the new guard command. See
 [plan 0049](../docs/plans/0049-alpaca-regular-campaign.md).
+
+`setup-alpaca-context.py` provisions these separate targets from the verified
+`/tmp/radar-context-research.new` and exact-member
+`/tmp/radar-context-research-bundle.tar`, taking the bundle SHA-256 as its sole
+argument. The bundle contains the worker, context service/timer and
+`alpaca-context-research.json.example`. Replace the example's zero start with a
+deliberately selected future epoch-millisecond schedule before bundling: setup
+requires more than two minutes and no more than seven days ahead. It pins twelve
+ten-minute slots/horizons and snapshot-context-v1. Never run the placeholder
+example unchanged. Existing targets refuse; no earlier campaign is modified.
+Stage and run only after GitHub verification. See
+[plan 0050](../docs/plans/0050-alpaca-context-provisioning.md).
