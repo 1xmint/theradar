@@ -255,17 +255,17 @@ mod tests {
     }
 
     fn account() -> String {
-        json!({"id":"paper-id","cash":"50","private":"omit"}).to_string()
+        json!({"id":"paper-id","status":"ACTIVE","cash":"50","private":"omit"}).to_string()
     }
 
-    fn response(path: &str) -> Option<String> {
-        Some(if path == "/v2/account" {
+    fn response(path: &str) -> String {
+        if path == "/v2/account" {
             account()
         } else if path.starts_with("/v2/orders:") {
             order().to_string()
         } else {
             events().to_string()
-        })
+        }
     }
 
     #[test]
@@ -313,6 +313,8 @@ mod tests {
         assert_eq!(result.count, 1);
         assert_eq!(result.filled_nanoshares, 1_000_000_000);
         assert_eq!(result.gross_floor_microusd, 99_990_000);
+        partial["status"] = json!("filled");
+        assert!(matched(&intent(), partial.clone(), json!([events()[1]])).is_err());
         for status in [
             "new",
             "accepted",
@@ -492,7 +494,7 @@ mod tests {
             let mut paths = Vec::new();
             let report = collect(&log, "paper-id", &intent.client_order_id, 1, |path| {
                 paths.push(path.to_owned());
-                let mut value: Value = serde_json::from_str(&response(path).unwrap()).unwrap();
+                let mut value: Value = serde_json::from_str(&response(path)).unwrap();
                 if path.starts_with("/v2/orders:") {
                     value["client_order_id"] = json!(intent.client_order_id);
                     value["side"] = json!(if side == BrokerSide::Buy {
@@ -578,7 +580,7 @@ mod tests {
                             2 => Ok(Some("null".into())),
                             _ => {
                                 let mut value: Value =
-                                    serde_json::from_str(&response(path).unwrap()).unwrap();
+                                    serde_json::from_str(&response(path)).unwrap();
                                 if path == "/v2/account" {
                                     value["cash"] = json!("49");
                                 } else if path.starts_with("/v2/orders:") {
@@ -590,8 +592,9 @@ mod tests {
                             }
                         };
                     }
-                    Ok(response(path))
+                    Ok(Some(response(path)))
                 });
+                assert!(index > stage, "failure must reach the injected read stage");
                 assert!(result.is_err(), "stage={stage}, failure={failure}");
             }
         }

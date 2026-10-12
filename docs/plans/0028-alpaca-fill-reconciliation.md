@@ -25,6 +25,10 @@ All verification runs on GitHub; no local jobs.
 - [x] Derive gross fill amounts with exact arithmetic and conservative USD bounds.
 - [ ] Verify the actual caller and arithmetic on GitHub, including mutation jobs.
   Six unit tests and one actual-command test raise the floor from 2347 to 2354.
+  First run 38199605432 at 73f450a exposed a missing required account status in
+  the fixture and unnecessary Option wrapping in its response helper. The
+  mutation baselines failed the same fixture; no mutants ran. Repair supplies
+  status, simplifies the helper and adds a filled-status/partial-history case.
 - [ ] Reconcile fees/nontrade cash and baseline account cash without attributing
   deposits/withdrawals to strategy returns. Late fees/corrections remain possible.
 - [ ] Persist verified economic transitions before claim release, with replay and
@@ -38,7 +42,8 @@ No orders, credentials, deployment or activation. The actual command now connect
 the inputs and preserves full claims. Tests cover both sides, partial/full/empty
 executions, interval order, rounding, gross range, malformed/missing fields,
 unsupported status, all nine read stages, visible account/order changes and
-private configuration refusals. These tests are written, not yet verified.
+private configuration refusals. Initial GitHub verification found the fixture
+and lint failures above; repair verification remains pending.
 The next step is GitHub verification and repair, then fee/cash/baseline economic
 accounting and durable claim transitions. Gross consistency and exhausted pages
 do not prove final history or fees. No release API exists. The owner still needs
