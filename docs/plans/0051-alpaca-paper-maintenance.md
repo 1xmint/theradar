@@ -68,3 +68,16 @@ The entire run then completed; all remaining ordinary jobs passed. All four
 downloaded mutation artifacts and baseline logs confirmed the same fixture
 failure before testing mutants, so this run supplies no mutation-coverage claim.
 Repairs are ready for a fresh GitHub run; keep this branch stable while it runs.
+
+Repair source 15a5546, GitHub 38314374131: all four mutation artifacts inspected;
+three caught, five compiler-unviable, no survivors/timeouts. Caught the stop
+conjunction inversion and both actual CLI match-arm deletions. Unviable logs
+showed unused arguments/imports or dead code from removed function bodies;
+these are not counted as test kills. Added four exact recovery-ordering
+reapplications (skip refresh, terminal inversion, pending cancellation inversion,
+first-to-last selection) to the GitHub private-setup job. Each must fail a
+four-test execution and restore source; no compiler failure qualifies.
+Lint additionally requires explicit BTreeMap::default() in the fixture helper;
+that repair is prepared. The run then completed: tests and all remaining jobs
+passed; only this lint diagnostic failed. All prior exact regressions passed.
+Push the lint repair and four additional exact checks after reviewing this diff.

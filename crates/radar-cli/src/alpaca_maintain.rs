@@ -106,7 +106,7 @@ mod tests {
             started: at,
             completed: at,
             observation: json!({}),
-            orders: Some(Default::default()),
+            orders: Some(std::collections::BTreeMap::default()),
         }
     }
 
