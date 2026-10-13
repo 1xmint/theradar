@@ -4,6 +4,7 @@
 import { lazy, Suspense, useEffect, useState } from "react";
 import { SubscriptionLink } from "./Agent";
 import { ApiError, connections } from "./api";
+import { AlpacaPaper } from "./AlpacaPaper";
 
 const PrivyWallet = lazy(() => import("./PrivyWallet"));
 
@@ -47,9 +48,10 @@ export function PrivateSetup() {
         <a className="inline-block rounded border border-[var(--color-line)] px-3 py-2 text-sm"
           href="https://app.alpaca.markets/" target="_blank" rel="noopener noreferrer">Open Alpaca dashboard</a>
         <p className="text-sm text-[var(--color-dim)]">
-          Broker connection: not available on this page yet. Keep paper API keys private;
+          Keep paper API keys private;
           do not paste them into research chat. Your Solana wallet settings do not apply to Alpaca.
         </p>
+        <AlpacaPaper />
         <p className="text-sm text-[var(--color-dim)]">
           Paper results help test the system, but simulated fills omit some live costs and execution effects.
           Profits in paper trading do not establish live profitability.
@@ -63,10 +65,9 @@ export function PrivateSetup() {
       <div className="rounded-md border border-[var(--color-line)] p-4">
         <h3 className="font-medium">Autonomous execution: not enabled</h3>
         <p className="mt-2 text-sm text-[var(--color-dim)]">
-          Alpaca paper execution still needs a verified broker connection, complete account and pending-order
-          checks, risk controls, and recovery after interruptions. Its controls will offer manual values or
-          Agent decides, with adaptive risk and an optional daily loss stop.
-          The Solana settings above remain separate drafts; neither venue is enabled by this page.
+          The Alpaca panel manages paper permission. The autonomous supervisor and its full entry/exit
+          lifecycle still need installation and verification before unattended trading can start.
+          The Solana settings above remain separate drafts. Granting paper permission does not prove the agent is running.
         </p>
       </div>
     </section>

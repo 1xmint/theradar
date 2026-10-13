@@ -211,6 +211,7 @@ async fn a_valid_customer_token_never_opens_an_operator_route() {
         "/automation/wallet",
         "/automation/balance",
         "/automation/limits",
+        "/v1/paper/status",
     ] {
         let status = status_with(router(keys.clone()), path, &token).await;
         assert_ne!(

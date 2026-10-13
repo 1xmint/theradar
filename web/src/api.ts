@@ -80,10 +80,10 @@ export interface Answered {
   uncited: boolean;
 }
 
-async function send<T>(path: string, body?: unknown): Promise<T> {
+async function send<T>(path: string, body?: unknown, extraHeaders: Record<string, string> = {}): Promise<T> {
   const response = await fetch(path, {
     method: "POST",
-    headers: { "content-type": "application/json", accept: "application/json" },
+    headers: { "content-type": "application/json", accept: "application/json", ...extraHeaders },
     // `null` rather than `undefined`: strict optional properties treat an
     // explicitly-undefined field as a type error, and `null` is what fetch
     // documents for "no body".
@@ -115,6 +115,34 @@ export const agent = {
 
 export const connections = {
   privy: (signal?: AbortSignal) => get<{ privy_app_id: string }>("/v1/customer/config", signal),
+};
+
+export type PaperLimit = "capital_usd" | "max_trade_usd" | "daily_loss_usd";
+export type PaperPreferences = Record<PaperLimit, string> & {
+  daily_loss_enabled: boolean;
+  agent_decides: Record<PaperLimit, boolean>;
+};
+export interface PaperStatus {
+  version: "alpaca-paper-control-v1";
+  environment: "paper";
+  account_id: string;
+  generation: number;
+  preferences: PaperPreferences | null;
+  handover_enabled: boolean;
+  effective_policy: { enabled: boolean; max_capital_microusd: number; max_order_microusd: number; max_daily_loss_microusd: number | null } | null;
+  account: { id: string; cash: string; equity: string; currency: string; status: string };
+  positions: { symbol: string; qty: string; side: string; market_value: string | null }[] | null;
+  market_clock: { timestamp: string; is_open: boolean; next_open: string; next_close: string } | null;
+  execution_authority: false;
+  agent_lifecycle_verified: false;
+  profit_measured: false;
+}
+
+export const paper = {
+  status: (signal?: AbortSignal) => get<PaperStatus>("/v1/paper/status", signal),
+  configure: (generation: number, preferences: PaperPreferences, enabled: boolean) =>
+    send("/v1/paper/preferences", { generation, preferences, enabled }, { "x-radar-paper-control": "1" }),
+  pause: (generation: number) => send("/v1/paper/pause", { generation }, { "x-radar-paper-control": "1" }),
 };
 
 /**

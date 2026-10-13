@@ -89,6 +89,7 @@ private-setup:
     setpriv --no-new-privs python3 deploy/prove_alpaca_maintenance_regressions.py "{{cargo}}"
     setpriv --no-new-privs python3 deploy/prove_alpaca_opening_regressions.py "{{cargo}}"
     setpriv --no-new-privs python3 deploy/prove_alpaca_paper_model_regressions.py "{{cargo}}"
+    setpriv --no-new-privs python3 deploy/prove_paper_site_regressions.py "{{cargo}}"
     setpriv --no-new-privs python3 deploy/prove_alpaca_session_regressions.py "{{cargo}}"
     setpriv --no-new-privs python3 deploy/prove_alpaca_context_regressions.py "{{cargo}}"
     systemd-analyze verify deploy/radar-paper-market.service deploy/radar-paper-market.timer
