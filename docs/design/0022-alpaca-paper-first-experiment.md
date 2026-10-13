@@ -398,10 +398,12 @@ unattended supervisor yet. See
 [private paper control](../plans/0058-alpaca-private-paper-control.md) for its
 verification status and remaining integration work.
 
-The website caller now has source for an Alpaca account/preferences/handover/pause
+The website caller now has a verified Alpaca account/preferences/handover/pause
 panel and private HTTP-to-socket bridge. The real guard carries verified operator
 identity; paper handlers require it even when Access is off and derive the actor
 themselves. Saving disables permission, enabling is explicit, and unknown writes
 require status reload. Selected simulated balances are not profit or proof the
-supervisor is running. This source is not deployed; see
+supervisor is running. Its matching website artifact is deployed at 4116592;
+the private controller and supervisor remain uninstalled. Authenticated browser
+review awaits a fresh Cloudflare sign-in. See
 [website handover](../plans/0059-alpaca-paper-website-handover.md) for verification.

@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # 0059 — Alpaca paper website handover
 
-**Status:** source implemented; GitHub verification pending; not deployed.
+**Status:** source verified; website deployed; private controller/supervisor remain uninstalled.
 
 Branch feat/alpaca-paper-site, parent 8870441. Parent CI 38461222557 completed
 all fourteen checks successfully before this child push. Previous goal turn
@@ -91,8 +91,9 @@ pending. Initial source passed tests and all 365 frontend tests; lint/format and
 the genuine coverage gaps are corrected locally for the next full run.
 
 All tests/build/lint/format/mutations run on GitHub, never the workstation.
-Source is not runtime evidence. No controller, root configuration, supervisor or
-website artifact is installed by this source change; no orders are enabled.
+Source is not runtime evidence. The website artifact was subsequently deployed
+with the evidence below. No private controller, root configuration or supervisor
+is installed; no autonomous paper order authority is active.
 
 Remaining: isolated supervisor inference access, model proposals and entry/exit
 lifecycle, reviewed installation and end-to-end paper evidence. Richer historical
@@ -100,7 +101,7 @@ features, forward/baseline comparisons, adaptive learning and complete economic
 fill/cost accounting still remain for the profit goal, followed by eligible live
 setup and explicit live permission. No positive expectancy has been established.
 
-## Current handback
+## Earlier verification
 
 Correction 441292f212dce10d43c2747b68bcaeab5461b40d is pushed in attached draft
 PR 420. GitHub run 38466027799 completed with failure; no job was canceled.
@@ -143,3 +144,56 @@ retire those completed campaign timers while preserving their files, so those
 legacy credentialed processes do not share the website UID. The private recorder
 and existing broker observation history must remain preserved. No service was
 changed during this inspection.
+
+## Current handback
+
+Source 4116592006059769175b0cfda839439a001b03ab passed all fourteen jobs in
+GitHub CI 38468036410. Tests job 115539707338 reports 2862 Rust tests, 109 Python
+tests and all twenty exact backend reapplications caught. Web job 115539707196
+reports 365 frontend tests and all nine panel reapplications caught. All four
+generic mutation artifacts were downloaded and every compiler-unviable reason
+inspected: 64 total, 43 caught, 21 compiler-unviable, no survivors/timeouts. No
+compiler refusal counts as executed coverage. No check was skipped or canceled.
+
+Matching release 38468143821 succeeded at the same 4116592 source. Downloaded
+BUILD-INFO and independent local hashes agree:
+
+- radar-serve: 8c5b14087d97df803c1dd8312207be15df7e2f3d8c43cd585259707ef364e7c3
+- radar: 45bb54452d63fd198a3e61c24b690cb3aac2dd266a655d0be74cc84fa33386cf
+
+The retained artifact directory is workstation TEMP/radar-paper-site-release-38468143821.
+Only radar-serve was uploaded to the fixed /tmp/radar-serve.new staging path;
+its old staged bytes matched the previously installed website, rather than an
+unknown pending artifact. The remote new hash matched before sudo radar-deploy.
+That fixed command returned active. Installed /usr/local/bin/radar-serve hashes
+to the expected 8c5b1408 value, and localhost:8402/health reports the exact
+4116592006059769175b0cfda839439a001b03ab build. The first post-deploy curl command
+had a PowerShell quoting error; the corrected read completed successfully.
+
+The service remains active in /system.slice/radar-serve.service, guardian UID/
+group, MemoryMax 805306368, ProtectHome read-only, ProtectSystem strict and
+NoNewPrivileges yes. An unauthenticated paper-status request returned 403.
+The existing health trading=true flag describes the manual wallet feature;
+it is not autonomous Alpaca authority. Direct systemd inspection reports
+LoadState not-found and ActiveState inactive for the private controller socket,
+controller service and supervisor service. No new model configuration was
+installed; existing broker readers were not replaced.
+
+Using the computer-use skill and the dedicated browser API, a new in-app Radar
+setup tab reached Cloudflare Access, then its normal sign-in screen. The browser
+needs fresh authentication. The tab is retained for handoff and the owner was
+asked to sign in there; no password, session credential or API key was retrieved
+or entered. Authenticated
+rendering is unverified, not a successful UI check. This does not block backend
+supervisor work. Do not bypass the login or infer permission from page content.
+
+Post-deploy paper-admin inspect showed recent completed observation ticks still
+successful, zero working/unresolved/terminal orders and new_order_authority false.
+Journal metadata was 525021 bytes; lock/genesis markers stayed 82/110 bytes.
+No journal contents, root environment contents or credentials were read.
+
+This turn completed verification and website deployment, not the full goal.
+Next implement isolated supervisor inference/data access, sizing and entry/exit
+proposals, then the reviewed private installation and end-to-end paper check.
+Adaptive learning, economic accounting, forward comparisons and eligible live
+activation remain as listed above. The full autonomous-trading objective stays active.
