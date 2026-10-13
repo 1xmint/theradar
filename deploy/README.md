@@ -1416,3 +1416,9 @@ submission checks remain. Changed/removed assumptions refuse at the policy reloa
 boundaries. Reports label the full model as simulation, with live capacity,
 live costs and measured profit false. No model file, new service or handover has
 been installed. See [plan 0057](../docs/plans/0057-alpaca-paper-stress-model.md).
+
+Source a66793a passed all fourteen checks in CI 38445546289 and matching Linux
+release 38445537967. Its reader SHA256 is
+0c421ea6475f400cda75126214725f718ed37cede13fe68d72c5f663016494f9;
+downloaded BUILD-INFO and an independent local hash agree. This binary remains
+local while isolated broker control, effective handover and supervision are built.

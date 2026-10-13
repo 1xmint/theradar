@@ -77,10 +77,11 @@ source/release 1819896 was applied once; direct VPS checks confirm resumed
 ordinary observation with unchanged simulated cash and empty claims. See
 [opening reconciliation](docs/plans/0056-alpaca-opening-cash-reconciliation.md).
 
-An optional private paper stress model is being implemented for the Alpaca
+An optional private paper stress model has verified source for the Alpaca
 preflight/submission caller. It declares finite scenario size, fee and slippage
 assumptions separately from live execution evidence, and preserves default
-unknown-input refusals. It has not enabled trading or site handover. See
+unknown-input refusals. Source CI and matching release passed at a66793a; it has
+not been installed or enabled trading/site handover. See
 [paper model work](docs/plans/0057-alpaca-paper-stress-model.md).
 
 Use protected storage in an existing durably provisioned directory. This does
