@@ -82,7 +82,10 @@ fn maintenance_refuses_existing_empty_or_reservation_only_history_before_credent
             assert!(!output.status.success());
             assert_eq!(output.stdout, Vec::<u8>::new());
             let error = String::from_utf8(output.stderr).unwrap();
-            assert!(error.contains("explicit initialization required"), "{error}");
+            assert!(
+                error.contains("explicit initialization required"),
+                "{error}"
+            );
             assert!(!error.contains("private-secret-sentinel"));
             assert_eq!(std::fs::read(&journal).unwrap(), before);
         }

@@ -190,7 +190,10 @@ mod tests {
                     true,
                     |_| {
                         reads += 1;
-                        assert!(!missing, "missing history must refuse before provider reads");
+                        assert!(
+                            !missing,
+                            "missing history must refuse before provider reads"
+                        );
                         Err("unknown observation".into())
                     },
                     |_, _| panic!("unverified checkpoint must not cancel")
