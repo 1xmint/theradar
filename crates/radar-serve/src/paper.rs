@@ -61,12 +61,10 @@ impl IntoResponse for Fault {
 fn authenticated(proof: Option<Extension<Operator>>) -> Result<crate::access::Identity, Fault> {
     proof
         .map(|Extension(Operator(identity))| identity)
-        .ok_or_else(|| {
-            Fault(
-                StatusCode::FORBIDDEN,
-                "Verified Cloudflare operator login required for paper controls.",
-            )
-        })
+        .ok_or(Fault(
+            StatusCode::FORBIDDEN,
+            "Verified Cloudflare operator login required for paper controls.",
+        ))
 }
 
 fn browser_write(headers: &HeaderMap) -> Result<(), Fault> {
@@ -875,7 +873,12 @@ mod tests {
                 let proposal = json!({"padding":"x".repeat(length - body_size)});
                 let accepted = length == 65536;
                 assert_eq!(
-                    exchange(&proposal, b"{\"result\":{\"ok\":true}}\n".to_vec(), accepted).is_ok(),
+                    exchange(
+                        &proposal,
+                        b"{\"result\":{\"ok\":true}}\n".to_vec(),
+                        accepted
+                    )
+                    .is_ok(),
                     accepted
                 );
             }

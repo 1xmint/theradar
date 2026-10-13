@@ -99,3 +99,21 @@ lifecycle, reviewed installation and end-to-end paper evidence. Richer historica
 features, forward/baseline comparisons, adaptive learning and complete economic
 fill/cost accounting still remain for the profit goal, followed by eligible live
 setup and explicit live permission. No positive expectancy has been established.
+
+## Current handback
+
+Correction 441292f212dce10d43c2747b68bcaeab5461b40d is pushed in attached draft
+PR 420. GitHub run 38466027799 is confirmed live; do not restart/cancel it or
+push over its remaining tests and mutation shards. Its lint job 115532922246
+requires ok_or for the now-small static Fault, and formatting job 115532922623
+reports one final assertion-wrapping hunk. Those exact corrections are retained
+locally, unpushed while this run is live. Tests job 115532922447 and all four
+mutation jobs were still in progress at the latest check; read their terminal
+results and artifacts before pushing the local correction. Frontend job
+115532921871 includes the newly required nine panel regressions; it also needs
+its actual result inspected. No local tests, builds, formatters or mutations ran.
+
+This goal turn made source and executed verification progress. The website
+caller is implemented, not yet fully verified or deployed. Continue with the
+remaining GitHub evidence, then supervisor integration and the reviewed private
+installation. Autonomous trading remains the full active objective.
