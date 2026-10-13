@@ -114,6 +114,7 @@ class SupervisorTests(unittest.TestCase):
                     elif change == "expired":
                         case.instance.clock = lambda:NOW + 120001
                         case.current["observed_at_unix_ms"] = NOW + 120001
+                        for quote in case.current["quotes"].values(): quote["as_of_unix_ms"] = NOW + 120001
                     else: case.current["orders"]["working_before_cancellation" if change == "working" else change] = ["radar_old"]
                 case.during_reason = alter
                 with self.assertRaises(ValueError): case.instance.tick()

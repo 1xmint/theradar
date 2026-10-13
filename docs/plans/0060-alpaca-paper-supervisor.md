@@ -72,3 +72,28 @@ profit evidence. No credentials or journal contents were read.
 No local tests, builds, lint, format or mutations ran. Current source still needs
 GitHub verification and the reviewed private installer. Full autonomous trading
 remains the active objective; this turn continues the actual paper execution loop.
+
+## First GitHub verification
+
+Source c7d4c27, draft PR 421, CI 38475644601 completed with the tests job failing
+at exact supervisor regression 6 (decision expiry). Normal Python suites passed;
+the original seventeen controller reapplications and first five supervisor cases
+were caught. Removing the decision-age check still passed because the fixture
+advanced the observation clock but left its quote watermark behind; intent
+validation rejected that separate mismatch. The fixture now advances both fresh
+quote watermarks as well, isolating the aged original decision. This is a test
+correction, not permission to weaken the expiry rule. Remaining new cases still
+need execution. A source review also changed the model-integrity fixture to
+valid JSON with a different fee, so parsing cannot mask a missing digest check.
+All other thirteen jobs completed successfully, inspected individually before
+the next push. Python discovery ran 127 tests; the new exact suite ran 37.
+
+Read-only installation inspection found the existing root Codex bridge hash
+4a6eba67dece415085dd71e7eab248eb22d8b56d21fe423b6a606bb1ec4cfcd8,
+its regular root-owned 0755 client wrapper hash
+37b37f06839bbb688df9813634a9814102a2f87e72a398046c162cd9284de31a,
+and old observation reader hash
+3f21fc1ae3b54b2333a5b809eda916c296be0948d69dba1f9da618adec9733d2.
+The research/context timers are active but their services inactive. The isolated
+model user exists; supervisor user and dedicated IPC group do not. No service,
+key, private directory, wrapper or existing reader was changed by these reads.

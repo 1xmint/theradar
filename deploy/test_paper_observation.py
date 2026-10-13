@@ -93,7 +93,9 @@ class ObservationTests(unittest.TestCase):
                 case.report[field] = wrong
                 with self.assertRaises(ValueError): case.instance.dispatch(1200, {"action":"observe"})
                 case.report[field] = before
-            control.MODEL.write_bytes(b"changed")
+            changed = control.decode(control.MODEL.read_bytes())
+            changed["fee_per_side_microusd"] += 1
+            control.MODEL.write_bytes(control.encoded(changed))
             with self.assertRaises(ValueError): case.instance.dispatch(1200, {"action":"observe"})
 
     def test_quote_failure_cleans_only_own_capture_and_policy_change_during_read_refuses(self):
