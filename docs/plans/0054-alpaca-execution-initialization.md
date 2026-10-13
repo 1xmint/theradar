@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # 0054 — Deliberate paper initialization and observation provisioning
 
-**Status:** source prepared; GitHub verification pending; not installed.
+**Status:** GitHub verified at 36ec9f2, staged and hashed; owner sudo setup pending. Not installed.
 
 Branch feat/alpaca-execution-initialization, base 37b56014. Parent CI
 38346644746 passed all fourteen jobs, 2842 Rust/66 Python tests and seven
@@ -14,8 +14,9 @@ Parent proof is recorded here without changing its verified branch head.
 - [x] Separate one-time initialization from recurring maintenance.
 - [x] Preserve a durable no-retry fence before any checkpoint attempt.
 - [x] Prepare pinned, exclusive fresh-install setup and shared private units.
-- [ ] Inspect GitHub tests/build/lint, executed mutation checks and unit syntax.
-- [ ] Package and independently verify exact reviewed installation bytes.
+- [x] Inspect GitHub 38349170488 at 36ec9f2: all fourteen jobs passed;
+  tests, executed mutation checks and unit syntax inspected.
+- [x] Package exact git show source bytes; independent local/VPS hashes match.
 - [ ] Owner sudo initialization/probe/timer installation; inspect actual results.
 
 The caller is deploy/setup-alpaca-execution.py. It reads a hash-bound exact
@@ -65,16 +66,43 @@ remains retained. This is scheduling proof, not outcomes or execution authority.
 
 ## Handback
 
-Prepared deliberate initialization and observation provisioning. Verification,
-packaging and actual owner sudo setup remain pending. No paper orders, live
-trades, website deployment or service changes occurred from this implementation.
-The next concrete owner command must be staged and verified before asking for
-their private sudo entry. Keep parent heads stable while child checks run.
+Implementation 36ec9f2ecc591e97f1a19e3be647075396b724c7 passed all fourteen
+GitHub jobs at 38349170488. The tests job measured 2842 Rust/80 Python tests,
+caught all 24 new initialization/setup mutations, all eleven worker mutations,
+seven maintenance reapplications and prior regression checks. Four unit pairs
+and the separate initializer passed systemd-analyze verify. All four Rust shard
+logs explicitly report no changed Rust files; no mutation artifacts or Rust
+test-kill claims are inferred from those skipped workloads. No local jobs ran.
+
+Packaged six exact committed members with only the reviewed account UUID
+substitution in the observation example. Independent local/VPS hashes match:
+
+- /tmp/radar-alpaca-execution-setup.py:
+  11100ede3ef5ba7f046fdb3fb6829ad4c4aa0e50983c7de6b6a6cca874ae6d4b
+- /tmp/radar-paper-execution-bundle.tar:
+  1b1370d29b07b87cc999195319517af7f5304d447ed96803dc305d8d35db45c1
+- /tmp/radar-paper-execution.new:
+  3f21fc1ae3b54b2333a5b809eda916c296be0948d69dba1f9da618adec9733d2
+
+Parent reader BUILD-INFO matches 37b56014 and its independently calculated hash.
+Before staging, both new services reported LoadState=not-found; protected target
+ancestors were root-owned 0755. Owner was asked to run the verified staged setup
+with the bundle hash in their existing terminal because sudo requires their
+private password. Await actual output and inspect sanitized initialization and
+maintenance logs/timer/hashes before claiming activation. Do not retry failures
+or infer installation from staging. Draft PR 415 is attached, stacked on PR 414.
+Later documentation CI is separate from this implementation proof. No paper
+orders, live trades, website deployment or service changes occurred here.
 
 Remaining full-goal work: execution capacity/cost semantics currently refuse
 all submissions, the supervisor still needs proposal-to-risk-to-submit and
 exit/revocation integration, and the site needs effective Alpaca balance and
 manual/agent handover controls. Learning/evaluation must measure held-out and
 forward outcomes after costs; the scheduled context experiment is not a learned
-edge. Eligible real-money setup remains separate. Recovery observation alone
-does not complete fully autonomous trading.
+edge. The next execution step must define a paper model explicitly rather than
+invent live liquidity/fees: [Alpaca's simulation specification](https://docs.alpaca.markets/us/docs/paper-trading)
+says paper fills ignore displayed NBBO quantity and omit regulatory fees, latency
+slippage and market impact. Paper fills cannot verify those live inputs. Keep
+model assumptions visible and separate from measured evidence. Eligible real-money
+setup remains separate. Recovery observation alone does not complete fully
+autonomous trading.
