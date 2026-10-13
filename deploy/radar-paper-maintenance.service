@@ -7,6 +7,8 @@ Wants=network-online.target
 [Service]
 Type=oneshot
 DynamicUser=yes
+User=radar-paper-execution
+UMask=0077
 WorkingDirectory=/
 ExecStart=/usr/bin/python3 /usr/local/lib/radar-paper-execution/maintain-alpaca-paper.py
 EnvironmentFile=/etc/radar/alpaca-paper.env

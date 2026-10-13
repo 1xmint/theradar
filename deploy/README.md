@@ -1321,8 +1321,8 @@ and state `/var/lib/radar-paper-context`. It preserves the earlier installation
 and history. For `snapshot-context-v1` the worker first runs the read-only
 `alpaca-research-session` clock guard; the regular session must have room for
 capture/model deadlines plus the full forward horizon. Failed guards retain a
-failed slot and never call the model. These units are source only until verified
-provisioning; the earlier context release lacks the new guard command. See
+failed slot and never call the model. The guarded contextual installation and
+future frozen schedule were independently inspected on October 13; see
 [plan 0049](../docs/plans/0049-alpaca-regular-campaign.md).
 
 `setup-alpaca-context.py` provisions these separate targets from the verified
@@ -1336,3 +1336,31 @@ ten-minute slots/horizons and snapshot-context-v1. Never run the placeholder
 example unchanged. Existing targets refuse; no earlier campaign is modified.
 Stage and run only after GitHub verification. See
 [plan 0050](../docs/plans/0050-alpaca-context-provisioning.md).
+
+The paper execution installation source is separate from the research units.
+`setup-alpaca-execution.py` consumes `/tmp/radar-paper-execution.new` and
+`/tmp/radar-paper-execution-bundle.tar`, with the verified bundle SHA-256 as its
+sole argument. It pins the already verified maintenance/genesis-guard reader
+release, requires root-private paper credential metadata without reading it,
+and refuses any existing execution library, state alias, unit or config target.
+It neither overwrites partial installs nor removes retained history.
+
+The exact six-member bundle contains `maintain-alpaca-paper.py`,
+`initialize-alpaca-paper.py`, `radar-paper-maintenance.service`,
+`radar-paper-maintenance.timer`, `radar-paper-initialize.service`, and
+`alpaca-maintenance.json.example`. Set the example's public account UUID to the
+verified paper account before bundling; setup accepts observation mode only.
+The units share the explicit DynamicUser name radar-paper-execution and its
+private 0700 StateDirectory. systemd loads the root-only EnvironmentFile;
+the child CLI receives only paper broker credentials and a fixed PATH.
+
+Setup starts initialization once, then probes maintenance, then enables its
+timer only if both probes succeed. Initialization requires an empty state
+directory, durably writes a no-retry fence before the fixed cash-checkpoint
+CLI, validates the returned pinned paper checkpoint and retains completion.
+Failure or interruption retains the fence and any partial history. Inspect
+failed installation explicitly; never delete the fence or repeat initialization
+as a recovery shortcut. The recurring worker refuses missing journal history.
+These files are not yet installed. Stage and request owner sudo execution only
+after GitHub verification. No model, new-order permission or website handover
+is activated. See [plan 0054](../docs/plans/0054-alpaca-execution-initialization.md).

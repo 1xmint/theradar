@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # 0052 — Isolated scheduled paper maintenance worker
 
-**Status:** GitHub verified at b5b7b0d; not provisioned or active. Genesis guard repair pending.
+**Status:** GitHub verified at b5b7b0d; not provisioned or active. Genesis repair verified; provisioning is plan 0054.
 
 Branch: feat/alpaca-maintenance-worker, base a92807a. The previous turn added
 the actual maintenance CLI. During this turn its repaired source 15a5546

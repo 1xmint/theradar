@@ -40,6 +40,14 @@ def configuration(path, owner=0):
     return value
 
 
+def broker_environment(environment):
+    child_env = {"PATH": "/usr/bin:/bin"}
+    for name in ("RADAR_ALPACA_PAPER_KEY_ID", "RADAR_ALPACA_PAPER_SECRET_KEY"):
+        if name in environment:
+            child_env[name] = environment[name]
+    return child_env
+
+
 def tick(directory, config, run, environment, load=configuration, max_bytes=MAX_BYTES, max_files=4096):
     plan = load(config)
     descriptor = os.open(directory / ".lock", os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
@@ -59,15 +67,12 @@ def tick(directory, config, run, environment, load=configuration, max_bytes=MAX_
             raise ValueError("Provisioned paper order journal is missing")
         if used + RESERVATION > max_bytes or count > max_files:
             return {"maintenance": "paused", "reason": "storage_limit", "new_order_authority": False}
-        child_env = {"PATH": "/usr/bin:/bin"}
-        for name in ("RADAR_ALPACA_PAPER_KEY_ID", "RADAR_ALPACA_PAPER_SECRET_KEY"):
-            if name in environment:
-                child_env[name] = environment[name]
         argv = [READER, "alpaca-paper-maintain", "--journal", str(journal),
                 "--account-id", plan["account_id"], "--max-pages", str(plan["max_pages"])]
         if plan["mode"] == "cancel_working":
             argv.append("--cancel-working")
-        result = run(argv, check=True, capture_output=True, text=True, timeout=75, env=child_env)
+        result = run(argv, check=True, capture_output=True, text=True, timeout=75,
+                     env=broker_environment(environment))
         if len(result.stdout) > 4 * 1024 * 1024:
             raise ValueError("Maintenance response exceeds limit")
         report = json.loads(result.stdout)

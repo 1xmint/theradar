@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # 0050 — Provision the separately scheduled contextual campaign
 
-**Status:** GitHub verified and files staged; owner sudo setup pending. Not installed.
+**Status:** installed; active timer, installed hashes and frozen future schedule independently verified October 13.
 
 The previous turn repaired the session worker and its mutation harness. Parent
 source 7b13b49 passed CI 38311232531 (all 14 jobs, 2836 Rust/51 Python tests,
@@ -18,7 +18,8 @@ source. Parent remains stable while this separate installer is verified.
 - [x] Add installer/schedule tests and targeted regression reapplications.
 - [x] Inspect GitHub checks and actual targeted mutation results.
 - [x] Stage independently verified files/bundle and a concrete future start.
-- [ ] Run owner sudo setup, then inspect installed hashes, timer and frozen plan.
+- [x] Owner setup succeeded; SSH systemctl/hash/journal reads verified installation
+  at October 13 04:56 UTC (details below).
 
 The actual provisioning caller is deploy/setup-alpaca-context.py. Like the older
 installer, it uses bounded no-follow regular-file reads, exact-member tar/hash
@@ -58,12 +59,17 @@ VPS hashes match:
 - /tmp/radar-context-research-bundle.tar: 3aa9d340884e41b5adf1b3e2edbfd1419f12d2c035fcec56d481914fd417c1f7
 - /tmp/radar-context-research.new: 712a872adba5400b8744e7019af62817446a651a54bb40a57271ffeeaad0929b
 
-Owner was asked to run the staged setup with the bundle hash in the existing
-VPS terminal because sudo requires their private password. Await actual output;
-do not infer activation from staging or CI. The explicit future start expires;
-if setup is delayed past the required margin, prepare a new reviewed schedule
-and bundle rather than retrying stale bytes. Next inspect installed hashes,
-timer and frozen future denominator, then continue the order/supervision path.
+Owner ran the staged setup successfully in their existing VPS terminal. SSH
+inspection independently found the context timer loaded/active/waiting and
+service Result=success, ExecMainStatus=0. The October 13 04:56:15 UTC journal
+contains twelve future slots and execution_authority=false. Installed reader
+hash is 712a872adba5400b8744e7019af62817446a651a54bb40a57271ffeeaad0929b;
+worker is eb5501f2b85f07e6f72195db19b93605fe02169833c5016f28429b845834bd51.
+Both match the staged release/source. Config and frozen campaign both hash to
+0acdaa71288bf38664a5eb59ae6e07455b0078cdfd8fe756209822be31e86495.
+The protected state directory and campaign remain guardian-owned 0700/0600.
+All twelve attempts await today's 10 AM Eastern start; no outcome or model-call
+success is inferred from installation. Continue the order/supervision path.
 
 Eight installer tests cover real temporary-path installation, hashes, metadata,
 exact bundle members, overwrite refusal and schedule/type/strategy boundaries.
