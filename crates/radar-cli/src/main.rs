@@ -22,6 +22,7 @@ mod alpaca_journal;
 mod alpaca_maintain;
 mod alpaca_market;
 mod alpaca_order_read;
+mod alpaca_paper_model;
 mod alpaca_positions;
 mod alpaca_preflight;
 mod alpaca_propose;
@@ -150,8 +151,8 @@ commands:
   alpaca-paper-cancel --journal <private-file> --account-id <paper-id> --client-order-id <retained-id>
   alpaca-paper-maintain --journal <private-file> --account-id <paper-id> --max-pages <positive-u16> [--cancel-working]
   alpaca-order-reserve --journal <private-file> --account-id <paper-id> --intent <typed-intent>
-  alpaca-order-preflight --journal <private-file> --intent <typed-intent> --policy <private-policy> --max-pages <positive-u16>
-  alpaca-paper-submit --journal <private-file> --intent <typed-intent> --policy <private-policy> --max-pages <positive-u16>
+  alpaca-order-preflight --journal <private-file> --intent <typed-intent> --policy <private-policy> --max-pages <positive-u16> [--paper-model <private-simulation-model>]
+  alpaca-paper-submit --journal <private-file> --intent <typed-intent> --policy <private-policy> --max-pages <positive-u16> [--paper-model <private-simulation-model>]
   alpaca-order-journal --journal <private-file> --account-id <paper-id>
   alpaca-assets-read --account-id <paper-id> --symbols SPY,QQQ
   alpaca-market-read --symbols SPY,QQQ --output <new-capture-file>

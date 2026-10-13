@@ -59,8 +59,8 @@ cargo := env("RADAR_CARGO", "cargo")
 # the bot's files -- 11 in brief.rs (the analyst, contest and vault checks), 5
 # in seven_days.rs, 6 in radar-backfill's analyst_log.rs and 3 for the watched
 # seven-day checkpoint in checkpoints.rs.
-# CI 38438493362 measured 2847; raise the floor only from observed runner output.
-export MIN_TESTS := "2847"
+# CI 38444102509 measured 2855; raise the floor only from observed runner output.
+export MIN_TESTS := "2855"
 
 _default:
     @just --list --unsorted
@@ -87,6 +87,7 @@ private-setup:
     setpriv --no-new-privs python3 deploy/prove_alpaca_cancel_regression.py "{{cargo}}"
     setpriv --no-new-privs python3 deploy/prove_alpaca_maintenance_regressions.py "{{cargo}}"
     setpriv --no-new-privs python3 deploy/prove_alpaca_opening_regressions.py "{{cargo}}"
+    setpriv --no-new-privs python3 deploy/prove_alpaca_paper_model_regressions.py "{{cargo}}"
     setpriv --no-new-privs python3 deploy/prove_alpaca_session_regressions.py "{{cargo}}"
     setpriv --no-new-privs python3 deploy/prove_alpaca_context_regressions.py "{{cargo}}"
     systemd-analyze verify deploy/radar-paper-market.service deploy/radar-paper-market.timer
