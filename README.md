@@ -52,20 +52,22 @@ then refreshes cash/share/order state, reports working, terminal and unresolved 
 and optionally requests cancellation of at most one working order. Pending
 cancellation uncertainty is observed rather than retried. Checkpoint failure
 stops the tick; cancellation acceptance retains claims. This is the maintenance
-phase for a future isolated supervisor, with no new-order authority or installed
-timer. See [paper maintenance](docs/plans/0051-alpaca-paper-maintenance.md).
+phase for a future isolated supervisor, with no new-order authority.
+See [paper maintenance](docs/plans/0051-alpaca-paper-maintenance.md).
 An existing empty file or reservation-only history is not a fresh account;
 initialization is a separate operator action. See
 [maintenance genesis guard](docs/plans/0053-alpaca-maintenance-genesis.md).
 
-The separate maintenance worker and systemd pair now have source under deploy.
+The separate observation worker and systemd pair are installed.
 Its root-owned configuration defaults to observation; optional cancel_working
 requests one retained-order cancellation per tick. It refuses a missing private
-journal and keeps brokerage credentials out of model processes. Provisioning,
-verified journal genesis and timer activation remain pending. A separate
-single-use initializer and pinned fresh-install setup now have source; neither
-enables unattended entries. See [scheduled maintenance](docs/plans/0052-alpaca-maintenance-worker.md)
-and [initialization/provisioning](docs/plans/0054-alpaca-execution-initialization.md).
+journal and keeps brokerage credentials out of model processes. Initial journal
+creation and early observation succeeded; a later unsupported cash activity
+now prevents checkpoint advancement. A fixed administrative helper is being
+verified so diagnostics no longer need repeated private sudo commands. These
+paths cannot create unattended entries. See
+[initialization/provisioning](docs/plans/0054-alpaca-execution-initialization.md)
+and [maintenance diagnosis](docs/plans/0055-alpaca-maintenance-diagnostics.md).
 
 Use protected storage in an existing durably provisioned directory. This does
 not establish available capital, profit or trading authority. See

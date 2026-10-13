@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # 0054 — Deliberate paper initialization and observation provisioning
 
-**Status:** GitHub verified at 36ec9f2, staged and hashed; owner sudo setup pending. Not installed.
+**Status:** installed; initialization and early observation verified. Later maintenance failure is tracked in plan 0055.
 
 Branch feat/alpaca-execution-initialization, base 37b56014. Parent CI
 38346644746 passed all fourteen jobs, 2842 Rust/66 Python tests and seven
@@ -17,7 +17,8 @@ Parent proof is recorded here without changing its verified branch head.
 - [x] Inspect GitHub 38349170488 at 36ec9f2: all fourteen jobs passed;
   tests, executed mutation checks and unit syntax inspected.
 - [x] Package exact git show source bytes; independent local/VPS hashes match.
-- [ ] Owner sudo initialization/probe/timer installation; inspect actual results.
+- [x] SSH journal verified initialization at October 13 05:11:32 UTC and
+  successful recurring observation ticks. A later failure requires plan 0055.
 
 The caller is deploy/setup-alpaca-execution.py. It reads a hash-bound exact
 six-member bundle and pinned reader, checks credential metadata without reading
@@ -93,6 +94,14 @@ maintenance logs/timer/hashes before claiming activation. Do not retry failures
 or infer installation from staging. Draft PR 415 is attached, stacked on PR 414.
 Later documentation CI is separate from this implementation proof. No paper
 orders, live trades, website deployment or service changes occurred here.
+
+Runtime follow-up: owner reported a generic setup failure, but SSH shows first
+initialization and observation succeeded at 05:11 UTC, followed by repeated
+successful zero-order ticks. First maintenance failure is 07:12:06 UTC. The
+timer remained active at 16:06 UTC; installed reader/worker/installer hashes
+match the verified package. An owner-run isolated diagnostic returned unsupported
+new cash activity; reconciliation unresolved. Do not repeat genesis. See
+[maintenance diagnosis](0055-alpaca-maintenance-diagnostics.md).
 
 Remaining full-goal work: execution capacity/cost semantics currently refuse
 all submissions, the supervisor still needs proposal-to-risk-to-submit and

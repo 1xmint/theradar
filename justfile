@@ -81,6 +81,7 @@ private-setup:
     setpriv --no-new-privs python3 deploy/mutate_alpaca_context_setup.py
     setpriv --no-new-privs python3 deploy/mutate_alpaca_maintenance.py
     setpriv --no-new-privs python3 deploy/mutate_alpaca_initialization.py
+    setpriv --no-new-privs python3 deploy/mutate_alpaca_admin.py
     setpriv --no-new-privs python3 deploy/mutate_alpaca_cohort.py
     setpriv --no-new-privs python3 deploy/prove_alpaca_cancel_regression.py "{{cargo}}"
     setpriv --no-new-privs python3 deploy/prove_alpaca_maintenance_regressions.py "{{cargo}}"

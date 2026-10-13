@@ -50,8 +50,10 @@ future slots starting today at 10 AM Eastern. See
 [context provisioning](plans/0050-alpaca-context-provisioning.md).
 Retained-order maintenance and its explicit history requirement passed GitHub
 at 37b56014. One-time initialization and observation provisioning passed all
-fourteen GitHub checks at 36ec9f2 and are staged; owner sudo setup is pending.
-No maintenance service has yet been installed. See
+fourteen GitHub checks at 36ec9f2 and are installed. SSH verified initialization
+and initial successful observation ticks, followed by recurring failure on an
+unsupported new cash activity. History remains retained; diagnosis and repair
+are [plan 0055](plans/0055-alpaca-maintenance-diagnostics.md). See
 [initialization/provisioning](plans/0054-alpaca-execution-initialization.md).
 No actual broker orders, effective autonomous handover or Alpaca learning results
 have been verified. The autonomous goal remains incomplete.
