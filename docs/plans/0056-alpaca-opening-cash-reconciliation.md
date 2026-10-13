@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # 0056 — Acknowledge late paper opening cash without double counting
 
-**Status:** first GitHub run failed; fixture/lint/format repairs and application checks prepared; not deployed or applied.
+**Status:** source and release verified; exact repair staged on VPS; private sudo application pending; no order authority.
 
 Branch fix/alpaca-opening-cash-reconciliation, base bb118e7. Parent documentation
 CI 38432857228 passed. The preceding goal turn installed and exercised fixed
@@ -52,8 +52,8 @@ claim release, retry and execution authority stay false.
   event/amount/date/status/time checks, history gates and actual provider races.
 - [x] Add actual CLI dispatch test for missing/empty/reserved history and an absent
   or substituted acknowledgement flag before key loading.
-- [ ] Inspect GitHub tests/build/lint/mutation results; repair demonstrated issues.
-- [ ] Build/hash a verified Linux release and prepare its controlled VPS application.
+- [x] CI 38439705359 at 1819896 passed all fourteen jobs after demonstrated repairs.
+- [x] Release 38439694798 at 1819896 passed; downloaded and remote hashes agree.
 - [ ] Verify actual retained opening cash and apply one acknowledged correction;
   prove successful resumed observation with unchanged capital and no orders.
 
@@ -81,7 +81,7 @@ before releasing the lock, probing old maintenance and enabling its timer.
 Any partial failure retains the staged reader and history, with no automatic
 retry; an existing target refuses. Invoke only through isolated Python (-I)
 after GitHub verification. Six application tests and fourteen executed exact
-regressions are prepared; no results claimed yet.
+regressions passed in the verified source run below.
 
 ## Handback
 
@@ -100,16 +100,36 @@ replacements trigger unused/dead-code warnings, except default Opening and
 BrokerCash substitutions which lack Default. These compiler refusals are not
 executed regression coverage. Seven earlier exact maintenance checks passed;
 the new opening script stopped after its second case and subsequent checks did
-not run. The corrected complete run is required before application.
+not run. The corrected complete run passed as recorded below.
 
 Release-linux 38438649651 finished successfully at the earlier 12e03ba head.
 Downloaded BUILD-INFO and independently computed reader SHA256 agree at
 2b950ba2f32aafe6416ab5d150da0b00264109e3a91bee3d4a64fe89cac11394.
-This artifact remains unused. The corrected source head 1819896 was pushed only
-after that run finished. Full CI 38439705359 and matching release 38439694798
-are live; lint and formatting now pass. Inspect all results before staging an
-artifact. A temporary unavailable live test log is not a terminal failure.
-No artifact has been staged or applied.
+This earlier artifact remains unused. The corrected source head 1819896 was
+pushed only after that run finished. Full CI 38439705359 passed all fourteen jobs,
+including 2847 Rust tests, 98 Python tests, all six exact opening regressions and
+all fourteen exact application regressions. The four generic shard artifacts
+again contain 52 caught and nine compiler-unviable changes, with no survivors or
+timeouts; all nine compiler diagnostics were inspected independently. Matching
+release 38439694798 passed at 18198969782678a13625600b1aee98d5173b3cb5.
+A temporary unavailable live test log was not treated as a terminal failure.
+
+Downloaded BUILD-INFO and independently computed reader hash agree at
+d8642180158cd4e77142f84d26d57ed861f295ed546d441d6a6fe936f8d4713c.
+The apply wrapper was packaged from that exact Git object, with SHA256
+8418fc794d50f44405d0fca14d9c1979e592b11fe63b26be3ecaf92139e7feed.
+Staging first refused existing targets, then copied the binary to
+/tmp/radar-opening-cash.new and wrapper to /tmp/radar-alpaca-opening-apply.py;
+independent remote SHA256 values match both. Installed helper, old reader and
+worker hashes were rechecked unchanged. No website artifact was deployed.
+
+The owner was given the concrete isolated-Python sudo command with the verified
+reader hash. Application is pending private sudo entry, not a permission request
+for a new trading mandate. The five-command admin grant does not allow root
+installation or this acknowledgement. After successful application, run direct
+admin inspect and maintain; verify resumed scheduling, ordinary reconciliation,
+unchanged simulated cash and no orders/claims before moving on. If application
+fails, retain staged/installed files and history and inspect before any retry.
 Fresh direct admin inspect and activities calls both succeeded: original journal
 metadata remains 162228 bytes, timer inactive, and the broker still reports the
 same single selected JNLC with unchanged 100000 USD simulated cash. This turn made
@@ -126,12 +146,9 @@ minute bar and one previous daily bar, with learned_edge_verified=false. Repeati
 this campaign is not evidence of learning. The next research work must add richer
 historical features and forward baselines rather than relax the edge label.
 
-Source implementation needs complete GitHub verification before any
-operator acknowledgement is requested. The installed admin helper
-continues to provide direct fixed diagnostics; its grant does not include arbitrary
-root updates or this accounting acknowledgement. A concrete verified deployment
-step may still need the owner's private sudo entry. No history, capital policy,
-credentials, broker orders or website deployment changed in this implementation.
+This turn made progress through complete verification and exact VPS staging. The
+installed admin helper continues to provide direct fixed diagnostics. No history,
+capital policy, credentials, broker orders or website deployment changed yet.
 
 Full autonomy still requires a defined paper execution model for currently unknown
 capacity/cost inputs, the proposal/risk/entry/exit/revocation supervisor, effective
