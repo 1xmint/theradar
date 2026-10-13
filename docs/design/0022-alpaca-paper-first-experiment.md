@@ -412,6 +412,7 @@ The separate credential-free paper supervisor now has source for scheduled
 observation, adaptive buy/sell/cancel/wait proposals, fresh policy/data checks
 and durable dispatch recovery. It calls the isolated controller and subscription
 bridge through Unix sockets; it cannot change owner policy or access broker keys.
-Dedicated socket-group provisioning, GitHub verification, installation and actual
-paper lifecycle checks remain pending. See
+Its source passed all fourteen jobs in CI 38476247749, including 127 Python tests
+and all 21 new behavioral reapplications. Dedicated socket-group provisioning,
+installation and actual paper lifecycle checks remain pending. See
 [paper supervisor](../plans/0060-alpaca-paper-supervisor.md).
