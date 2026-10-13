@@ -59,8 +59,8 @@ cargo := env("RADAR_CARGO", "cargo")
 # the bot's files -- 11 in brief.rs (the analyst, contest and vault checks), 5
 # in seven_days.rs, 6 in radar-backfill's analyst_log.rs and 3 for the watched
 # seven-day checkpoint in checkpoints.rs.
-# CI 38315068491 measured 2841; raise the floor only from observed runner output.
-export MIN_TESTS := "2841"
+# CI 38346644746 measured 2842; raise the floor only from observed runner output.
+export MIN_TESTS := "2842"
 
 _default:
     @just --list --unsorted
@@ -80,6 +80,7 @@ private-setup:
     setpriv --no-new-privs python3 deploy/mutate_alpaca_research_setup.py
     setpriv --no-new-privs python3 deploy/mutate_alpaca_context_setup.py
     setpriv --no-new-privs python3 deploy/mutate_alpaca_maintenance.py
+    setpriv --no-new-privs python3 deploy/mutate_alpaca_initialization.py
     setpriv --no-new-privs python3 deploy/mutate_alpaca_cohort.py
     setpriv --no-new-privs python3 deploy/prove_alpaca_cancel_regression.py "{{cargo}}"
     setpriv --no-new-privs python3 deploy/prove_alpaca_maintenance_regressions.py "{{cargo}}"
@@ -89,6 +90,7 @@ private-setup:
     systemd-analyze verify deploy/radar-paper-research.service deploy/radar-paper-research.timer
     systemd-analyze verify deploy/radar-context-research.service deploy/radar-context-research.timer
     systemd-analyze verify deploy/radar-paper-maintenance.service deploy/radar-paper-maintenance.timer
+    systemd-analyze verify deploy/radar-paper-initialize.service
 
 # --- required checks, one recipe per status-check context ---------------------
 

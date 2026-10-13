@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # 0053 — Maintenance requires history before refreshing it
 
-**Status:** correction prepared; GitHub verification pending. Not deployed.
+**Status:** verified at 37b56014; release hashed; not deployed. Provisioning is plan 0054.
 
 Branch: fix/alpaca-maintenance-genesis, base b5b7b0d. The previous goal turn
 verified maintenance and prepared the isolated worker. Worker source b5b7b0d
@@ -22,12 +22,12 @@ maintenance service or orders have used this path.
 
 ## Work
 
-- [ ] Verify missing checkpoint refuses before the refresh callback.
-- [ ] Verify actual CLI rejects empty and reservation-only existing journals
+- [x] Verify missing checkpoint refuses before the refresh callback.
+- [x] Verify actual CLI rejects empty and reservation-only existing journals
   in both modes, before credential loading and without changing journal bytes.
-- [ ] Verify deliberately initialized history still refreshes through the
+- [x] Verify deliberately initialized history still refreshes through the
   actual provider collector and retains all prior recovery behavior.
-- [ ] Reapply both new guard omissions, the inverted history predicate and
+- [x] Reapply both new guard omissions, the inverted history predicate and
   the four earlier exact mistakes
   on GitHub; inspect all tests/build/lint/mutation results.
 
@@ -66,3 +66,17 @@ mutation artifacts showed compiler-unviable function-body removals only (unused
 arguments/imports/dead code), not test kills; shard 3 selected zero mutants.
 The tests job stopped at repository conformance before exact reapplications,
 so those seven checks remain unverified until the repair run completes.
+
+Repair source 37b56014b0a8430918c5c03a87641cece9ef511f passed all fourteen
+GitHub jobs at 38346644746: 2842 Rust/66 Python tests, seven exact maintenance
+regressions, eleven worker mutations, all prior checks and four systemd pairs.
+All three downloaded mutation artifacts were inspected: three compiler-unviable
+function-body removals, zero test kills/survivors/timeouts. Shard 3 selected zero
+mutants. Critical guard coverage comes from the seven executed exact checks,
+not from compiler failures. Release 38346705855 succeeded at this same source;
+BUILD-INFO and independent downloaded reader hashing both give
+3f21fc1ae3b54b2333a5b809eda916c296be0948d69dba1f9da618adec9733d2.
+No server artifact was deployed. This verified reader is pinned by plan 0054's
+separate deliberate initialization/provisioning path. Context research has now
+been installed and independently inspected; the earlier pending status above
+describes the prior inspection, superseded by plan 0050's runtime handback.

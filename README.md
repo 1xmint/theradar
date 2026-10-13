@@ -62,9 +62,10 @@ The separate maintenance worker and systemd pair now have source under deploy.
 Its root-owned configuration defaults to observation; optional cancel_working
 requests one retained-order cancellation per tick. It refuses a missing private
 journal and keeps brokerage credentials out of model processes. Provisioning,
-verified journal genesis and timer activation remain pending; these files do
-not enable unattended entries. See
-[scheduled maintenance](docs/plans/0052-alpaca-maintenance-worker.md).
+verified journal genesis and timer activation remain pending. A separate
+single-use initializer and pinned fresh-install setup now have source; neither
+enables unattended entries. See [scheduled maintenance](docs/plans/0052-alpaca-maintenance-worker.md)
+and [initialization/provisioning](docs/plans/0054-alpaca-execution-initialization.md).
 
 Use protected storage in an existing durably provisioned directory. This does
 not establish available capital, profit or trading authority. See

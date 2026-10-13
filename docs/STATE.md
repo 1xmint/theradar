@@ -29,24 +29,30 @@ The scorer keeps size units, participation, fees and slippage as explicit resear
 assumptions, never broker execution facts. Local forward-decision commands now
 freeze Enter/Wait, same-size always-enter and cash baselines, assumptions and an
 exact horizon cutoff; offline comparisons retain unscoreable cases. They are
-GitHub-verified but not deployed or produced by the linked model. A new
-subscription research CLI can request a strict Enter/Wait choice, retain fixed
-experiment size/horizon/cost assumptions and revalidate the quote at completion.
+GitHub-verified. A separately installed subscription research CLI can request a
+strict Enter/Wait choice, retain fixed experiment size/horizon/cost assumptions
+and revalidate the quote at completion.
 GitHub subprocess tests verify framing, refusal before invalid model calls and
-strict output; no actual model run is claimed. Complete scheduled cohorts,
-durable failed-attempt records and held-out/forward evaluation remain incomplete.
+strict output. The first retained actual model decision was wait; its exit
+became unscoreable because the quote was stale. No positive expectancy follows.
+Complete useful scheduled cohorts and held-out/forward evaluation remain incomplete.
 See [plan 0041](plans/0041-alpaca-forward-decision.md) and
 [plan 0042](plans/0042-alpaca-model-proposal.md).
 An optional scheduled research worker now freezes a campaign and retains each
 slot as decision, failed, missed or interrupted_unknown, without automatic retry.
-GitHub verifies its schedule/persistence/credential boundaries; it is not yet
-installed or enabled. Cost-aware cohort scoring and actual model runs remain
-unverified. See [plan 0043](plans/0043-alpaca-research-campaign.md).
-A GitHub-verified setup helper and exact-member bundle are staged on the VPS.
-They provision the research reader separately from the running recorder and set
-up twelve hypothetical research slots. Owner sudo execution and actual installed
-worker/model results remain unverified; see
-[plan 0044](plans/0044-alpaca-research-provisioning.md).
+GitHub verifies its schedule/persistence/credential boundaries. The earlier
+quote-only campaign is installed and retained; its first actual wait decision
+and stale exit, plus failed attempts, do not establish useful performance.
+See [cohort reporting](plans/0045-alpaca-cohort-report.md). The separate guarded
+snapshot-context campaign is now installed. SSH at October 13 04:56 UTC verified
+active scheduling, successful service, installed hashes and the frozen twelve
+future slots starting today at 10 AM Eastern. See
+[context provisioning](plans/0050-alpaca-context-provisioning.md).
+Retained-order maintenance and its explicit history requirement passed GitHub
+at 37b56014. One-time initialization and observation provisioning passed all
+fourteen GitHub checks at 36ec9f2 and are staged; owner sudo setup is pending.
+No maintenance service has yet been installed. See
+[initialization/provisioning](plans/0054-alpaca-execution-initialization.md).
 No actual broker orders, effective autonomous handover or Alpaca learning results
 have been verified. The autonomous goal remains incomplete.
 
