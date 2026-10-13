@@ -1390,3 +1390,12 @@ is not treated as a new deposit or profit. It is outside the installed admin
 grant and never called by ordinary maintenance or the model. GitHub verification
 and a controlled installation/application remain pending; see
 [plan 0056](../docs/plans/0056-alpaca-opening-cash-reconciliation.md).
+
+The source-only `apply-alpaca-opening.py` one-time wrapper installs a verified
+acknowledgement reader alongside the existing maintenance reader. It pins the
+installed administration and old reader hashes, requires the new artifact hash,
+preserves the original journal prefix under the existing observation lock, and
+probes maintenance before resuming scheduling. Failed or partial application
+retains the staged reader and refuses automatic retry. This wrapper is outside
+the five-command sudo grant and must be invoked with isolated Python (`-I`)
+after GitHub verification. No trading authority is enabled.

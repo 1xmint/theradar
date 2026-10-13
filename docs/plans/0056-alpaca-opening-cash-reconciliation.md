@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # 0056 — Acknowledge late paper opening cash without double counting
 
-**Status:** implementation prepared; GitHub verification pending; not deployed or applied.
+**Status:** first GitHub run failed; fixture/lint/format repairs and application checks prepared; not deployed or applied.
 
 Branch fix/alpaca-opening-cash-reconciliation, base bb118e7. Parent documentation
 CI 38432857228 passed. The preceding goal turn installed and exercised fixed
@@ -62,6 +62,26 @@ actual-process test, never compiler failures as kills. The generic journal tests
 also check first cash survives later appends/reopen and poisoned ownership refuses
 opening reads. No new Rust floor is predicted; parent measured 2842 remains.
 All tests/build/lint/mutation jobs run on GitHub. No local jobs.
+
+First run 38435943148 at f38c7cd completed with failures. The successful append
+fixture compared sparse input JSON with normalized Activity JSON containing null
+fields; the assertion now compares normalized typed activities. Lint required an
+explicit empty collection assertion. All four mutation shards failed that same
+unmutated fixture; no mutation coverage was obtained. GitHub's 27 formatter
+diagnostic hunks were applied as source edits. A new full GitHub run is required.
+
+The one-time apply-alpaca-opening.py application pins the installed admin source
+and existing reader hashes, checks a supplied verified new reader hash and
+protected observation configuration/units, stops scheduling, and acquires the
+existing observation lock without creating missing state. It installs the new
+reader alongside the unchanged recurring reader, then runs only the selected
+acknowledgement in the existing isolated service policy. It requires an appended
+checkpoint, preserved original journal prefix, empty claims and no authority
+before releasing the lock, probing old maintenance and enabling its timer.
+Any partial failure retains the staged reader and history, with no automatic
+retry; an existing target refuses. Invoke only through isolated Python (-I)
+after GitHub verification. Six application tests and fourteen executed exact
+regressions are prepared; no results claimed yet.
 
 ## Handback
 
