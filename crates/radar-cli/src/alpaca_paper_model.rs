@@ -38,7 +38,8 @@ impl Model {
         }
         let shares = u128::from(quantity);
         let rounded = |value: u128, scale| {
-            u64::try_from(value.div_ceil(scale)).map_err(|_| "paper stress cost overflow".to_owned())
+            u64::try_from(value.div_ceil(scale))
+                .map_err(|_| "paper stress cost overflow".to_owned())
         };
         let spread = rounded(shares * u128::from(ask - bid), 1_000_000_000)?;
         // Charge each side at the larger quote/limit value. A reduction's limit
@@ -62,7 +63,9 @@ impl Model {
             || state.required_fee_microusd.is_some()
             || state.round_trip_cost_microusd.is_some()
         {
-            return Err("paper model cannot replace existing execution evidence or another account".into());
+            return Err(
+                "paper model cannot replace existing execution evidence or another account".into(),
+            );
         }
         let cost = self.costs(
             intent.quantity_nanoshares,
@@ -86,9 +89,9 @@ impl Model {
 
 /// Re-read the operator file both before risk evaluation and after durable
 /// submission uncertainty. Changed/removed/invalid assumptions must recollect.
-pub(super) fn unchanged(expected: &Option<Model>, path: Option<&str>) -> Result<(), String> {
+pub(super) fn unchanged(expected: Option<&Model>, path: Option<&str>) -> Result<(), String> {
     let current: Option<Model> = path.map(super::alpaca_preflight::load).transpose()?;
-    if &current != expected {
+    if current.as_ref() != expected {
         return Err("paper stress model changed; recollect before any submission".into());
     }
     Ok(())
@@ -109,19 +112,27 @@ mod tests {
     fn exact_fractional_costs_round_up_and_use_the_larger_quote_or_limit() {
         let model = model();
         assert_eq!(
-            model.costs(1_000_000_000, 100_000_000, 99_000_000, 100_000_000).unwrap(),
+            model
+                .costs(1_000_000_000, 100_000_000, 99_000_000, 100_000_000)
+                .unwrap(),
             1_200_014
         );
         assert_eq!(
-            model.costs(1, 100_000_001, 100_000_000, 100_000_001).unwrap(),
+            model
+                .costs(1, 100_000_001, 100_000_000, 100_000_001)
+                .unwrap(),
             17
         );
         assert_eq!(
-            model.costs(1_000_000_000, 99_000_000, 100_000_000, 101_000_000).unwrap(),
+            model
+                .costs(1_000_000_000, 99_000_000, 100_000_000, 101_000_000)
+                .unwrap(),
             1_202_014
         );
         assert_eq!(
-            model.costs(1_000_000_000, 102_000_000, 100_000_000, 101_000_000).unwrap(),
+            model
+                .costs(1_000_000_000, 102_000_000, 100_000_000, 101_000_000)
+                .unwrap(),
             1_204_014
         );
     }
@@ -185,22 +196,22 @@ mod tests {
 
     #[test]
     fn changed_missing_invalid_or_injected_model_cannot_pass_the_reload_guard() {
-        unchanged(&None, None).unwrap();
+        unchanged(None, None).unwrap();
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("model.json");
         let name = path.to_str().unwrap();
         let expected = Some(model());
         std::fs::write(&path, serde_json::to_vec(&expected).unwrap()).unwrap();
-        unchanged(&expected, Some(name)).unwrap();
-        assert!(unchanged(&expected, None).is_err());
-        assert!(unchanged(&None, Some(name)).is_err());
+        unchanged(expected.as_ref(), Some(name)).unwrap();
+        assert!(unchanged(expected.as_ref(), None).is_err());
+        assert!(unchanged(None, Some(name)).is_err());
         let mut changed = model();
         changed.fee_per_side_microusd += 1;
         std::fs::write(&path, serde_json::to_vec(&changed).unwrap()).unwrap();
-        assert!(unchanged(&expected, Some(name)).is_err());
+        assert!(unchanged(expected.as_ref(), Some(name)).is_err());
         std::fs::write(&path, "{private-invalid-value}").unwrap();
-        assert!(unchanged(&expected, Some(name)).is_err());
+        assert!(unchanged(expected.as_ref(), Some(name)).is_err());
         std::fs::remove_file(&path).unwrap();
-        assert!(unchanged(&expected, Some(name)).is_err());
+        assert!(unchanged(expected.as_ref(), Some(name)).is_err());
     }
 }

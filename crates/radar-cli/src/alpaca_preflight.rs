@@ -425,7 +425,7 @@ fn dispatch_configured(
         intent,
         &state,
         || {
-            super::alpaca_paper_model::unchanged(&inputs.model, inputs.model_path)?;
+            super::alpaca_paper_model::unchanged(inputs.model.as_ref(), inputs.model_path)?;
             load(inputs.policy_path)
         },
         clock,
@@ -508,9 +508,11 @@ mod tests {
     }
 
     fn paper_scenario(capacity: u64, fee: u64) -> super::super::alpaca_paper_model::Model {
-        serde_json::from_value(json!({"version":"alpaca-paper-stress-v1","account_id":"paper",
+        serde_json::from_value(
+            json!({"version":"alpaca-paper-stress-v1","account_id":"paper",
             "max_quantity_nanoshares":capacity,"fee_per_side_microusd":fee,
-            "slippage_bps_per_side":10}))
+            "slippage_bps_per_side":10}),
+        )
         .unwrap()
     }
 
@@ -537,27 +539,54 @@ mod tests {
         for side in [BrokerSide::Buy, BrokerSide::Sell] {
             for case in ["valid", "capacity", "fee", "disabled", "cash"] {
                 let directory = tempfile::tempdir().unwrap();
-                let mut log = BrokerLog::open(directory.path().join("orders.jsonl"), "paper").unwrap();
+                let mut log =
+                    BrokerLog::open(directory.path().join("orders.jsonl"), "paper").unwrap();
                 let proposal = intent(side);
                 let (mut state, _) = paper_state(&mut log, &proposal);
-                if case == "cash" { state.available_cash_microusd = Some(0); }
-                let model = paper_scenario(if case == "capacity" { 1 } else { 2_000_000_000 },
-                    if case == "fee" { 8 } else { 7 });
+                if case == "cash" {
+                    state.available_cash_microusd = Some(0);
+                }
+                let model = paper_scenario(
+                    if case == "capacity" { 1 } else { 2_000_000_000 },
+                    if case == "fee" { 8 } else { 7 },
+                );
                 let model_path = directory.path().join("model.json");
                 let policy_path = directory.path().join("policy.json");
                 let mut selected = policy();
-                if case == "disabled" { selected.enabled = false; }
+                if case == "disabled" {
+                    selected.enabled = false;
+                }
                 std::fs::write(&model_path, serde_json::to_vec(&model).unwrap()).unwrap();
                 std::fs::write(&policy_path, serde_json::to_vec(&selected).unwrap()).unwrap();
-                let inputs = ExecutionInputs {policy_path:policy_path.to_str().unwrap(),
-                    model_path:Some(model_path.to_str().unwrap()), model:Some(model)};
-                let report = dispatch_configured("alpaca-order-preflight", &mut log, &proposal,
-                    state, &inputs, || panic!("preflight has no send clock"), |_| panic!("preflight cannot send")).unwrap();
+                let inputs = ExecutionInputs {
+                    policy_path: policy_path.to_str().unwrap(),
+                    model_path: Some(model_path.to_str().unwrap()),
+                    model: Some(model),
+                };
+                let report = dispatch_configured(
+                    "alpaca-order-preflight",
+                    &mut log,
+                    &proposal,
+                    state,
+                    &inputs,
+                    || panic!("preflight has no send clock"),
+                    |_| panic!("preflight cannot send"),
+                )
+                .unwrap();
                 assert_eq!(report["risk_refusal"].is_null(), case == "valid", "{case}");
                 assert_eq!(report["execution_authority"], false);
-                assert_eq!(report["paper_execution_model"]["basis"], "operator_stress_scenario");
-                assert_eq!(report["paper_execution_model"]["live_capacity_verified"], false);
-                assert_eq!(report["paper_execution_model"]["live_costs_verified"], false);
+                assert_eq!(
+                    report["paper_execution_model"]["basis"],
+                    "operator_stress_scenario"
+                );
+                assert_eq!(
+                    report["paper_execution_model"]["live_capacity_verified"],
+                    false
+                );
+                assert_eq!(
+                    report["paper_execution_model"]["live_costs_verified"],
+                    false
+                );
                 assert_eq!(report["paper_execution_model"]["profit_measured"], false);
                 if case == "valid" {
                     assert_eq!(report["capacity_nanoshares"], "2000000000");
@@ -582,31 +611,55 @@ mod tests {
             let model = paper_scenario(2_000_000_000, 7);
             std::fs::write(&model_path, serde_json::to_vec(&model).unwrap()).unwrap();
             std::fs::write(&policy_path, serde_json::to_vec(&policy()).unwrap()).unwrap();
-            let inputs = ExecutionInputs {policy_path:policy_path.to_str().unwrap(),
-                model_path:if case == "absent" { None } else { Some(model_path.to_str().unwrap()) },
-                model:if case == "absent" { None } else { Some(model) }};
+            let inputs = ExecutionInputs {
+                policy_path: policy_path.to_str().unwrap(),
+                model_path: if case == "absent" {
+                    None
+                } else {
+                    Some(model_path.to_str().unwrap())
+                },
+                model: if case == "absent" { None } else { Some(model) },
+            };
             let changed = serde_json::to_vec(&paper_scenario(2_000_000_000, 8)).unwrap();
-            if case == "before" { std::fs::write(&model_path, &changed).unwrap(); }
+            if case == "before" {
+                std::fs::write(&model_path, &changed).unwrap();
+            }
             let sent = std::cell::Cell::new(false);
-            let result = dispatch_configured("alpaca-paper-submit", &mut log, &proposal, state,
-                &inputs, || {
-                    if case == "after" { std::fs::write(&model_path, &changed).unwrap(); }
+            let result = dispatch_configured(
+                "alpaca-paper-submit",
+                &mut log,
+                &proposal,
+                state,
+                &inputs,
+                || {
+                    if case == "after" {
+                        std::fs::write(&model_path, &changed).unwrap();
+                    }
                     Ok(tick)
-                }, |body| {
-                    assert!(std::fs::read_to_string(&path).unwrap().contains("submission_unknown"));
+                },
+                |body| {
+                    assert!(
+                        std::fs::read_to_string(&path)
+                            .unwrap()
+                            .contains("submission_unknown")
+                    );
                     sent.set(true);
                     let mut response: Value = serde_json::from_str(body).unwrap();
                     response["id"] = json!("broker");
                     response["asset_class"] = json!("us_equity");
                     response["status"] = json!("new");
                     Ok(response.to_string())
-                });
+                },
+            );
             assert_eq!(result.is_ok(), case == "same", "{case}");
             assert_eq!(sent.get(), case == "same", "{case}");
             let entries: Vec<_> = log.entries().unwrap().collect();
             if case == "same" || case == "after" {
                 assert_eq!(entries.len(), 1);
-                assert_eq!(entries[0].state, radar_journal::BrokerState::SubmissionUnknown);
+                assert_eq!(
+                    entries[0].state,
+                    radar_journal::BrokerState::SubmissionUnknown
+                );
             } else {
                 assert_eq!(entries.len(), 0);
             }
@@ -630,9 +683,25 @@ mod tests {
                 "quote" => current.ask_microusd_per_share = current.bid_microusd_per_share - 1,
                 _ => order.quantity_nanoshares = 0,
             }
-            let original = (current.capacity_nanoshares, current.required_fee_microusd, current.round_trip_cost_microusd);
-            assert!(paper_scenario(2_000_000_000, 7).apply(&order, &mut current).is_err(), "{case}");
-            assert_eq!((current.capacity_nanoshares, current.required_fee_microusd, current.round_trip_cost_microusd), original);
+            let original = (
+                current.capacity_nanoshares,
+                current.required_fee_microusd,
+                current.round_trip_cost_microusd,
+            );
+            assert!(
+                paper_scenario(2_000_000_000, 7)
+                    .apply(&order, &mut current)
+                    .is_err(),
+                "{case}"
+            );
+            assert_eq!(
+                (
+                    current.capacity_nanoshares,
+                    current.required_fee_microusd,
+                    current.round_trip_cost_microusd
+                ),
+                original
+            );
         }
     }
 

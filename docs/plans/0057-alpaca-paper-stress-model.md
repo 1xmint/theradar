@@ -61,9 +61,20 @@ Do not raise the measured parent floor 2847 until actual full runner output.
 
 ## Handback
 
-Implementation and verification harness are prepared. No child checks run yet;
-no artifact, configuration, website deployment or order authority changed.
-Complete the GitHub checks and inspect mutation diagnostics before provisioning.
+Source fe21d9e is pushed in attached draft PR 418. CI 38444102509 is live: its
+lint job requires Option<&Model> rather than &Option<Model>, and formatting
+reported sixteen hunks. Those exact GitHub formatting edits and the reference
+type/caller/test/regression correction are prepared locally, without suppressing
+warnings. Do not push until the full current run is terminal; inspect the test
+result and executed exact regressions first.
+
+All four generic mutation shards passed. Downloaded artifacts show 32 caught,
+eight compiler-unviable, no survivors or timeouts. All eight unviable diagnostics
+were read: whole-function replacements cause unused/dead-code warnings; they are
+not executed-test coverage. The full test job and exact reapplications are still
+running. No new test count/floor or complete verification is claimed yet.
+No artifact, configuration, website deployment or order authority changed.
+Complete the corrected GitHub checks before provisioning.
 The observation repair remains successful; it is not the final trading goal.
 
 Remaining: effective Alpaca manual/Agent decides site controls, revocable paper

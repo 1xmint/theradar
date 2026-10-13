@@ -26,8 +26,8 @@ cases = [
     (model, b"value.div_ceil(scale)", b"value / scale", "round scenario costs down", unit, 4),
     (model, b".checked_mul(2)", b".checked_mul(1)", "charge only one trade side", unit, 4),
     # Preserve production field/function reads so this actually executes tests.
-    (preflight, b"super::alpaca_paper_model::unchanged(&inputs.model, inputs.model_path)?;",
-     b"super::alpaca_paper_model::unchanged(&None, inputs.model_path.filter(|_| false))?;",
+    (preflight, b"super::alpaca_paper_model::unchanged(inputs.model.as_ref(), inputs.model_path)?;",
+     b"super::alpaca_paper_model::unchanged(None, inputs.model_path.filter(|_| false))?;",
      "skip model reload at submission boundary",
      ["--bin", "radar", "paper_model_submit_reloads_before_risk"], 1),
     (preflight, b"model.validate(&intent.account_id)?;", b"let _ = model;",
