@@ -84,6 +84,7 @@ private-setup:
     setpriv --no-new-privs python3 deploy/mutate_alpaca_admin.py
     setpriv --no-new-privs python3 deploy/mutate_alpaca_opening_apply.py
     setpriv --no-new-privs python3 deploy/mutate_paper_control.py
+    setpriv --no-new-privs python3 deploy/mutate_paper_supervisor.py
     setpriv --no-new-privs python3 deploy/mutate_alpaca_cohort.py
     setpriv --no-new-privs python3 deploy/prove_alpaca_cancel_regression.py "{{cargo}}"
     setpriv --no-new-privs python3 deploy/prove_alpaca_maintenance_regressions.py "{{cargo}}"
@@ -98,6 +99,7 @@ private-setup:
     systemd-analyze verify deploy/radar-paper-maintenance.service deploy/radar-paper-maintenance.timer
     systemd-analyze verify deploy/radar-paper-initialize.service
     systemd-analyze verify deploy/radar-paper-control.service deploy/radar-paper-control.socket
+    systemd-analyze verify deploy/radar-paper-supervisor.service deploy/radar-paper-supervisor.timer
 
 # --- required checks, one recipe per status-check context ---------------------
 

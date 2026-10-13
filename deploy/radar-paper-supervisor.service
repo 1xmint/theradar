@@ -1,0 +1,40 @@
+# SPDX-License-Identifier: Apache-2.0
+[Unit]
+Description=Radar credential-free autonomous paper agent tick
+Requires=radar-paper-control.socket radar-codex.socket
+After=radar-paper-control.socket radar-codex.socket
+
+[Service]
+Type=oneshot
+User=radar-paper-supervisor
+Group=radar-paper-supervisor
+SupplementaryGroups=radar-paper-ipc
+WorkingDirectory=/
+ExecStart=/usr/bin/python3 -I /usr/local/lib/radar-paper-control/paper-supervisor.py
+StateDirectory=radar-paper-supervisor
+StateDirectoryMode=0700
+UMask=0077
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectProc=invisible
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+RestrictNamespaces=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+CapabilityBoundingSet=
+RestrictAddressFamilies=AF_UNIX
+IPAddressDeny=any
+LimitCORE=0
+MemoryMax=128M
+TasksMax=16
+CPUQuota=25%
+TimeoutStartSec=480
+KillMode=control-group
+LogRateLimitIntervalSec=60
+LogRateLimitBurst=5

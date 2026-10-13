@@ -407,3 +407,12 @@ supervisor is running. Its matching website artifact is deployed at 4116592;
 the private controller and supervisor remain uninstalled. Authenticated browser
 review awaits a fresh Cloudflare sign-in. See
 [website handover](../plans/0059-alpaca-paper-website-handover.md) for verification.
+
+The separate credential-free paper supervisor now has source for scheduled
+observation, adaptive buy/sell/cancel/wait proposals, fresh policy/data checks
+and durable dispatch recovery. It calls the isolated controller and subscription
+bridge through Unix sockets; it cannot change owner policy or access broker keys.
+Its source passed all fourteen jobs in CI 38476247749, including 127 Python tests
+and all 21 new behavioral reapplications. Dedicated socket-group provisioning,
+installation and actual paper lifecycle checks remain pending. See
+[paper supervisor](../plans/0060-alpaca-paper-supervisor.md).

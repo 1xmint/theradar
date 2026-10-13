@@ -48,11 +48,11 @@ def stop(child):
             child.wait()
 
 
-def serve_one(connection, expected_uid):
+def serve_one(connection, expected_uid, supervisor_uid=None):
     child = None
     try:
         _, uid, _ = struct.unpack("3i", connection.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, 12))
-        if uid != expected_uid:
+        if uid != expected_uid and uid != supervisor_uid:
             raise ValueError("caller refused")
         connection.settimeout(5)
         reader = connection.makefile("rb")
@@ -66,6 +66,8 @@ def serve_one(connection, expected_uid):
                 or not isinstance(request["input"], str)):
             raise ValueError("request refused")
         command = tuple(request["command"])
+        if uid != expected_uid and command != ("exec", "-"):
+            raise ValueError("supervisor may request inference only")
         if command not in COMMANDS:
             raise ValueError("command refused")
         prompt = request["input"].encode("utf-8")
@@ -131,12 +133,18 @@ def serve():
         raise SystemExit("Start through radar-codex.socket")
     listener = socket.socket(fileno=3)
     guardian_uid = pwd.getpwnam("guardian").pw_uid
+    try:
+        supervisor_uid = pwd.getpwnam("radar-paper-supervisor").pw_uid
+    except KeyError:
+        supervisor_uid = None  # Existing login still works before provisioning.
+    if guardian_uid == os.getuid() or supervisor_uid in (guardian_uid, os.getuid()):
+        raise SystemExit("Codex principals must be separate")
     # One CLI writer, including refresh during inference and device login.
     slots = threading.BoundedSemaphore(1)
 
     def handle(connection):
         try:
-            serve_one(connection, guardian_uid)
+            serve_one(connection, guardian_uid, supervisor_uid)
         finally:
             slots.release()
 

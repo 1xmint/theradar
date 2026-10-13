@@ -34,9 +34,9 @@ class BridgeTests(unittest.TestCase):
             Popen=spawn, PIPE=subprocess.PIPE, TimeoutExpired=subprocess.TimeoutExpired,
         )
 
-    def request(self, request, uid=None):
+    def request(self, request, uid=None, supervisor_uid=None):
         local, remote = socket.socketpair()
-        worker = threading.Thread(target=self.bridge.serve_one, args=(remote, os.getuid() if uid is None else uid))
+        worker = threading.Thread(target=self.bridge.serve_one, args=(remote, os.getuid() if uid is None else uid, supervisor_uid))
         packets = []
         with local:
             local.settimeout(5)
@@ -80,6 +80,15 @@ class BridgeTests(unittest.TestCase):
         packets = self.request({"command": ["login", "status"], "input": ""}, uid=os.getuid() + 1)
         self.assertIn("error", packets[-1])
         self.assertEqual(self.spawned, [])
+
+    def test_supervisor_can_request_inference_but_cannot_manage_login(self):
+        for command in (["login", "status"], ["login", "--device-auth"]):
+            packets = self.request({"command":command, "input":""}, uid=os.getuid() + 1, supervisor_uid=os.getuid())
+            self.assertIn("error", packets[-1])
+        self.assertEqual(self.spawned, [])
+        packets = self.request({"command":["exec", "-"], "input":"inert proposal"}, uid=os.getuid() + 1, supervisor_uid=os.getuid())
+        self.assertEqual(packets[-1], {"exit":0})
+        self.assertEqual(len(self.spawned), 1)
 
     def test_disconnecting_kills_the_cli_process_group(self):
         self.stub = "import time; print('ready',flush=True); time.sleep(60)"

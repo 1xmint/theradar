@@ -5,7 +5,7 @@ Description=Radar private paper broker control socket
 [Socket]
 ListenStream=/run/radar-paper-control.sock
 SocketUser=root
-SocketGroup=guardian
+SocketGroup=radar-paper-ipc
 SocketMode=0660
 RemoveOnStop=yes
 
