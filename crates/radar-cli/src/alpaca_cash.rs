@@ -26,6 +26,72 @@ struct Snapshot {
     activities: Vec<Activity>,
 }
 
+struct Opening {
+    activity_id: String,
+    snapshot: Snapshot,
+}
+
+fn opening_plan(log: &BrokerLog, expected: &str, activity_id: &str) -> Result<Opening, String> {
+    if activity_id.is_empty()
+        || activity_id.len() > 256
+        || !activity_id.is_ascii()
+        || activity_id.bytes().any(|byte| byte.is_ascii_control())
+        || log.entries().map_err(|e| e.to_string())?.next().is_some()
+    {
+        return Err("opening acknowledgement requires an activity ID and no retained orders".into());
+    }
+    let first = log.opening_cash().map_err(|e| e.to_string())?
+        .ok_or("opening acknowledgement requires retained genesis")?;
+    let last = log.cash().map_err(|e| e.to_string())?
+        .ok_or("opening acknowledgement requires retained cash")?;
+    let now = super::wallet_read::now()?;
+    let opening = retained_snapshot(&first, expected, now)?;
+    let baseline = retained_snapshot(last, expected, now)?;
+    if !opening.activities.is_empty() || !baseline.activities.is_empty()
+        || cash(&opening.account)? != cash(&baseline.account)?
+        || !super::alpaca_positions::retained(&first.observation)?.is_empty()
+        || !super::alpaca_positions::retained(&last.observation)?.is_empty()
+    {
+        return Err("opening acknowledgement requires unchanged empty-account opening history".into());
+    }
+    Ok(Opening { activity_id: activity_id.to_owned(), snapshot: opening })
+}
+
+fn opening_delta(baseline: &Snapshot, current: &Snapshot, opening: &Opening) -> Result<Value, String> {
+    if baseline.read_completed_unix_secs > current.read_started_unix_secs {
+        return Err("opening acknowledgement observations overlap or move backwards".into());
+    }
+    let [event] = current.activities.as_slice() else {
+        return Err("opening acknowledgement requires exactly one cash activity".into());
+    };
+    let day = event.date.as_deref().and_then(|date| {
+        super::alpaca_quote::timestamp_ns(&format!("{date}T00:00:00Z"))
+    }).ok_or("opening cash activity date is unknown")? / 1_000_000_000 / 86_400;
+    let amount = nanos(event.net_amount.as_deref().ok_or("opening cash amount is unknown")?)?;
+    let initial = cash(&opening.snapshot.account)?;
+    if event.id != opening.activity_id || event.category != "JNLC"
+        || event.status.as_deref() != Some("executed") || amount == 0 || amount != initial
+        || cash(&baseline.account)? != initial || cash(&current.account)? != initial
+        || !baseline.activities.is_empty()
+        || event.order_id.is_some() || event.qty.is_some() || event.side.is_some() || event.symbol.is_some()
+        || event.price.is_some() || event.cum_qty.is_some() || event.leaves_qty.is_some() || event.kind.is_some()
+        || day >= u128::from(opening.snapshot.read_started_unix_secs / 86_400)
+    {
+        return Err("cash event does not match the acknowledged opening balance".into());
+    }
+    // A date is a coarse eligibility check, not proof of when cash posted.
+    // Only the explicit operator acknowledgement selects this interpretation.
+    // Keep its first availability NOW and retain the old journal prefix unchanged.
+    Ok(json!({"new_activities":1,"starting_cash_nanos":initial.to_string(),
+        "observed_cash_nanos":initial.to_string(),"expected_cash_floor_nanos":initial.to_string(),
+        "expected_cash_ceil_nanos":initial.to_string(),"trade_cash_flow_floor_nanos":"0",
+        "trade_cash_flow_ceil_nanos":"0","external_cash_flow_nanos":"0","fee_cash_flow_nanos":"0",
+        "observed_cash_consistent":true,"profit_measured":false,
+        "opening_cash_acknowledgement":{"activity_id":event.id,"amount_nanos":amount.to_string(),
+        "opening_started_unix_secs":opening.snapshot.read_started_unix_secs,
+        "operator_acknowledged_already_in_opening_cash":true,"broker_posting_time_verified":false}}))
+}
+
 fn cash(account: &BrokerAccount) -> Result<u64, String> {
     if account.currency.as_deref() != Some("USD") {
         return Err("paper cash USD currency is unknown".into());
@@ -229,6 +295,17 @@ fn collect(
     expected: &str,
     baseline: &Snapshot,
     max_pages: u16,
+    read: impl FnMut(&str) -> Result<Option<String>, String>,
+) -> Result<Value, String> {
+    collect_checked(log, expected, baseline, max_pages, None, read)
+}
+
+fn collect_checked(
+    log: &BrokerLog,
+    expected: &str,
+    baseline: &Snapshot,
+    max_pages: u16,
+    opening: Option<&Opening>,
     mut read: impl FnMut(&str) -> Result<Option<String>, String>,
 ) -> Result<Value, String> {
     if max_pages == 0 || baseline.account.id != expected {
@@ -289,7 +366,10 @@ fn collect(
         }
         orders.push(json!({"intent":intent,"before":first,"after":last,"executions":executions}));
     }
-    let cash = delta(baseline, &current, &bindings)?;
+    let cash = match opening {
+        Some(opening) => opening_delta(baseline, &current, opening)?,
+        None => delta(baseline, &current, &bindings)?,
+    };
     let claims = super::alpaca_journal::report(log, expected, false)?;
     Ok(
         json!({"version":1,"venue":"alpaca","environment":"paper","source":PAPER_API,
@@ -316,6 +396,16 @@ pub(super) fn checkpoint(
     log: &mut BrokerLog,
     expected: &str,
     max_pages: u16,
+    read: impl FnMut(&str) -> Result<Option<String>, String>,
+) -> Result<Value, String> {
+    checkpoint_checked(log, expected, max_pages, None, read)
+}
+
+fn checkpoint_checked(
+    log: &mut BrokerLog,
+    expected: &str,
+    max_pages: u16,
+    opening: Option<&Opening>,
     mut read: impl FnMut(&str) -> Result<Option<String>, String>,
 ) -> Result<Value, String> {
     let retained = log.cash().map_err(|e| e.to_string())?.cloned();
@@ -336,7 +426,7 @@ pub(super) fn checkpoint(
     )?;
     let (mut observation, reconciliation) = if let Some(prior) = &retained {
         let baseline = retained_snapshot(prior, expected, super::wallet_read::now()?)?;
-        let report = collect(log, expected, &baseline, max_pages, &mut read)?;
+        let report = collect_checked(log, expected, &baseline, max_pages, opening, &mut read)?;
         (report["activity_observations"].clone(), Some(report))
     } else {
         let observation = super::alpaca_activities::collect(expected, max_pages, |path| {
@@ -374,6 +464,11 @@ pub(super) fn checkpoint(
     observation["read_completed_unix_secs"] = json!(super::wallet_read::now()?);
     observation["position_quantities"] =
         serde_json::to_value(positions).map_err(|_| "invalid selected positions")?;
+    if let Some(acknowledgement) = reconciliation.as_ref()
+        .and_then(|report| report["cash"].get("opening_cash_acknowledgement"))
+    {
+        observation["opening_cash_acknowledgement"] = acknowledgement.clone();
+    }
     let selected = snapshot(&observation, expected)?;
     let cash = BrokerCash {
         account_id: expected.to_owned(),
@@ -434,6 +529,26 @@ pub(super) fn checkpoint_run(args: &[String]) -> Result<(), String> {
     Ok(())
 }
 
+pub(super) fn opening_run(args: &[String]) -> Result<(), String> {
+    let values: Vec<&str> = args.iter().map(String::as_str).collect();
+    let ["alpaca-opening-cash-acknowledge", "--journal", path, "--account-id", expected,
+        "--activity-id", activity_id, "--max-pages", pages, "--already-in-opening-balance"] = values.as_slice()
+    else {
+        return Err("usage: radar alpaca-opening-cash-acknowledge --journal <existing-file> --account-id <paper-id> --activity-id <selected-id> --max-pages <positive-u16> --already-in-opening-balance".into());
+    };
+    let max_pages = super::alpaca_activities::page_limit(pages)?;
+    let mut log = recovery::open_existing(path, expected)?;
+    let opening = opening_plan(&log, expected, activity_id)?;
+    let key = super::alpaca_read::credential(std::env::var("RADAR_ALPACA_PAPER_KEY_ID").ok())?;
+    let secret = super::alpaca_read::credential(std::env::var("RADAR_ALPACA_PAPER_SECRET_KEY").ok())?;
+    let agent = super::alpaca_read::agent();
+    let report = checkpoint_checked(&mut log, expected, max_pages, Some(&opening), |path| {
+        super::alpaca_read::get(&agent, &format!("{PAPER_API}{path}"), &key, &secret).map(Some)
+    })?;
+    println!("{report}");
+    Ok(())
+}
+
 pub(super) fn run(args: &[String]) -> Result<(), String> {
     let values: Vec<&str> = args.iter().map(String::as_str).collect();
     let [
@@ -472,6 +587,169 @@ pub(super) fn run(args: &[String]) -> Result<(), String> {
 mod tests {
     use super::*;
     use radar_journal::BrokerSide;
+
+    fn opening_event() -> Value {
+        json!({"id":"opening-selected","activity_type":"JNLC","net_amount":"50",
+            "date":"1970-01-01","status":"executed"})
+    }
+
+    #[test]
+    fn opening_late_seed_requires_ack_preserves_prefix_and_allows_normal_followup() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("opening.jsonl");
+        let mut log = BrokerLog::open(&path, "paper-id").unwrap();
+        checkpoint(&mut log, "paper-id", 1, |p| {
+            Ok(Some(observation_reader("50", &json!([]), p)))
+        }).unwrap();
+        let original = std::fs::read(&path).unwrap();
+        let initial = log.opening_cash().unwrap().unwrap();
+        let event = json!([opening_event()]);
+        assert!(checkpoint(&mut log, "paper-id", 1, |p| {
+            Ok(Some(observation_reader("50", &event, p)))
+        }).is_err());
+        assert_eq!(std::fs::read(&path).unwrap(), original);
+        let opening = opening_plan(&log, "paper-id", "opening-selected").unwrap();
+        let result = checkpoint_checked(&mut log, "paper-id", 1, Some(&opening), |p| {
+            Ok(Some(observation_reader("50", &event, p)))
+        }).unwrap();
+        assert_eq!(result["reconciliation"]["cash"]["external_cash_flow_nanos"], "0");
+        assert_eq!(result["checkpoint"]["observation"]["account_before"]["cash"], "50");
+        assert_eq!(result["checkpoint"]["observation"]["activities"], event);
+        assert_eq!(result["checkpoint"]["observation"]["opening_cash_acknowledgement"]["activity_id"], "opening-selected");
+        assert_eq!(result["checkpoint"]["observation"]["opening_cash_acknowledgement"]["broker_posting_time_verified"], false);
+        assert!(std::fs::read(&path).unwrap().starts_with(&original));
+        for flag in ["execution_authority", "retry_authorized", "claim_release_authorized", "profit_measured"] {
+            assert_eq!(result[flag], false);
+        }
+        drop(log);
+        let mut log = BrokerLog::open(&path, "paper-id").unwrap();
+        assert_eq!(log.opening_cash().unwrap().unwrap(), initial);
+        assert!(opening_plan(&log, "paper-id", "opening-selected").is_err());
+        checkpoint(&mut log, "paper-id", 1, |p| {
+            Ok(Some(observation_reader("50", &event, p)))
+        }).unwrap();
+        assert!(log.claims().unwrap().is_empty());
+        let unchanged = std::fs::read(&path).unwrap();
+        let mut changed = event;
+        changed[0]["net_amount"] = json!("51");
+        assert!(checkpoint(&mut log, "paper-id", 1, |p| {
+            Ok(Some(observation_reader("50", &changed, p)))
+        }).is_err());
+        assert_eq!(std::fs::read(&path).unwrap(), unchanged);
+    }
+
+    #[test]
+    fn opening_ack_binds_exact_event_balances_date_status_and_nonoverlapping_reads() {
+        let opening = Opening { activity_id:"opening-selected".into(),
+            snapshot:snapshot(&report("50", json!([]), 172_800, 172_801), "paper-id").unwrap() };
+        let baseline = snapshot(&report("50", json!([]), 259_200, 259_201), "paper-id").unwrap();
+        for date in ["1970-01-01", "1970-01-02"] {
+            let mut event = opening_event();
+            event["date"] = json!(date);
+            let current = snapshot(&report("50", json!([event]), 259_201, 259_201), "paper-id").unwrap();
+            let result = opening_delta(&baseline, &current, &opening).unwrap();
+            assert_eq!(result["observed_cash_nanos"], "50000000000");
+            assert_eq!(result["opening_cash_acknowledgement"]["opening_started_unix_secs"], 172_800);
+        }
+        for (field, value) in [
+            ("id", json!("other")), ("activity_type", json!("CSD")), ("status", json!("pending")),
+            ("status", Value::Null), ("net_amount", Value::Null), ("net_amount", json!("0")),
+            ("net_amount", json!("-50")), ("net_amount", json!("49.999999999")),
+            ("date", Value::Null), ("date", json!("1970-01-03")), ("date", json!("1970-02-30")),
+            ("date", json!("1970-1-01")), ("order_id", json!("foreign")), ("qty", json!("1")),
+            ("side", json!("buy")), ("symbol", json!("SPY")), ("price", json!("50")),
+            ("cum_qty", json!("1")), ("leaves_qty", json!("0")), ("type", json!("fill")),
+        ] {
+            let mut event = opening_event();
+            event[field] = value;
+            let current = snapshot(&report("50", json!([event]), 345_600, 345_601), "paper-id").unwrap();
+            assert!(opening_delta(&baseline, &current, &opening).is_err(), "{field}");
+        }
+        for events in [json!([]), json!([opening_event(), opening_event()])] {
+            let value = report("50", events, 345_600, 345_601);
+            assert!(snapshot(&value, "paper-id").is_err()
+                || opening_delta(&baseline, &snapshot(&value, "paper-id").unwrap(), &opening).is_err());
+        }
+        for balance in ["49.999999999", "50.000000001"] {
+            let current = snapshot(&report(balance, json!([opening_event()]), 345_600, 345_601), "paper-id").unwrap();
+            assert!(opening_delta(&baseline, &current, &opening).is_err());
+            let prior = snapshot(&report(balance, json!([]), 259_200, 259_201), "paper-id").unwrap();
+            let current = snapshot(&report("50", json!([opening_event()]), 345_600, 345_601), "paper-id").unwrap();
+            assert!(opening_delta(&prior, &current, &opening).is_err());
+        }
+        let overlapping = snapshot(&report("50", json!([opening_event()]), 259_200, 259_201), "paper-id").unwrap();
+        assert!(opening_delta(&baseline, &overlapping, &opening).is_err());
+        let prior = snapshot(&report("50", json!([{"id":"prior","activity_type":"CSD","net_amount":"50"}]),
+            259_200, 259_201), "paper-id").unwrap();
+        let current = snapshot(&report("50", json!([opening_event()]), 345_600, 345_601), "paper-id").unwrap();
+        assert!(opening_delta(&prior, &current, &opening).is_err());
+        let mut zero_event = opening_event();
+        zero_event["net_amount"] = json!("0");
+        let zero_opening = Opening {activity_id:"opening-selected".into(),
+            snapshot:snapshot(&report("0", json!([]), 172_800, 172_801), "paper-id").unwrap()};
+        let zero_prior = snapshot(&report("0", json!([]), 259_200, 259_201), "paper-id").unwrap();
+        let zero_current = snapshot(&report("0", json!([zero_event]), 345_600, 345_601), "paper-id").unwrap();
+        assert!(opening_delta(&zero_prior, &zero_current, &zero_opening).is_err());
+    }
+
+    #[test]
+    fn opening_plan_requires_retained_empty_unchanged_genesis_and_no_orders() {
+        for case in 0..8 {
+            let directory = tempfile::tempdir().unwrap();
+            let path = directory.path().join("opening.jsonl");
+            let mut log = BrokerLog::open(&path, "paper-id").unwrap();
+            if case != 0 {
+                for at in [1, 2] {
+                    let events = if (case == 2 && at == 1) || (case == 3 && at == 2) {
+                        json!([{"id":"prior", "activity_type":"CSD", "net_amount":"50"}])
+                    } else { json!([]) };
+                    let balance = if case == 1 && at == 2 { "51" } else { "50" };
+                    let mut observation = report(balance, events, at, at);
+                    observation["position_quantities"] = if (case == 4 && at == 1) || (case == 5 && at == 2) {
+                        json!({"SPY":{"asset_id":"asset", "nanoshares":1}})
+                    } else { json!({}) };
+                    if case == 6 { observation["position_quantities"] = Value::Null; }
+                    log.observe_cash(BrokerCash {account_id:"paper-id".into(), started:at, completed:at,
+                        observation, orders:Some(BTreeMap::new())}, at).unwrap();
+                }
+            }
+            if case == 7 { log.reserve(intent(BrokerSide::Buy), 3).unwrap(); }
+            assert!(opening_plan(&log, "paper-id", "opening-selected").is_err(), "{case}");
+        }
+        let directory = tempfile::tempdir().unwrap();
+        let mut log = BrokerLog::open(directory.path().join("valid.jsonl"), "paper-id").unwrap();
+        checkpoint(&mut log, "paper-id", 1, |p| Ok(Some(observation_reader("50", &json!([]), p)))).unwrap();
+        assert!(opening_plan(&log, "paper-id", &"x".repeat(256)).is_ok());
+        for id in [String::new(), "x".repeat(257), "line\nbreak".into(), "é".into()] {
+            assert!(opening_plan(&log, "paper-id", &id).is_err());
+        }
+    }
+
+    #[test]
+    fn opening_actual_collector_rejects_current_cash_and_position_races_without_append() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("opening.jsonl");
+        let mut log = BrokerLog::open(&path, "paper-id").unwrap();
+        checkpoint(&mut log, "paper-id", 1, |p| Ok(Some(observation_reader("50", &json!([]), p)))).unwrap();
+        let opening = opening_plan(&log, "paper-id", "opening-selected").unwrap();
+        let before = std::fs::read(&path).unwrap();
+        for changed in ["cash", "positions"] {
+            let mut reads = 0;
+            let result = checkpoint_checked(&mut log, "paper-id", 1, Some(&opening), |p| {
+                if p == "/v2/account" { reads += 1; }
+                if changed == "cash" && p == "/v2/account" && reads == 4 {
+                    return Ok(Some(account("51").to_string()));
+                }
+                if changed == "positions" && p == "/v2/positions" {
+                    return Ok(Some(json!([{"asset_id":"asset", "symbol":"SPY", "asset_class":"us_equity",
+                        "qty":"1", "side":"long", "cost_basis":"50"}]).to_string()));
+                }
+                Ok(Some(observation_reader("50", &json!([opening_event()]), p)))
+            });
+            assert!(result.is_err(), "{changed}");
+            assert_eq!(std::fs::read(&path).unwrap(), before);
+        }
+    }
 
     fn account(cash: &str) -> Value {
         json!({"id":"paper-id","status":"ACTIVE","currency":"USD","cash":cash,"private":"omit"})

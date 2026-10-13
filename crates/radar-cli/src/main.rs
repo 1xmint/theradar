@@ -144,6 +144,7 @@ commands:
   alpaca-activities-read --account-id <paper-id> --max-pages <positive-u16>
   alpaca-cash-reconcile --journal <private-file> --account-id <paper-id> --baseline <activity-report> --max-pages <positive-u16>
   alpaca-cash-checkpoint --journal <private-file> --account-id <paper-id> --max-pages <positive-u16>
+  alpaca-opening-cash-acknowledge --journal <existing-file> --account-id <paper-id> --activity-id <selected-id> --max-pages <positive-u16> --already-in-opening-balance
   alpaca-order-reconcile --journal <private-file> --account-id <paper-id> --client-order-id <retained-id> --max-pages <positive-u16>
   alpaca-order-read --account-id <expected-paper-account-id> --client-order-id <retained-id> [--journal <private-file>]
   alpaca-paper-cancel --journal <private-file> --account-id <paper-id> --client-order-id <retained-id>
@@ -960,6 +961,7 @@ fn main() -> ExitCode {
         "alpaca-activities-read" => alpaca_activities::run(&args),
         "alpaca-cash-reconcile" => alpaca_cash::run(&args),
         "alpaca-cash-checkpoint" => alpaca_cash::checkpoint_run(&args),
+        "alpaca-opening-cash-acknowledge" => alpaca_cash::opening_run(&args),
         "alpaca-order-reconcile" => alpaca_fills::run(&args),
         "alpaca-order-read" => alpaca_order_read::run(&args),
         "alpaca-paper-cancel" => alpaca_cancel::run(&args),
