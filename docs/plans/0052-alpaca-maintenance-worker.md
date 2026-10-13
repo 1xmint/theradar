@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # 0052 — Isolated scheduled paper maintenance worker
 
-**Status:** prepared for GitHub verification; not provisioned or active.
+**Status:** GitHub verified at b5b7b0d; not provisioned or active. Genesis guard repair pending.
 
 Branch: feat/alpaca-maintenance-worker, base a92807a. The previous turn added
 the actual maintenance CLI. During this turn its repaired source 15a5546
@@ -55,6 +55,16 @@ does not prove cancellation or reconciled fills. Memory limits additionally boun
 captured subprocess output; the four-MiB response check is after capture.
 
 ## Handback
+
+Source b5b7b0dec3d8b901f36bdf30505fe253c41e5e4b: GitHub 38316159013 passed
+all fourteen jobs, 2841 Rust/66 Python tests, eleven new worker mutations,
+four exact maintenance regressions and prior checks, and four systemd pairs.
+All four Rust shard logs explicitly report no changed Rust files; no artifacts
+are expected for this Python-only source change. Proof is recorded on the
+genesis repair child branch to preserve the parent. Review before provisioning
+found that maintenance's underlying checkpoint caller can initialize an empty
+existing journal; fix that on the child before producing an installable release.
+See plan 0053. VPS access was reauthenticated; context timer still not installed.
 
 Prepared seven tests and eleven targeted mutations for protected config, command
 selection, credential filtering, journal preservation, quotas and response trust.
