@@ -1,0 +1,6 @@
+{
+  "version": "alpaca-paper-control-v1",
+  "account_id": "replace-with-your-paper-account-uuid",
+  "operator_email": "owner@example.com",
+  "model_sha256": "replace-with-the-reviewed-private-model-sha256"
+}

@@ -1,0 +1,38 @@
+# SPDX-License-Identifier: Apache-2.0
+[Unit]
+Description=Radar isolated paper broker controller
+Requires=radar-paper-control.socket
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+DynamicUser=yes
+User=radar-paper-execution
+WorkingDirectory=/
+ExecStart=/usr/bin/python3 -I /usr/local/lib/radar-paper-control/paper-control.py
+EnvironmentFile=/etc/radar/alpaca-paper.env
+StateDirectory=radar-paper-execution
+StateDirectoryMode=0700
+UMask=0077
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectProc=invisible
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+RestrictNamespaces=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+CapabilityBoundingSet=
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+LimitCORE=0
+MemoryMax=128M
+TasksMax=32
+CPUQuota=25%
+KillMode=control-group
+LogRateLimitIntervalSec=60
+LogRateLimitBurst=5
