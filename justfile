@@ -59,8 +59,8 @@ cargo := env("RADAR_CARGO", "cargo")
 # the bot's files -- 11 in brief.rs (the analyst, contest and vault checks), 5
 # in seven_days.rs, 6 in radar-backfill's analyst_log.rs and 3 for the watched
 # seven-day checkpoint in checkpoints.rs.
-# CI 38346644746 measured 2842; raise the floor only from observed runner output.
-export MIN_TESTS := "2842"
+# CI 38438493362 measured 2847; raise the floor only from observed runner output.
+export MIN_TESTS := "2847"
 
 _default:
     @just --list --unsorted

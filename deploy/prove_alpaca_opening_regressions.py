@@ -16,7 +16,10 @@ unit = ["--bin", "radar", "alpaca_cash::tests::opening_"]
 cases = [
     (cash, b"cash(&current.account)? != initial", b"cash(&current.account)? != initial.saturating_add(amount)",
      "double-count acknowledged opening credit", None, unit, 4),
-    (cash, b"event.id != opening.activity_id", b"false", "forget selected opening event", None, unit, 4),
+    # Keep the selected field read so -D warnings does not turn this regression
+    # into a dead-code compiler refusal. Valid opening IDs are always nonempty.
+    (cash, b"event.id != opening.activity_id", b"event.id != opening.activity_id && opening.activity_id.is_empty()",
+     "forget selected opening event", None, unit, 4),
     (cash, b"log.entries().map_err(|e| e.to_string())?.next().is_some()", b"false",
      "acknowledge after retained orders", (b"fn opening_plan(", b"fn opening_delta("), unit, 4),
     (journal, b".next()", b".last()", "replace original opening with latest checkpoint",

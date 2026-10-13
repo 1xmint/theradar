@@ -60,7 +60,7 @@ claim release, retry and execution authority stay false.
 Six exact regression reapplications require four executed unit tests or the one
 actual-process test, never compiler failures as kills. The generic journal tests
 also check first cash survives later appends/reopen and poisoned ownership refuses
-opening reads. No new Rust floor is predicted; parent measured 2842 remains.
+opening reads. Run 38438493362 measured 2847 Rust tests; the floor now matches.
 All tests/build/lint/mutation jobs run on GitHub. No local jobs.
 
 First run 38435943148 at f38c7cd completed with failures. The successful append
@@ -85,12 +85,26 @@ regressions are prepared; no results claimed yet.
 
 ## Handback
 
-At 12e03ba, CI 38438493362 is still running. Formatting passed; lint found one
-107-line test after formatting. A local source correction extracts repeated
-snapshot construction without removing assertions or changing test count. Do not
-push until the current full run and release-linux 38438649651 finish; inspect all
-results and mutation artifacts first. That release belongs to the earlier head
-and cannot verify the pending correction. No artifact has been staged or applied.
+At 12e03ba, CI 38438493362 completed with two failures: the 107-line fixture
+triggered lint, and the second exact Rust regression compiled with an unused
+activity_id field, so the harness correctly refused to count it as caught.
+888d85f extracts repeated snapshot construction without removing assertions or
+changing test count. The pending regression replacement keeps the selected ID
+read while bypassing its check for every valid nonempty ID. No warning is disabled.
+
+The run measured 2847 passed Rust tests and 98 Python tests, including all six
+application tests. All fourteen exact application regressions were caught.
+All four generic mutation shards passed: 52 caught, 9 unviable, no survivors or
+timeouts. All retained unviable diagnostics were inspected: whole-function
+replacements trigger unused/dead-code warnings, except default Opening and
+BrokerCash substitutions which lack Default. These compiler refusals are not
+executed regression coverage. Seven earlier exact maintenance checks passed;
+the new opening script stopped after its second case and subsequent checks did
+not run. The corrected complete run is required before application.
+
+Release-linux 38438649651 remains live at the earlier head. Do not push over it
+while waiting on it; inspect its terminal result first. It cannot verify the
+pending correction. No artifact has been staged or applied.
 Fresh direct admin inspect and activities calls both succeeded: original journal
 metadata remains 162228 bytes, timer inactive, and the broker still reports the
 same single selected JNLC with unchanged 100000 USD simulated cash. This turn made
