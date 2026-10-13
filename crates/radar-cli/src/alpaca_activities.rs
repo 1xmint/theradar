@@ -19,7 +19,7 @@ pub(super) struct Activity {
     pub(super) account_id: Option<String>,
     pub(super) order_id: Option<String>,
     transaction_time: Option<String>,
-    date: Option<String>,
+    pub(super) date: Option<String>,
     #[serde(rename = "type")]
     pub(super) kind: Option<String>,
     pub(super) side: Option<String>,
@@ -29,7 +29,7 @@ pub(super) struct Activity {
     pub(super) cum_qty: Option<String>,
     pub(super) leaves_qty: Option<String>,
     pub(super) net_amount: Option<String>,
-    status: Option<String>,
+    pub(super) status: Option<String>,
 }
 
 fn encoded(token: &str) -> String {

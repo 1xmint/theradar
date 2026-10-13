@@ -69,6 +69,13 @@ paths cannot create unattended entries. See
 [initialization/provisioning](docs/plans/0054-alpaca-execution-initialization.md)
 and [maintenance diagnosis](docs/plans/0055-alpaca-maintenance-diagnostics.md).
 
+An explicit private opening-cash acknowledgement command now has source for the
+late paper funding case. It binds one selected cash journal to unchanged retained
+opening cash, appends the operator acknowledgement and preserves the old prefix.
+Ordinary maintenance cannot make this interpretation automatically. Verification
+and application remain pending; see
+[opening reconciliation](docs/plans/0056-alpaca-opening-cash-reconciliation.md).
+
 Use protected storage in an existing durably provisioned directory. This does
 not establish available capital, profit or trading authority. See
 [durable cash work](docs/plans/0030-alpaca-durable-cash.md).

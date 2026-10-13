@@ -1379,3 +1379,27 @@ Use the helper through sudo -n; never change credential permissions or repeat
 account initialization to work around a failed observation. Verification and
 installation succeeded and direct commands were exercised; see
 [plan 0055](../docs/plans/0055-alpaca-maintenance-diagnostics.md).
+
+The source-only `alpaca-opening-cash-acknowledge` operator command takes an
+existing private journal, pinned paper account, selected activity ID, positive
+page bound and explicit `--already-in-opening-balance` flag. It never resets
+genesis. It requires empty order/position/activity history and unchanged opening
+cash, then fresh bracketed reads matching one executed historical cash journal.
+The acknowledgement is retained at its current availability time; the activity
+is not treated as a new deposit or profit. It is outside the installed admin
+grant and never called by ordinary maintenance or the model. Source CI 38439705359
+and matching release 38439694798 passed at 1819896. The owner applied the verified
+wrapper; independent admin checks confirm resumed ordinary observation, unchanged
+100000 USD simulated cash and empty claims. See
+[plan 0056](../docs/plans/0056-alpaca-opening-cash-reconciliation.md).
+
+The source-only `apply-alpaca-opening.py` one-time wrapper installs a verified
+acknowledgement reader alongside the existing maintenance reader. It pins the
+installed administration and old reader hashes, requires the new artifact hash,
+preserves the original journal prefix under the existing observation lock, and
+probes maintenance before resuming scheduling. Failed or partial application
+retains the staged reader and refuses automatic retry. This wrapper is outside
+the five-command sudo grant and must be invoked with isolated Python (`-I`)
+after GitHub verification. Its verified source and release are recorded in
+plan 0056; application succeeded and the old recurring reader remains installed.
+No trading authority is enabled.

@@ -284,6 +284,20 @@ impl BrokerLog {
         Ok(self.cash.as_ref())
     }
 
+    /// First retained cash observation, without replacing or advancing history.
+    ///
+    /// # Errors
+    /// Poisoned ownership or an unreadable journal.
+    pub fn opening_cash(&self) -> Result<Option<BrokerCash>, BrokerError> {
+        self.healthy()?;
+        Ok(self
+            .journal
+            .events()?
+            .into_iter()
+            .next()
+            .and_then(|event| event.correlation.broker_cash))
+    }
+
     /// Residual claims relative to the last durable caller-verified observation.
     /// Original intents and submission uncertainty remain immutable; no retry.
     ///
@@ -463,6 +477,7 @@ mod tests {
         let path = dir.path().join("cash.jsonl");
         let mut log = BrokerLog::open(&path, "paper-id").unwrap();
         assert_eq!(log.cash().unwrap(), None);
+        assert_eq!(log.opening_cash().unwrap(), None);
         assert_eq!(log.observe_cash(cash(1, 2), 2).unwrap(), Applied::Advanced);
         let bytes = std::fs::read(&path).unwrap();
         assert_eq!(
@@ -476,6 +491,7 @@ mod tests {
         drop(log);
         let mut log = BrokerLog::open(&path, "paper-id").unwrap();
         assert_eq!(log.cash().unwrap(), Some(&cash(2, 2)));
+        assert_eq!(log.opening_cash().unwrap(), Some(cash(1, 2)));
         let entry = log.entries().unwrap().next().unwrap();
         assert_eq!(entry.intent, intent());
         assert_eq!(entry.state, BrokerState::SubmissionUnknown);
@@ -598,6 +614,7 @@ mod tests {
         std::fs::create_dir(&path).unwrap();
         assert!(log.observe_cash(cash(2, 3), 3).is_err());
         assert!(matches!(log.cash(), Err(BrokerError::Poisoned)));
+        assert!(matches!(log.opening_cash(), Err(BrokerError::Poisoned)));
         assert!(matches!(log.claims(), Err(BrokerError::Poisoned)));
         assert!(matches!(log.entries(), Err(BrokerError::Poisoned)));
         assert!(matches!(
