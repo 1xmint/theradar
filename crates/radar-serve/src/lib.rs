@@ -27,6 +27,7 @@ pub mod link;
 pub mod market;
 pub mod mcp;
 mod ops;
+mod paper;
 pub mod positions;
 pub mod privy;
 pub mod share;
@@ -306,6 +307,7 @@ impl Drop for VisitorGuard {
 pub fn app(state: Arc<AppState>) -> Router {
     let mut router = Router::new()
         .merge(automation::routes())
+        .merge(paper::routes())
         // The interface, embedded in this binary. The server-rendered ops page
         // stays at /ops as the no-JavaScript fallback: it is what answers when
         // somebody is debugging with curl, and it needs no build to exist.
@@ -658,7 +660,9 @@ async fn guard(
         // one wallet's own state refuses the operator like anyone else. The
         // owner's decision of 2026-09-23 -- nobody reads a wallet's list but
         // that wallet.
-        Ok(_) => {
+        Ok(identity) => {
+            let mut request = request;
+            request.extensions_mut().insert(Operator(identity));
             next.run(with_session_refusal(request, session_refused))
                 .await
         }
@@ -672,6 +676,11 @@ async fn guard(
         },
     }
 }
+
+/// A request-carried proof, inserted only after verified operator Access.
+/// Access-off and customer authentication never construct this proof.
+#[derive(Clone)]
+struct Operator(access::Identity);
 
 /// The request, carrying why its wallet session was refused, if one was.
 ///

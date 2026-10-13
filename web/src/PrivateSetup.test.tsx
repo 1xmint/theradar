@@ -10,6 +10,7 @@ afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); });
 
 function server(link: unknown = { error: "not configured" }, status = 404, privy: unknown = { error: "not configured" }, privyStatus = 503) {
   return vi.fn(async (url: RequestInfo | URL, options?: RequestInit) => {
+    if (url === "/v1/paper/status") return Response.json({ error: "Paper controller not installed" }, { status: 503 });
     if (url === "/health") return new Response(JSON.stringify({ agent: { configured: false } }));
     if (url === "/v1/customer/config") return new Response(JSON.stringify(privy), { status: privyStatus });
     if (options?.method === "POST") return new Response(JSON.stringify({
@@ -62,6 +63,7 @@ describe("private setup", () => {
     vi.useFakeTimers();
     let polls = 0;
     vi.stubGlobal("fetch", vi.fn(async (url: RequestInfo | URL) => {
+      if (url === "/v1/paper/status") return Response.json({ error: "Paper controller not installed" }, { status: 503 });
       if (url === "/v1/customer/config") return new Response("{}", { status: 503 });
       polls++;
       return new Response(JSON.stringify(polls === 1 ? {
