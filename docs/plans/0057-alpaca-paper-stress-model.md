@@ -57,22 +57,24 @@ atomic state failure. One actual CLI process test covers both commands, optional
 selection, invalid scenario validation before credentials, unsupported flags and
 missing history without creation. Eight exact regressions require executed
 tests; compiler refusals are not kills. Tests/build/lint/mutations run on GitHub.
-Do not raise the measured parent floor 2847 until actual full runner output.
+CI 38444102509 measured 2855 Rust tests; the floor now matches that output.
 
 ## Handback
 
-Source fe21d9e is pushed in attached draft PR 418. CI 38444102509 is live: its
+Source fe21d9e is pushed in attached draft PR 418. CI 38444102509 completed: its
 lint job requires Option<&Model> rather than &Option<Model>, and formatting
 reported sixteen hunks. Those exact GitHub formatting edits and the reference
-type/caller/test/regression correction are prepared locally, without suppressing
-warnings. Do not push until the full current run is terminal; inspect the test
-result and executed exact regressions first.
+type/caller/test/regression correction are committed locally at e7db69a, without
+suppressing warnings. All jobs are terminal; only lint and formatting failed.
+The corrected source must pass complete GitHub verification before provisioning.
 
 All four generic mutation shards passed. Downloaded artifacts show 32 caught,
 eight compiler-unviable, no survivors or timeouts. All eight unviable diagnostics
 were read: whole-function replacements cause unused/dead-code warnings; they are
-not executed-test coverage. The full test job and exact reapplications are still
-running. No new test count/floor or complete verification is claimed yet.
+not executed-test coverage. The full test job passed: 2855 Rust tests, 98 Python
+tests and all eight exact paper-model reapplications were caught by the required
+executed tests. Earlier exact checks and unit verification also completed. A
+corrected full run is still required; passing tests alone is not complete CI.
 No artifact, configuration, website deployment or order authority changed.
 Complete the corrected GitHub checks before provisioning.
 The observation repair remains successful; it is not the final trading goal.
