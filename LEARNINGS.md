@@ -13,7 +13,7 @@ benefit of the doubt on everything else.
 
 ## Index
 
-**45 of these 59 name something mechanical that would catch a
+**46 of these 60 name something mechanical that would catch a
 recurrence. 14 name only a habit, and say so** — which is this file's opening
 standard rather than a gap in it. The habit-only rows are the ones worth reading
 twice; nothing will stop those repeating except somebody remembering.
@@ -84,6 +84,7 @@ quietly absent.
 | [57](#57-malformed-packet-tests-failed-at-a-different-guard) | Malformed packet tests failed at a different guard | signed malformed-header and balance-consistent duplicate-account regressions |
 | [58](#58-a-small-captured-amount-was-misnamed-as-a-tolerance) | A small captured amount was misnamed as a tolerance | raw-token floor conversion and successful-capture argument regressions |
 | [59](#59-recovery-must-not-also-initialize-its-own-missing-history) | Recovery must not also initialize its own missing history | maintenance process refusals and exact retained-history guard omissions |
+| [60](#60-a-boundary-test-must-not-borrow-the-broken-boundarys-expectation) | A boundary test must not borrow the broken boundary's expectation | independent paper socket boundaries and exact arithmetic regressions |
 
 ---
 

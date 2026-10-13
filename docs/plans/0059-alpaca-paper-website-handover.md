@@ -103,19 +103,43 @@ setup and explicit live permission. No positive expectancy has been established.
 ## Current handback
 
 Correction 441292f212dce10d43c2747b68bcaeab5461b40d is pushed in attached draft
-PR 420. GitHub run 38466027799 is confirmed live; do not restart/cancel it or
-push over its remaining tests and mutation shards. Its lint job 115532922246
-requires ok_or for the now-small static Fault, and formatting job 115532922623
-reports one final assertion-wrapping hunk. Those exact corrections are retained
-locally, unpushed while this run is live. Tests job 115532922447 and all four
-mutation jobs were still in progress at the latest check; read their terminal
-results and artifacts before pushing the local correction. Frontend job
-115532921871 completed successfully: its actual log reports 365 tests and all
-nine panel reapplications caught. A transient jobs-list HTTP 502 was followed
-by a successful read of the same still-live run; nothing was restarted.
-No local tests, builds, formatters or mutations ran.
+PR 420. GitHub run 38466027799 completed with failure; no job was canceled.
+Its lint job 115532922246 requires ok_or for the now-small static Fault, and
+formatting job 115532922623 reports one final assertion-wrapping hunk. Those
+exact corrections are committed locally at 2800e45. Tests job 115532922447
+passed all seven paper tests but failed repo-conformance because the new
+learning note lacked index row 60. The missing row and table counts are fixed;
+the test was not weakened. That early failure prevented its twenty exact backend
+reapplications from running, so those are still pending.
+
+All four mutation artifacts were read, including every compiler-unviable reason:
+64 total, 43 caught, 21 compiler-unviable, no survivors/timeouts. Whole-function
+substitutions fail unused/dead-code checks or invalid constructor/Default types;
+none count as executed coverage. Frontend job 115532921871 completed with
+365 tests and all nine panel reapplications caught. Transient jobs-list 502/504
+responses were followed by successful reads of the same run and its individual
+jobs; no restart was inferred from an observation failure.
+The next push combines the retained lint/format fixes, index correction and this
+evidence. Full green verification remains required. No local tests, builds,
+formatters or mutations ran.
 
 This goal turn made source and executed verification progress. The website
 caller is implemented, not yet fully verified or deployed. Continue with the
 remaining GitHub evidence, then supervisor integration and the reviewed private
 installation. Autonomous trading remains the full active objective.
+
+## Supervisor integration findings
+
+The existing alpaca-paper-propose command has a fixed experiment quantity and
+only enter/wait replies; it cannot implement agent sizing or exits. The Codex
+bridge currently admits guardian only; a separate supervisor needs exec-only
+admission, keeping login operations guardian-only and the model UID excluded
+from broker control. The fixed market-read CLI can collect SPY/QQQ snapshots;
+the supervisor needs a private observation path rather than broker credentials.
+
+Existing radar-paper-research.service and radar-context-research.service run as
+guardian with the paper environment. A reviewed autonomous installation must
+retire those completed campaign timers while preserving their files, so those
+legacy credentialed processes do not share the website UID. The private recorder
+and existing broker observation history must remain preserved. No service was
+changed during this inspection.
