@@ -102,14 +102,29 @@ executed regression coverage. Seven earlier exact maintenance checks passed;
 the new opening script stopped after its second case and subsequent checks did
 not run. The corrected complete run is required before application.
 
-Release-linux 38438649651 remains live at the earlier head. Do not push over it
-while waiting on it; inspect its terminal result first. It cannot verify the
-pending correction. No artifact has been staged or applied.
+Release-linux 38438649651 finished successfully at the earlier 12e03ba head.
+Downloaded BUILD-INFO and independently computed reader SHA256 agree at
+2b950ba2f32aafe6416ab5d150da0b00264109e3a91bee3d4a64fe89cac11394.
+This artifact remains unused. The corrected source head 1819896 was pushed only
+after that run finished. Full CI 38439705359 and matching release 38439694798
+are live; lint and formatting now pass. Inspect all results before staging an
+artifact. A temporary unavailable live test log is not a terminal failure.
+No artifact has been staged or applied.
 Fresh direct admin inspect and activities calls both succeeded: original journal
 metadata remains 162228 bytes, timer inactive, and the broker still reports the
 same single selected JNLC with unchanged 100000 USD simulated cash. This turn made
 progress through CI corrections and controlled application source/test coverage;
 it is not a repeated access-blocked turn.
+
+Independent research inspection while CI runs: guardian can read the retained
+context campaign files. All twelve slot decision records, not only first/last,
+contain action=wait and strategy_id=snapshot-context-v1. Their reasons cite
+incomplete context, no verified learned edge and explicit costs. The service
+reports success; this proves retained abstention, not model provenance or
+cost-adjusted outcome scores. Source alpaca_context.rs supplies one completed
+minute bar and one previous daily bar, with learned_edge_verified=false. Repeating
+this campaign is not evidence of learning. The next research work must add richer
+historical features and forward baselines rather than relax the edge label.
 
 Source implementation needs complete GitHub verification before any
 operator acknowledgement is requested. The installed admin helper
