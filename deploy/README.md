@@ -1361,6 +1361,21 @@ CLI, validates the returned pinned paper checkpoint and retains completion.
 Failure or interruption retains the fence and any partial history. Inspect
 failed installation explicitly; never delete the fence or repeat initialization
 as a recovery shortcut. The recurring worker refuses missing journal history.
-These files are not yet installed. Stage and request owner sudo execution only
-after GitHub verification. No model, new-order permission or website handover
-is activated. See [plan 0054](../docs/plans/0054-alpaca-execution-initialization.md).
+These files were installed and initialization/early observation succeeded;
+later maintenance stopped advancing on an unsupported cash activity. No model,
+new-order permission or website handover is activated. See
+[plan 0054](../docs/plans/0054-alpaca-execution-initialization.md).
+
+The owner-authorized administrative helper source, `radar-paper-admin.py`,
+accepts only inspect, activities, maintain, stop or start. Its one-time root
+installer, `setup-alpaca-admin.py`, consumes `/tmp/radar-paper-admin.py` and the
+verified helper SHA-256 as its sole argument. After GitHub verification it
+exclusively installs `/usr/local/sbin/radar-paper-admin` and
+`/etc/sudoers.d/radar-paper-admin`, allowing guardian exactly those five commands
+without another password prompt. It validates the sudoers grammar before either
+publication and refuses preexisting targets. It cannot invoke arbitrary commands
+or alter trading policy. Installation does not start or stop any service.
+Use the helper through sudo -n; never change credential permissions or repeat
+account initialization to work around a failed observation. Verification and
+installation succeeded and direct commands were exercised; see
+[plan 0055](../docs/plans/0055-alpaca-maintenance-diagnostics.md).
