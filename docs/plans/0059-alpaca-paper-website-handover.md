@@ -110,8 +110,10 @@ reports one final assertion-wrapping hunk. Those exact corrections are retained
 locally, unpushed while this run is live. Tests job 115532922447 and all four
 mutation jobs were still in progress at the latest check; read their terminal
 results and artifacts before pushing the local correction. Frontend job
-115532921871 includes the newly required nine panel regressions; it also needs
-its actual result inspected. No local tests, builds, formatters or mutations ran.
+115532921871 completed successfully: its actual log reports 365 tests and all
+nine panel reapplications caught. A transient jobs-list HTTP 502 was followed
+by a successful read of the same still-live run; nothing was restarted.
+No local tests, builds, formatters or mutations ran.
 
 This goal turn made source and executed verification progress. The website
 caller is implemented, not yet fully verified or deployed. Continue with the
