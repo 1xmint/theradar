@@ -1377,4 +1377,5 @@ publication and refuses preexisting targets. It cannot invoke arbitrary commands
 or alter trading policy. Installation does not start or stop any service.
 Use the helper through sudo -n; never change credential permissions or repeat
 account initialization to work around a failed observation. Verification and
-installation are pending; see [plan 0055](../docs/plans/0055-alpaca-maintenance-diagnostics.md).
+installation succeeded and direct commands were exercised; see
+[plan 0055](../docs/plans/0055-alpaca-maintenance-diagnostics.md).

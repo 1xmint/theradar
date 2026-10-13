@@ -63,8 +63,8 @@ Its root-owned configuration defaults to observation; optional cancel_working
 requests one retained-order cancellation per tick. It refuses a missing private
 journal and keeps brokerage credentials out of model processes. Initial journal
 creation and early observation succeeded; a later unsupported cash activity
-now prevents checkpoint advancement. A fixed administrative helper is being
-verified so diagnostics no longer need repeated private sudo commands. These
+now prevents checkpoint advancement. A verified fixed administrative helper is
+installed so diagnostics no longer need repeated private sudo commands. These
 paths cannot create unattended entries. See
 [initialization/provisioning](docs/plans/0054-alpaca-execution-initialization.md)
 and [maintenance diagnosis](docs/plans/0055-alpaca-maintenance-diagnostics.md).

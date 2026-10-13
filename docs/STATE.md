@@ -46,14 +46,20 @@ and stale exit, plus failed attempts, do not establish useful performance.
 See [cohort reporting](plans/0045-alpaca-cohort-report.md). The separate guarded
 snapshot-context campaign is now installed. SSH at October 13 04:56 UTC verified
 active scheduling, successful service, installed hashes and the frozen twelve
-future slots starting today at 10 AM Eastern. See
+slots starting today at 10 AM Eastern. At 16:09 UTC the service reported all
+twelve slots as decisions; independently read first/last proposals are wait.
+Cost-adjusted exits remain unscored. See
 [context provisioning](plans/0050-alpaca-context-provisioning.md).
 Retained-order maintenance and its explicit history requirement passed GitHub
 at 37b56014. One-time initialization and observation provisioning passed all
 fourteen GitHub checks at 36ec9f2 and are installed. SSH verified initialization
 and initial successful observation ticks, followed by recurring failure on an
 unsupported new cash activity. History remains retained; diagnosis and repair
-are [plan 0055](plans/0055-alpaca-maintenance-diagnostics.md). See
+are [plan 0055](plans/0055-alpaca-maintenance-diagnostics.md). A verified root-owned
+helper now grants five exact passwordless paper diagnostic/observation commands.
+The failing timer is stopped and history retained. Direct activity inspection
+identified an executed 100000 JNLC dated before initialization; controlled
+opening-history reconciliation remains required. See
 [initialization/provisioning](plans/0054-alpaca-execution-initialization.md).
 No actual broker orders, effective autonomous handover or Alpaca learning results
 have been verified. The autonomous goal remains incomplete.
