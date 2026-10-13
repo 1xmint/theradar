@@ -46,13 +46,17 @@ not an installed unattended supervisor. See
 [paper cancellation](docs/plans/0046-alpaca-paper-cancellation.md).
 
 `radar alpaca-paper-maintain --journal <private-file> --account-id <paper-id> --max-pages <positive-u16> [--cancel-working]`
-performs one recovery tick under the existing journal owner. It refreshes the
-cash/share/order checkpoint, reports working, terminal and unresolved orders,
+performs one recovery tick under the existing journal owner. It requires an
+already retained cash checkpoint before reading credentials or broker facts,
+then refreshes cash/share/order state, reports working, terminal and unresolved orders,
 and optionally requests cancellation of at most one working order. Pending
 cancellation uncertainty is observed rather than retried. Checkpoint failure
 stops the tick; cancellation acceptance retains claims. This is the maintenance
 phase for a future isolated supervisor, with no new-order authority or installed
 timer. See [paper maintenance](docs/plans/0051-alpaca-paper-maintenance.md).
+An existing empty file or reservation-only history is not a fresh account;
+initialization is a separate operator action. See
+[maintenance genesis guard](docs/plans/0053-alpaca-maintenance-genesis.md).
 
 The separate maintenance worker and systemd pair now have source under deploy.
 Its root-owned configuration defaults to observation; optional cancel_working

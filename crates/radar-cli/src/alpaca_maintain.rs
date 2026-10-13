@@ -6,6 +6,15 @@ use serde_json::{Value, json};
 
 const PAPER_API: &str = "https://paper-api.alpaca.markets";
 
+fn existing_checkpoint(log: &BrokerLog) -> Result<(), String> {
+    if log.cash().map_err(|e| e.to_string())?.is_none() {
+        return Err(
+            "paper maintenance checkpoint missing; explicit initialization required".into(),
+        );
+    }
+    Ok(())
+}
+
 fn maintain(
     log: &mut BrokerLog,
     account: &str,
@@ -15,10 +24,9 @@ fn maintain(
 ) -> Result<Value, String> {
     // A fresh protected checkpoint must precede selecting a cancellation. A
     // missing order, changing account or incomplete fills stops the entire tick.
+    // Existing-but-empty history must never be silently bootstrapped by a tick.
+    existing_checkpoint(log)?;
     refresh(log)?;
-    if log.cash().map_err(|e| e.to_string())?.is_none() {
-        return Err("paper maintenance checkpoint missing".into());
-    }
     let claims = log.claims().map_err(|e| e.to_string())?;
     let mut working = Vec::new();
     let mut unresolved = Vec::new();
@@ -69,6 +77,7 @@ pub(super) fn run(args: &[String]) -> Result<(), String> {
     };
     let pages = super::alpaca_activities::page_limit(pages)?;
     let mut log = super::alpaca_order_read::open_existing(journal, account)?;
+    existing_checkpoint(&log)?;
     let key = super::alpaca_read::credential(std::env::var("RADAR_ALPACA_PAPER_KEY_ID").ok())?;
     let secret =
         super::alpaca_read::credential(std::env::var("RADAR_ALPACA_PAPER_SECRET_KEY").ok())?;
@@ -122,10 +131,23 @@ mod tests {
         }
     }
 
+    fn observation(path: &str) -> String {
+        if path == "/v2/account" {
+            json!({"id":"paper","status":"ACTIVE","currency":"USD","cash":"100"}).to_string()
+        } else {
+            "[]".into()
+        }
+    }
+
     #[test]
     fn actual_checkpoint_runs_before_maintenance_without_orders_or_cancellation() {
         let dir = tempfile::tempdir().unwrap();
         let mut log = BrokerLog::open(dir.path().join("paper.jsonl"), "paper").unwrap();
+        // Deliberate initialization is separate from the maintenance caller.
+        super::super::alpaca_cash::checkpoint(&mut log, "paper", 1, |path| {
+            Ok(Some(observation(path)))
+        })
+        .unwrap();
         let mut paths = Vec::new();
         let report = maintain(
             &mut log,
@@ -134,12 +156,7 @@ mod tests {
             |log| {
                 super::super::alpaca_cash::checkpoint(log, "paper", 1, |path| {
                     paths.push(path.to_owned());
-                    Ok(Some(if path == "/v2/account" {
-                        json!({"id":"paper","status":"ACTIVE","currency":"USD","cash":"100"})
-                            .to_string()
-                    } else {
-                        "[]".into()
-                    }))
+                    Ok(Some(observation(path)))
                 })
                 .map(|_| ())
             },
@@ -162,20 +179,25 @@ mod tests {
         for missing in [false, true] {
             let dir = tempfile::tempdir().unwrap();
             let mut log = BrokerLog::open(dir.path().join("paper.jsonl"), "paper").unwrap();
+            if !missing {
+                log.observe_cash(cash(1), 1).unwrap();
+            }
+            let mut reads = 0;
             assert!(
                 maintain(
                     &mut log,
                     "paper",
                     true,
-                    |_| if missing {
-                        Ok(())
-                    } else {
+                    |_| {
+                        reads += 1;
+                        assert!(!missing, "missing history must refuse before provider reads");
                         Err("unknown observation".into())
                     },
                     |_, _| panic!("unverified checkpoint must not cancel")
                 )
                 .is_err()
             );
+            assert_eq!(reads, usize::from(!missing));
         }
     }
 

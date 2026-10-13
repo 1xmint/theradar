@@ -2380,3 +2380,22 @@ keep captured bytes, interface meaning and acceptance claims separate. Research
 0039 records the evidence and remaining limits. No live trade used this change.
 
 **What catches a recurrence:** the raw-token floor conversion and successful-capture argument regressions in crates/radar-pumpfun/src/instruction.rs; the quote provenance still needs independent verification.
+
+## 59. Recovery must not also initialize its own missing history
+
+The paper maintenance command refreshed through alpaca_cash::checkpoint before
+requiring a retained checkpoint. That general collector supports initialization;
+its maintenance test explicitly accepted starting from an empty BrokerLog.
+GitHub 38315068491 passed that test. An existing-but-empty recovery journal could
+therefore acquire a fresh genesis rather than refusing potentially lost history.
+The absence check after refresh could never detect that reset. Review found this
+before service installation; no production orders used the maintenance path.
+
+Require retained history before refreshing it and before reading credentials in
+the actual CLI. Initialization remains a deliberate separate operator action.
+Test both empty and reservation-only existing journals without broker keys,
+assert no journal-byte changes, and keep valid initialization/refresh distinct.
+Plan 0053 records the correction and pending GitHub evidence.
+
+**What catches a recurrence:** actual maintenance process refusals for absent
+cash history and targeted omissions of the pre-refresh and pre-credential guards.
