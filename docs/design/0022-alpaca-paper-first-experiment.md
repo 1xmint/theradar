@@ -376,7 +376,7 @@ after those writes, checks the original permission and re-evaluates the aged
 provider facts under the latest policy before the fixed paper-only POST. A
 matching response is neither reconciled fills nor permission to retry/release.
 Default capacity/cost inputs remain unknown and refuse before reservation. This
-private CLI process is not yet an isolated authenticated execution service or
+private CLI process is not yet installed behind an authenticated control service or
 unattended supervisor; site handover, cancellation/recovery and forward evaluation
 remain required. See [paper submission](../plans/0034-alpaca-paper-submit.md).
 
@@ -388,3 +388,12 @@ same operator model before risk and after durable submission uncertainty. Change
 assumptions refuse before send. It is neither a learned strategy nor effective
 site handover; no model is installed or enabled. See
 [paper execution assumptions](../plans/0057-alpaca-paper-stress-model.md).
+
+The private paper controller now has source for a systemd-owned local socket,
+separate web/supervisor peer roles and generation-specific revocable policies.
+It resolves manual and Agent decides choices into standing equity-bounded
+ceilings, then invokes the existing deterministic paper execution caller.
+Unknown submission outcomes remain retained. This is not installed, and has no
+website handler or unattended supervisor yet. See
+[private paper control](../plans/0058-alpaca-private-paper-control.md) for its
+verification status and remaining integration work.

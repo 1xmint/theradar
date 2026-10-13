@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # 0058 — Private paper handover control
 
-**Status:** source implemented; GitHub verification pending; not installed.
+**Status:** source verified on GitHub; not installed; website/supervisor remain.
 
 Branch feat/alpaca-paper-control, parent d1bf9d7. Parent documentation CI
 38447606174 completed all fourteen jobs successfully before this branch. Its
@@ -74,3 +74,26 @@ Richer historical features and held-out/forward comparisons, realistic fill/cost
 accounting and learning remain necessary for the profit goal. All twelve earlier
 context decisions abstained; no positive expectancy has been established.
 No service, website, credentials or trading authority changed in this source step.
+
+Source 92871a9abf34d0cdf9b286dcfa8c23cfe348c757 passed all fourteen jobs in
+GitHub CI 38459955335. Its tests job 115512240980 reports 2855 Rust tests and
+109 Python tests, including all eleven new controller tests. All seventeen
+paper-control regressions were caught by executed tests. Existing exact checks
+also passed, followed by systemd-analyze verification of the service and socket.
+The generic Rust mutation shards reported no changed Rust source; no new Rust
+mutation artifact or compiler-unviable coverage is claimed for this Python diff.
+Attached draft PR 419 is stacked on PR 418; keep that parent stable.
+
+Direct passwordless paper-admin inspect on October 13, around 20:05 UTC,
+independently returned an active waiting observation timer and successful recent
+maintenance ticks with zero working, unresolved and terminal orders, and
+new_order_authority false. Existing journal metadata showed 393967 bytes; lock
+and genesis marker sizes remained 82 and 110 bytes. No private file contents or
+credentials were read. The prior accounting repair remains operational.
+
+This turn made source and verification progress; no access blocker recurred.
+Next implement the verified-identity website bridge and panel, then the separate
+supervisor and reviewed installation. The Codex bridge currently admits only
+guardian; extending it for supervisor inference must keep login operations
+guardian-only and continue excluding the model UID from paper control. The full
+autonomous-trading goal remains active; this component is not activation.
