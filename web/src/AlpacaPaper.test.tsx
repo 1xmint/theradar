@@ -11,7 +11,7 @@ function snapshot(): PaperStatus {
   return { version: "alpaca-paper-control-v1", environment: "paper", account_id: "paper-account", generation: 7,
     preferences: { capital_usd: "50", max_trade_usd: "10", daily_loss_usd: "5", daily_loss_enabled: false,
       agent_decides: { capital_usd: false, max_trade_usd: false, daily_loss_usd: false } },
-    handover_enabled: false, effective_policy: null,
+    handover_enabled: false, effective_policy: { enabled: false, max_capital_microusd: 0, max_order_microusd: 0, max_daily_loss_microusd: null },
     account: { id: "paper-account", cash: "100000", equity: "100000", currency: "USD", status: "ACTIVE" },
     positions: [], market_clock: { timestamp: "2026-10-13T15:00:00Z", is_open: true,
       next_open: "2026-10-14T13:30:00Z", next_close: "2026-10-13T20:00:00Z" },
@@ -24,7 +24,8 @@ function server(initial = snapshot()) {
     if (url === "/v1/paper/status") return Response.json(retained);
     const body = JSON.parse(options!.body as string) as { generation: number; preferences?: PaperStatus["preferences"]; enabled?: boolean };
     retained = { ...retained, generation: body.generation + 1, handover_enabled: body.enabled ?? false,
-      preferences: body.preferences ?? retained.preferences };
+      preferences: body.preferences ?? retained.preferences,
+      effective_policy: retained.effective_policy ? { ...retained.effective_policy, enabled: body.enabled ?? false } : null };
     return Response.json({ generation: retained.generation });
   });
   vi.stubGlobal("fetch", fetch);
@@ -86,6 +87,7 @@ describe("Alpaca paper handover", () => {
 
   it("pauses independently of invalid draft amounts and reloads the new revision", async () => {
     const initial = snapshot(); initial.handover_enabled = true;
+    initial.effective_policy!.enabled = true;
     const fetch = server(initial); render(<AlpacaPaper />); await screen.findAllByText("100000 USD");
     fireEvent.change(screen.getByLabelText("Paper capital budget"), { target: { value: "invalid" } });
     fireEvent.click(screen.getByRole("button", { name: "Pause paper handover" }));
@@ -134,6 +136,7 @@ describe("Alpaca paper handover", () => {
     expect(fetch.mock.calls.filter(([url]) => url !== "/v1/paper/status")).toHaveLength(1);
     expect(screen.queryByText(/Paper permission updated/)).toBeNull();
     retained.generation = 8; retained.handover_enabled = true;
+    retained.effective_policy!.enabled = true;
     await act(async () => { resolve!(Response.json({ generation: 8 })); });
     await screen.findByText("Paper permission granted; autonomous agent readiness is not yet verified.");
   });

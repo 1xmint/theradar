@@ -60,7 +60,7 @@ cargo := env("RADAR_CARGO", "cargo")
 # in seven_days.rs, 6 in radar-backfill's analyst_log.rs and 3 for the watched
 # seven-day checkpoint in checkpoints.rs.
 # CI 38444102509 measured 2855; raise the floor only from observed runner output.
-export MIN_TESTS := "2855"
+export MIN_TESTS := "2862"
 
 _default:
     @just --list --unsorted
@@ -404,7 +404,7 @@ licence-headers:
 # "refused, or is rate-limited" case became three: a 400 still ends the poll
 # immediately, a `busy` 503 keeps polling past its first refusal, and a
 # `chain_unreadable` 502 followed by a landed read still shows "Landed".
-export MIN_WEB_TESTS := "343"
+export MIN_WEB_TESTS := "365"
 
 # The public site at cabalhunter.org. Lower because it has five pages, and it
 # exists for the same reason MIN_WEB_TESTS does: `vitest run` exits zero when it
@@ -434,6 +434,7 @@ export MIN_SITE_TESTS := "58"
 # compile when nobody has run it.
 web:
     just _npm_app web "$MIN_WEB_TESTS"
+    python3 deploy/prove_paper_panel_regressions.py
 
 # The public site: the same pipeline, on the other application.
 #

@@ -747,9 +747,13 @@ pub(crate) mod tests {
     use std::collections::BTreeMap;
 
     pub(crate) fn operator_fixture() -> (&'static str, Config, KeyCache) {
-        (GOOD, config(), KeyCache {
-            inner: RwLock::new(Some((std::time::Instant::now(), keys()))),
-        })
+        (
+            GOOD,
+            config(),
+            KeyCache {
+                inner: RwLock::new(Some((std::time::Instant::now(), keys()))),
+            },
+        )
     }
 
     /// The modulus of the key that signed the fixtures below, base64url.

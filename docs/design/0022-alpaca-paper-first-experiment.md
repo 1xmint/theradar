@@ -394,6 +394,14 @@ separate web/supervisor peer roles and generation-specific revocable policies.
 It resolves manual and Agent decides choices into standing equity-bounded
 ceilings, then invokes the existing deterministic paper execution caller.
 Unknown submission outcomes remain retained. This is not installed, and has no
-website handler or unattended supervisor yet. See
+unattended supervisor yet. See
 [private paper control](../plans/0058-alpaca-private-paper-control.md) for its
 verification status and remaining integration work.
+
+The website caller now has source for an Alpaca account/preferences/handover/pause
+panel and private HTTP-to-socket bridge. The real guard carries verified operator
+identity; paper handlers require it even when Access is off and derive the actor
+themselves. Saving disables permission, enabling is explicit, and unknown writes
+require status reload. Selected simulated balances are not profit or proof the
+supervisor is running. This source is not deployed; see
+[website handover](../plans/0059-alpaca-paper-website-handover.md) for verification.

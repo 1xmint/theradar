@@ -2400,3 +2400,17 @@ Plan 0053 records the correction and pending GitHub evidence.
 
 **What catches a recurrence:** actual maintenance process refusals for absent
 cash history and targeted omissions of the pre-refresh and pre-credential guards.
+
+## 60. A boundary test must not borrow the broken boundary's expectation
+
+The paper socket response test built its oversized payload from production LIMIT.
+GitHub CI 38463563767 mutation shard 0 changed each multiplication in that bound
+to addition; both survived because the payload shrank with the faulty limit.
+The test proved agreement with its implementation, not the 4 MiB protocol.
+Use an independent 4194304-byte expectation, a valid JSON response exactly at
+the boundary, and another one byte above it. Check request boundaries separately.
+Both original arithmetic faults are included in plan 0059's exact executed-test
+reapplications. Corrected verification is pending; no exclusion was added.
+
+**What catches a recurrence:** the independent paper socket boundary cases and
+both arithmetic faults in deploy/prove_paper_site_regressions.py.
