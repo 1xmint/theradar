@@ -85,8 +85,20 @@ regressions are prepared; no results claimed yet.
 
 ## Handback
 
-Source implementation is prepared and needs GitHub verification before any
-artifact or operator acknowledgement is requested. The installed admin helper
+At 12e03ba, CI 38438493362 is still running. Formatting passed; lint found one
+107-line test after formatting. A local source correction extracts repeated
+snapshot construction without removing assertions or changing test count. Do not
+push until the current full run and release-linux 38438649651 finish; inspect all
+results and mutation artifacts first. That release belongs to the earlier head
+and cannot verify the pending correction. No artifact has been staged or applied.
+Fresh direct admin inspect and activities calls both succeeded: original journal
+metadata remains 162228 bytes, timer inactive, and the broker still reports the
+same single selected JNLC with unchanged 100000 USD simulated cash. This turn made
+progress through CI corrections and controlled application source/test coverage;
+it is not a repeated access-blocked turn.
+
+Source implementation needs complete GitHub verification before any
+operator acknowledgement is requested. The installed admin helper
 continues to provide direct fixed diagnostics; its grant does not include arbitrary
 root updates or this accounting acknowledgement. A concrete verified deployment
 step may still need the owner's private sudo entry. No history, capital policy,

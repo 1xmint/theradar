@@ -717,6 +717,10 @@ mod tests {
         assert_eq!(std::fs::read(&path).unwrap(), unchanged);
     }
 
+    fn opening_fixture(balance: &str, events: Value, started: u64, completed: u64) -> Snapshot {
+        snapshot(&report(balance, events, started, completed), "paper-id").unwrap()
+    }
+
     #[test]
     fn opening_ack_binds_exact_event_balances_date_status_and_nonoverlapping_reads() {
         let opening = Opening {
@@ -776,26 +780,14 @@ mod tests {
             );
         }
         for balance in ["49.999999999", "50.000000001"] {
-            let current = snapshot(
-                &report(balance, json!([opening_event()]), 345_600, 345_601),
-                "paper-id",
-            )
-            .unwrap();
+            let current = opening_fixture(balance, json!([opening_event()]), 345_600, 345_601);
             assert!(opening_delta(&baseline, &current, &opening).is_err());
             let prior =
                 snapshot(&report(balance, json!([]), 259_200, 259_201), "paper-id").unwrap();
-            let current = snapshot(
-                &report("50", json!([opening_event()]), 345_600, 345_601),
-                "paper-id",
-            )
-            .unwrap();
+            let current = opening_fixture("50", json!([opening_event()]), 345_600, 345_601);
             assert!(opening_delta(&prior, &current, &opening).is_err());
         }
-        let overlapping = snapshot(
-            &report("50", json!([opening_event()]), 259_200, 259_201),
-            "paper-id",
-        )
-        .unwrap();
+        let overlapping = opening_fixture("50", json!([opening_event()]), 259_200, 259_201);
         assert!(opening_delta(&baseline, &overlapping, &opening).is_err());
         let prior = snapshot(
             &report(
@@ -807,11 +799,7 @@ mod tests {
             "paper-id",
         )
         .unwrap();
-        let current = snapshot(
-            &report("50", json!([opening_event()]), 345_600, 345_601),
-            "paper-id",
-        )
-        .unwrap();
+        let current = opening_fixture("50", json!([opening_event()]), 345_600, 345_601);
         assert!(opening_delta(&prior, &current, &opening).is_err());
         let mut zero_event = opening_event();
         zero_event["net_amount"] = json!("0");
@@ -820,11 +808,7 @@ mod tests {
             snapshot: snapshot(&report("0", json!([]), 172_800, 172_801), "paper-id").unwrap(),
         };
         let zero_prior = snapshot(&report("0", json!([]), 259_200, 259_201), "paper-id").unwrap();
-        let zero_current = snapshot(
-            &report("0", json!([zero_event]), 345_600, 345_601),
-            "paper-id",
-        )
-        .unwrap();
+        let zero_current = opening_fixture("0", json!([zero_event]), 345_600, 345_601);
         assert!(opening_delta(&zero_prior, &zero_current, &zero_opening).is_err());
     }
 
