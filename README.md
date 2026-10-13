@@ -72,9 +72,16 @@ and [maintenance diagnosis](docs/plans/0055-alpaca-maintenance-diagnostics.md).
 An explicit private opening-cash acknowledgement command now has source for the
 late paper funding case. It binds one selected cash journal to unchanged retained
 opening cash, appends the operator acknowledgement and preserves the old prefix.
-Ordinary maintenance cannot make this interpretation automatically. Verification
-and application remain pending; see
+Ordinary maintenance cannot make this interpretation automatically. Verified
+source/release 1819896 was applied once; direct VPS checks confirm resumed
+ordinary observation with unchanged simulated cash and empty claims. See
 [opening reconciliation](docs/plans/0056-alpaca-opening-cash-reconciliation.md).
+
+An optional private paper stress model is being implemented for the Alpaca
+preflight/submission caller. It declares finite scenario size, fee and slippage
+assumptions separately from live execution evidence, and preserves default
+unknown-input refusals. It has not enabled trading or site handover. See
+[paper model work](docs/plans/0057-alpaca-paper-stress-model.md).
 
 Use protected storage in an existing durably provisioned directory. This does
 not establish available capital, profit or trading authority. See

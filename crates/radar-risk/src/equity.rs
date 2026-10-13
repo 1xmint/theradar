@@ -98,11 +98,14 @@ pub struct State {
     pub bid_microusd_per_share: u64,
     /// Validated ask, micro-USD per share.
     pub ask_microusd_per_share: u64,
-    /// Verified executable/exit capacity in shares, not ambiguous feed size units.
+    /// Share-capacity bound, never ambiguous feed size units. The fixed-host
+    /// paper caller can explicitly supply a labelled operator simulation ceiling;
+    /// this does not establish live executable or exit liquidity.
     pub capacity_nanoshares: Option<u64>,
-    /// Independently established required fee reserve, micro-USD.
+    /// Required fee reserve, micro-USD; an explicit paper scenario is not live fees.
     pub required_fee_microusd: Option<u64>,
-    /// Conservative round-trip cost, micro-USD; never model confidence.
+    /// Conservative round-trip cost, micro-USD; explicit paper stress assumptions
+    /// remain distinct from measured live costs and model confidence.
     pub round_trip_cost_microusd: Option<u64>,
 }
 

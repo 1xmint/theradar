@@ -1403,3 +1403,16 @@ the five-command sudo grant and must be invoked with isolated Python (`-I`)
 after GitHub verification. Its verified source and release are recorded in
 plan 0056; application succeeded and the old recurring reader remains installed.
 No trading authority is enabled.
+
+The source-only optional `--paper-model <private-simulation-model>` argument on
+`alpaca-order-preflight` and `alpaca-paper-submit` selects an explicit operator
+paper stress scenario. The strict shape is in `alpaca-paper-model.json.example`;
+its numbers are illustrative, not live fee/liquidity calibration or a capital
+mandate. Without the argument, unknown capacity/cost inputs continue to refuse.
+The model supplies a finite nanoshares ceiling, positive fee reserve and
+per-side slippage; round-trip costs charge spread plus both trade sides with
+upward rounding. Account, cash, owned-share, session, quote, policy and durable
+submission checks remain. Changed/removed assumptions refuse at the policy reload
+boundaries. Reports label the full model as simulation, with live capacity,
+live costs and measured profit false. No model file, new service or handover has
+been installed. See [plan 0057](../docs/plans/0057-alpaca-paper-stress-model.md).

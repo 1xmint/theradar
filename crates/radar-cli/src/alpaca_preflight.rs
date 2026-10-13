@@ -307,7 +307,9 @@ fn report(intent: &BrokerIntent, state: &State, policy: &Policy) -> Value {
         "available_nanoshares":state.available_nanoshares.map(|v| v.to_string()),
         "committed_microusd":state.committed_microusd.map(|v| v.to_string()),
         "symbol_committed_microusd":state.symbol_committed_microusd.map(|v| v.to_string()),
-        "capacity_nanoshares":null,"required_fee_microusd":null,"round_trip_cost_microusd":null,
+        "capacity_nanoshares":state.capacity_nanoshares.map(|v| v.to_string()),
+        "required_fee_microusd":state.required_fee_microusd.map(|v| v.to_string()),
+        "round_trip_cost_microusd":state.round_trip_cost_microusd.map(|v| v.to_string()),
         "oldest_input_unix_ms":state.oldest_input_unix_ms,
         "session_close_unix_ms":state.session_close_unix_ms,
         "available_at_unix_ms":state.available_at_unix_ms,"as_of_unix_ms":state.now_unix_ms})
@@ -326,8 +328,19 @@ fn collect(
     Ok(report(intent, &state, policy))
 }
 
+struct ExecutionInputs<'a> {
+    policy_path: &'a str,
+    model_path: Option<&'a str>,
+    model: Option<super::alpaca_paper_model::Model>,
+}
+
 pub(super) fn run(args: &[String]) -> Result<(), String> {
     let values: Vec<_> = args.iter().map(String::as_str).collect();
+    let (values, model_path) = if let [core @ .., "--paper-model", path] = values.as_slice() {
+        (core, Some(*path))
+    } else {
+        (values.as_slice(), None)
+    };
     let [
         command @ ("alpaca-order-preflight" | "alpaca-paper-submit"),
         "--journal",
@@ -338,12 +351,16 @@ pub(super) fn run(args: &[String]) -> Result<(), String> {
         policy_path,
         "--max-pages",
         pages,
-    ] = values.as_slice()
+    ] = values
     else {
-        return Err("usage: radar <alpaca-order-preflight|alpaca-paper-submit> --journal <private-file> --intent <typed-intent> --policy <private-policy> --max-pages <positive-u16>".into());
+        return Err("usage: radar <alpaca-order-preflight|alpaca-paper-submit> --journal <private-file> --intent <typed-intent> --policy <private-policy> --max-pages <positive-u16> [--paper-model <private-simulation-model>]".into());
     };
     let intent: BrokerIntent = load(input)?;
     let policy: Policy = load(policy_path)?;
+    let model: Option<super::alpaca_paper_model::Model> = model_path.map(load).transpose()?;
+    if let Some(model) = &model {
+        model.validate(&intent.account_id)?;
+    }
     let pages = super::alpaca_activities::page_limit(pages)?;
     let mut log = super::alpaca_order_read::open_existing(path, &intent.account_id)?;
     let key = super::alpaca_read::credential(std::env::var("RADAR_ALPACA_PAPER_KEY_ID").ok())?;
@@ -371,17 +388,51 @@ pub(super) fn run(args: &[String]) -> Result<(), String> {
         },
         now_ms,
     )?;
-    let output = dispatch(
+    let output = dispatch_configured(
         command,
         &mut log,
         &intent,
-        &state,
-        || load(policy_path),
+        state,
+        &ExecutionInputs {
+            policy_path,
+            model_path,
+            model,
+        },
         now_ms,
         |body| super::alpaca_submit::post(&agent, &key, &secret, body),
     )?;
     println!("{output}");
     Ok(())
+}
+
+fn dispatch_configured(
+    command: &str,
+    log: &mut BrokerLog,
+    intent: &BrokerIntent,
+    mut state: State,
+    inputs: &ExecutionInputs<'_>,
+    clock: impl FnMut() -> Result<u64, String>,
+    send: impl FnOnce(&str) -> Result<String, String>,
+) -> Result<Value, String> {
+    let scenario = inputs
+        .model
+        .as_ref()
+        .map(|model| model.apply(intent, &mut state))
+        .transpose()?;
+    let mut output = dispatch(
+        command,
+        log,
+        intent,
+        &state,
+        || {
+            super::alpaca_paper_model::unchanged(&inputs.model, inputs.model_path)?;
+            load(inputs.policy_path)
+        },
+        clock,
+        send,
+    )?;
+    output["paper_execution_model"] = scenario.unwrap_or(Value::Null);
+    Ok(output)
 }
 
 fn dispatch(
@@ -453,6 +504,135 @@ mod tests {
             json!({"SPY":{"latestQuote":{"t":radar_types::civil::timestamp_from_seconds(seconds),"bp":100,"ap":100,"bs":10,"as":10,"bx":"V","ax":"V","c":["R"],"z":"B"}}})
         } else {
             panic!("unexpected fixture URL {url}")
+        }
+    }
+
+    fn paper_scenario(capacity: u64, fee: u64) -> super::super::alpaca_paper_model::Model {
+        serde_json::from_value(json!({"version":"alpaca-paper-stress-v1","account_id":"paper",
+            "max_quantity_nanoshares":capacity,"fee_per_side_microusd":fee,
+            "slippage_bps_per_side":10}))
+        .unwrap()
+    }
+
+    fn paper_state(log: &mut BrokerLog, intent: &BrokerIntent) -> (State, u64) {
+        let seconds = super::super::wallet_read::now().unwrap();
+        let mut tick = seconds * 1_000;
+        let state = collect_state(
+            log,
+            intent,
+            &policy(),
+            1,
+            |url| Ok(Some(fixture(url, seconds).to_string())),
+            || {
+                tick += 10;
+                Ok(tick)
+            },
+        )
+        .unwrap();
+        (state, tick)
+    }
+
+    #[test]
+    fn paper_model_preflight_reports_assumptions_and_keeps_policy_capacity_fee_and_cash_gates() {
+        for side in [BrokerSide::Buy, BrokerSide::Sell] {
+            for case in ["valid", "capacity", "fee", "disabled", "cash"] {
+                let directory = tempfile::tempdir().unwrap();
+                let mut log = BrokerLog::open(directory.path().join("orders.jsonl"), "paper").unwrap();
+                let proposal = intent(side);
+                let (mut state, _) = paper_state(&mut log, &proposal);
+                if case == "cash" { state.available_cash_microusd = Some(0); }
+                let model = paper_scenario(if case == "capacity" { 1 } else { 2_000_000_000 },
+                    if case == "fee" { 8 } else { 7 });
+                let model_path = directory.path().join("model.json");
+                let policy_path = directory.path().join("policy.json");
+                let mut selected = policy();
+                if case == "disabled" { selected.enabled = false; }
+                std::fs::write(&model_path, serde_json::to_vec(&model).unwrap()).unwrap();
+                std::fs::write(&policy_path, serde_json::to_vec(&selected).unwrap()).unwrap();
+                let inputs = ExecutionInputs {policy_path:policy_path.to_str().unwrap(),
+                    model_path:Some(model_path.to_str().unwrap()), model:Some(model)};
+                let report = dispatch_configured("alpaca-order-preflight", &mut log, &proposal,
+                    state, &inputs, || panic!("preflight has no send clock"), |_| panic!("preflight cannot send")).unwrap();
+                assert_eq!(report["risk_refusal"].is_null(), case == "valid", "{case}");
+                assert_eq!(report["execution_authority"], false);
+                assert_eq!(report["paper_execution_model"]["basis"], "operator_stress_scenario");
+                assert_eq!(report["paper_execution_model"]["live_capacity_verified"], false);
+                assert_eq!(report["paper_execution_model"]["live_costs_verified"], false);
+                assert_eq!(report["paper_execution_model"]["profit_measured"], false);
+                if case == "valid" {
+                    assert_eq!(report["capacity_nanoshares"], "2000000000");
+                    assert_eq!(report["required_fee_microusd"], "7");
+                    assert_eq!(report["round_trip_cost_microusd"], "200014");
+                }
+                assert!(log.entries().unwrap().next().is_none());
+            }
+        }
+    }
+
+    #[test]
+    fn paper_model_submit_reloads_before_risk_and_after_durable_uncertainty() {
+        for case in ["absent", "same", "before", "after"] {
+            let directory = tempfile::tempdir().unwrap();
+            let path = directory.path().join("orders.jsonl");
+            let mut log = BrokerLog::open(&path, "paper").unwrap();
+            let proposal = intent(BrokerSide::Buy);
+            let (state, tick) = paper_state(&mut log, &proposal);
+            let model_path = directory.path().join("model.json");
+            let policy_path = directory.path().join("policy.json");
+            let model = paper_scenario(2_000_000_000, 7);
+            std::fs::write(&model_path, serde_json::to_vec(&model).unwrap()).unwrap();
+            std::fs::write(&policy_path, serde_json::to_vec(&policy()).unwrap()).unwrap();
+            let inputs = ExecutionInputs {policy_path:policy_path.to_str().unwrap(),
+                model_path:if case == "absent" { None } else { Some(model_path.to_str().unwrap()) },
+                model:if case == "absent" { None } else { Some(model) }};
+            let changed = serde_json::to_vec(&paper_scenario(2_000_000_000, 8)).unwrap();
+            if case == "before" { std::fs::write(&model_path, &changed).unwrap(); }
+            let sent = std::cell::Cell::new(false);
+            let result = dispatch_configured("alpaca-paper-submit", &mut log, &proposal, state,
+                &inputs, || {
+                    if case == "after" { std::fs::write(&model_path, &changed).unwrap(); }
+                    Ok(tick)
+                }, |body| {
+                    assert!(std::fs::read_to_string(&path).unwrap().contains("submission_unknown"));
+                    sent.set(true);
+                    let mut response: Value = serde_json::from_str(body).unwrap();
+                    response["id"] = json!("broker");
+                    response["asset_class"] = json!("us_equity");
+                    response["status"] = json!("new");
+                    Ok(response.to_string())
+                });
+            assert_eq!(result.is_ok(), case == "same", "{case}");
+            assert_eq!(sent.get(), case == "same", "{case}");
+            let entries: Vec<_> = log.entries().unwrap().collect();
+            if case == "same" || case == "after" {
+                assert_eq!(entries.len(), 1);
+                assert_eq!(entries[0].state, radar_journal::BrokerState::SubmissionUnknown);
+            } else {
+                assert_eq!(entries.len(), 0);
+            }
+        }
+    }
+
+    #[test]
+    fn paper_model_cannot_override_evidence_or_partially_update_invalid_state() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut log = BrokerLog::open(directory.path().join("orders.jsonl"), "paper").unwrap();
+        let proposal = intent(BrokerSide::Buy);
+        let (state, _) = paper_state(&mut log, &proposal);
+        for case in ["capacity", "fee", "cost", "account", "quote", "zero"] {
+            let mut current = state.clone();
+            let mut order = proposal.clone();
+            match case {
+                "capacity" => current.capacity_nanoshares = Some(0),
+                "fee" => current.required_fee_microusd = Some(0),
+                "cost" => current.round_trip_cost_microusd = Some(0),
+                "account" => current.account_id = "other".into(),
+                "quote" => current.ask_microusd_per_share = current.bid_microusd_per_share - 1,
+                _ => order.quantity_nanoshares = 0,
+            }
+            let original = (current.capacity_nanoshares, current.required_fee_microusd, current.round_trip_cost_microusd);
+            assert!(paper_scenario(2_000_000_000, 7).apply(&order, &mut current).is_err(), "{case}");
+            assert_eq!((current.capacity_nanoshares, current.required_fee_microusd, current.round_trip_cost_microusd), original);
         }
     }
 

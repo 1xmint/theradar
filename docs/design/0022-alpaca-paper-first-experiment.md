@@ -375,7 +375,16 @@ submission uncertainty before any network effect. It reloads owner policy/time
 after those writes, checks the original permission and re-evaluates the aged
 provider facts under the latest policy before the fixed paper-only POST. A
 matching response is neither reconciled fills nor permission to retry/release.
-Actual capacity/cost inputs remain unknown and refuse before reservation. This
+Default capacity/cost inputs remain unknown and refuse before reservation. This
 private CLI process is not yet an isolated authenticated execution service or
 unattended supervisor; site handover, cancellation/recovery and forward evaluation
 remain required. See [paper submission](../plans/0034-alpaca-paper-submit.md).
+
+The optional private --paper-model argument now has source for an explicit paper
+stress scenario. It supplies a finite share ceiling and positive fee/slippage
+assumptions without claiming measured live capacity or fees. It preserves the
+default refusal when absent, all existing risk/journal checks, and rechecks the
+same operator model before risk and after durable submission uncertainty. Changed
+assumptions refuse before send. It is neither a learned strategy nor effective
+site handover; no model is installed or enabled. See
+[paper execution assumptions](../plans/0057-alpaca-paper-stress-model.md).
