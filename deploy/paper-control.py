@@ -187,7 +187,7 @@ class Control:
                 or (retained and retained["operator"] is not None and retained["operator"] != value)):
             raise ValueError("Paper operator differs")
 
-    def invoke(self, args):
+    def execute(self, args):
         environment = {"PATH": "/usr/bin:/bin"}
         for name in ("RADAR_ALPACA_PAPER_KEY_ID", "RADAR_ALPACA_PAPER_SECRET_KEY"):
             if name in os.environ:
@@ -196,10 +196,89 @@ class Control:
             timeout=75, cwd="/", env=environment)
         if len(result.stdout.encode()) > 4 * 1024 * 1024:
             raise ValueError("Broker response exceeds bound")
-        result = decode(result.stdout)
+        return decode(result.stdout)
+
+    def invoke(self, args):
+        result = self.execute(args)
         if not isinstance(result, dict) or result.get("venue") != "alpaca" or result.get("environment") != "paper":
             raise ValueError("Invalid paper response")
         return result
+
+    def observe(self, request):
+        if set(request) != {"action"}:
+            raise ValueError("Invalid observation request")
+        with self.locked(execution=True):
+            with self.locked():
+                prior = self.retained()
+                selected = decode(read(self.policy_path(prior["generation"]))) if prior["generation"] else None
+            report = self.invoke(["alpaca-paper-maintain", "--journal", str(self.store / "orders.jsonl"),
+                "--account-id", self.config["account_id"], "--max-pages", "2"])
+            classes = ("working_before_cancellation", "unresolved", "cancellation_pending_before_tick", "terminal")
+            if (report.get("expected_account_id") != self.config["account_id"]
+                    or report.get("checkpoint_refreshed") is not True
+                    or any(report.get(field) is not False for field in
+                        ("new_order_authority", "retry_authorized", "claim_release_authorized", "profit_measured"))
+                    or any(not isinstance(report.get(field), list) or any(not text(item) for item in report[field]) for field in classes)):
+                raise ValueError("Observation reconciliation unavailable")
+            account, _ = self.account()
+            quotes = {}
+            at = int(self.clock() * 1000)
+            if prior["enabled"] and account["market_clock"].get("is_open") is True:
+                self.storage()
+                descriptor, temporary = tempfile.mkstemp(prefix=".paper-market-", dir=self.store)
+                os.close(descriptor)
+                os.unlink(temporary)  # Only this call's placeholder; CLI requires a new capture.
+                try:
+                    written = self.execute(["alpaca-market-read", "--symbols", "QQQ,SPY", "--output", temporary])
+                    if (not isinstance(written, dict) or written.get("capture_written") is not True
+                            or written.get("execution_authority") is not False or written.get("feed") != "iex"):
+                        raise ValueError("Market capture unavailable")
+                    at = int(self.clock() * 1000)
+                    for symbol in SYMBOLS:
+                        quote = self.execute(["alpaca-quote", "--input", temporary, "--symbol", symbol,
+                            "--as-of-unix-ms", str(at), "--max-age-ms", "120000", "--max-spread-bps", "20"])
+                        if (not isinstance(quote, dict) or quote.get("venue") != "alpaca" or quote.get("feed") != "iex"
+                                or quote.get("symbol") != symbol or quote.get("execution_authority") is not False
+                                or quote.get("as_of_unix_ms") != at):
+                            raise ValueError("Validated market quote unavailable")
+                        quotes[symbol] = quote
+                finally:
+                    if os.path.lexists(temporary):
+                        os.unlink(temporary)
+            with self.locked():
+                current = self.retained()
+                if current != prior:
+                    raise ValueError("Owner policy changed during observation")
+            raw_model = read(MODEL)
+            if hashlib.sha256(raw_model).hexdigest() != self.config["model_sha256"]:
+                raise ValueError("Paper scenario changed")
+            return dict(version="alpaca-paper-observation-v1", venue="alpaca", environment="paper",
+                account_id=self.config["account_id"], generation=prior["generation"],
+                handover_enabled=prior["enabled"], effective_policy=selected,
+                account=account["account"], positions=account["positions"], market_clock=account["market_clock"],
+                observed_at_unix_ms=at, quotes=quotes, paper_execution_model=decode(raw_model),
+                orders={field:report[field] for field in classes},
+                execution_authority=False, learned_edge_verified=False, profit_measured=False)
+
+    def cancel(self, request):
+        if (set(request) != {"action", "generation", "client_order_id"}
+                or not integer(request.get("generation"), 1) or not text(request.get("client_order_id"))):
+            raise ValueError("Invalid cancellation proposal")
+        with self.locked(execution=True):
+            with self.locked():
+                prior = self.retained()
+                if not prior["enabled"] or prior["generation"] != request["generation"]:
+                    raise ValueError("Cancellation handover closed or changed")
+            # Existing CLI binds account, retained intent and broker payload;
+            # it persists cancellation uncertainty before its one fixed DELETE.
+            result = self.invoke(["alpaca-paper-cancel", "--journal", str(self.store / "orders.jsonl"),
+                "--account-id", self.config["account_id"], "--client-order-id", request["client_order_id"]])
+            if (result.get("client_order_id") != request["client_order_id"] or not text(result.get("broker_order_id"))
+                    or result.get("cancellation") != "request_accepted"
+                    or any(result.get(field) is not False for field in
+                        ("cancellation_confirmed", "fills_reconciled", "retry_authorized", "claim_release_authorized"))):
+                raise ValueError("Paper cancellation requires reconciliation")
+            return result
 
     def account(self):
         value = self.invoke(["alpaca-read"])
@@ -343,6 +422,10 @@ class Control:
             return self.change(request, pause=action == "pause")
         if role == "supervisor" and action == "submit":
             return self.submit(request)
+        if role == "supervisor" and action == "observe":
+            return self.observe(request)
+        if role == "supervisor" and action == "cancel":
+            return self.cancel(request)
         raise ValueError("Paper operation refused for caller")
 
 

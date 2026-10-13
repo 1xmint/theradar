@@ -37,7 +37,8 @@ cases = [
 for index, replacements in enumerate(cases):
     mutated = source
     for correct, wrong in replacements:
-        if mutated.count(correct) != 1:
+        expected = 2 if correct == 'not prior["enabled"] or prior["generation"] != request["generation"]' else 1
+        if mutated.count(correct) != expected:
             sys.exit(f"Paper control mutation predicate changed: {correct}")
         mutated = mutated.replace(correct, wrong)
     with tempfile.TemporaryDirectory(prefix="radar-control-mutation-") as temporary:
