@@ -1388,8 +1388,9 @@ cash, then fresh bracketed reads matching one executed historical cash journal.
 The acknowledgement is retained at its current availability time; the activity
 is not treated as a new deposit or profit. It is outside the installed admin
 grant and never called by ordinary maintenance or the model. Source CI 38439705359
-and matching release 38439694798 passed at 1819896. The exact binary and wrapper
-are staged on the VPS; private sudo application remains pending. See
+and matching release 38439694798 passed at 1819896. The owner applied the verified
+wrapper; independent admin checks confirm resumed ordinary observation, unchanged
+100000 USD simulated cash and empty claims. See
 [plan 0056](../docs/plans/0056-alpaca-opening-cash-reconciliation.md).
 
 The source-only `apply-alpaca-opening.py` one-time wrapper installs a verified
@@ -1400,4 +1401,5 @@ probes maintenance before resuming scheduling. Failed or partial application
 retains the staged reader and refuses automatic retry. This wrapper is outside
 the five-command sudo grant and must be invoked with isolated Python (`-I`)
 after GitHub verification. Its verified source and release are recorded in
-plan 0056; application has not yet happened. No trading authority is enabled.
+plan 0056; application succeeded and the old recurring reader remains installed.
+No trading authority is enabled.

@@ -1,12 +1,12 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # 0056 — Acknowledge late paper opening cash without double counting
 
-**Status:** source and release verified; exact repair staged on VPS; private sudo application pending; no order authority.
+**Status:** verified repair applied; ordinary observation resumed and independently checked; no order authority.
 
 Branch fix/alpaca-opening-cash-reconciliation, base bb118e7. Parent documentation
 CI 38432857228 passed. The preceding goal turn installed and exercised fixed
 passwordless paper administration; it made progress, not a wait or no-progress
-turn. Fresh SSH inspection still shows the observation timer stopped and the
+turn. Initial SSH inspection showed the observation timer stopped and the
 162228-byte retained journal intact in metadata. No order authority exists.
 
 ## Demonstrated problem
@@ -54,8 +54,9 @@ claim release, retry and execution authority stay false.
   or substituted acknowledgement flag before key loading.
 - [x] CI 38439705359 at 1819896 passed all fourteen jobs after demonstrated repairs.
 - [x] Release 38439694798 at 1819896 passed; downloaded and remote hashes agree.
-- [ ] Verify actual retained opening cash and apply one acknowledged correction;
-  prove successful resumed observation with unchanged capital and no orders.
+- [x] Owner application reported preserved original prefix and acknowledged opening
+  cash. Direct admin inspect/maintain/activities verified resumed observation,
+  unchanged simulated cash and empty claims on October 13 at 17:43–17:44 UTC.
 
 Six exact regression reapplications require four executed unit tests or the one
 actual-process test, never compiler failures as kills. The generic journal tests
@@ -123,18 +124,30 @@ Staging first refused existing targets, then copied the binary to
 independent remote SHA256 values match both. Installed helper, old reader and
 worker hashes were rechecked unchanged. No website artifact was deployed.
 
-The owner was given the concrete isolated-Python sudo command with the verified
-reader hash. Application is pending private sudo entry, not a permission request
-for a new trading mandate. The five-command admin grant does not allow root
-installation or this acknowledgement. After successful application, run direct
-admin inspect and maintain; verify resumed scheduling, ordinary reconciliation,
-unchanged simulated cash and no orders/claims before moving on. If application
-fails, retain staged/installed files and history and inspect before any retry.
-Fresh direct admin inspect and activities calls both succeeded: original journal
-metadata remains 162228 bytes, timer inactive, and the broker still reports the
-same single selected JNLC with unchanged 100000 USD simulated cash. This turn made
-progress through CI corrections and controlled application source/test coverage;
-it is not a repeated access-blocked turn.
+The owner ran the concrete isolated-Python sudo command with the verified reader
+hash and returned opening_acknowledged=true, original_prefix_preserved=true,
+cash_usd=100000, maintenance_started=true, new_order_authority=false. Prefix
+preservation is the verified wrapper's owner-returned report, not an independent
+raw private-journal read. The five-command admin grant stays unchanged.
+
+Independent direct SSH checks after application: installed acknowledgement reader
+hash matches d8642180..., recurring reader remains 3f21fc1a..., and admin remains
+e740c7a9.... Admin inspect shows the timer active/waiting and ordinary maintenance
+successful at 17:43:37 UTC, zero working/unresolved/terminal orders, observe mode
+and no new order authority. Journal metadata grew from 162228 to 165899 bytes;
+the 82-byte initialization fence and 110-byte completion marker remain.
+
+A further direct admin maintain invocation f8ace9b17c3445079027f08f39671c9a
+succeeded with checkpoint_refreshed=true, empty claims and empty order classes,
+no cancellation, retry, claim release, profit measurement or new order authority.
+Direct activities invocation 0ee68d91a76d4da59a5eb149b94e3d3e succeeded with
+before/after cash both 100000, exactly the same selected JNLC, and exhausted
+pagination. Ordinary reconciliation succeeds without replacing its installed
+reader. No history reset, website deployment or trading enablement occurred.
+Before application, direct admin inspect and activities calls succeeded with
+162228-byte journal metadata, inactive timer and the same single selected JNLC
+with unchanged 100000 USD simulated cash. Those diagnostics established the
+repair's starting state; the post-application checks above establish its result.
 
 Independent research inspection while CI runs: guardian can read the retained
 context campaign files. All twelve slot decision records, not only first/last,
@@ -146,9 +159,11 @@ minute bar and one previous daily bar, with learned_edge_verified=false. Repeati
 this campaign is not evidence of learning. The next research work must add richer
 historical features and forward baselines rather than relax the edge label.
 
-This turn made progress through complete verification and exact VPS staging. The
-installed admin helper continues to provide direct fixed diagnostics. No history,
-capital policy, credentials, broker orders or website deployment changed yet.
+This turn made progress through complete verification, exact VPS staging, owner
+application and independent normal-reader runtime checks. Documentation head
+bb3d5ea has live CI 38440996376; inspect its terminal result before pushing this
+runtime record. Verified production source remains 1819896, and the new changes
+since it are documentation only. No repeated access blocker remains.
 
 Full autonomy still requires a defined paper execution model for currently unknown
 capacity/cost inputs, the proposal/risk/entry/exit/revocation supervisor, effective
