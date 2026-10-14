@@ -67,3 +67,13 @@ the extension instead. Opening Radar there reached the authenticated setup page:
 ChatGPT displayed Linked, and the Alpaca panel displayed private control unavailable,
 consistent with the controller not being installed. No credentials were retrieved,
 entered or moved between browsers; no handover or trade was enabled.
+
+## First GitHub verification
+
+Draft PR 422, source 2fe67017a1cb02ab94099b04c7a676b1fb038bb6, CI 38492547352
+completed with thirteen successful jobs and one failed test job. Python discovery
+ran 136 tests; the partial-install recovery case failed because the fixture's
+mocked existing-file pin raised AssertionError on a second attempt, whereas the
+real boundary raises ValueError. The fixture now preserves the real refusal type.
+No installation regression execution is claimed from that failed run; discovery
+stopped the recipe before mutation checks. No local tests or jobs ran.

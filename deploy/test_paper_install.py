@@ -65,10 +65,13 @@ class InstallationTests(unittest.TestCase):
             def user(name):
                 if name == "radar-paper-supervisor": raise KeyError(name)
                 return types.SimpleNamespace(pw_uid=1000 if name == "guardian" else 997)
+            def check_pin(path, expected):
+                if setup.digest(setup.read(path)) != expected:
+                    raise ValueError("Existing subscription installation differs")
             patches.enter_context(patch.object(setup.os, "geteuid", return_value=0))
             patches.enter_context(patch.object(setup, "protected"))
             patches.enter_context(patch.object(setup, "private_environment"))
-            patches.enter_context(patch.object(setup, "pinned", side_effect=lambda path, expected:self.assertEqual(setup.digest(setup.read(path)), expected)))
+            patches.enter_context(patch.object(setup, "pinned", side_effect=check_pin))
             patches.enter_context(patch.object(setup.pwd, "getpwnam", side_effect=user))
             patches.enter_context(patch.object(setup.grp, "getgrnam", side_effect=KeyError))
             for name, value in (("READER_HASH", setup.digest(case.reader)), ("BRIDGE_HASH", setup.digest(b"old-bridge")), ("CLIENT_HASH", setup.digest(b"fixed-client"))):
