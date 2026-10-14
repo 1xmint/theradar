@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # 0061 — Combined private paper installation
 
-**Status:** installer source implementation; GitHub verification and installation pending.
+**Status:** installer source GitHub-verified; extra metadata regressions and VPS installation pending.
 
 Branch feat/alpaca-paper-install, parent f1a139c. Supervisor implementation
 48936c3 passed CI 38476247749; parent documentation CI 38477850089 completed
@@ -77,3 +77,29 @@ mocked existing-file pin raised AssertionError on a second attempt, whereas the
 real boundary raises ValueError. The fixture now preserves the real refusal type.
 No installation regression execution is claimed from that failed run; discovery
 stopped the recipe before mutation checks. No local tests or jobs ran.
+
+## Verified installer and candidate bundle
+
+Source 615da927ea485ac6bc0ae656da4a253c4203e13d passed all fourteen jobs in
+CI 38493019184. Tests job 115622400528 reports 2862 Rust tests, 136 Python tests,
+all 21 installation reapplications caught, and successful systemd unit checks.
+All job statuses were inspected after completion. Two further exact metadata
+reapplications and direct file/directory ownership/mode checks are being added;
+they change only tests/harness, not the verified installer or bundle payload.
+Their verification remains pending. No jobs were canceled or run locally.
+
+Local packaging under workstation TEMP/radar-paper-install-candidate-38493019184
+retains eleven exact named payload files. Packaging/listing/hashing ran locally;
+no test or application process was executed. Candidate receipts:
+
+- radar-paper-autonomy-bundle.tar: 67584 bytes,
+  5189e78d40993f50552cd57fc9ef946a52040be653e7882b842a25dc0417cd50.
+- radar-paper-autonomy-reader.new: 13879760 bytes,
+  0c421ea6475f400cda75126214725f718ed37cede13fe68d72c5f663016494f9.
+- radar-paper-autonomy-setup.py: 14032 bytes,
+  81109f976f8b9fcc910d7f314c3baf97a7cb37c8e07fc9502dfa127fb2c21ed0.
+
+The binary independently matches BUILD-INFO from the already verified a66793a
+release. These receipts do not prove a VPS install; remote staging hashes must
+match before asking for the one-time sudo invocation. The installer code and
+payload remain identical to the source verified above while metadata tests run.

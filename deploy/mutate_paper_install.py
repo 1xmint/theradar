@@ -17,6 +17,8 @@ cases = [
     ("setup-paper-autonomy.py", 'entry.isfile()', 'True'),
     ("setup-paper-autonomy.py", 'digest(read(path)) != expected', 'False'),
     ("setup-paper-autonomy.py", 'stat.S_IMODE(info.st_mode) != 0o600', 'False'),
+    ("setup-paper-autonomy.py", 'if not stat.S_ISDIR(info.st_mode) or info.st_uid != 0 or info.st_mode & 0o022:', 'if False:'),
+    ("setup-paper-autonomy.py", 'if not stat.S_ISREG(info.st_mode) or info.st_uid != 0 or info.st_mode & 0o022 or digest(read(path)) != expected:', 'if digest(read(path)) != expected:'),
     ("setup-paper-autonomy.py", 'os.link(temporary, path)', 'os.replace(temporary, path)'),
     ("setup-paper-autonomy.py", 'json.loads(markers["genesis-complete.json"]) != {"genesis":"initialized", "account_id":ACCOUNT, "new_order_authority":False}', 'False'),
     ("setup-paper-autonomy.py", 'if (state / "control.json").exists() or list(state.glob("effective-policy-*.json")):', 'if False:'),

@@ -183,6 +183,14 @@ class InstallationTests(unittest.TestCase):
             for mode, uid in ((stat.S_IFREG | 0o644, 0), (stat.S_IFREG | 0o600, 1000), (stat.S_IFLNK | 0o600, 0)):
                 with patch.object(setup, "protected"), patch.object(Path, "lstat", return_value=types.SimpleNamespace(st_mode=mode, st_uid=uid)):
                     with self.assertRaises(ValueError): setup.private_environment(target)
+            for mode, uid in ((stat.S_IFREG | 0o666, 0), (stat.S_IFREG | 0o644, 1000), (stat.S_IFLNK | 0o644, 0)):
+                with patch.object(setup, "protected"), patch.object(Path, "lstat", return_value=types.SimpleNamespace(st_mode=mode, st_uid=uid)):
+                    with self.assertRaises(ValueError): setup.pinned(target, setup.digest(b"first"))
+            with patch.object(Path, "lstat", return_value=types.SimpleNamespace(st_mode=stat.S_IFDIR | 0o755, st_uid=0)):
+                setup.protected(target.parent)
+            for mode, uid in ((stat.S_IFDIR | 0o775, 0), (stat.S_IFDIR | 0o755, 1000), (stat.S_IFLNK | 0o755, 0)):
+                with patch.object(Path, "lstat", return_value=types.SimpleNamespace(st_mode=mode, st_uid=uid)):
+                    with self.assertRaises(ValueError): setup.protected(target.parent)
 
     def test_supervisor_provision_fences_success_and_interrupted_publication_without_reset(self):
         with tempfile.TemporaryDirectory() as temporary:
