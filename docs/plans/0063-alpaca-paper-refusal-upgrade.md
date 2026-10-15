@@ -59,3 +59,25 @@ committed locally while the existing run finishes; it still requires its own
 GitHub verification. No upgrade archive or installer has been staged on the VPS.
 The current turn made source and runtime-inspection progress; no permission or
 deployed service changed. Full autonomous trading remains incomplete and active.
+
+## Packaged candidate receipt
+
+Local packaging at TEMP/radar-refusal-upgrade-candidate-029747d contains only
+the two named Python payload members in its tar archive, plus the verified reader
+and isolated upgrade script. It executes no application or test. SHA256 receipts:
+
+- radar-paper-refusal-bundle.tar:
+  0e9f2ed00e1704021b40ae540e95721cc0ab0ed28021ec69df57b9e93639413a.
+- radar-paper-refusal-reader.new:
+  47b0448dd16b89818bcf65551745814161cc7ac082e1ff9618c143b409c30a3f.
+- radar-paper-refusal-upgrade.py:
+  2fb63fef9758b9323dc21a05a7f66296d1eb67a4ec4b66ec9be785c676297aa5.
+
+CI 38783431746 has thirteen successful jobs; tests job 116589227131 is still
+confirmed live at this checkpoint. No source success or deployment is inferred
+from elapsed time. The local resolvable-link fixture commit ee17b6f is still
+unpushed to avoid canceling that run. After it terminates, inspect all outcomes,
+push the fixture refinement and verify that run before staging this candidate.
+The refinement changes tests/docs only; the packaged payload is unchanged.
+Do not rerun or overwrite the one-time installer. This continuation packaged a
+reviewable candidate and waited on the confirmed test handle; goal remains active.
