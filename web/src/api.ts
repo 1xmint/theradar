@@ -138,11 +138,37 @@ export interface PaperStatus {
   profit_measured: false;
 }
 
+export interface PaperResearchMessage {
+  id: string;
+  role: "user" | "assistant";
+  text: string;
+  received_at_unix_ms: number;
+  reply_to: string | null;
+}
+export interface PaperResearchThread {
+  version: "alpaca-paper-research-v1";
+  account_id: string;
+  as_of_unix_ms: number;
+  available: boolean;
+  messages: PaperResearchMessage[];
+  truncated: false;
+  execution_authority: false;
+  source_claims_verified: false;
+}
+export interface PaperResearchSubmitted {
+  thread: PaperResearchThread;
+  reply_status: "completed" | "unavailable";
+  detail: string | null;
+}
+
 export const paper = {
   status: (signal?: AbortSignal) => get<PaperStatus>("/v1/paper/status", signal),
   configure: (generation: number, preferences: PaperPreferences, enabled: boolean) =>
     send("/v1/paper/preferences", { generation, preferences, enabled }, { "x-radar-paper-control": "1" }),
   pause: (generation: number) => send("/v1/paper/pause", { generation }, { "x-radar-paper-control": "1" }),
+  research: (signal?: AbortSignal) => get<PaperResearchThread>("/v1/paper/research", signal),
+  researchSend: (nonce: string, text: string) => send<PaperResearchSubmitted>(
+    "/v1/paper/research", { nonce, text }, { "x-radar-paper-control": "1" }),
 };
 
 /**

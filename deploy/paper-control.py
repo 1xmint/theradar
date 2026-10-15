@@ -27,6 +27,21 @@ STORE = Path("/var/lib/radar-paper-execution")
 VERSION = "alpaca-paper-control-v1"
 SYMBOLS = ["QQQ", "SPY"]
 MAX = (1 << 64) - 1
+RESEARCH_VERSION = "alpaca-paper-research-v1"
+
+
+def research_message(value):
+    fields = {"id", "role", "text", "received_at_unix_ms", "reply_to"}
+    if (not isinstance(value, dict) or set(value) != fields
+            or not isinstance(value["id"], str) or not re.fullmatch(r"radar_research_[A-Za-z0-9_-]{1,80}", value["id"])
+            or value["role"] not in ("user", "assistant")
+            or not isinstance(value["text"], str) or not value["text"].strip() or len(value["text"].encode()) > 4000
+            or not integer(value["received_at_unix_ms"], 1)
+            or (value["role"] == "user" and value["reply_to"] is not None)
+            or (value["role"] == "assistant" and (not isinstance(value["reply_to"], str)
+                or not re.fullmatch(r"radar_research_[A-Za-z0-9_-]{1,80}", value["reply_to"])))):
+        raise ValueError("Invalid inert research message")
+    return value
 
 
 def decode(raw):
@@ -270,6 +285,7 @@ class Control:
                 current = self.retained()
                 if current != prior:
                     raise ValueError("Owner policy changed during observation")
+                research = self.research_snapshot(at)
             raw_model = read(MODEL)
             if hashlib.sha256(raw_model).hexdigest() != self.config["model_sha256"]:
                 raise ValueError("Paper scenario changed")
@@ -279,7 +295,93 @@ class Control:
                 account=account["account"], positions=account["positions"], market_clock=account["market_clock"],
                 observed_at_unix_ms=at, quotes=quotes, paper_execution_model=decode(raw_model),
                 orders={field:report[field] for field in classes},
+                research=research,
                 execution_authority=False, learned_edge_verified=False, profit_measured=False)
+
+    def research_state(self):
+        origin_path, state_path = self.store / "research-origin.json", self.store / "research-messages.json"
+        try:
+            origin = decode(read(origin_path))
+        except FileNotFoundError:
+            if os.path.lexists(state_path):
+                raise ValueError("Research origin missing; preserve history")
+            return None
+        if (not isinstance(origin, dict) or set(origin) != {"version", "account_id", "operator"}
+                or origin["version"] != RESEARCH_VERSION or origin["account_id"] != self.config["account_id"]):
+            raise ValueError("Invalid research origin")
+        self.operator(origin["operator"])
+        value = decode(read(state_path, 1024 * 1024))
+        if (not isinstance(value, dict) or set(value) != {"version", "messages"}
+                or value["version"] != RESEARCH_VERSION or not isinstance(value["messages"], list)
+                or len(value["messages"]) > 128):
+            raise ValueError("Invalid research history")
+        identities, users, answered, prior = set(), set(), set(), 0
+        for item in value["messages"]:
+            research_message(item)
+            if item["id"] in identities or item["received_at_unix_ms"] < prior:
+                raise ValueError("Ambiguous research history")
+            identities.add(item["id"])
+            prior = item["received_at_unix_ms"]
+            if item["role"] == "user": users.add(item["id"])
+            elif item["reply_to"] not in users or item["reply_to"] in answered:
+                raise ValueError("Research reply lacks a unique prior question")
+            else: answered.add(item["reply_to"])
+        return origin, value
+
+    def research_snapshot(self, at, limit=6):
+        result = dict(version=RESEARCH_VERSION, account_id=self.config["account_id"], as_of_unix_ms=at,
+            available=False, messages=[], truncated=False, execution_authority=False, source_claims_verified=False)
+        try:
+            retained = self.research_state()
+            if retained is None: return result
+            origin, state = retained
+            owner = self.retained()["operator"]
+            if owner is not None and owner != origin["operator"]: return result
+            messages = [item for item in state["messages"] if item["received_at_unix_ms"] <= at]
+            return dict(result, available=True, messages=messages[-limit:], truncated=len(messages) > limit)
+        except (ValueError, OSError):
+            # Optional research corruption cannot disable the owner's pause or
+            # masquerade as no tips. It supplies explicit unknown context only.
+            return result
+
+    def research(self, request):
+        action = request.get("action")
+        fields = {"action", "operator"} if action == "research_read" else {"action", "operator", "message"}
+        if set(request) != fields:
+            raise ValueError("Invalid research envelope")
+        with self.locked():
+            self.operator(request["operator"], self.retained())
+            retained = self.research_state()
+            if retained is not None and retained[0]["operator"] != request["operator"]:
+                raise ValueError("Research belongs to another operator")
+            at = int(self.clock() * 1000)
+            if action == "research_read": return self.research_snapshot(at, limit=128)
+            incoming = request["message"]
+            if not isinstance(incoming, dict) or set(incoming) != {"id", "role", "text", "reply_to"}:
+                raise ValueError("Research receive time is assigned by the controller")
+            message = research_message(dict(incoming, received_at_unix_ms=at))
+            role = "user" if action == "research_add" else "assistant"
+            if message["role"] != role:
+                raise ValueError("Research role or receive time differs")
+            origin, state = retained if retained is not None else (dict(version=RESEARCH_VERSION,
+                account_id=self.config["account_id"], operator=request["operator"]), dict(version=RESEARCH_VERSION, messages=[]))
+            existing = next((item for item in state["messages"] if item["id"] == message["id"]), None)
+            if existing is not None:
+                if any(existing[field] != message[field] for field in ("role", "text", "reply_to")):
+                    raise ValueError("Research identity already retained with different content")
+                return self.research_snapshot(at, limit=128)
+            if (len(state["messages"]) >= 128
+                    or (state["messages"] and state["messages"][-1]["received_at_unix_ms"] > at)):
+                raise ValueError("Research retention or clock bound reached")
+            if role == "assistant" and (not any(item["id"] == message["reply_to"] and item["role"] == "user" for item in state["messages"])
+                    or any(item["reply_to"] == message["reply_to"] for item in state["messages"])):
+                raise ValueError("Research response requires an unanswered question")
+            self.storage()
+            if retained is None:
+                publish(self.store / "research-origin.json", origin, exclusive=True)
+                publish(self.store / "research-messages.json", state, exclusive=True)
+            publish(self.store / "research-messages.json", dict(state, messages=[*state["messages"], message]))
+            return self.research_snapshot(at, limit=128)
 
     def cancel(self, request):
         if (set(request) != {"action", "generation", "client_order_id"}
@@ -443,6 +545,8 @@ class Control:
             return self.status()
         if role == "web" and action in ("configure", "pause"):
             return self.change(request, pause=action == "pause")
+        if role == "web" and action in ("research_read", "research_add", "research_reply"):
+            return self.research(request)
         if role == "supervisor" and action == "submit":
             return self.submit(request)
         if role == "supervisor" and action == "observe":

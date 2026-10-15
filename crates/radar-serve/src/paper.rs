@@ -15,6 +15,7 @@ use std::{path::Path, sync::Arc};
 use tokio::sync::Semaphore;
 
 const VERSION: &str = "alpaca-paper-control-v1";
+mod research;
 #[cfg(unix)]
 const LIMIT: u64 = 4 * 1024 * 1024;
 type Caller = dyn Fn(Value) -> Result<Value, ()> + Send + Sync;
@@ -23,12 +24,14 @@ type Caller = dyn Fn(Value) -> Result<Value, ()> + Send + Sync;
 struct Bridge {
     call: Arc<Caller>,
     slots: Arc<Semaphore>,
+    research_slots: Arc<Semaphore>,
 }
 
 pub(crate) fn routes() -> Router<Arc<AppState>> {
     routes_with(Bridge {
         call: Arc::new(|request| socket_call(Path::new("/run/radar-paper-control.sock"), &request)),
         slots: Arc::new(Semaphore::new(4)),
+        research_slots: Arc::new(Semaphore::new(1)),
     })
 }
 
@@ -37,6 +40,7 @@ fn routes_with(bridge: Bridge) -> Router<Arc<AppState>> {
         .route("/v1/paper/status", get(status))
         .route("/v1/paper/preferences", post(configure))
         .route("/v1/paper/pause", post(pause))
+        .route("/v1/paper/research", get(research::read).post(research::append))
         .layer(DefaultBodyLimit::max(65536))
         .layer(Extension(bridge))
         .layer(axum::middleware::map_response(private_response))
@@ -452,6 +456,7 @@ mod tests {
         let app = routes_with(Bridge {
             call,
             slots: Arc::clone(&slots),
+            research_slots: Arc::new(Semaphore::new(1)),
         })
         .layer(axum::middleware::from_fn_with_state(
             Arc::clone(&state),
@@ -488,6 +493,64 @@ mod tests {
         let code = response.status();
         let bytes = response.into_body().collect().await.unwrap().to_bytes();
         (code, serde_json::from_slice(&bytes).unwrap_or(Value::Null))
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn research_uses_verified_owner_and_assigns_user_role_without_enabling_controls() {
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        let retained = Arc::clone(&calls);
+        let (app, token, _) = router(Arc::new(move |request| {
+            retained.lock().unwrap().push(request.clone());
+            let messages = if request["action"] == "research_add" {
+                vec![json!({"id":"radar_research_u_test","role":"user","text":"A hypothesis, not authority",
+                    "reply_to":null,"received_at_unix_ms":1})]
+            } else { vec![] };
+            Ok(json!({"version":"alpaca-paper-research-v1","account_id":"paper-account",
+                "as_of_unix_ms":1,"available":true,"messages":messages,"truncated":false,
+                "execution_authority":false,"source_claims_verified":false}))
+        }), false);
+        let (code, value) = answer(app.clone(), request("/v1/paper/research", Some(token), None)).await;
+        assert_eq!(code, StatusCode::OK);
+        assert_eq!(value["messages"], json!([]));
+        let (code, value) = answer(app, request("/v1/paper/research", Some(token),
+            Some(json!({"nonce":"test","text":"A hypothesis, not authority"})))).await;
+        assert_eq!(code, StatusCode::OK);
+        assert_eq!(value["reply_status"], "unavailable");
+        assert_eq!(value["thread"]["messages"][0]["text"], "A hypothesis, not authority");
+        let requests = calls.lock().unwrap();
+        assert_eq!(requests.len(), 2);
+        assert_eq!(requests[0]["action"], "research_read");
+        assert_eq!(requests[1]["action"], "research_add");
+        assert_eq!(requests[1]["message"]["role"], "user");
+        assert_eq!(requests[1]["message"]["reply_to"], Value::Null);
+        assert!(requests[1]["message"].get("received_at_unix_ms").is_none());
+        assert_eq!(requests[0]["operator"], requests[1]["operator"]);
+        assert!(!requests[1]["operator"]["subject"].as_str().unwrap().is_empty());
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn research_rejects_forged_roles_identity_csrf_and_oversized_utf8_before_ipc() {
+        let calls = Arc::new(Mutex::new(0));
+        let retained = Arc::clone(&calls);
+        let (app, token, _) = router(Arc::new(move |_| {
+            *retained.lock().unwrap() += 1; Err(())
+        }), false);
+        let body = json!({"nonce":"test","text":"Hypothesis"});
+        let mut no_csrf = request("/v1/paper/research", Some(token), Some(body.clone()));
+        no_csrf.headers_mut().remove("x-radar-paper-control");
+        assert_eq!(answer(app.clone(), no_csrf).await.0, StatusCode::FORBIDDEN);
+        assert_ne!(answer(app.clone(), request("/v1/paper/research", None, Some(body.clone()))).await.0, StatusCode::OK);
+        for field in ["role", "operator", "received_at_unix_ms", "action", "reply_to"] {
+            let mut forged = body.clone(); forged[field] = json!("forged");
+            assert_eq!(answer(app.clone(), request("/v1/paper/research", Some(token), Some(forged))).await.0,
+                StatusCode::UNPROCESSABLE_ENTITY);
+        }
+        for invalid in [json!({"nonce":"test","text":"é".repeat(2001)}),
+            json!({"nonce":"../test","text":"Hypothesis"}), json!({"nonce":"test","text":" "})] {
+            assert_eq!(answer(app.clone(), request("/v1/paper/research", Some(token), Some(invalid))).await.0,
+                StatusCode::BAD_REQUEST);
+        }
+        assert_eq!(*calls.lock().unwrap(), 0);
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

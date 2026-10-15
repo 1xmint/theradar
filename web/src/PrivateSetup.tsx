@@ -5,6 +5,7 @@ import { lazy, Suspense, useEffect, useState } from "react";
 import { SubscriptionLink } from "./Agent";
 import { ApiError, connections } from "./api";
 import { AlpacaPaper } from "./AlpacaPaper";
+import { PaperResearch } from "./PaperResearch";
 
 const PrivyWallet = lazy(() => import("./PrivyWallet"));
 
@@ -52,6 +53,7 @@ export function PrivateSetup() {
           do not paste them into research chat. Your Solana wallet settings do not apply to Alpaca.
         </p>
         <AlpacaPaper />
+        <PaperResearch />
         <p className="text-sm text-[var(--color-dim)]">
           Paper results help test the system, but simulated fills omit some live costs and execution effects.
           Profits in paper trading do not establish live profitability.
