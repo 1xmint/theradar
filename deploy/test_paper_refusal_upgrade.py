@@ -20,9 +20,10 @@ spec.loader.exec_module(upgrade)
 def archive(entries):
     stream = io.BytesIO()
     with tarfile.open(fileobj=stream, mode="w:") as output:
-        for name, raw, kind in entries:
+        for name, raw, kind, *link in entries:
             member = tarfile.TarInfo(name)
             member.size, member.type = len(raw), kind
+            member.linkname = link[0] if link else ""
             output.addfile(member, io.BytesIO(raw))
     return stream.getvalue()
 
@@ -90,7 +91,8 @@ class UpgradeTests(unittest.TestCase):
     def test_archive_rejects_duplicates_links_extra_missing_and_wrong_reader_pin(self):
         with self.context() as case:
             for entries in (case.entries * 2, case.entries[:1], case.entries + [("other", b"", tarfile.REGTYPE)],
-                    [("paper-control.py", b"", tarfile.SYMTYPE), case.entries[1]],
+                    [("paper-supervisor.py", case.entries[0][1], tarfile.REGTYPE),
+                        ("paper-control.py", b"", tarfile.SYMTYPE, "paper-supervisor.py")],
                     [("paper-control.py", b"wrong-pin", tarfile.REGTYPE), case.entries[1]]):
                 raw = archive(entries)
                 with self.assertRaises(ValueError): upgrade.payload(raw, upgrade.digest(raw))

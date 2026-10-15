@@ -46,3 +46,16 @@ passwordless grants). After application inspect paused runtime and authenticated
 site, correct stale installation copy and verify explicit handover and actual
 paper entry/exit/cancel/reconciliation/pause. Adaptive learning and measured
 profit after costs remain unfinished; the full autonomous-trading goal is active.
+
+## GitHub handle and fixture refinement
+
+Draft PR 424 is attached. Source 029747d8a48c9bb2dfcfe47f13fd74978fb88038
+is confirmed in progress in CI 38783431746; inspect this handle before pushing.
+No prior job was canceled. A subsequent source review strengthened the tar-link
+fixture: it now names a valid regular target containing the expected reader pin,
+so removing the link rejection must actually accept a linked payload, rather
+than fail later on an invalid empty link target. This fixture-only refinement is
+committed locally while the existing run finishes; it still requires its own
+GitHub verification. No upgrade archive or installer has been staged on the VPS.
+The current turn made source and runtime-inspection progress; no permission or
+deployed service changed. Full autonomous trading remains incomplete and active.
