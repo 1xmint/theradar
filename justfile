@@ -86,6 +86,7 @@ private-setup:
     setpriv --no-new-privs python3 deploy/mutate_paper_control.py
     setpriv --no-new-privs python3 deploy/mutate_paper_supervisor.py
     setpriv --no-new-privs python3 deploy/mutate_paper_install.py
+    setpriv --no-new-privs python3 deploy/mutate_paper_refusal_upgrade.py
     setpriv --no-new-privs python3 deploy/mutate_alpaca_cohort.py
     setpriv --no-new-privs python3 deploy/prove_alpaca_cancel_regression.py "{{cargo}}"
     setpriv --no-new-privs python3 deploy/prove_alpaca_maintenance_regressions.py "{{cargo}}"

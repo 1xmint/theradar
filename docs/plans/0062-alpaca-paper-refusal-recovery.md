@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # 0062 — Recover from proven paper refusals
 
-**Status:** source implemented; GitHub verification pending; not deployed.
+**Status:** source GitHub-verified and release artifact hashed; protected deployment pending.
 
 Branch feat/alpaca-paper-refusals, parent 79fa519 (PR 422). Parent CI
 38496773942 completed all fourteen jobs successfully before this branch was
@@ -74,3 +74,57 @@ Tailscale SSH check. The owner was asked to finish that browser sign-in. The
 pending SSH session was not restarted; no deployed services or permission changed
 during this turn. Full objective remains active, with source and verification
 progress rather than autonomous-trading completion.
+
+## Corrected verification in flight
+
+Source 70aabc9eef7898df75b4760faa75da1012d74206 is in CI 38781016512.
+Thirteen jobs, including lint and cargo-deny, completed successfully; tests job
+116580915820 remains authoritatively in progress at this checkpoint. Do not push
+over it. Its four generic shards report two caught and two unviable; do not count
+the unviable results as executed coverage. The full refusal suites are not yet
+claimed successful. Linux release 38781098632, build job 116581201476, is also
+confirmed in progress for the same source commit. No artifact has been installed.
+
+The pending SSH session ended with an authoritative connection timeout. No SSH
+command was restarted merely because observing it took time. Owner completion
+of the fresh Tailscale SSH sign-in is still pending. Next turn should inspect
+these same CI/release handles, fix any actual failures, read the executed exact
+regression outputs and artifact receipts, then prepare the coordinated upgrade.
+This turn made source and verification progress; the full goal remains active.
+
+## Release receipt verified
+
+Release 38781098632 completed successfully for
+70aabc9eef7898df75b4760faa75da1012d74206. Downloaded artifact directory is
+workstation TEMP/radar-refusal-release-38781098632. BUILD-INFO records that exact
+commit and build time 2026-10-15T17:58:59Z. Every one of its six named binaries
+was independently hashed and matched the manifest. The paper reader radar hash is
+47b0448dd16b89818bcf65551745814161cc7ac082e1ff9618c143b409c30a3f;
+radar-serve is bc2e75f439d10dd1209173ddef0aa5091743cb6f120b557c77756e5f3d47bc1e.
+Downloading and hashing are not local execution; no workstation jobs ran.
+
+CI 38781016512 tests job 116580915820 remains confirmed in progress after the
+release completed. Do not restart, cancel, push over it, or treat its duration as
+failure. No new test success is claimed. A coordinated upgrade must replace the
+reader and pin in paper-control.py together with paper-supervisor.py, validate
+the currently installed old hashes, require paused/unconfigured owner authority,
+preserve broker/supervisor state, retain old bytes and start with a paused check.
+The one-time installer must not be rerun against existing state. Runtime access
+still needs the outstanding Tailscale sign-in. This continuation verified the
+release artifact and waited on a confirmed live test handle; the goal is active.
+
+## Completed verification
+
+CI 38781016512 completed all fourteen jobs successfully at source 70aabc9.
+Tests job 116580915820 reports 2863 Rust tests and 138 Python tests, all 27
+supervisor/controller/bridge reapplications caught, all three new exact Rust
+refusal reapplications caught, and systemd unit verification. Its output was
+read after completion. The owner finished Tailscale authentication; the existing
+SSH alias and fixed private inspect helper now work. Independent October 15
+inspection again shows successful paused ticks, separate principals and active
+controller/socket/timer. No order permission or service changed in that read.
+
+Follow-up branch feat/alpaca-paper-refusal-upgrade carries the protected upgrade
+work and these documentation receipts, stacked on the verified remote PR 423
+source 70aabc9. The local documentation-only commits were not pushed over its
+live test run. See the next upgrade plan for outstanding verification/deployment.
