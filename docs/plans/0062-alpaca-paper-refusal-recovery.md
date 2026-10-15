@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # 0062 — Recover from proven paper refusals
 
-**Status:** source implemented; GitHub verification pending; not deployed.
+**Status:** source GitHub-verified and release artifact hashed; protected deployment pending.
 
 Branch feat/alpaca-paper-refusals, parent 79fa519 (PR 422). Parent CI
 38496773942 completed all fourteen jobs successfully before this branch was
@@ -112,3 +112,19 @@ preserve broker/supervisor state, retain old bytes and start with a paused check
 The one-time installer must not be rerun against existing state. Runtime access
 still needs the outstanding Tailscale sign-in. This continuation verified the
 release artifact and waited on a confirmed live test handle; the goal is active.
+
+## Completed verification
+
+CI 38781016512 completed all fourteen jobs successfully at source 70aabc9.
+Tests job 116580915820 reports 2863 Rust tests and 138 Python tests, all 27
+supervisor/controller/bridge reapplications caught, all three new exact Rust
+refusal reapplications caught, and systemd unit verification. Its output was
+read after completion. The owner finished Tailscale authentication; the existing
+SSH alias and fixed private inspect helper now work. Independent October 15
+inspection again shows successful paused ticks, separate principals and active
+controller/socket/timer. No order permission or service changed in that read.
+
+Follow-up branch feat/alpaca-paper-refusal-upgrade carries the protected upgrade
+work and these documentation receipts, stacked on the verified remote PR 423
+source 70aabc9. The local documentation-only commits were not pushed over its
+live test run. See the next upgrade plan for outstanding verification/deployment.

@@ -22,7 +22,7 @@ import uuid
 CONFIG = Path("/etc/radar/alpaca-paper-control.json")
 MODEL = Path("/etc/radar/alpaca-paper-model.json")
 READER = Path("/usr/local/lib/radar-paper-control/radar")
-READER_HASH = "0c421ea6475f400cda75126214725f718ed37cede13fe68d72c5f663016494f9"
+READER_HASH = "47b0448dd16b89818bcf65551745814161cc7ac082e1ff9618c143b409c30a3f"
 STORE = Path("/var/lib/radar-paper-execution")
 VERSION = "alpaca-paper-control-v1"
 SYMBOLS = ["QQQ", "SPY"]
