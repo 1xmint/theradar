@@ -74,3 +74,20 @@ Tailscale SSH check. The owner was asked to finish that browser sign-in. The
 pending SSH session was not restarted; no deployed services or permission changed
 during this turn. Full objective remains active, with source and verification
 progress rather than autonomous-trading completion.
+
+## Corrected verification in flight
+
+Source 70aabc9eef7898df75b4760faa75da1012d74206 is in CI 38781016512.
+Thirteen jobs, including lint and cargo-deny, completed successfully; tests job
+116580915820 remains authoritatively in progress at this checkpoint. Do not push
+over it. Its four generic shards report two caught and two unviable; do not count
+the unviable results as executed coverage. The full refusal suites are not yet
+claimed successful. Linux release 38781098632, build job 116581201476, is also
+confirmed in progress for the same source commit. No artifact has been installed.
+
+The pending SSH session ended with an authoritative connection timeout. No SSH
+command was restarted merely because observing it took time. Owner completion
+of the fresh Tailscale SSH sign-in is still pending. Next turn should inspect
+these same CI/release handles, fix any actual failures, read the executed exact
+regression outputs and artifact receipts, then prepare the coordinated upgrade.
+This turn made source and verification progress; the full goal remains active.
