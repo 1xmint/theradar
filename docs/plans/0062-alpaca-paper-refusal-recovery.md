@@ -91,3 +91,24 @@ of the fresh Tailscale SSH sign-in is still pending. Next turn should inspect
 these same CI/release handles, fix any actual failures, read the executed exact
 regression outputs and artifact receipts, then prepare the coordinated upgrade.
 This turn made source and verification progress; the full goal remains active.
+
+## Release receipt verified
+
+Release 38781098632 completed successfully for
+70aabc9eef7898df75b4760faa75da1012d74206. Downloaded artifact directory is
+workstation TEMP/radar-refusal-release-38781098632. BUILD-INFO records that exact
+commit and build time 2026-10-15T17:58:59Z. Every one of its six named binaries
+was independently hashed and matched the manifest. The paper reader radar hash is
+47b0448dd16b89818bcf65551745814161cc7ac082e1ff9618c143b409c30a3f;
+radar-serve is bc2e75f439d10dd1209173ddef0aa5091743cb6f120b557c77756e5f3d47bc1e.
+Downloading and hashing are not local execution; no workstation jobs ran.
+
+CI 38781016512 tests job 116580915820 remains confirmed in progress after the
+release completed. Do not restart, cancel, push over it, or treat its duration as
+failure. No new test success is claimed. A coordinated upgrade must replace the
+reader and pin in paper-control.py together with paper-supervisor.py, validate
+the currently installed old hashes, require paused/unconfigured owner authority,
+preserve broker/supervisor state, retain old bytes and start with a paused check.
+The one-time installer must not be rerun against existing state. Runtime access
+still needs the outstanding Tailscale sign-in. This continuation verified the
+release artifact and waited on a confirmed live test handle; the goal is active.
