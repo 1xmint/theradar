@@ -35,7 +35,7 @@ describe("private setup", () => {
     expect(await screen.findByText(/ChatGPT connection is not configured/)).toBeTruthy();
     expect(await screen.findByText("No Privy app is configured on this instance.")).toBeTruthy();
     expect((screen.getByRole("button", { name: "Connect ChatGPT" }) as HTMLButtonElement).disabled).toBe(true);
-    expect(screen.getByText("Autonomous execution: not enabled")).toBeTruthy();
+    expect(screen.getByText("Autonomous trading readiness")).toBeTruthy();
     expect(fetchImpl.mock.calls.every(([, options]) => options?.method !== "POST")).toBe(true);
   });
 
