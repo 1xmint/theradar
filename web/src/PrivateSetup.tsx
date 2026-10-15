@@ -63,10 +63,10 @@ export function PrivateSetup() {
           : <p className="mt-2 text-sm" role="status">{error ?? "Checking Privy configuration…"}</p>}
       </div>
       <div className="rounded-md border border-[var(--color-line)] p-4">
-        <h3 className="font-medium">Autonomous execution: not enabled</h3>
+        <h3 className="font-medium">Autonomous trading readiness</h3>
         <p className="mt-2 text-sm text-[var(--color-dim)]">
-          The Alpaca panel manages paper permission. The autonomous supervisor and its full entry/exit
-          lifecycle still need installation and verification before unattended trading can start.
+          Use the Alpaca panel to manage paper handover. Verify supervisor health and the full order
+          lifecycle before unattended trading: entry, exit, reconciliation, cancellation and pause.
           The Solana settings above remain separate drafts. Granting paper permission does not prove the agent is running.
         </p>
       </div>
