@@ -59,7 +59,8 @@ cargo := env("RADAR_CARGO", "cargo")
 # the bot's files -- 11 in brief.rs (the analyst, contest and vault checks), 5
 # in seven_days.rs, 6 in radar-backfill's analyst_log.rs and 3 for the watched
 # seven-day checkpoint in checkpoints.rs.
-export MIN_TESTS := "1954"
+# CI 38444102509 measured 2855; raise the floor only from observed runner output.
+export MIN_TESTS := "2863"
 
 _default:
     @just --list --unsorted
@@ -69,6 +70,40 @@ check: _disk build tests lint fmt
 
 # Everything runnable off a GitHub runner.
 ci: build tests lint fmt cargo-deny licence-headers
+
+# Private setup boundaries; fake CLI/account reads use no credentials.
+private-setup:
+    setpriv --no-new-privs python3 -m unittest discover -s deploy -p 'test_*.py' -v
+    setpriv --no-new-privs python3 deploy/mutate_alpaca_reader.py
+    setpriv --no-new-privs python3 deploy/mutate_alpaca_recorder.py
+    setpriv --no-new-privs python3 deploy/mutate_alpaca_research.py
+    setpriv --no-new-privs python3 deploy/mutate_alpaca_research_setup.py
+    setpriv --no-new-privs python3 deploy/mutate_alpaca_context_setup.py
+    setpriv --no-new-privs python3 deploy/mutate_alpaca_maintenance.py
+    setpriv --no-new-privs python3 deploy/mutate_alpaca_initialization.py
+    setpriv --no-new-privs python3 deploy/mutate_alpaca_admin.py
+    setpriv --no-new-privs python3 deploy/mutate_alpaca_opening_apply.py
+    setpriv --no-new-privs python3 deploy/mutate_paper_control.py
+    setpriv --no-new-privs python3 deploy/mutate_paper_supervisor.py
+    setpriv --no-new-privs python3 deploy/mutate_paper_install.py
+    setpriv --no-new-privs python3 deploy/mutate_paper_refusal_upgrade.py
+    setpriv --no-new-privs python3 deploy/mutate_paper_research.py
+    setpriv --no-new-privs python3 deploy/mutate_alpaca_cohort.py
+    setpriv --no-new-privs python3 deploy/prove_alpaca_cancel_regression.py "{{cargo}}"
+    setpriv --no-new-privs python3 deploy/prove_alpaca_maintenance_regressions.py "{{cargo}}"
+    setpriv --no-new-privs python3 deploy/prove_alpaca_opening_regressions.py "{{cargo}}"
+    setpriv --no-new-privs python3 deploy/prove_alpaca_paper_model_regressions.py "{{cargo}}"
+    setpriv --no-new-privs python3 deploy/prove_paper_site_regressions.py "{{cargo}}"
+    setpriv --no-new-privs python3 deploy/prove_alpaca_session_regressions.py "{{cargo}}"
+    setpriv --no-new-privs python3 deploy/prove_alpaca_refusal_regressions.py "{{cargo}}"
+    setpriv --no-new-privs python3 deploy/prove_alpaca_context_regressions.py "{{cargo}}"
+    systemd-analyze verify deploy/radar-paper-market.service deploy/radar-paper-market.timer
+    systemd-analyze verify deploy/radar-paper-research.service deploy/radar-paper-research.timer
+    systemd-analyze verify deploy/radar-context-research.service deploy/radar-context-research.timer
+    systemd-analyze verify deploy/radar-paper-maintenance.service deploy/radar-paper-maintenance.timer
+    systemd-analyze verify deploy/radar-paper-initialize.service
+    systemd-analyze verify deploy/radar-paper-control.service deploy/radar-paper-control.socket
+    systemd-analyze verify deploy/radar-paper-supervisor.service deploy/radar-paper-supervisor.timer
 
 # --- required checks, one recipe per status-check context ---------------------
 
@@ -95,6 +130,11 @@ tests:
         echo "Either tests were skipped or the harness is lying. Raise MIN_TESTS in" >&2
         echo "the justfile when the suite grows; never lower it to make this pass." >&2
         exit 1
+    fi
+    # Linux peer credentials are exercised by the existing required tests job.
+    if [ "$(uname -s)" = "Linux" ]; then
+        just private-setup
+        python3 deploy/prove_codex_prompt_regression.py "{{ cargo }}"
     fi
 
 # Pedantic clippy, denied. The workspace lint table sets the levels; this runs them.
@@ -370,7 +410,7 @@ licence-headers:
 # "refused, or is rate-limited" case became three: a 400 still ends the poll
 # immediately, a `busy` 503 keeps polling past its first refusal, and a
 # `chain_unreadable` 502 followed by a landed read still shows "Landed".
-export MIN_WEB_TESTS := "327"
+export MIN_WEB_TESTS := "365"
 
 # The public site at cabalhunter.org. Lower because it has five pages, and it
 # exists for the same reason MIN_WEB_TESTS does: `vitest run` exits zero when it
@@ -400,6 +440,7 @@ export MIN_SITE_TESTS := "58"
 # compile when nobody has run it.
 web:
     just _npm_app web "$MIN_WEB_TESTS"
+    python3 deploy/prove_paper_panel_regressions.py
 
 # The public site: the same pipeline, on the other application.
 #

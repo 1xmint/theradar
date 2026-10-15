@@ -1,9 +1,229 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # Radar
 
-Solana research and trading infrastructure, with an x402/MCP agent surface built
+Autonomous trading research, with **Alpaca paper stocks/ETFs as the primary next
+experiment**. Hyperliquid public-data research and Solana remain secondary;
+neither is the starting live venue for this U.S. owner. See the
+[accepted direction](docs/design/0022-alpaca-paper-first-experiment.md).
+
+The existing Solana infrastructure has an x402/MCP agent surface built
 in and, on the live instance, sitting behind Cloudflare Access rather than open
 to any outside agent (issue #186) — see [What is live](#what-is-live) below.
+
+`radar alpaca-read` reads a paper account, open positions and the US equity market
+clock. It requires private environment variables `RADAR_ALPACA_PAPER_KEY_ID` and
+`RADAR_ALPACA_PAPER_SECRET_KEY`; it always uses Alpaca's paper host and never
+places orders. See [setup and remaining work](docs/plans/0017-alpaca-paper-foundation.md).
+The command is not yet wired to the deployed site. Existing measurements below
+describe the Solana experiment, not Alpaca performance.
+
+`radar alpaca-cash-checkpoint --journal <private-file> --account-id <paper-id>
+--max-pages <positive-u16>` retains selected broker observations durably beside
+order claims. Initialize before reserving any order; subsequent calls reconcile
+against the retained baseline. Rejected reads leave the baseline unchanged.
+Checkpoints also retain share quantities and require subsequent changes to match
+new bound fills, with account/position reads bracketing collection. Legacy cash
+baselines without share quantities require explicit reconciliation before use.
+`radar alpaca-order-preflight` joins these observations and local liabilities to
+the pure equity risk kernel. It performs paper-host reads and reports refusals;
+unverified capacity/cost inputs remain unknown. It cannot submit an order. See
+[equity risk work](docs/plans/0033-alpaca-equity-risk.md).
+The private `radar alpaca-paper-submit` command uses the same collected state,
+checks deterministic risk and the serialized request, and durably records
+uncertainty before a fixed paper-only POST. It reloads owner policy/time before
+the effect and refuses existing client IDs. Actual capacity/cost inputs remain
+unknown, so this path currently refuses before reserving or sending. Service
+isolation, site handover and unattended recovery remain required; see
+[paper submission work](docs/plans/0034-alpaca-paper-submit.md).
+
+`radar alpaca-paper-cancel --journal <private-file> --account-id <paper-id> --client-order-id <retained-id>`
+binds a working simple order to Radar's retained intent before requesting its
+cancellation on the fixed paper host. It records cancellation uncertainty before
+DELETE, refuses repeated requests, and retains cash/share claims even after HTTP
+204 acceptance. Reconcile fills and terminal observations separately; acceptance
+does not establish that filling stopped. This is a private operator command,
+not an installed unattended supervisor. See
+[paper cancellation](docs/plans/0046-alpaca-paper-cancellation.md).
+
+`radar alpaca-paper-maintain --journal <private-file> --account-id <paper-id> --max-pages <positive-u16> [--cancel-working]`
+performs one recovery tick under the existing journal owner. It requires an
+already retained cash checkpoint before reading credentials or broker facts,
+then refreshes cash/share/order state, reports working, terminal and unresolved orders,
+and optionally requests cancellation of at most one working order. Pending
+cancellation uncertainty is observed rather than retried. Checkpoint failure
+stops the tick; cancellation acceptance retains claims. This is the maintenance
+phase for a future isolated supervisor, with no new-order authority.
+See [paper maintenance](docs/plans/0051-alpaca-paper-maintenance.md).
+An existing empty file or reservation-only history is not a fresh account;
+initialization is a separate operator action. See
+[maintenance genesis guard](docs/plans/0053-alpaca-maintenance-genesis.md).
+
+The separate observation worker and systemd pair are installed.
+Its root-owned configuration defaults to observation; optional cancel_working
+requests one retained-order cancellation per tick. It refuses a missing private
+journal and keeps brokerage credentials out of model processes. Initial journal
+creation and early observation succeeded; a later unsupported cash activity
+now prevents checkpoint advancement. A verified fixed administrative helper is
+installed so diagnostics no longer need repeated private sudo commands. These
+paths cannot create unattended entries. See
+[initialization/provisioning](docs/plans/0054-alpaca-execution-initialization.md)
+and [maintenance diagnosis](docs/plans/0055-alpaca-maintenance-diagnostics.md).
+
+An explicit private opening-cash acknowledgement command now has source for the
+late paper funding case. It binds one selected cash journal to unchanged retained
+opening cash, appends the operator acknowledgement and preserves the old prefix.
+Ordinary maintenance cannot make this interpretation automatically. Verified
+source/release 1819896 was applied once; direct VPS checks confirm resumed
+ordinary observation with unchanged simulated cash and empty claims. See
+[opening reconciliation](docs/plans/0056-alpaca-opening-cash-reconciliation.md).
+
+An optional private paper stress model has verified source for the Alpaca
+preflight/submission caller. It declares finite scenario size, fee and slippage
+assumptions separately from live execution evidence, and preserves default
+unknown-input refusals. Source CI and matching release passed at a66793a; it has
+not been installed or enabled trading/site handover. See
+[paper model work](docs/plans/0057-alpaca-paper-stress-model.md).
+
+Use protected storage in an existing durably provisioned directory. This does
+not establish available capital, profit or trading authority. See
+[durable cash work](docs/plans/0030-alpaca-durable-cash.md).
+
+Cash checkpoints now retain complete bound execution progress and derive the
+remaining order liabilities: unfilled buy limit cost, unfilled sell shares, and
+the full fee reserve. Confirmed terminal orders have no unfilled quantity claim.
+Original intents and submission uncertainty remain; retries are still refused.
+These observations are not available capital or trading authority. See
+[economic claim work](docs/plans/0031-alpaca-economic-claims.md).
+
+`radar alpaca-market-read --symbols SPY,QQQ --output ./data/alpaca/capture-001.json`
+captures the explicitly requested IEX feed using the same private paper keys.
+Create the output directory first and use a new filename for each observation;
+existing captures are never replaced. Replay without credentials using
+`radar alpaca-market-replay --input ./data/alpaca/capture-001.json --as-of-unix-ms <N>`.
+The replay gate uses host availability time, preserves missing symbols as null,
+and does not certify exchange timestamps, quote freshness or consolidated coverage.
+The commands are operator tools. A separate bounded recorder schedules research
+captures; autonomous broker execution remains pending.
+
+`radar alpaca-quote --input ./data/alpaca/capture-001.json --symbol SPY --as-of-unix-ms <N> --max-age-ms 1000 --max-spread-bps 10`
+checks a captured quote against explicit age/spread bounds, the capture's requested
+symbols and availability, and its nanosecond UTC exchange timestamp. Quote
+provenance must match the supported IEX pattern: both exchanges V,
+exactly condition R and tape A/B/C. Missing or other metadata is refused;
+matching it does not establish market hours or tradability. Prices and
+displayed sizes are parsed as exact integers at six decimal places; size units
+remain unverified and cannot yet bound executable share quantity. Unsupported
+precision and exponent notation are refused. This produces quote inputs only,
+not an account mandate, asset-eligibility verdict or permission to place orders.
+
+`radar alpaca-paper-score --entry <capture> --entry-as-of-unix-ms <N> --exit <capture> --exit-as-of-unix-ms <N> --symbol SPY --quantity-nanoshares <N> --assumptions <json>`
+scores one offline long trade at entry ask and later exit bid. Each capture must
+have been available at its own watermark and pass the quote checks above. Required
+assumptions include model_id, displayed_size_unit (shares), participation_bps,
+slippage_bps_per_side, fee_per_side_microusd, max_quote_age_ms and max_spread_bps.
+There are no defaults. Fees and adverse slippage are charged on both sides;
+spread is already included in ask-to-bid prices. The report retains both quotes
+and all assumptions. Capacity is explicitly assumed, broker P&L is not claimed,
+and nothing from this scorer enters execution risk state. It is an outcome
+measurement tool; it does not establish held-out performance or choose trades.
+
+`radar alpaca-paper-decision --capture <capture> --symbol SPY --proposal <json> --assumptions <json> --output <new-file>`
+records a local research choice using the host clock and a capture available at
+that cutoff. Proposal fields are strategy_id (include version), action (enter or
+wait), quantity_nanoshares, horizon_ms and reason. Quantity also fixes the
+same-size always-enter baseline; cash is the second baseline. Cost assumptions
+use the scoring schema above. All are copied into the new record, including raw
+entry data; existing files refuse publication. No model call or order is made.
+`radar alpaca-paper-decision-score --decision <record> --exit <capture> --exit-as-of-unix-ms <N>`
+requires exactly the frozen horizon watermark. Unavailable or invalid exit data
+and excess assumed participation produce an explicit unscoreable outcome, with
+unknown comparison values, rather than dropping the case or assigning zero.
+Records are mutable local research files, not authenticated strategy provenance.
+This does not yet prove cohort completeness, a learned strategy or forward gains.
+
+`radar alpaca-paper-propose --capture <capture> --symbol SPY --experiment <json> --assumptions <json> --output <new-file>`
+calls the configured linked subscription provider for a strict Enter/Wait reply.
+The fixed experiment requires strategy_id, quantity_nanoshares and horizon_ms;
+the model controls only action and reason. Observations use the existing untrusted
+fences. The quote is revalidated when the answer returns, and that completion
+cutoff starts the evaluation horizon; there are no pre-answer simulated fills.
+The caller requires explicit unlimited subscription allowance with an adequate
+per-call bound. Finite daily allowances need shared durable metering first; paid
+API providers cannot use this path. No credentials are handled by this caller.
+Malformed/late/failed answers refuse without creating a decision. The separate
+research worker retains scheduled attempts, including failures, under a frozen
+campaign; see [research provisioning](docs/plans/0044-alpaca-research-provisioning.md).
+There is no verified model edge or execution authority from this command.
+
+`python3 deploy/report-alpaca-cohort.py <research-store> <capture-tape> <as-of-unix-ms>`
+reports every planned slot, including failed, missed, interrupted and unrecorded
+attempts. Completed decisions are compared at their exact frozen horizons using
+the latest capture available by that horizon. Ties or absent/invalid exit quotes
+remain unscoreable. Scoring uses the separately installed research CLI and receives
+no brokerage credentials. This is a manual read-only report, not an installed
+scoring service. Overlapping hypothetical outcomes are not added into portfolio
+profit; aggregate profit remains unknown. Local records do not authenticate model
+provenance. See [cohort evaluation](docs/plans/0045-alpaca-cohort-report.md).
+
+`radar alpaca-reconcile --account-id <expected-paper-account-id>` pins the account
+identity and brackets positions/market-clock reads with account and open-order
+reads. It preserves pending orders and nested legs, reports changes in selected
+fields, and refuses full 500-order responses. Stable fields do not prove an atomic
+snapshot or complete economic accounting. It uses the same private paper keys
+and cannot submit orders. See [reconciliation work](docs/plans/0018-alpaca-paper-reconciliation.md).
+
+The same report includes conservative exposure bounds for supported simple equity
+limit orders and long positions. It reserves original pending quantities, rounds
+funds down and exposure up, and reports unsupported or changing states with null
+bounds. Fees, durable local claims, freshness and complete economic reconciliation
+remain unresolved; these bounds are not available capital or trading authority.
+See [exposure accounting](docs/plans/0020-alpaca-paper-exposure.md).
+
+`radar alpaca-activities-read --account-id <paper-id> --max-pages 10` retrieves
+paginated fill and nontrade cash/fee observations between pinned account reads.
+The page limit bounds requests, not capital; hitting it refuses partial history.
+Exhausting pagination does not prove economic completeness or final fees, and
+never releases reservations. See [activity reconciliation inputs](docs/plans/0027-alpaca-account-activities.md).
+
+`radar alpaca-order-read --account-id <expected-paper-account-id> --client-order-id <retained-id>`
+queries a specific paper order between pinned account reads. It preserves selected
+fill/terminal observations without authorizing a retry or releasing claims.
+HTTP 404 means not visible, not proof that submission failed; other errors refuse
+without partial output. See [recovery reads](docs/plans/0021-alpaca-order-recovery-read.md).
+Add `--journal <private-file>` to compare the broker payload with a retained
+intent under journal ownership. Only exact simple day equity limit payloads with
+extended hours disabled can match. Missing orders stay unresolved; matching does
+not reconcile fills/fees, free a claim or authorize execution. See
+[intent binding](docs/plans/0026-alpaca-intent-binding.md).
+
+`radar alpaca-order-reconcile --journal <private-file> --account-id <paper-id> --client-order-id <retained-id> --max-pages 10`
+connects retained intent, matched order reads and paginated activities under journal
+ownership. It requires unchanged selected order/account observations, matches
+execution quantity intervals and computes gross USD bounds with exact arithmetic.
+It retains the entire original cash/share claim. Gross execution consistency does
+not establish final fees, account cash, complete history or permission to trade.
+See [execution reconciliation](docs/plans/0028-alpaca-fill-reconciliation.md).
+
+`radar alpaca-cash-reconcile --journal <private-file> --account-id <paper-id> --baseline <prior-activities-report.json> --max-pages 10`
+compares a prior private `alpaca-activities-read` JSON report with current broker
+observations, binding every retained order around the activity reads. It refuses
+changed/disappeared baseline records, unbound new fills and unsupported new cash
+activity types. Exact trade cash flow, deposits/withdrawals and observed USD fees
+are reported separately. A matching cash balance is not measured profit or final
+economic reconciliation; all claims remain held. Baseline input is bounded to
+16 MiB and must remain in protected operator storage. See
+[cash accounting](docs/plans/0029-alpaca-cash-accounting.md).
+
+`radar alpaca-order-reserve --journal <private-file> --account-id <paper-id> --intent <typed-intent>`
+records an immutable paper claim. `radar alpaca-order-journal --journal <private-file> --account-id <paper-id>`
+reopens and verifies it under exclusive cooperative ownership. These operator
+commands need no broker keys and cannot submit, retry or release an order.
+See [durable paper claims](docs/plans/0022-alpaca-order-journal.md).
+
+`radar alpaca-assets-read --account-id <paper-id> --symbols SPY,QQQ` reads
+identity-bound equity assets between pinned paper account observations. Missing
+tradability and fractional-share flags remain unknown. This does not authorize
+orders. See [asset checks](docs/plans/0023-alpaca-asset-observations.md).
 
 **Status: recording, and refusing to trade.** The pipeline runs end to end on a
 live instance — recording launches, measuring what became of them, and running
@@ -120,9 +340,10 @@ again. This needs nothing from any vendor and it is the largest saving available
 | `radar-research` | Replay. Re-runs a recorded decision at its original watermark and separates a store that gained history from a strategy that is not a pure function of its inputs. Also builds and reads the creator index and the base-rate snapshot — moved here from `radar-roast` when the bot that read them left for its own repository (ADR-0024). |
 | `radar-signer` | A separate process holding the key. Re-decodes every transaction and trusts nothing the caller said about it. |
 | `radar-exec` | Route, gate, sign, submit, reconcile. The last stage, and the one holding the least authority. |
+| `radar-pda` | Pure Solana program-derived address calculation shared by transaction builders and the independent signer. |
 | `radar-pumpfun` | Builds pump.fun instructions and prices them off the bonding curve. Pure: no clock, no network, no key. The curve is `x·y=k` over published reserves, so a fill is computed rather than quoted — see ADR 0009. |
 | `radar-customer` | The customer model. Pure: a bounded grant derived from the kernel's authorisation, and a signature meter. No account table — see ADR 0006. |
-| `radar-onchain` | The on-demand chain read behind `radar dossier`. Rebuilds a token's launch block and prices its curve from RPC in a bounded number of calls, for a mint that may be forty seconds old — which the store cannot answer, being minutes behind by design and holding the launch-block verdict rather than the number. Read-only: no key, no signer in its tree. |
+| `radar-onchain` | The on-demand chain read behind `radar dossier`. Rebuilds a token's launch block and prices its curve from RPC in a bounded number of calls, for a mint that may be forty seconds old — which the store cannot answer, being minutes behind by design and holding the launch-block verdict rather than the number. Also reads mint/curve/fees in one RPC context for the hypothetical `radar curve-exit` command. Read-only: no key, no signer in its tree. |
 | `radar-journal` | What the autonomous surface decided, written **before** it acted. One JSON object per line, hash-chained: each event carries the id of the one before it, so an alteration is visible from a later event — relative to a trusted checkpoint, which is what a chain buys and all it buys. Reading one back keeps three answers apart that an operator must not confuse: nothing was ever written, the last write was interrupted, and something wrote to this file that was not the journal. A write that fails blocks the effect it was recording. ADR 0017. |
 | `radar-cli` | The operator command line. Reads live state and computes nothing it does not have. |
 

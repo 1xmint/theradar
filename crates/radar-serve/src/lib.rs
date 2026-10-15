@@ -14,6 +14,7 @@
 pub mod access;
 pub mod admission;
 pub mod api;
+mod automation;
 pub mod cache;
 pub mod challenges;
 pub mod chat;
@@ -26,6 +27,7 @@ pub mod link;
 pub mod market;
 pub mod mcp;
 mod ops;
+mod paper;
 pub mod positions;
 pub mod privy;
 pub mod share;
@@ -304,6 +306,8 @@ impl Drop for VisitorGuard {
 /// deployment returns 404 for them rather than serving intelligence for free.
 pub fn app(state: Arc<AppState>) -> Router {
     let mut router = Router::new()
+        .merge(automation::routes())
+        .merge(paper::routes())
         // The interface, embedded in this binary. The server-rendered ops page
         // stays at /ops as the no-JavaScript fallback: it is what answers when
         // somebody is debugging with curl, and it needs no build to exist.
@@ -380,11 +384,11 @@ pub fn app(state: Arc<AppState>) -> Router {
         // paywall that admits its own shape is halfway to one that fails open.
         .fallback(interface);
 
+    // Linking a subscription precedes giving inference a spending budget.
+    // Named even when unconfigured, so GET returns JSON rather than the SPA.
+    router = router.route("/v1/link", post(link::begin).get(link::status));
     if state.chat.is_some() {
-        router = router
-            .route("/v1/chat", post(chat::ask))
-            .route("/v1/link", post(link::begin))
-            .route("/v1/link", get(link::status));
+        router = router.route("/v1/chat", post(chat::ask));
     }
 
     if state.x402.is_some() {
@@ -656,7 +660,9 @@ async fn guard(
         // one wallet's own state refuses the operator like anyone else. The
         // owner's decision of 2026-09-23 -- nobody reads a wallet's list but
         // that wallet.
-        Ok(_) => {
+        Ok(identity) => {
+            let mut request = request;
+            request.extensions_mut().insert(Operator(identity));
             next.run(with_session_refusal(request, session_refused))
                 .await
         }
@@ -670,6 +676,11 @@ async fn guard(
         },
     }
 }
+
+/// A request-carried proof, inserted only after verified operator Access.
+/// Access-off and customer authentication never construct this proof.
+#[derive(Clone)]
+struct Operator(access::Identity);
 
 /// The request, carrying why its wallet session was refused, if one was.
 ///

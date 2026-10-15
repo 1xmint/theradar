@@ -1,0 +1,7 @@
+{
+  "version": "alpaca-paper-stress-v1",
+  "account_id": "replace-with-your-paper-account-id",
+  "max_quantity_nanoshares": 10000000,
+  "fee_per_side_microusd": 10000,
+  "slippage_bps_per_side": 10
+}

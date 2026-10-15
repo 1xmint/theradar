@@ -126,7 +126,41 @@ is partly written by whoever named a token.
 The prompt goes in on **stdin**, not as an argument. Arguments are visible in
 `ps` to every user on the box.
 
-## Related
+## Amendment — connecting before allowing inference (2026-10-06)
+
+The owner reaffirmed private use and fully autonomous execution through a Privy
+wallet. Subscription linking remains a vendor-CLI operation; this does not
+authorize inference spend or wallet signatures.
+
+The operator opens `/automation` and presses **Connect ChatGPT**. With a valid,
+unambiguous `RADAR_MODEL_CODEX` configuration, `/v1/link` works before an
+inference budget is chosen. `/v1/chat` still requires the provider, a positive
+budget and a durable ledger. An unconfigured linking endpoint returns JSON 404,
+including GET, rather than the application shell.
+
+The CLI continues to own credentials and refresh. The UI reports completion of
+the current linking attempt, not persistent authentication health. No new code
+reads credentials, grants a Privy delegation, or reaches the execution path.
+
+## Related decisions
+
+### Deployment amendment — retain NoNewPrivileges (2026-10-06)
+
+Live inspection found `NoNewPrivileges=yes` on `radar-serve`, so the documented
+sudo wrapper could not switch to the isolated CLI user. The deployment now uses
+a local socket-activated service running as `radar-agent`; Radar's command
+configuration names its unprivileged client. Both services retain
+`NoNewPrivileges`. Systemd socket permissions and Linux peer credentials admit
+only guardian. The broker accepts three fixed commands and supplies the CLI's
+cwd, cleared environment and read-only inference flags itself. It serializes
+CLI operations and kills a process group when its client disconnects. It never
+opens credentials and has no connection to the signer.
+
+The change is a deployment implementation of the existing credential-isolation
+decision; it does not authorize a model call or funds. Linux tests use a fake
+CLI to check refused commands, refused peers, stdin/environment boundaries and
+disconnect cleanup. Production namespace compatibility still needs the owner's
+one-time administrator install and a real login-status check.
 
 - AGENTS.md rule 1 — model judgement never authorises capital. This decision is
   about a credential rather than about capital, but it is the same shape: the

@@ -8,7 +8,7 @@
 //! rebuilding — both are facts about this file, and neither is visible in the
 //! modules it calls.
 
-use radar_risk::Authorization;
+use radar_risk::{Action, Authorization};
 use radar_types::{Address, MicroUsd, Signature, Slot};
 
 use crate::economics::{Costs, Economics, FailureRisk, evaluate};
@@ -26,6 +26,21 @@ pub trait Routing {
         mint: &Address,
         wallet: &Address,
         size_lamports: u64,
+    ) -> Result<Route, RouteError>;
+
+    /// Builds a sale of raw `mint` tokens for native SOL.
+    ///
+    /// `amount_raw` is token base units, never lamports or USD. Other quote
+    /// assets need a typed execution request and their own spend verification.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`RouteError`] if no supported, verifiable route exists.
+    fn build_sell(
+        &self,
+        mint: &Address,
+        wallet: &Address,
+        amount_raw: u64,
     ) -> Result<Route, RouteError>;
 }
 
@@ -85,12 +100,14 @@ pub struct Attempt {
     pub authorization: Authorization,
     /// The wallet trading.
     pub wallet: Address,
-    /// How much to commit, in lamports.
+    /// Maximum outgoing native instruction spend, in lamports.
     ///
     /// Also the size bound sent to the signer: this is what the executor
     /// *intends* to spend, and the signer checks the transaction the router
     /// actually built against it. A router that returned a larger buy than it
-    /// was asked for is caught by the process holding the key.
+    /// was asked for is caught by the process holding the key. For a sale,
+    /// token quantity instead comes from authorization.max_token_debit_raw;
+    /// this remains a separate ceiling for native setup or other outgoing spend.
     pub size_lamports: u64,
     /// The chain head the kernel judged against.
     ///
@@ -197,11 +214,26 @@ pub fn execute<R: Routing, S: Signing, T: Sending>(
     signer: &S,
     sender: &T,
 ) -> Outcome {
-    let route = match router.build_buy(
-        &attempt.authorization.mint,
-        &attempt.wallet,
-        attempt.size_lamports,
-    ) {
+    let built = match attempt.authorization.action {
+        Action::Buy => router.build_buy(
+            &attempt.authorization.mint,
+            &attempt.wallet,
+            attempt.size_lamports,
+        ),
+        Action::Reduce | Action::Exit => {
+            let Some(amount) = attempt
+                .authorization
+                .max_token_debit_raw
+                .filter(|raw| *raw > 0)
+            else {
+                return Outcome::Refused {
+                    reasons: vec!["sale requires positive raw-token debit authority".to_owned()],
+                };
+            };
+            router.build_sell(&attempt.authorization.mint, &attempt.wallet, amount)
+        }
+    };
+    let route = match built {
         Ok(r) => r,
         Err(e) => {
             return Outcome::NoRoute { why: e.to_string() };
@@ -248,7 +280,7 @@ pub fn execute<R: Routing, S: Signing, T: Sending>(
 
 #[cfg(test)]
 mod tests {
-    use std::cell::Cell;
+    use std::cell::{Cell, RefCell};
 
     use radar_risk::Action;
     use radar_types::Slot;
@@ -259,6 +291,10 @@ mod tests {
 
     impl Routing for FixedRoute {
         fn build_buy(&self, _: &Address, _: &Address, _: u64) -> Result<Route, RouteError> {
+            self.0.clone()
+        }
+
+        fn build_sell(&self, _: &Address, _: &Address, _: u64) -> Result<Route, RouteError> {
             self.0.clone()
         }
     }
@@ -335,6 +371,8 @@ mod tests {
                 action: Action::Buy,
                 max_notional: MicroUsd::from_dollars(100.0),
                 expires_after: Slot(1_150),
+                max_token_debit_raw: None,
+                min_output_raw: None,
                 needs_operator_signature: false,
             },
             now: Slot(1_100),
@@ -352,6 +390,98 @@ mod tests {
                 cost: MicroUsd::from_dollars(0.07),
             },
             impact_per_bps: MicroUsd(1_000),
+        }
+    }
+
+    #[derive(Debug, PartialEq, Eq)]
+    struct RouteCall {
+        buying: bool,
+        mint: Address,
+        wallet: Address,
+        amount: u64,
+    }
+
+    #[derive(Default)]
+    struct RecordingRouter(RefCell<Vec<RouteCall>>);
+
+    impl Routing for RecordingRouter {
+        fn build_buy(
+            &self,
+            mint: &Address,
+            wallet: &Address,
+            amount: u64,
+        ) -> Result<Route, RouteError> {
+            self.0.borrow_mut().push(RouteCall {
+                buying: true,
+                mint: *mint,
+                wallet: *wallet,
+                amount,
+            });
+            Ok(route(0))
+        }
+
+        fn build_sell(
+            &self,
+            mint: &Address,
+            wallet: &Address,
+            amount: u64,
+        ) -> Result<Route, RouteError> {
+            self.0.borrow_mut().push(RouteCall {
+                buying: false,
+                mint: *mint,
+                wallet: *wallet,
+                amount,
+            });
+            Ok(route(0))
+        }
+    }
+
+    #[test]
+    fn execution_routes_each_action_with_its_own_asset_units() {
+        for action in [Action::Buy, Action::Reduce, Action::Exit] {
+            let mut a = attempt(MicroUsd::from_dollars(10.0));
+            a.authorization.action = action;
+            a.authorization.max_token_debit_raw = Some(123_456);
+            let router = RecordingRouter::default();
+            let signer = CountingSigner::signing();
+            let sender = CountingSender::sending();
+            let outcome = execute(&a, &router, &signer, &sender);
+            assert!(matches!(outcome, Outcome::Submitted { .. }), "{outcome:?}");
+            assert_eq!(
+                *router.0.borrow(),
+                [RouteCall {
+                    buying: action == Action::Buy,
+                    mint: a.authorization.mint,
+                    wallet: a.wallet,
+                    amount: if action == Action::Buy {
+                        a.size_lamports
+                    } else {
+                        123_456
+                    },
+                }]
+            );
+            assert_eq!(signer.asked.get(), 1);
+            assert_eq!(sender.asked.get(), 1);
+            assert_eq!(signer.saw.get().unwrap().max_lamports, a.size_lamports);
+        }
+    }
+
+    #[test]
+    fn missing_or_zero_token_authority_refuses_before_routing_or_signing() {
+        for action in [Action::Reduce, Action::Exit] {
+            for bound in [None, Some(0)] {
+                let mut a = attempt(MicroUsd::from_dollars(10.0));
+                a.authorization.action = action;
+                a.authorization.max_token_debit_raw = bound;
+                let router = RecordingRouter::default();
+                let signer = CountingSigner::signing();
+                let sender = CountingSender::sending();
+                let outcome = execute(&a, &router, &signer, &sender);
+                assert!(matches!(outcome, Outcome::Refused { .. }), "{outcome:?}");
+                assert!(router.0.borrow().is_empty());
+                assert_eq!(signer.asked.get(), 0);
+                assert_eq!(sender.asked.get(), 0);
+            }
         }
     }
 

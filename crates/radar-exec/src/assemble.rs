@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-//! Compiling a Jupiter `/build` response into an unsigned Solana v0
+//! Compiling a Jupiter `/build` response into an unsigned Solana v0 or legacy
 //! transaction, with one zeroed signature slot for the fee payer.
 //!
 //! # Why this is hand-rolled
@@ -111,11 +111,11 @@ struct BuildInstructions {
     blockhash_with_metadata: RawBlockhashWithMetadata,
 }
 
-/// An unsigned v0 transaction, ready for the fee payer to sign.
+/// An unsigned transaction, ready for independent review before signing.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AssembledTransaction {
     /// The full serialized wire bytes: a shortvec signature count of `1`, one
-    /// zeroed 64-byte signature slot, then the v0 message.
+    /// zeroed 64-byte signature slot, then the selected message format.
     pub wire: Vec<u8>,
     /// Jupiter's `lastValidBlockHeight` for the blockhash this transaction
     /// names — the height after which the blockhash (and so this
@@ -155,6 +155,28 @@ impl AssembledTransaction {
 /// settings from anywhere in the message, so one hiding there would spend or
 /// size the transaction without ever being priced.
 pub fn assemble(body: &str, taker: Address) -> Result<AssembledTransaction, RouteError> {
+    assemble_format(body, taker, false)
+}
+
+/// Compiles every instruction account inline into a legacy transaction.
+///
+/// Lookup-table membership is unnecessary: the instruction metas already name
+/// every address. No accounts or instructions are dropped to fit a packet.
+/// This proves message readability, not swap semantics or execution safety.
+///
+/// # Errors
+///
+/// Same validation as [`assemble`], including fee, signer and packet bounds.
+/// Large routes that fit using lookup tables may be too large inline.
+pub fn assemble_legacy(body: &str, taker: Address) -> Result<AssembledTransaction, RouteError> {
+    assemble_format(body, taker, true)
+}
+
+fn assemble_format(
+    body: &str,
+    taker: Address,
+    legacy: bool,
+) -> Result<AssembledTransaction, RouteError> {
     let parsed: BuildInstructions =
         serde_json::from_str(body).map_err(|e| RouteError::Malformed(e.to_string()))?;
 
@@ -216,12 +238,13 @@ pub fn assemble(body: &str, taker: Address) -> Result<AssembledTransaction, Rout
         .chain(parsed.other_instructions)
         .collect();
 
-    let plan = Plan::build(
-        &instructions,
-        taker,
-        &parsed.addresses_by_lookup_table_address,
-    )?;
-    let message = plan.encode_message(&instructions, blockhash)?;
+    let tables = if legacy {
+        BTreeMap::new()
+    } else {
+        parsed.addresses_by_lookup_table_address
+    };
+    let plan = Plan::build(&instructions, taker, &tables)?;
+    let message = plan.encode_message(&instructions, blockhash, legacy)?;
 
     let mut wire = Vec::with_capacity(1 + 64 + message.len());
     write_shortvec(&mut wire, 1)?; // one signature slot, for the fee payer
@@ -756,14 +779,18 @@ impl Plan {
         &self,
         instructions: &[RawInstruction],
         blockhash: [u8; 32],
+        legacy: bool,
     ) -> Result<Vec<u8>, RouteError> {
         // 0x80: v0, high bit set per the wire format's version marker.
-        let mut out = vec![
-            0x80,
+        let mut out = Vec::new();
+        if !legacy {
+            out.push(0x80);
+        }
+        out.extend([
             self.num_required_signatures,
             self.num_readonly_signed,
             self.num_readonly_unsigned,
-        ];
+        ]);
 
         write_shortvec(&mut out, self.static_keys.len())?;
         for key in &self.static_keys {
@@ -806,13 +833,15 @@ impl Plan {
             out.extend_from_slice(&data);
         }
 
-        write_shortvec(&mut out, self.lookups.len())?;
-        for lookup in &self.lookups {
-            out.extend_from_slice(lookup.table.as_bytes());
-            write_shortvec(&mut out, lookup.writable.len())?;
-            out.extend_from_slice(&lookup.writable);
-            write_shortvec(&mut out, lookup.readonly.len())?;
-            out.extend_from_slice(&lookup.readonly);
+        if !legacy {
+            write_shortvec(&mut out, self.lookups.len())?;
+            for lookup in &self.lookups {
+                out.extend_from_slice(lookup.table.as_bytes());
+                write_shortvec(&mut out, lookup.writable.len())?;
+                out.extend_from_slice(&lookup.writable);
+                write_shortvec(&mut out, lookup.readonly.len())?;
+                out.extend_from_slice(&lookup.readonly);
+            }
         }
 
         Ok(out)

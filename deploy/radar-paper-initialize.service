@@ -1,0 +1,36 @@
+# SPDX-License-Identifier: Apache-2.0
+[Unit]
+Description=Radar deliberate first paper cash checkpoint
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+DynamicUser=yes
+User=radar-paper-execution
+UMask=0077
+WorkingDirectory=/
+ExecStart=/usr/bin/python3 /usr/local/lib/radar-paper-execution/initialize-alpaca-paper.py
+EnvironmentFile=/etc/radar/alpaca-paper.env
+StateDirectory=radar-paper-execution
+StateDirectoryMode=0700
+TimeoutStartSec=90
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectProc=invisible
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+RestrictNamespaces=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+CapabilityBoundingSet=
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+LimitCORE=0
+MemoryMax=128M
+TasksMax=16
+CPUQuota=25%

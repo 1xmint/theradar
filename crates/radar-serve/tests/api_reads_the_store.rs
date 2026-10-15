@@ -114,8 +114,11 @@ fn a_mint_the_store_has_never_seen_returns_empty_rather_than_failing() {
 
     let evidence = api::token_evidence(&Reader::open(dir.path()), &unknown, AsOf::at(Slot(50_000)))
         .expect("an unknown mint is not an error");
-    assert!(evidence.decisions.is_empty());
-    assert!(evidence.measurements.is_empty());
+    assert_eq!(evidence.decisions, [] as [radar_store::Decision; 0]);
+    assert_eq!(
+        evidence.measurements,
+        [] as [radar_serve::api::Measurement; 0]
+    );
     assert_eq!(evidence.mint, unknown, "the request is echoed back");
 }
 
@@ -133,7 +136,10 @@ fn evidence_taken_after_the_watermark_is_not_returned() {
         before.decisions.is_empty(),
         "a decision at slot 10,000 is not visible as of 9,999"
     );
-    assert!(before.measurements.is_empty());
+    assert_eq!(
+        before.measurements,
+        [] as [radar_serve::api::Measurement; 0]
+    );
 
     let after = api::token_evidence(&reader, &wanted, AsOf::at(Slot(11_000))).expect("reads");
     assert_eq!(after.decisions.len(), 1);

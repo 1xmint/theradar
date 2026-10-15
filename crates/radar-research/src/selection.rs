@@ -870,7 +870,7 @@ mod tests {
         let report = evaluate(&decisions, &outcomes, 850);
         assert_eq!(report.refused.decisions, 1);
         assert_eq!(report.refused.scored, 0);
-        assert!(report.refused.returns_bps.is_empty());
+        assert_eq!(report.refused.returns_bps, [] as [i64; 0]);
     }
 
     #[test]

@@ -1,0 +1,6 @@
+{
+  "version": "alpaca-maintenance-v1",
+  "account_id": "00000000-0000-0000-0000-000000000000",
+  "max_pages": 2,
+  "mode": "observe"
+}

@@ -116,7 +116,53 @@ fn the_wallet_returned_is_the_embedded_solana_one_and_not_a_connected_phantom() 
         .expect("found");
 
     assert_eq!(wallet.address, "SoLanaEmbeddedWalletAddress");
-    assert_eq!(wallet.id, "sol-1");
+    assert_eq!(wallet.id.as_deref(), Some("sol-1"));
+}
+
+#[test]
+fn a_device_wallet_without_a_server_id_is_present_and_not_signing_authority() {
+    for id in [",\"id\":null", ""] {
+        let body = format!(
+            r#"{{"linked_accounts":[{{"type":"wallet","chain_type":"solana","connector_type":"embedded","wallet_client_type":"privy","address":"SoLanaEmbeddedWalletAddress"{id}}}]}}"#
+        );
+        let wallet = client(&body)
+            .wallet_for(DID)
+            .expect("wallet exists without a server ID");
+        assert_eq!(wallet.address, "SoLanaEmbeddedWalletAddress");
+        assert_eq!(wallet.id, None);
+        assert!(!wallet.delegated);
+    }
+}
+
+#[test]
+fn malformed_wallet_responses_are_unknown_not_absent() {
+    for body in [
+        "{}",
+        r#"{"linked_accounts":null}"#,
+        r#"{"linked_accounts":[{"type":"wallet","chain_type":"solana","connector_type":"embedded","id":123,"address":"sol"}]}"#,
+        r#"{"linked_accounts":[{"type":"wallet","chain_type":"solana","connector_type":"embedded","id":"sol-1"}]}"#,
+        r#"{"linked_accounts":[{"type":"wallet","chain_type":"solana","connector_type":"embedded","id":"sol-1","address":""}]}"#,
+        r#"{"linked_accounts":[{"type":"wallet","chain_type":"solana","connector_type":"embedded","id":"","address":"sol"}]}"#,
+    ] {
+        assert!(matches!(
+            client(body).wallet_for(DID),
+            Err(Unavailable::Unreachable(_))
+        ));
+    }
+}
+
+#[test]
+fn nullable_ids_do_not_relax_embedded_solana_account_selection() {
+    for (kind, chain, connector) in [
+        ("email", "solana", "embedded"),
+        ("wallet", "ethereum", "embedded"),
+        ("wallet", "solana", "phantom"),
+    ] {
+        let body = format!(
+            r#"{{"linked_accounts":[{{"type":"{kind}","chain_type":"{chain}","connector_type":"{connector}","id":null,"address":"unrelated"}}]}}"#
+        );
+        assert_eq!(client(&body).wallet_for(DID), Err(Unavailable::NoWallet));
+    }
 }
 
 #[test]

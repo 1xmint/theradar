@@ -15,6 +15,7 @@
 //! Nothing here softens a refusal or reaches a signer; it establishes who is
 //! asking, and no more than that.
 
+use std::fmt::Write as _;
 use std::sync::Arc;
 
 use axum::{
@@ -58,7 +59,12 @@ pub async fn challenge(
     let Ok(address) = body.address.parse::<radar_types::Address>() else {
         return chat::refuse(StatusCode::BAD_REQUEST, "that is not a Solana address");
     };
-    let nonce = radar_types::b64::encode_url(&random_nonce());
+    // SIWS requires at least eight alphanumeric characters. Base64url's '-'
+    // and '_' make some otherwise valid challenges unacceptable to wallets.
+    let mut nonce = String::with_capacity(64);
+    for byte in random_nonce() {
+        write!(&mut nonce, "{byte:02x}").expect("format into a String");
+    }
     match challenges.issue(nonce, now_unix()) {
         Ok(challenge) => Json(serde_json::json!({
             // The exact text to sign, rendered **here**. The client must not

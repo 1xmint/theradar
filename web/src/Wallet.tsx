@@ -221,7 +221,18 @@ export function explain(error: SignInError): string {
       return "No Solana wallet found. Install Phantom or Solflare to sign in.";
     case "declined":
       // Not phrased as a failure, because it is not one.
-      return "Sign-in cancelled.";
+      return "Sign-in cancelled. Connect again and approve both wallet prompts to sign in.";
+    case "wallet-error": {
+      const step = error.step === "connect" ? "connect" : "sign the sign-in message";
+      const hint = error.code === -32002
+        ? "Finish or close the pending wallet request, then try again."
+        : error.code === -32000 && error.step === "sign"
+          ? "Open Radar at radar.heyvera.org and reconnect. If this continues, Radar's sign-in message needs checking."
+          : "Unlock your wallet and try again.";
+      return `Your wallet could not ${step}: ${error.detail} ${hint}`;
+    }
+    case "invalid-response":
+      return "Radar returned an invalid sign-in response. Reload Radar and try again.";
     case "refused":
       return error.detail;
     case "unreachable":
@@ -307,7 +318,7 @@ export function Wallet() {
     : null;
 
   return (
-    <div className="flex items-center gap-3 text-sm">
+    <div className="relative flex shrink-0 flex-wrap items-center gap-x-3 gap-y-2 text-sm">
       {!phoneNoWallet && (
         <button
           type="button"
@@ -319,7 +330,7 @@ export function Wallet() {
         </button>
       )}
       {state.kind === "failed" && (
-        <span role="status" className="text-[var(--color-refuse)]">
+        <span role="status" className="absolute right-0 top-full z-50 mt-2 w-80 max-w-[calc(100vw-1.5rem)] rounded-md border border-[var(--color-line)] bg-[var(--color-surface)] p-3 text-[var(--color-refuse)] shadow-lg">
           {explain(state.error)}
         </span>
       )}

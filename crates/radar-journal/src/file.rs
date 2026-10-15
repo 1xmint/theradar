@@ -126,6 +126,14 @@ impl Journal {
         self.sequence + 1
     }
 
+    /// Last complete event's digest; empty before the first event.
+    /// Advances only after a successful durable append. This identifies history,
+    /// not the correctness of a caller's accounting derived from it.
+    #[must_use]
+    pub fn checkpoint(&self) -> &str {
+        &self.previous
+    }
+
     /// Writes one event, and returns the receipt an effect needs.
     ///
     /// The sequence, the previous hash and the id are filled in here. A caller
@@ -175,6 +183,7 @@ impl Journal {
             public_reason,
             redacted,
             operation: None,
+            broker: None,
         })
     }
 
@@ -221,7 +230,84 @@ impl Journal {
             public_reason,
             redacted: None,
             operation: Some(operation),
+            broker: None,
         })
+    }
+
+    pub(crate) fn record_broker(
+        &mut self,
+        entry: crate::BrokerEntry,
+        at: u64,
+    ) -> Result<Recorded, JournalError> {
+        self.record_broker_synced(entry, at, sync_parent)
+    }
+
+    pub(crate) fn record_broker_cash(
+        &mut self,
+        cash: crate::BrokerCash,
+        at: u64,
+    ) -> Result<Recorded, JournalError> {
+        self.record_broker_cash_synced(cash, at, sync_parent)
+    }
+
+    fn record_broker_cash_synced(
+        &mut self,
+        cash: crate::BrokerCash,
+        at: u64,
+        sync: impl FnOnce(&Path) -> Result<(), JournalError>,
+    ) -> Result<Recorded, JournalError> {
+        let recorded = self.record(
+            Stage::BrokerCash,
+            Outcome::Ok,
+            at,
+            Correlation {
+                broker_cash: Some(cash),
+                ..Correlation::default()
+            },
+            None,
+            Vec::new(),
+            None,
+            None,
+        )?;
+        sync(&self.path)?;
+        Ok(recorded)
+    }
+
+    fn record_broker_synced(
+        &mut self,
+        entry: crate::BrokerEntry,
+        at: u64,
+        sync: impl FnOnce(&Path) -> Result<(), JournalError>,
+    ) -> Result<Recorded, JournalError> {
+        let recorded = self.append(Event {
+            schema: SCHEMA_VERSION,
+            sequence: self.sequence + 1,
+            id: String::new(),
+            previous: self.previous.clone(),
+            correlation: Correlation {
+                receipt: Some(entry.intent.client_order_id.clone()),
+                ..Correlation::default()
+            },
+            stage: Stage::BrokerOrder,
+            outcome: match entry.state {
+                crate::BrokerState::Reserved => Outcome::Ok,
+                crate::BrokerState::SubmissionUnknown => Outcome::Uncertain,
+            },
+            at,
+            took_ms: None,
+            build: None,
+            versions: Vec::new(),
+            config: None,
+            public_reason: None,
+            redacted: None,
+            operation: None,
+            broker: Some(entry),
+        })?;
+        // File fsync alone does not persist a newly created directory entry.
+        // Sync on every broker append: a previous failed directory sync may
+        // already have left an intact event that a fresh owner can replay.
+        sync(&self.path)?;
+        Ok(recorded)
     }
 
     /// Fills in the id, writes the line, and syncs it before the receipt exists.
@@ -292,6 +378,19 @@ impl Journal {
     pub fn verify(&self) -> Result<Verified, JournalError> {
         verify(&self.path)
     }
+}
+
+fn sync_parent(path: &Path) -> Result<(), JournalError> {
+    let parent = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or(Path::new("."));
+    fs::File::open(parent)
+        .and_then(|directory| directory.sync_all())
+        .map_err(|source| JournalError::Io {
+            path: parent.display().to_string(),
+            source,
+        })
 }
 
 /// Whether the file has content that does not end in a newline.
@@ -397,4 +496,134 @@ fn verify(path: &Path) -> Result<Verified, JournalError> {
     }
 
     Ok(Verified::Intact { events })
+}
+
+#[cfg(test)]
+mod broker_sync_tests {
+    use super::*;
+    use crate::{BrokerEntry, BrokerIntent, BrokerLog, BrokerSide, BrokerState};
+
+    #[test]
+    fn cash_receipt_waits_for_directory_sync_and_failure_is_replayable() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("cash.jsonl");
+        let cash = crate::BrokerCash {
+            account_id: "paper-id".into(),
+            started: 1,
+            completed: 2,
+            observation: serde_json::json!({"cash":"100"}),
+            orders: None,
+        };
+        let mut journal = Journal::open(&path).unwrap();
+        let mut called = false;
+        journal
+            .record_broker_cash_synced(cash.clone(), 2, |recorded_path| {
+                assert_eq!(recorded_path, path);
+                assert_eq!(
+                    Journal::open(recorded_path).unwrap().events().unwrap()[0]
+                        .correlation
+                        .broker_cash,
+                    Some(cash.clone())
+                );
+                sync_parent(recorded_path)?;
+                called = true;
+                Ok(())
+            })
+            .unwrap();
+        assert!(called);
+        let later = crate::BrokerCash {
+            started: 2,
+            completed: 3,
+            ..cash
+        };
+        assert!(
+            journal
+                .record_broker_cash_synced(later.clone(), 3, |_| {
+                    Err(JournalError::Io {
+                        path: "injected".into(),
+                        source: std::io::Error::other("directory sync failed"),
+                    })
+                })
+                .is_err()
+        );
+        drop(journal);
+        let recovered = BrokerLog::open(&path, "paper-id").unwrap();
+        assert_eq!(recovered.cash().unwrap(), Some(&later));
+    }
+
+    fn entry(state: BrokerState) -> BrokerEntry {
+        BrokerEntry {
+            intent: BrokerIntent {
+                account_id: "paper-id".into(),
+                client_order_id: "retained_1".into(),
+                symbol: "SPY".into(),
+                side: BrokerSide::Buy,
+                quantity_nanoshares: 10_000_000,
+                limit_microusd_per_share: 100_000_000,
+                fee_bound_microusd: 1,
+            },
+            state,
+            cancel_unknown_order_id: None,
+        }
+    }
+
+    #[test]
+    fn broker_receipt_waits_for_directory_sync_after_each_durable_record() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("paper.jsonl");
+        let mut journal = Journal::open(&path).unwrap();
+        for (index, state) in [BrokerState::Reserved, BrokerState::SubmissionUnknown]
+            .into_iter()
+            .enumerate()
+        {
+            let mut synced = false;
+            let receipt = journal
+                .record_broker_synced(entry(state), 1, |recorded_path| {
+                    assert_eq!(recorded_path, path);
+                    let persisted = Journal::open(recorded_path).unwrap();
+                    assert_eq!(
+                        persisted.verify().unwrap(),
+                        Verified::Intact { events: index + 1 }
+                    );
+                    assert_eq!(
+                        persisted.events().unwrap()[index].broker,
+                        Some(entry(state))
+                    );
+                    sync_parent(recorded_path)?;
+                    synced = true;
+                    Ok(())
+                })
+                .unwrap();
+            assert!(synced, "receipt must follow directory sync on every record");
+            assert_eq!(receipt.event().broker, Some(entry(state)));
+        }
+    }
+
+    #[test]
+    fn directory_sync_failure_withholds_receipt_even_when_the_event_was_written() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("paper.jsonl");
+        let missing = dir.path().join("missing").join("paper.jsonl");
+        assert!(matches!(
+            sync_parent(&missing),
+            Err(JournalError::Io { .. })
+        ));
+        let mut journal = Journal::open(&path).unwrap();
+        let result =
+            journal.record_broker_synced(entry(BrokerState::Reserved), 1, |recorded_path| {
+                assert!(
+                    recorded_path.is_file(),
+                    "failure occurs after the file write"
+                );
+                Err(JournalError::Io {
+                    path: dir.path().display().to_string(),
+                    source: std::io::Error::other("injected directory sync failure"),
+                })
+            });
+        assert!(matches!(result, Err(JournalError::Io { .. })));
+        drop(journal);
+        let recovered = BrokerLog::open(&path, "paper-id").unwrap();
+        let entries: Vec<_> = recovered.entries().unwrap().cloned().collect();
+        assert_eq!(entries, [entry(BrokerState::Reserved)]);
+    }
 }

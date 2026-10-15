@@ -222,12 +222,12 @@ function TopBar({
   searchRef: React.RefObject<HTMLInputElement | null>;
 }) {
   return (
-    <header className="flex h-12 shrink-0 items-center gap-4 border-b border-[var(--color-line)] px-3">
+    <header className="flex min-h-12 shrink-0 flex-wrap items-center gap-x-4 gap-y-2 border-b border-[var(--color-line)] px-3 py-2">
       <a href="/" className="text-sm font-semibold tracking-tight hover:text-[var(--color-dim)]">
         Radar
       </a>
 
-      <form onSubmit={onSubmit} className="flex-1">
+      <form onSubmit={onSubmit} className="order-last w-full sm:order-none sm:w-auto sm:flex-1">
         <label htmlFor="terminal-search" className="sr-only">
           Search by mint or symbol
         </label>
@@ -243,6 +243,7 @@ function TopBar({
         />
       </form>
 
+      <a href="/automation" className="shrink-0 text-xs text-[var(--color-dim)] underline">Private setup</a>
       <Wallet />
     </header>
   );

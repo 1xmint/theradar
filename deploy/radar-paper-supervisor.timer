@@ -1,0 +1,12 @@
+# SPDX-License-Identifier: Apache-2.0
+[Unit]
+Description=Radar bounded paper research and execution ticks
+
+[Timer]
+OnBootSec=60
+OnUnitInactiveSec=60
+AccuracySec=5
+Unit=radar-paper-supervisor.service
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,22 @@
+{
+  "version": "alpaca-research-v1",
+  "symbol": "SPY",
+  "start_unix_ms": 0,
+  "interval_ms": 600000,
+  "start_window_ms": 90000,
+  "slots": 12,
+  "experiment": {
+    "strategy_id": "quote-only-abstention-control-v1",
+    "quantity_nanoshares": 10000000,
+    "horizon_ms": 600000
+  },
+  "assumptions": {
+    "model_id": "explicit-stress-costs-v1",
+    "displayed_size_unit": "shares",
+    "participation_bps": 1000,
+    "slippage_bps_per_side": 10,
+    "fee_per_side_microusd": 10000,
+    "max_quote_age_ms": 120000,
+    "max_spread_bps": 20
+  }
+}

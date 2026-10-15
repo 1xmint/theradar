@@ -80,10 +80,10 @@ export interface Answered {
   uncited: boolean;
 }
 
-async function send<T>(path: string, body?: unknown): Promise<T> {
+async function send<T>(path: string, body?: unknown, extraHeaders: Record<string, string> = {}): Promise<T> {
   const response = await fetch(path, {
     method: "POST",
-    headers: { "content-type": "application/json", accept: "application/json" },
+    headers: { "content-type": "application/json", accept: "application/json", ...extraHeaders },
     // `null` rather than `undefined`: strict optional properties treat an
     // explicitly-undefined field as a type error, and `null` is what fetch
     // documents for "no body".
@@ -103,12 +103,72 @@ async function send<T>(path: string, body?: unknown): Promise<T> {
 }
 
 export const agent = {
+  /** Configuration is separate from authentication and successful inference. */
+  configuration: (signal?: AbortSignal) => get<{ agent: { configured: boolean } }>("/health", signal),
   /** Starts a device-authorisation flow, or returns the one already open. */
   link: () => send<Progress>("/v1/link"),
   /** Where the current flow has got to. */
   linkStatus: (signal?: AbortSignal) => get<Progress>("/v1/link", signal),
   /** Asks a question. */
   ask: (question: string) => send<Answered>("/v1/chat", { question }),
+};
+
+export const connections = {
+  privy: (signal?: AbortSignal) => get<{ privy_app_id: string }>("/v1/customer/config", signal),
+};
+
+export type PaperLimit = "capital_usd" | "max_trade_usd" | "daily_loss_usd";
+export type PaperPreferences = Record<PaperLimit, string> & {
+  daily_loss_enabled: boolean;
+  agent_decides: Record<PaperLimit, boolean>;
+};
+export interface PaperStatus {
+  version: "alpaca-paper-control-v1";
+  environment: "paper";
+  account_id: string;
+  generation: number;
+  preferences: PaperPreferences | null;
+  handover_enabled: boolean;
+  effective_policy: { enabled: boolean; max_capital_microusd: number; max_order_microusd: number; max_daily_loss_microusd: number | null } | null;
+  account: { id: string; cash: string; equity: string; currency: string; status: string };
+  positions: { symbol: string; qty: string; side: string; market_value: string | null }[] | null;
+  market_clock: { timestamp: string; is_open: boolean; next_open: string; next_close: string } | null;
+  execution_authority: false;
+  agent_lifecycle_verified: false;
+  profit_measured: false;
+}
+
+export interface PaperResearchMessage {
+  id: string;
+  role: "user" | "assistant";
+  text: string;
+  received_at_unix_ms: number;
+  reply_to: string | null;
+}
+export interface PaperResearchThread {
+  version: "alpaca-paper-research-v1";
+  account_id: string;
+  as_of_unix_ms: number;
+  available: boolean;
+  messages: PaperResearchMessage[];
+  truncated: false;
+  execution_authority: false;
+  source_claims_verified: false;
+}
+export interface PaperResearchSubmitted {
+  thread: PaperResearchThread;
+  reply_status: "completed" | "unavailable";
+  detail: string | null;
+}
+
+export const paper = {
+  status: (signal?: AbortSignal) => get<PaperStatus>("/v1/paper/status", signal),
+  configure: (generation: number, preferences: PaperPreferences, enabled: boolean) =>
+    send("/v1/paper/preferences", { generation, preferences, enabled }, { "x-radar-paper-control": "1" }),
+  pause: (generation: number) => send("/v1/paper/pause", { generation }, { "x-radar-paper-control": "1" }),
+  research: (signal?: AbortSignal) => get<PaperResearchThread>("/v1/paper/research", signal),
+  researchSend: (nonce: string, text: string) => send<PaperResearchSubmitted>(
+    "/v1/paper/research", { nonce, text }, { "x-radar-paper-control": "1" }),
 };
 
 /**

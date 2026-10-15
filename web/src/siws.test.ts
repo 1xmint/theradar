@@ -97,7 +97,7 @@ describe("signIn", () => {
     const refusedConnect = await signIn(
       wallet({
         connect: async () => {
-          throw new Error("User rejected the request.");
+          throw { code: 4001, message: "User rejected the request." };
         },
       }),
       server(),
@@ -107,7 +107,7 @@ describe("signIn", () => {
     const refusedSignature = await signIn(
       wallet({
         signMessage: async () => {
-          throw new Error("User rejected the request.");
+          throw { code: 4001, message: "User rejected the request." };
         },
       }),
       server(),
@@ -146,6 +146,63 @@ describe("signIn", () => {
     if (!unreachable.ok) expect(unreachable.error.kind).toBe("unreachable");
   });
 
+  it("preserves connection errors instead of calling them cancellation", async () => {
+    const fetchImpl = server();
+    const result = await signIn(wallet({ connect: async () => {
+      throw { code: -32002, message: "An approval is already pending" };
+    } }), fetchImpl);
+    expect(result).toEqual({ ok: false, error: {
+      kind: "wallet-error", step: "connect", code: -32002,
+      detail: "An approval is already pending",
+    } });
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("preserves a pre-prompt signature rejection and never asks for verification", async () => {
+    const fetchImpl = server();
+    const result = await signIn(wallet({ signMessage: async () => {
+      throw { code: -32000, message: "Domain does not match" };
+    } }), fetchImpl);
+    expect(result).toEqual({ ok: false, error: {
+      kind: "wallet-error", step: "sign", code: -32000, detail: "Domain does not match",
+    } });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not infer cancellation from an uncoded exception", async () => {
+    const result = await signIn(wallet({ connect: async () => {
+      throw new Error("Extension disconnected");
+    } }), server());
+    expect(result).toEqual({ ok: false, error: {
+      kind: "wallet-error", step: "connect", code: undefined, detail: "Extension disconnected",
+    } });
+  });
+
+  it("refuses an HTML or malformed challenge without asking for a signature", async () => {
+    for (const body of ["<html>Access sign-in</html>", "null", "{}", '{"message":42}']) {
+      const provider = wallet({ signMessage: vi.fn() });
+      const result = await signIn(provider, server({ challenge: new Response(body) }));
+      expect(result).toEqual({ ok: false, error: { kind: "invalid-response" } });
+      expect(provider.signMessage).not.toHaveBeenCalled();
+    }
+  });
+
+  it("refuses a malformed or mismatched session", async () => {
+    for (const body of [null, {}, { token: "x", address: "another wallet", expires_in_seconds: 300 },
+      { token: "x", address: ADDRESS, expires_in_seconds: 0 }]) {
+      expect(await signIn(wallet(), server({ verify: new Response(JSON.stringify(body)) })))
+        .toEqual({ ok: false, error: { kind: "invalid-response" } });
+    }
+  });
+
+  it("reports a response body that cannot be read as a transport failure", async () => {
+    const response = new Response("{}");
+    vi.spyOn(response, "text").mockRejectedValue(new Error("Connection dropped"));
+    const result = await signIn(wallet(), server({ challenge: response }));
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.kind).toBe("unreachable");
+  });
+
   it("stops at the challenge when the challenge is refused", async () => {
     // No point asking a wallet to sign something the server will not accept,
     // and asking anyway shows the customer a popup that was always doomed.
@@ -178,6 +235,11 @@ describe("detect", () => {
   it("falls back to the legacy provider", () => {
     const legacy = wallet();
     expect(detect({ solana: legacy })).toBe(legacy);
+  });
+
+  it("finds Solflare's namespaced provider", () => {
+    const provider = wallet();
+    expect(detect({ solflare: provider })).toBe(provider);
   });
 
   it("reports no wallet as null rather than throwing", () => {

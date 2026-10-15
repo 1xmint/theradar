@@ -329,7 +329,7 @@ mod tests {
             vec![Extension::MetadataPointer, Extension::TokenMetadata]
         );
         // Metadata extensions cannot stop a sale.
-        assert!(m.exit_threats().is_empty());
+        assert_eq!(m.exit_threats(), [] as [crate::mint::Extension; 0]);
         assert!(!m.can_be_stopped());
     }
 
@@ -341,7 +341,7 @@ mod tests {
         let m = MintStructure::parse(&classic_mint(true, false), TOKEN_PROGRAM).expect("parses");
         assert!(m.can_be_diluted());
         assert!(!m.can_be_stopped());
-        assert!(m.exit_threats().is_empty());
+        assert_eq!(m.exit_threats(), [] as [crate::mint::Extension; 0]);
 
         let revoked =
             MintStructure::parse(&classic_mint(false, false), TOKEN_PROGRAM).expect("parses");
@@ -366,7 +366,7 @@ mod tests {
     fn a_classic_mint_with_both_revoked_has_nothing_structural_against_it() {
         let m = MintStructure::parse(&classic_mint(false, false), TOKEN_PROGRAM).expect("parses");
         assert!(!m.token_2022);
-        assert!(m.extensions.is_empty());
+        assert_eq!(m.extensions, [] as [crate::mint::Extension; 0]);
         assert!(!m.can_be_stopped());
     }
 

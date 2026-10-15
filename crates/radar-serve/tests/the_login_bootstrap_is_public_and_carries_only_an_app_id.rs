@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-//! `/v1/customer/config`: the one public route under `/v1/customer/`.
+//! `/v1/customer/config` and the public SIWS challenge bootstrap.
 //!
 //! # Why it is public, and why that needs a test rather than a comment
 //!
@@ -52,7 +52,9 @@ fn router(customer: Mode) -> axum::Router {
         linker: radar_serve::link::Linker::new(),
         scoreboard: radar_serve::cache::Cache::new(),
         token: radar_serve::cache::Cache::new(),
-        challenges: None,
+        challenges: Some(radar_serve::challenges::Challenges::new(
+            "radar.heyvera.org".to_owned(),
+        )),
         market: radar_serve::market::Market::new(),
         market_snapshot: radar_serve::market::SnapshotCache::new(),
         customers: None,
@@ -99,6 +101,44 @@ async fn it_answers_an_anonymous_caller_with_the_application_id() {
     assert_eq!(status, StatusCode::OK, "body: {body}");
     let value: serde_json::Value = serde_json::from_str(&body).expect("JSON");
     assert_eq!(value["privy_app_id"], APP);
+}
+
+#[tokio::test]
+async fn a_sign_in_challenge_uses_wallet_compatible_nonce_and_timestamp_fields() {
+    let response = router(Mode::Off)
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/customer/siws/challenge")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    r#"{"address":"11111111111111111111111111111111"}"#,
+                ))
+                .expect("request"),
+        )
+        .await
+        .expect("response");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response
+        .into_body()
+        .collect()
+        .await
+        .expect("body")
+        .to_bytes();
+    let value: serde_json::Value = serde_json::from_slice(&body).expect("JSON");
+    let message = value["message"].as_str().expect("message");
+    let nonce = message
+        .lines()
+        .find_map(|line| line.strip_prefix("Nonce: "))
+        .expect("nonce");
+    // SIWS ABNF permits only ALPHA/DIGIT, not base64url's '-' and '_'.
+    assert_eq!(nonce.len(), 64);
+    assert!(nonce.bytes().all(|byte| byte.is_ascii_alphanumeric()));
+    let issued = message
+        .lines()
+        .find_map(|line| line.strip_prefix("Issued At: "))
+        .expect("issue time");
+    assert!(radar_types::civil::seconds_from_timestamp(issued).is_some());
 }
 
 #[tokio::test]

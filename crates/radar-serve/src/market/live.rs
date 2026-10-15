@@ -322,7 +322,10 @@ mod tests {
             minute(t0 + 60, 2.0, 2.0, 1.0, 1.0),
         ];
         assert_eq!(roll_up(&minutes, 60).len(), 2);
-        assert!(roll_up(&minutes, 0).is_empty());
+        assert_eq!(
+            roll_up(&minutes, 0),
+            [] as [radar_backfill::market::fold::Candle; 0]
+        );
     }
 
     #[test]

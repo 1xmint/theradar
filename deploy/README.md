@@ -1,6 +1,56 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # Deploying Radar
 
+## Private Alpaca paper setup
+
+Use `deploy/setup-alpaca-paper.py` only after its exact commit passes GitHub
+checks. Upload the script to `/tmp/radar-alpaca-paper-setup.py` on
+guardian-vps-tail, then run it in your own terminal:
+
+```powershell
+ssh -t guardian-vps-tail "sudo python3 /tmp/radar-alpaca-paper-setup.py"
+```
+
+Enter the Alpaca paper key ID and secret at the hidden prompts. Do not paste
+them in chat, command arguments or the repository. The script verifies the
+active USD paper account using one fixed HTTPS GET, refuses redirects, and
+saves `/etc/radar/alpaca-paper.env` with root-only permissions. It refuses
+existing credentials rather than rotating them. The existing `/etc/radar`
+directory and its parents must be root-owned without group/public write access.
+
+This provisions storage only. It does not give the website/model process
+credentials, install a service or enable trading. The protected operator reader
+uses the two variables documented in `deploy/alpaca-paper.env.example`; service
+isolation, owner handover and remaining execution checks must be completed
+before unattended operation. See plan 0035 for verification and handback.
+
+For the next selected account/positions/clock observation, use the verified
+`deploy/read-alpaca-paper.py` and the `radar` executable from the GitHub
+release-linux artifact at the verified branch SHA. Upload them as
+/tmp/radar-alpaca-paper-read.py and /tmp/radar-paper-reader.new. Use the reader
+SHA256 recorded in that artifact's BUILD-INFO.txt, then run in your own terminal:
+
+```bash
+sudo python3 /tmp/radar-alpaca-paper-read.py <verified-reader-sha256>
+```
+
+This stages exact hash-checked bytes into root-owned /usr/local/lib/radar-paper,
+then runs only `alpaca-read` in a transient systemd DynamicUser unit. The system
+manager loads the protected paper environment; it is never sourced into your
+SSH shell or passed to the website/model. It adds no timer, listening endpoint,
+sudo permission or service enablement. It requires systemd isolation support
+(the inspected VPS has systemd 255). Review the selected report; observations
+do not authorize trades. See plan 0036 for verification and limitations.
+
+The verified helper also accepts `--market` after the reader hash. This captures
+SPY/QQQ IEX snapshots into a fresh file under /var/lib/radar-paper-market using
+one temporary credential-bearing reader. A second temporary process replays that
+file at its original availability watermark with no broker credential environment
+and no network. Persistent state directories are managed by systemd, mode 0700.
+This captures only selected IEX coverage, not consolidated executable quotes.
+It installs no recorder timer, research agent, order authority or trading service.
+See plan 0037 for verification and actual feed findings.
+
 Radar runs on the shared `clawguard` VPS alongside Cortex and Pulse. That shapes
 every choice here: it is a 2-core box with 3.8 GiB of RAM running other people's
 production services, so Radar is memory-capped, sandboxed, and installed without
@@ -184,6 +234,15 @@ means any token from any application in the team opens Radar — with a signatur
 that verifies perfectly, which is why the audience check is the one worth
 getting right.
 
+When adding an operator page, add its hostname/path to the **same Access
+application** whose AUD Radar verifies. The `/automation` page and `/v1/link`
+must use that application and its existing owner policy. Creating separate
+applications for each path produces different audiences that Radar will refuse.
+Verify each changed operator path through Cloudflare without a session: it must
+redirect to Access login, with the configured AUD in the redirect's `kid`.
+Then verify the page and API together in the owner's authenticated browser.
+An origin-side refusal alone does not prove the edge offers a login flow.
+
 Radar verifies the **signature** on `Cf-Access-Jwt-Assertion` against
 Cloudflare's published keys. It does **not** read
 `Cf-Access-Authenticated-User-Email`: that header is a claim by whoever sent the
@@ -326,6 +385,29 @@ The startup log says which state it is in, every start:
 
 ### The reading assistant, when you want it
 
+For the initial private setup on the existing `guardian` VPS, use
+[`setup-private-connections.py`](setup-private-connections.py):
+
+```sh
+sudo python3 /tmp/radar-private-setup.py cmthhkznr0a3u0cl86prxlb7x
+```
+
+Upload that script and the adjacent `radar-codex-bridge.py`, `radar-codex.socket`
+and `radar-codex.service` files from this checkout first. It requires the existing
+`radar-agent` account and vendor CLI, prompts for a missing Privy app secret
+with hidden input, and retains root-only backups before replacing files. It
+installs a root-owned Codex client and a socket-activated service allowing only
+device login, login status, and a fixed stdin-only, read-only inference command.
+The CLI runs from its isolated home with a cleared environment. No sudo rule is
+added: Radar's `NoNewPrivileges` protection remains enabled.
+
+The script configures the supplied Privy app and closes customer admission.
+It does not configure wallet delegation, a signer, money limits or an inference
+allowance, and refuses an existing active inference configuration for review.
+It does not restart the service: apply with the verified artifact and fixed
+`radar-deploy` procedure below. Then use `/automation` for ChatGPT login. Privy
+embedded-wallet login and the owner's admission allowlist remain separate steps.
+
 Off unless a provider *and* a budget are configured, and it holds no credential
 of its own. The subscription path spawns the vendor CLI, which owns `auth.json`
 and its own refresh; Radar has no code that reads, writes or stores a token.
@@ -339,39 +421,36 @@ sudo useradd --system --create-home --home-dir /var/lib/radar-agent      --shell
 sudo install -d -o radar-agent -g radar-agent -m700 /var/lib/radar-agent/.codex
 ```
 
-Seed the credential once, interactively. This is the only step that needs a
-human, and it needs the vendor CLI installed on the box first — check with
-`which codex`:
+The setup script installs the local socket service as that user. A `sudo`
+wrapper cannot work inside the hardened `radar-serve.service`, because
+`NoNewPrivileges=true` prevents its change of user. Disabling that protection
+would let every other child change privilege too.
 
-```
-sudo -u radar-agent env CODEX_HOME=/var/lib/radar-agent/.codex      codex login --device-auth
-```
+Systemd owns `/run/radar-codex.sock`, with mode 0660 and group `guardian`.
+The service also checks Linux peer credentials for guardian's UID. It accepts
+three exact operations; no caller chooses an executable, cwd, environment,
+config override or CLI flags. Requests and output are bounded, and a disconnected
+client terminates the CLI's process group. Calls are serialized, including
+refresh and login. The 128 KiB prompt cap is a transport limit, not a money limit.
 
-Then a wrapper that drops to that user, so `radar-serve` never runs the CLI as
-itself. **It must pass its arguments through**, because Radar supplies the
-subcommand: `exec -` to ask a question and `login --device-auth` to link the
-credential.
-
-```
-sudo tee /usr/local/bin/radar-codex >/dev/null <<'SH'
-#!/bin/sh
-exec sudo -n -u radar-agent env CODEX_HOME=/var/lib/radar-agent/.codex codex "$@"
-SH
-sudo chmod 755 /usr/local/bin/radar-codex
-```
-
-`guardian` needs `NOPASSWD` for exactly that one command and nothing else. Radar
-clears the child's environment and passes only `PATH`, `HOME`, `CODEX_HOME`,
-`LANG`, `LC_ALL` and `TMPDIR`, so nothing else in `/etc/radar/radar.env` reaches
-the CLI, and the prompt goes in on stdin rather than as an argument — arguments
-are visible in `ps` to every user on the box.
+The client forwards `exec -`, `login --device-auth`, or `login status` to that
+service. The service supplies a cleared environment and read-only inference
+sandbox, and the prompt still reaches the CLI on stdin. Nothing in
+`/etc/radar/radar.env` reaches the vendor process. The broker never opens its
+credential file; the vendor CLI continues to own it.
 
 ### Linking is a button, not an SSH session
 
-Once the wrapper is in place, **the interface links the credential itself**.
-Sign in, press **Link**, and the page shows a verification URL and a short code
+Once the wrapper is in place and `RADAR_MODEL_CODEX` names it, **the interface
+links the credential itself** at `/automation`. Sign in as the operator, press
+**Connect ChatGPT**, and the page shows a verification URL and a short code
 to enter in a browser. Neither is a credential — that is what device
 authorisation is — so nothing secret crosses the page.
+
+Linking does not require an inference budget. Leave `RADAR_MODEL_DAILY_USD`
+unset until an allowance is chosen: `/v1/link` still works, while `/v1/chat`
+remains unavailable. An idle linking flow says nothing about an existing stored
+credential; only successful completion of this attempt is reported as linked.
 
 The seeding command below still works and is the fallback when the interface is
 not reachable. The button matters most for the case nobody plans for: the
@@ -379,7 +458,7 @@ refresh token expires after roughly 14–30 days of inactivity, and re-linking
 should be a click rather than a procedure somebody has to remember.
 
 ```
-sudo -u radar-agent env CODEX_HOME=/var/lib/radar-agent/.codex      codex login --device-auth
+/usr/local/bin/radar-codex login --device-auth
 ```
 
 Only one flow runs at a time. The credential is single-writer, so a second
@@ -398,6 +477,29 @@ RADAR_MODEL_DAILY_USD=2.00
 RADAR_STATE_DIR=/home/guardian/radar/data/state
 RADAR_MODEL_CODEX=/usr/local/bin/radar-codex
 ```
+
+For an explicitly selected ChatGPT subscription with no Radar daily call cap,
+set `RADAR_MODEL_DAILY_USD=unlimited`. This literal is accepted only with the
+Codex provider; missing or conflicting provider settings and paid API providers
+cannot use it. The saturating meter uses its maximum counter value to represent
+unlimited usage, continues recording calls, and startup reports unlimited
+subscription calls instead of a dollar ceiling. OpenAI's plan limits still apply.
+Per-investigation turn limits, deadlines and read-only tools still apply.
+An explicitly configured `RADAR_MODEL_PER_CALL_USD` retains its separate limit.
+
+After the matching server release is installed, the existing administrator
+setup script can apply this choice without re-entering Privy secrets:
+
+```powershell
+ssh -t guardian-vps-tail "sudo python3 /tmp/radar-private-setup.py --unlimited-subscription"
+```
+
+Upload the current `deploy/setup-private-connections.py` to that temporary path
+first and verify its hash. This mode requires the isolated Codex client, refuses
+paid API settings, preserves unrelated identity settings and uses the existing
+ledger directory (or the already-existing default state directory). Apply the
+saved settings through the verified artifact and fixed `sudo radar-deploy`
+procedure. It grants no wallet or trading authority.
 
 The startup log says which mode it is in. `radar-serve` prints `access` and
 `agent` lines on every start, and an instance serving without a check says so
@@ -1038,6 +1140,42 @@ sudo systemctl disable --now radar-market-tape
 `radar-serve`, and `sudo systemctl enable --now radar-market-tape`. The store
 still holds what the tape collected before the feed.
 
+## Alpaca research recorder
+
+The private Alpaca paper recorder uses the already verified installed reader,
+not the web service. See [plan 0038](../docs/plans/0038-alpaca-market-recorder.md)
+for verification and installation status. Package the exact GitHub-verified
+versions of record-alpaca-market.py, radar-paper-market.service and
+radar-paper-market.timer as three top-level regular members of an uncompressed
+tar file, with no other entries. Upload it as /tmp/radar-paper-market-bundle.tar
+and the matching setup-alpaca-recorder.py as /tmp/radar-alpaca-recorder-setup.py.
+Compare local and remote SHA256 values before giving the administrator:
+
+```bash
+sudo python3 /tmp/radar-alpaca-recorder-setup.py VERIFIED_BUNDLE_SHA256
+```
+
+The installer checks the pinned reader, root-only credential permissions,
+bundle digest and destination ownership. It refuses existing destinations.
+It installs the three files, reloads systemd and starts one worker pass before
+enabling the timer. A failed pass leaves installed files and a disabled timer;
+inspect the service, fix the cause, then explicitly start the service and enable
+the timer. Do not delete the dataset as an installation shortcut.
+
+Inspect timer state with systemctl is-active radar-paper-market.timer and
+selected worker logs with sudo journalctl -u radar-paper-market.service -n 10
+--no-pager. Do not dump service Environment properties or the credential file.
+To stop collection while retaining data, use sudo systemctl disable --now
+radar-paper-market.timer; an already running worker may finish its bounded read.
+
+Snapshots accumulate in the private systemd StateDirectory radar-paper-tape,
+separate from manual captures. Collection pauses before exceeding 256 MiB or
+65,536 files; nothing is deleted. The byte cap measures file lengths; filesystem
+allocation and metadata can use more disk. Sampling is roughly once a minute, including
+closed sessions. IEX is partial coverage; quote presence is not a freshness,
+size-unit or executable-capacity guarantee. This enables research collection
+only and leaves trading disabled.
+
 ## Disk
 
 Recorded events run about 1 GiB a month. The box had 48 GiB free at the time of
@@ -1138,3 +1276,149 @@ ssh guardian-vps-tail 'sudo ss -tlnp | grep radar-signer'
 
 That must print nothing. If it prints anything, something was added that should
 not have been.
+
+## Scheduled Alpaca research (source only)
+
+`run-alpaca-research.py` invokes the verified reader's market-read and
+paper-propose commands for an explicit campaign in `/etc/radar/alpaca-research.json`.
+The example `alpaca-research.json.example` requires a deliberately chosen future
+start timestamp; zero refuses. Quantity/costs are hypothetical research inputs,
+not capital authorization. The optional `radar-paper-research.service` and timer
+are not installed or enabled by the existing recorder setup.
+
+Each slot publishes a synced begin record before calls and a terminal decision,
+failed or missed record afterward. A claimed slot without a terminal record is
+interrupted_unknown and is never retried. Future and storage-limited slots stay
+visible. No automatic deletion; the logical storage cap reserves 4 MiB per
+attempt. Capture/decision partial files are retained and never imply success.
+Vendor errors and credentials are not recorded. The campaign bytes are frozen;
+changes require another store. A private local file is not authenticated provenance.
+
+The service runs as guardian for the existing bridge's peer-UID check, and loads
+only the paper credential file. The worker separates reader and model environments.
+It neither submits orders nor scores complete cohorts yet. Use a verified new
+reader artifact and verify config/state ownership before provisioning these units;
+the installed earlier recorder binary does not contain the new proposal command.
+See [plan 0043](../docs/plans/0043-alpaca-research-campaign.md).
+
+`setup-alpaca-research.py` provisions this separately under
+`/usr/local/lib/radar-research`, preserving the old recorder binary/hash. It
+requires the verified `/tmp/radar-research.new` and exact-member
+`/tmp/radar-research-bundle.tar` with the bundle SHA-256 as its sole argument.
+The bundle contains the worker, service, timer and research JSON example. Setup
+sets the example start two minutes ahead, probes the service and enables the
+timer for twelve research attempts under the existing unlimited subscription
+allowance. It refuses existing targets and never overwrites or deletes history.
+Failed setup can leave installed files; inspect before any explicit upgrade.
+Do not run until the installer/bundle have passed GitHub verification. This
+neither authorizes orders nor changes the site's autonomous handover. See
+[plan 0044](../docs/plans/0044-alpaca-research-provisioning.md).
+
+The separate contextual campaign source uses `radar-context-research.service`
+and timer, the worker's fixed `--context-campaign` option, reader under
+`/usr/local/lib/radar-context-research`, config `/etc/radar/alpaca-context-research.json`
+and state `/var/lib/radar-paper-context`. It preserves the earlier installation
+and history. For `snapshot-context-v1` the worker first runs the read-only
+`alpaca-research-session` clock guard; the regular session must have room for
+capture/model deadlines plus the full forward horizon. Failed guards retain a
+failed slot and never call the model. The guarded contextual installation and
+future frozen schedule were independently inspected on October 13; see
+[plan 0049](../docs/plans/0049-alpaca-regular-campaign.md).
+
+`setup-alpaca-context.py` provisions these separate targets from the verified
+`/tmp/radar-context-research.new` and exact-member
+`/tmp/radar-context-research-bundle.tar`, taking the bundle SHA-256 as its sole
+argument. The bundle contains the worker, context service/timer and
+`alpaca-context-research.json.example`. Replace the example's zero start with a
+deliberately selected future epoch-millisecond schedule before bundling: setup
+requires more than two minutes and no more than seven days ahead. It pins twelve
+ten-minute slots/horizons and snapshot-context-v1. Never run the placeholder
+example unchanged. Existing targets refuse; no earlier campaign is modified.
+Stage and run only after GitHub verification. See
+[plan 0050](../docs/plans/0050-alpaca-context-provisioning.md).
+
+The paper execution installation source is separate from the research units.
+`setup-alpaca-execution.py` consumes `/tmp/radar-paper-execution.new` and
+`/tmp/radar-paper-execution-bundle.tar`, with the verified bundle SHA-256 as its
+sole argument. It pins the already verified maintenance/genesis-guard reader
+release, requires root-private paper credential metadata without reading it,
+and refuses any existing execution library, state alias, unit or config target.
+It neither overwrites partial installs nor removes retained history.
+
+The exact six-member bundle contains `maintain-alpaca-paper.py`,
+`initialize-alpaca-paper.py`, `radar-paper-maintenance.service`,
+`radar-paper-maintenance.timer`, `radar-paper-initialize.service`, and
+`alpaca-maintenance.json.example`. Set the example's public account UUID to the
+verified paper account before bundling; setup accepts observation mode only.
+The units share the explicit DynamicUser name radar-paper-execution and its
+private 0700 StateDirectory. systemd loads the root-only EnvironmentFile;
+the child CLI receives only paper broker credentials and a fixed PATH.
+
+Setup starts initialization once, then probes maintenance, then enables its
+timer only if both probes succeed. Initialization requires an empty state
+directory, durably writes a no-retry fence before the fixed cash-checkpoint
+CLI, validates the returned pinned paper checkpoint and retains completion.
+Failure or interruption retains the fence and any partial history. Inspect
+failed installation explicitly; never delete the fence or repeat initialization
+as a recovery shortcut. The recurring worker refuses missing journal history.
+These files were installed and initialization/early observation succeeded;
+later maintenance stopped advancing on an unsupported cash activity. No model,
+new-order permission or website handover is activated. See
+[plan 0054](../docs/plans/0054-alpaca-execution-initialization.md).
+
+The owner-authorized administrative helper source, `radar-paper-admin.py`,
+accepts only inspect, activities, maintain, stop or start. Its one-time root
+installer, `setup-alpaca-admin.py`, consumes `/tmp/radar-paper-admin.py` and the
+verified helper SHA-256 as its sole argument. After GitHub verification it
+exclusively installs `/usr/local/sbin/radar-paper-admin` and
+`/etc/sudoers.d/radar-paper-admin`, allowing guardian exactly those five commands
+without another password prompt. It validates the sudoers grammar before either
+publication and refuses preexisting targets. It cannot invoke arbitrary commands
+or alter trading policy. Installation does not start or stop any service.
+Use the helper through sudo -n; never change credential permissions or repeat
+account initialization to work around a failed observation. Verification and
+installation succeeded and direct commands were exercised; see
+[plan 0055](../docs/plans/0055-alpaca-maintenance-diagnostics.md).
+
+The source-only `alpaca-opening-cash-acknowledge` operator command takes an
+existing private journal, pinned paper account, selected activity ID, positive
+page bound and explicit `--already-in-opening-balance` flag. It never resets
+genesis. It requires empty order/position/activity history and unchanged opening
+cash, then fresh bracketed reads matching one executed historical cash journal.
+The acknowledgement is retained at its current availability time; the activity
+is not treated as a new deposit or profit. It is outside the installed admin
+grant and never called by ordinary maintenance or the model. Source CI 38439705359
+and matching release 38439694798 passed at 1819896. The owner applied the verified
+wrapper; independent admin checks confirm resumed ordinary observation, unchanged
+100000 USD simulated cash and empty claims. See
+[plan 0056](../docs/plans/0056-alpaca-opening-cash-reconciliation.md).
+
+The source-only `apply-alpaca-opening.py` one-time wrapper installs a verified
+acknowledgement reader alongside the existing maintenance reader. It pins the
+installed administration and old reader hashes, requires the new artifact hash,
+preserves the original journal prefix under the existing observation lock, and
+probes maintenance before resuming scheduling. Failed or partial application
+retains the staged reader and refuses automatic retry. This wrapper is outside
+the five-command sudo grant and must be invoked with isolated Python (`-I`)
+after GitHub verification. Its verified source and release are recorded in
+plan 0056; application succeeded and the old recurring reader remains installed.
+No trading authority is enabled.
+
+The source-only optional `--paper-model <private-simulation-model>` argument on
+`alpaca-order-preflight` and `alpaca-paper-submit` selects an explicit operator
+paper stress scenario. The strict shape is in `alpaca-paper-model.json.example`;
+its numbers are illustrative, not live fee/liquidity calibration or a capital
+mandate. Without the argument, unknown capacity/cost inputs continue to refuse.
+The model supplies a finite nanoshares ceiling, positive fee reserve and
+per-side slippage; round-trip costs charge spread plus both trade sides with
+upward rounding. Account, cash, owned-share, session, quote, policy and durable
+submission checks remain. Changed/removed assumptions refuse at the policy reload
+boundaries. Reports label the full model as simulation, with live capacity,
+live costs and measured profit false. No model file, new service or handover has
+been installed. See [plan 0057](../docs/plans/0057-alpaca-paper-stress-model.md).
+
+Source a66793a passed all fourteen checks in CI 38445546289 and matching Linux
+release 38445537967. Its reader SHA256 is
+0c421ea6475f400cda75126214725f718ed37cede13fe68d72c5f663016494f9;
+downloaded BUILD-INFO and an independent local hash agree. This binary remains
+local while isolated broker control, effective handover and supervision are built.

@@ -18,16 +18,39 @@ fn policy() -> Policy {
         max_position: MicroUsd::from_dollars(50.0),
         max_deployed: MicroUsd::from_dollars(200.0),
         max_per_creator: MicroUsd::from_dollars(60.0),
-        max_daily_loss: MicroUsd::from_dollars(25.0),
+        max_daily_loss: Some(MicroUsd::from_dollars(25.0)),
         max_round_trip_cost_bps: 900,
         max_canary: MicroUsd::from_dollars(1.0),
         max_input_staleness: SlotDelta(150),
+        max_native_spend_lamports: None,
         max_consecutive_failures: 3,
     }
 }
 
 fn mint(n: u8) -> Address {
     Address::new([n; 32])
+}
+
+#[test]
+fn existing_kernel_decisions_do_not_invent_token_debit_authority() {
+    let verdict = evaluate(&buy(10.0), &PortfolioState::flat(Slot(1_000)), &policy());
+    let authorization = verdict.authorisation().expect("valid buy");
+    assert_eq!(authorization.max_token_debit_raw, None);
+    assert_eq!(authorization.min_output_raw, None);
+    let old_wire = serde_json::to_value(authorization).unwrap();
+    assert!(old_wire.get("max_token_debit_raw").is_none());
+    assert!(old_wire.get("min_output_raw").is_none());
+    let parsed: radar_risk::Authorization = serde_json::from_value(old_wire.clone()).unwrap();
+    assert_eq!(parsed, *authorization);
+    for limit in [0, 10, u64::MAX] {
+        let mut bounded = old_wire.clone();
+        bounded["max_token_debit_raw"] = serde_json::json!(limit);
+        bounded["min_output_raw"] = serde_json::json!(limit);
+        let parsed: radar_risk::Authorization = serde_json::from_value(bounded.clone()).unwrap();
+        assert_eq!(parsed.max_token_debit_raw, Some(limit));
+        assert_eq!(parsed.min_output_raw, Some(limit));
+        assert_eq!(serde_json::to_value(parsed).unwrap(), bounded);
+    }
 }
 
 fn buy(notional_dollars: f64) -> Proposal {
@@ -211,6 +234,137 @@ fn exiting_is_never_blocked_by_a_sizing_limit() {
 }
 
 // --- limits ------------------------------------------------------------------
+
+#[test]
+fn daily_loss_closes_entries_without_trapping_reductions_or_bypassing_other_gates() {
+    let mut pol = policy();
+    pol.max_daily_loss = Some(MicroUsd(1));
+    for loss in [0, 1, 2, u64::MAX] {
+        let portfolio = PortfolioState {
+            realised_loss_today: MicroUsd(loss),
+            ..state()
+        };
+        assert_eq!(
+            refusals(&evaluate(&buy(20.0), &portfolio, &pol)).contains(&Refusal::DailyLossReached),
+            loss >= 1
+        );
+        for action in [Action::Reduce, Action::Exit] {
+            let proposal = Proposal {
+                action,
+                ..buy(20.0)
+            };
+            assert!(
+                evaluate(&proposal, &portfolio, &pol)
+                    .authorisation()
+                    .is_some()
+            );
+            for (restricted, expected) in [
+                (
+                    PortfolioState {
+                        halted: true,
+                        ..portfolio.clone()
+                    },
+                    Refusal::Halted,
+                ),
+                (
+                    PortfolioState {
+                        consecutive_failures: 3,
+                        ..portfolio.clone()
+                    },
+                    Refusal::TooManyFailures,
+                ),
+                (
+                    PortfolioState {
+                        now: Slot(2_000),
+                        ..portfolio.clone()
+                    },
+                    Refusal::InputsTooStale,
+                ),
+            ] {
+                let reasons = refusals(&evaluate(&proposal, &restricted, &pol));
+                assert!(reasons.contains(&expected), "{action:?}: {reasons:?}");
+                assert!(!reasons.contains(&Refusal::DailyLossReached));
+            }
+            let no_authority = Policy {
+                autonomy: Autonomy::Observe,
+                ..pol
+            };
+            assert!(
+                refusals(&evaluate(&proposal, &portfolio, &no_authority))
+                    .contains(&Refusal::NoAutonomy)
+            );
+        }
+    }
+}
+
+#[test]
+fn daily_caps_are_optional_but_disabling_one_does_not_disable_other_risk_checks() {
+    let mut pol = policy();
+    pol.max_daily_loss = Some(MicroUsd(1));
+    for (loss, allowed) in [(0, true), (1, false), (2, false)] {
+        let portfolio = PortfolioState {
+            realised_loss_today: MicroUsd(loss),
+            ..state()
+        };
+        assert_eq!(
+            evaluate(&buy(20.0), &portfolio, &pol)
+                .authorisation()
+                .is_some(),
+            allowed
+        );
+    }
+    pol.max_daily_loss = Some(MicroUsd::ZERO);
+    assert!(refusals(&evaluate(&buy(20.0), &state(), &pol)).contains(&Refusal::DailyLossReached));
+    pol.max_daily_loss = None;
+    let losing = PortfolioState {
+        realised_loss_today: MicroUsd(u64::MAX),
+        ..state()
+    };
+    assert!(
+        evaluate(&buy(20.0), &losing, &pol)
+            .authorisation()
+            .is_some()
+    );
+    for (portfolio, proposal, reason) in [
+        (
+            PortfolioState {
+                halted: true,
+                ..losing.clone()
+            },
+            buy(20.0),
+            Refusal::Halted,
+        ),
+        (
+            PortfolioState {
+                consecutive_failures: 3,
+                ..losing.clone()
+            },
+            buy(20.0),
+            Refusal::TooManyFailures,
+        ),
+        (losing.clone(), buy(51.0), Refusal::OverPositionLimit),
+        (
+            losing.clone(),
+            Proposal {
+                simulated_exit_capacity: None,
+                ..buy(20.0)
+            },
+            Refusal::ExitNotSimulated,
+        ),
+        (
+            losing,
+            Proposal {
+                oldest_input_slot: Slot(1),
+                ..buy(20.0)
+            },
+            Refusal::InputsTooStale,
+        ),
+    ] {
+        let reasons = refusals(&evaluate(&proposal, &portfolio, &pol));
+        assert!(reasons.contains(&reason), "{reasons:?}");
+        assert!(!reasons.contains(&Refusal::DailyLossReached));
+    }
+}
 
 #[test]
 fn creator_exposure_aggregates_across_their_tokens() {
@@ -462,7 +616,7 @@ fn the_shipped_policy_refuses_everything_for_reasons_that_are_all_its_own() {
     let refused = evaluate(&buy(10.0), &state(), &Policy::CLOSED);
     let (policy_bound, about_this) =
         radar_risk::partition_refusals(&refusals(&refused), &Policy::CLOSED);
-    assert!(!policy_bound.is_empty());
+    assert_ne!(policy_bound, [] as [Refusal; 0]);
     assert!(
         about_this.is_empty(),
         "under a closed policy nothing is a finding about the token: {about_this:?}"
@@ -495,7 +649,10 @@ fn an_open_policy_makes_a_real_refusal_visible_as_one() {
 fn an_open_policy_has_nothing_inevitable_about_it() {
     // If a policy would refuse a perfect proposal, it is closed in some way the
     // operator may not have intended. An open one refuses nothing a priori.
-    assert!(radar_risk::inevitable_refusals(&policy()).is_empty());
+    assert_eq!(
+        radar_risk::inevitable_refusals(&policy()),
+        [] as [Refusal; 0]
+    );
 }
 
 #[test]
@@ -527,7 +684,10 @@ fn the_classification_is_computed_so_it_cannot_drift_from_the_policy() {
         vec![Refusal::OverDeploymentLimit],
         "the newly-closed limit, and only it"
     );
-    assert!(radar_risk::inevitable_refusals(&policy()).is_empty());
+    assert_eq!(
+        radar_risk::inevitable_refusals(&policy()),
+        [] as [Refusal; 0]
+    );
 }
 
 #[test]
@@ -593,9 +753,10 @@ fn a_proposal_exactly_at_every_limit_is_authorised() {
         max_deployed: limit,
         max_per_creator: limit,
         max_canary: limit,
-        max_daily_loss: MicroUsd::from_dollars(25.0),
+        max_daily_loss: Some(MicroUsd::from_dollars(25.0)),
         max_round_trip_cost_bps: 900,
         max_input_staleness: SlotDelta(150),
+        max_native_spend_lamports: None,
         max_consecutive_failures: 3,
     };
     let at_the_limit = Proposal {

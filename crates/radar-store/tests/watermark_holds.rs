@@ -70,6 +70,85 @@ fn slots_in_one_partition() -> [u64; 4] {
 }
 
 #[test]
+fn matching_reads_filter_during_decode_without_exposing_future_rows() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let slots = slots_in_one_partition();
+    let mut writer = Writer::open(dir.path(), 10_000).expect("open");
+    for slot in slots {
+        writer.append(launch_at(slot)).expect("append");
+    }
+    writer.flush().expect("flush");
+    let reader = Reader::open(dir.path());
+    let visited = std::cell::RefCell::new(Vec::new());
+    let matching = reader
+        .read_matching(Table::Launches, AsOf::at(Slot(slots[1])), &|event| {
+            visited.borrow_mut().push(event.slot());
+            event.slot() == Slot(slots[1])
+        })
+        .expect("matching read");
+    assert_eq!(*visited.borrow(), vec![Slot(slots[0]), Slot(slots[1])]);
+    assert_eq!(matching.len(), 1);
+    assert_eq!(matching[0].slot(), Slot(slots[1]));
+    assert_eq!(
+        reader
+            .read_matching(Table::Launches, AsOf::at(Slot(slots[3])), &|_| false)
+            .expect("reject every row")
+            .len(),
+        0
+    );
+    assert_eq!(
+        reader
+            .read_matching(Table::Launches, AsOf::at(Slot(slots[3])), &|_| true)
+            .expect("accept every admitted row")
+            .len(),
+        4
+    );
+    assert!(
+        reader
+            .read_matching(Table::Positions, AsOf::at(Slot(slots[3])), &|_| true)
+            .is_err()
+    );
+}
+
+#[test]
+fn creator_column_selection_keeps_other_creators_and_future_rows_out() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let slots = slots_in_one_partition();
+    let mut writer = Writer::open(dir.path(), 10_000).expect("open");
+    for slot in slots {
+        let mut event = launch_at(slot);
+        if slot == slots[1] {
+            let Event::Launch(launch) = &mut event else {
+                unreachable!()
+            };
+            launch.creator = Address::new([8; 32]);
+        }
+        writer.append(event).expect("append");
+    }
+    writer.flush().expect("flush");
+    let reader = Reader::open(dir.path());
+    let selected = reader
+        .read_creator_launches(&Address::new([7; 32]).to_string(), AsOf::at(Slot(slots[1])))
+        .expect("creator launches");
+    assert_eq!(selected.len(), 1);
+    assert_eq!(selected[0].slot(), Slot(slots[0]));
+    assert_eq!(
+        reader
+            .read_creator_launches(&Address::new([8; 32]).to_string(), AsOf::at(Slot(slots[3])))
+            .expect("other creator")
+            .len(),
+        1
+    );
+    assert_eq!(
+        reader
+            .read_creator_launches(&Address::new([6; 32]).to_string(), AsOf::at(Slot(slots[3])))
+            .expect("unknown creator")
+            .len(),
+        0
+    );
+}
+
+#[test]
 fn a_file_that_straddles_the_watermark_yields_only_the_admissible_half() {
     let dir = tempfile::tempdir().expect("tempdir");
     let slots = slots_in_one_partition();
@@ -179,6 +258,35 @@ fn outcomes_are_gated_on_when_they_were_measured() {
 }
 
 #[test]
+fn matching_outcomes_retain_only_selected_admitted_measurements() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let slots = slots_in_one_partition();
+    let mut writer = Writer::open(dir.path(), 10_000).expect("open");
+    for slot in slots {
+        writer.append_outcome(outcome_at(slot)).expect("append");
+    }
+    writer.flush().expect("flush");
+    let reader = Reader::open(dir.path());
+    let visited = std::cell::RefCell::new(Vec::new());
+    let matching = reader
+        .read_outcomes_matching(AsOf::at(Slot(slots[1])), &|outcome| {
+            visited.borrow_mut().push(outcome.measured_at);
+            outcome.measured_at == Slot(slots[1])
+        })
+        .expect("matching outcomes");
+    assert_eq!(*visited.borrow(), vec![Slot(slots[0]), Slot(slots[1])]);
+    assert_eq!(matching.len(), 1);
+    assert_eq!(matching[0].measured_at, Slot(slots[1]));
+    assert_eq!(
+        reader
+            .read_outcomes_matching(AsOf::at(Slot(slots[3])), &|_| false)
+            .expect("reject all")
+            .len(),
+        0
+    );
+}
+
+#[test]
 fn a_watermark_before_everything_returns_nothing_rather_than_everything() {
     // The failure direction that matters: an inverted comparison returns the
     // whole store, and every count downstream still looks plausible.
@@ -192,13 +300,14 @@ fn a_watermark_before_everything_returns_nothing_rather_than_everything() {
 
     let reader = Reader::open(dir.path());
     let ancient = AsOf::at(Slot(1));
-    assert!(
-        reader
-            .read(Table::Launches, ancient)
-            .expect("read")
-            .is_empty()
+    assert_eq!(
+        reader.read(Table::Launches, ancient).expect("read"),
+        [] as [radar_store::Event; 0]
     );
-    assert!(reader.read_outcomes(ancient).expect("read").is_empty());
+    assert_eq!(
+        reader.read_outcomes(ancient).expect("read"),
+        [] as [radar_store::Outcome; 0]
+    );
 }
 
 #[test]

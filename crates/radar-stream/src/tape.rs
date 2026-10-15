@@ -767,7 +767,10 @@ mod tests {
             !tape.trades(&addr(1), T0, T0 + 60).0.is_empty(),
             "coin 1 traded again"
         );
-        assert!(!tape.trades(&addr(3), T0, T0 + 60).0.is_empty());
+        assert_ne!(
+            tape.trades(&addr(3), T0, T0 + 60).0,
+            [] as [radar_store::MarketTrade; 0]
+        );
     }
 
     #[test]
@@ -1082,7 +1085,10 @@ mod tests {
             !tape.minutes(&addr(1), T0, T0 + 60).1,
             "T0 is before watching began"
         );
-        assert!(tape.minutes(&addr(9), T0, T0 + 60).0.is_empty());
+        assert_eq!(
+            tape.minutes(&addr(9), T0, T0 + 60).0,
+            [] as [crate::tape::Minute; 0]
+        );
         assert!(
             !tape.minutes(&addr(9), T0, T0 + 60).1,
             "an unknown coin is not complete"
@@ -1129,7 +1135,7 @@ mod tests {
             T0 + 60,
             tx(vec![fill(1, 1.0, true)]),
         );
-        assert!(tape.active(T0, T0 + 60).is_empty());
+        assert_eq!(tape.active(T0, T0 + 60), [] as [crate::tape::Activity; 0]);
         assert_eq!(tape.active(T0, T0 + 61).len(), 1);
     }
 

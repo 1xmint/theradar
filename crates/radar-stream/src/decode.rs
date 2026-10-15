@@ -513,7 +513,7 @@ mod tests {
                 (4, COIN, POOL, Some(500), Some(400)),
             ],
         ));
-        assert!(d.fills.is_empty());
+        assert_eq!(d.fills, [] as [crate::decode::Fill; 0]);
         assert_eq!(d.unpriced, 0);
     }
 

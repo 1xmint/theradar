@@ -87,10 +87,12 @@ fn empty_token_accounts_json(slot: u64) -> String {
 fn token_accounts_json(slot: u64, owner: &Address, accounts: &[(&str, &str, u8)]) -> String {
     let entries: Vec<String> = accounts
         .iter()
-        .map(|(mint, amount, decimals)| {
-            format!(
-                r#"{{"account":{{"data":{{"parsed":{{"info":{{"mint":"{mint}","owner":"{owner}","tokenAmount":{{"amount":"{amount}","decimals":{decimals}}}}}}}}}}}}}"#
-            )
+        .enumerate()
+        .map(|(index, (mint, amount, decimals))| {
+            serde_json::json!({"pubkey":Address::new([u8::try_from(index).expect("fixture index");32]).to_string(),
+                "account":{"owner":radar_onchain::rpc::TOKEN_PROGRAM_ID,"data":{"parsed":{"info":{
+                    "mint":mint,"owner":owner.to_string(),"state":"initialized",
+                    "tokenAmount":{"amount":amount,"decimals":decimals}}}}}}).to_string()
         })
         .collect();
     format!(

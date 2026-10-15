@@ -118,8 +118,9 @@ impl Credentials {
 pub struct Wallet {
     /// The Solana address, base58.
     pub address: String,
-    /// Privy's identifier for it, which the signing endpoint is keyed by.
-    pub id: String,
+    /// Privy's server wallet identifier, when assigned. An address can be read
+    /// without this identifier; its absence must never authorize signing.
+    pub id: Option<String>,
     /// Whether the customer has granted Radar a signer on this wallet.
     ///
     /// # Rule 9 lives here
@@ -223,7 +224,7 @@ impl Client {
             .map_err(Unavailable::Unreachable)?;
         let user: serde_json::Value =
             serde_json::from_str(&body).map_err(|e| Unavailable::Unreachable(e.to_string()))?;
-        solana_wallet(&user).ok_or(Unavailable::NoWallet)
+        solana_wallet(&user)
     }
 }
 
@@ -241,9 +242,12 @@ impl Client {
 /// Anything less specific risks returning a **Phantom address the customer
 /// connected for login**, which Radar can never sign for and must never be shown
 /// as a deposit destination.
-fn solana_wallet(user: &serde_json::Value) -> Option<Wallet> {
-    user.get("linked_accounts")?
-        .as_array()?
+fn solana_wallet(user: &serde_json::Value) -> Result<Wallet, Unavailable> {
+    let unreadable = || Unavailable::Unreachable("unreadable Privy wallet response".into());
+    let account = user
+        .get("linked_accounts")
+        .and_then(serde_json::Value::as_array)
+        .ok_or_else(unreadable)?
         .iter()
         .find(|account| {
             account.get("type").and_then(serde_json::Value::as_str) == Some("wallet")
@@ -256,15 +260,25 @@ fn solana_wallet(user: &serde_json::Value) -> Option<Wallet> {
                     .and_then(serde_json::Value::as_str)
                     == Some("embedded")
         })
-        .and_then(|account| {
-            Some(Wallet {
-                address: account.get("address")?.as_str()?.to_owned(),
-                id: account.get("id")?.as_str()?.to_owned(),
-                // Rule 9. A field Privy did not send is not a grant.
-                delegated: account
-                    .get("delegated")
-                    .and_then(serde_json::Value::as_bool)
-                    .unwrap_or(false),
-            })
-        })
+        .ok_or(Unavailable::NoWallet)?;
+    let address = account
+        .get("address")
+        .and_then(serde_json::Value::as_str)
+        .filter(|address| !address.is_empty())
+        .ok_or_else(unreadable)?
+        .to_owned();
+    let id = match account.get("id") {
+        None | Some(serde_json::Value::Null) => None,
+        Some(serde_json::Value::String(id)) if !id.is_empty() => Some(id.clone()),
+        _ => return Err(unreadable()),
+    };
+    Ok(Wallet {
+        address,
+        id,
+        // Rule 9. A field Privy did not send is not a grant.
+        delegated: account
+            .get("delegated")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false),
+    })
 }

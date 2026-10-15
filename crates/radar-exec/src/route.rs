@@ -27,8 +27,10 @@
 //! So the old buy-a-transaction path cannot be served here, and is not faked.
 //! [`Router`]'s [`crate::pipeline::Routing`] implementation refuses, in writing,
 //! rather than returning bytes the signer would reject at the end of the lane.
-//! Assembling a signer-readable transaction from these instructions is a
-//! separate piece of work; nothing in this module pretends it is done.
+//! [`Router::build_legacy`] now assembles the same instruction metas inline and
+//! refuses routes that exceed the packet limit. That proves readability only;
+//! routed-program execution semantics remain unverified, so the autonomous
+//! [`crate::pipeline::Routing`] implementation still refuses execution.
 //!
 //! That confirms rather than contradicts
 //! [research 0021](https://github.com/hey-vera/radar/blob/main/docs/research/0021-the-signer-cannot-read-the-only-venue-that-lists-them.md):
@@ -252,9 +254,8 @@ fn truncated(body: &str) -> String {
 
 /// A transaction ready to be sent to the signer.
 ///
-/// Nothing in this module produces one any more — see the module documentation.
-/// It remains the currency of [`crate::pipeline`], whose ordering is written
-/// against it.
+/// Remains the currency of [`crate::pipeline`]. Readable construction is available
+/// separately through [`Router::build_legacy`]; it grants no execution authority.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Route {
     /// The unsigned transaction, base64.
@@ -684,6 +685,30 @@ impl Router {
         Ok(Build { quote, transaction })
     }
 
+    /// Fetches a quote and assembles its instructions with every account inline.
+    ///
+    /// Reviews the currently supported single-hop RaydiumV2 envelope in both
+    /// directions, binding amounts, tolerance and named account roles to the
+    /// request/quote. Other route layouts refuse. Pool/token state and global
+    /// privileges still need independent protected verification; no signing
+    /// authority is granted. Browser v0 builds retain their existing behavior.
+    ///
+    /// # Errors
+    ///
+    /// Same quote checks as [`Self::build`] and the packet/fee/signer refusals of
+    /// [`crate::assemble::assemble_legacy`]. Never falls back to lookup tables.
+    pub fn build_legacy(
+        &self,
+        request: &QuoteRequest,
+        slippage_bps: u32,
+    ) -> Result<Build, RouteError> {
+        let body = self.fetch_body(request, slippage_bps)?;
+        let quote = Quote::from_response(&body, request, slippage_bps)?;
+        let transaction = crate::assemble::assemble_legacy(&body, request.taker)?;
+        crate::route_review::review(&body, request, &quote, slippage_bps)?;
+        Ok(Build { quote, transaction })
+    }
+
     /// The one GET both [`Self::quote`] and [`Self::build`] make, returning
     /// the raw response body for each to read its own way.
     fn fetch_body(&self, request: &QuoteRequest, slippage_bps: u32) -> Result<String, RouteError> {
@@ -736,7 +761,7 @@ impl Router {
 pub struct Build {
     /// The same quote [`Router::quote`] would have returned for this request.
     pub quote: Quote,
-    /// The unsigned v0 transaction, fee payer set to the request's `taker`.
+    /// The unsigned transaction, fee payer set to the request's `taker`.
     pub transaction: crate::assemble::AssembledTransaction,
 }
 
@@ -791,21 +816,17 @@ pub fn notional_to_lamports(notional: MicroUsd, sol_price: MicroUsd) -> u64 {
 }
 
 /// Why this router cannot build a transaction, in the words the caller sees.
-const CANNOT_BUILD: &str = "Jupiter's Router returns raw instructions and no transaction, has no \
-     asLegacyTransaction parameter, and routed every pair captured on \
-     2026-09-09 through address lookup tables. Assembling a legacy \
-     transaction from those instructions is not built. Radar's own venue is \
-     radar-pumpfun (ADR 0009); this router prices, it does not execute.";
+const CANNOT_BUILD: &str = "Jupiter legacy instruction assembly is available, but routed-program \
+     execution semantics and protected asset spend/output verification are not \
+     complete. Readable bytes alone do not authorize autonomous execution.";
 
 /// The router, as the pipeline sees it — and a refusal.
 ///
 /// **This implementation always fails, and that is the honest answer**, not a
-/// stub and not an oversight. The endpoint that returned a signer-readable
-/// transaction is deprecated; its replacement returns instructions and lookup
-/// tables. Until something assembles a legacy transaction from those, there is
-/// no route from here to a signature, and a caller learns that here — at the
-/// routing stage, with nothing at stake — rather than at the signer, with a
-/// decision already resting on it.
+/// stub and not an oversight. [`Router::build_legacy`] can construct a readable
+/// transaction where all accounts fit inline. The independent signer still
+/// needs complete routed-program and asset spend/output checks before this
+/// implementation may hand it an autonomous attempt.
 ///
 /// It is kept rather than deleted because deleting it would leave
 /// [`crate::pipeline::Routing`] with no production implementation again and
@@ -813,6 +834,10 @@ const CANNOT_BUILD: &str = "Jupiter's Router returns raw instructions and no tra
 /// explains itself is visible; an absent implementation is not.
 impl crate::pipeline::Routing for Router {
     fn build_buy(&self, _: &Address, _: &Address, _: u64) -> Result<Route, RouteError> {
+        Err(RouteError::Unverifiable(CANNOT_BUILD.to_owned()))
+    }
+
+    fn build_sell(&self, _: &Address, _: &Address, _: u64) -> Result<Route, RouteError> {
         Err(RouteError::Unverifiable(CANNOT_BUILD.to_owned()))
     }
 }
@@ -976,17 +1001,18 @@ mod tests {
         // operator reading a journal line learns what to fix rather than
         // concluding the market is thin.
         let router = Router::new(credentials());
-        let err = Routing::build_buy(
-            &router,
-            &Address::new([0x22; 32]),
-            &Address::new([0x33; 32]),
-            1_000_000,
-        )
-        .expect_err("the Router API cannot supply a signable transaction");
-        assert!(
-            matches!(err, RouteError::Unverifiable(ref m) if m.contains("lookup tables")),
-            "the refusal must name the reason, got {err}"
-        );
+        let mint = Address::new([0x22; 32]);
+        let wallet = Address::new([0x33; 32]);
+        for result in [
+            Routing::build_buy(&router, &mint, &wallet, 1_000_000),
+            Routing::build_sell(&router, &mint, &wallet, 1_000_000),
+        ] {
+            let err = result.expect_err("readability alone cannot authorize autonomous execution");
+            assert!(
+                matches!(err, RouteError::Unverifiable(ref m) if m.contains("execution semantics") && m.contains("spend/output verification")),
+                "the refusal must name the reason, got {err}"
+            );
+        }
     }
 
     #[test]

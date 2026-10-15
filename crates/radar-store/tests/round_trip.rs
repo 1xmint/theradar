@@ -683,8 +683,8 @@ fn empty_reason_lists_and_populated_ones_both_survive() {
     let back = Reader::open(dir.path())
         .read_decisions(AsOf::at(Slot(1_000_000)))
         .expect("read");
-    assert!(back[0].reasons.is_empty());
-    assert!(back[0].kernel_reasons.is_empty());
+    assert_eq!(back[0].reasons, [] as [std::string::String; 0]);
+    assert_eq!(back[0].kernel_reasons, [] as [std::string::String; 0]);
     assert_eq!(back[1].reasons, vec!["A", "B", "C"]);
     assert_eq!(back[1].kernel_reasons, vec!["D"]);
 }

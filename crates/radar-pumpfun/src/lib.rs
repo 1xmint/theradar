@@ -29,6 +29,7 @@
 #![forbid(unsafe_code)]
 
 pub mod curve;
+pub mod fee_schedule;
 pub mod fees;
 pub mod instruction;
 pub mod pda;

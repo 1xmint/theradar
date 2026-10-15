@@ -47,15 +47,18 @@ pub enum Envelope {
 /// different copy sent.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct PrivyAuthorization {
-    /// The authorization the kernel issued.
+    /// The authorization asserted by the issuer. Its proof does not itself
+    /// establish that the kernel ran against trusted portfolio state.
     pub authorization: Authorization,
+    /// Required issuer proof. Old callers without one fail closed.
+    pub proof: IntentProof,
     /// The Privy request, exactly as it will be sent.
     pub request: crate::privy::PrivyRequest,
     /// The customer's wallet, base58.
     ///
-    /// The account the transaction must be signed by. Supplied by the caller and
-    /// then checked against the bytes, like everything else here — a caller that
-    /// names the wrong wallet gets a refusal, not somebody else's signature.
+    /// Must match the process's configured wallet scope as well as the bytes.
+    /// The process consumes the authorization nonce before using the Privy key,
+    /// after verifying the configured issuer's proof and time window.
     pub wallet: String,
     /// The caller's view of the chain head.
     pub now_slot: u64,
@@ -64,6 +67,18 @@ pub struct PrivyAuthorization {
     /// Required, like `now_slot` and for the same reason: an optional bound with
     /// a default is a missing value that passes.
     pub max_lamports: u64,
+}
+
+/// An issuer-signed validity window, checked against the process's own clock.
+/// There is no default expiry or request-selected public key.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct IntentProof {
+    /// Unix seconds; a future issue time refuses without clock-skew allowance.
+    pub issued_at_unix_secs: u64,
+    /// Unix seconds; expiry is exclusive.
+    pub expires_at_unix_secs: u64,
+    /// Base64 Ed25519 signature over [`crate::attestation::payload`].
+    pub signature: String,
 }
 
 /// A request to sign locally.
@@ -83,10 +98,12 @@ pub struct Request {
     /// The most lamports the caller intended this transaction to spend.
     ///
     /// The authorization is in micro-USD and the transaction in lamports, and
-    /// this process has no price feed; the caller has one, so it converts and
-    /// says so here. It can only **narrow**: the authorization's own ceiling and
-    /// the signer's policy both still apply, so a caller that sets this to
-    /// `u64::MAX` gains nothing. See [`verify::CallerBounds`](crate::verify::CallerBounds).
+    /// this process has no price feed. The isolated issuer binds its protected
+    /// conversion into the Privy proof. This can only narrow the signer's own
+    /// native-spend policy; USD authorization limits are checked separately.
+    /// Old policy files retain their legacy restrictive bound. The library and
+    /// local lane cannot authenticate a caller's price conversion. See
+    /// [`verify::CallerBounds`](crate::verify::CallerBounds).
     ///
     /// Required, with no `serde` default. An optional bound whose absence means
     /// "no limit" is rule 8 broken in the one process that must not break it, so

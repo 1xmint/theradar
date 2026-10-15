@@ -136,11 +136,11 @@ rule *currently reaches* is status, and status is in
    **authentication, not authority**, and may never soften a refusal.
 
    **State the signer's guarantee exactly, because an earlier version said
-   "absolute" and was read as more than it is.** The signer does not verify that
-   an `Authorization` came from the kernel: there is no MAC and the `nonce` is
-   never checked. The property is *the transaction matches the authorisation the
-   caller supplied* — a complete defence against an executor **bug**, and not one
-   against a **compromised caller**, which writes its own authorisation.
+   "absolute" and was read as more than it is.** The library checks caller-supplied
+   bounds. The Privy binary also checks an issuer signature, host-clock expiry
+   and durable nonce reuse. The offline issuer uses operator-provisioned evidence;
+   live snapshots/reconciliation are absent. Provenance alone proves no decision. The local
+   lane remains unauthenticated. Keep live delegation closed until those gaps close.
    LEARNINGS 23, and [ADR 0007](docs/adr/0007-the-privy-authorization-key-lives-in-the-signer-process.md).
    This is why it refuses address lookup tables
    ([ADR 0003](docs/adr/0003-legacy-transactions-because-the-signer-must-be-able-to-read-them.md))
@@ -240,6 +240,11 @@ rule *currently reaches* is status, and status is in
 
 ## 6. Verification and iteration
 
+- **Owner preference (2026-10-10): run tests and jobs on GitHub.** Use GitHub
+  Actions for test, build, lint and mutation verification rather than running
+  those jobs on the workstation. Inspect the results before claiming success.
+  Local source inspection and lightweight diff checks remain appropriate.
+
 - Validate with the most relevant evidence available — tests, builds, linters,
   runtime behaviour — proportional to risk. Skip ceremonial checks that add no
   confidence.
@@ -322,28 +327,17 @@ decisions about a trade-off that belongs to the owner. LEARNINGS 26.
 is using that machine while you work on it. `target/` reached **127GB** on
 2026-09-03 and froze it hard enough to need a forced power-off.
 
-**Do not run locally:** `cargo mutants` over anything wider than a single file,
-`cargo build --release`, repeated full-workspace rebuilds, `--jobs` above the
-default, or long-running background cargo. The edit-compile loop is fine.
-`just check` on a crate is fine. `cargo mutants -f one/file.rs` is fine.
+**Run tests, builds, lint and mutation jobs on GitHub**, as the owner requests
+in §6. Do not substitute workstation jobs for the GitHub checks.
 
 **Move it, do not skip it.** CI runs the mutation check sharded across four
-runners. Push the branch and read the result. **A local `cargo mutants -f` is for
-diagnosing a survivor CI has already reported** — one file, once. It is not the
-way to verify a fix: it costs about nine minutes of the whole machine per file,
-and four runners in parallel are both faster and free. Three serial runs on
-2026-09-03 cost an hour and told CI nothing it would not have said itself.
+runners. Push the branch and read the result.
 **And if CI cannot run it, say so and ask** — silently skipping a check and
 silently burning somebody's computer are the same mistake, acting on a trade-off
 that was not yours to make. LEARNINGS 26.
 
-**Spend the machine sparingly otherwise:** one cargo process at a time, never a
-background build alongside a foreground one. Scope to what you are editing
-(`-p <crate>`); the workspace-wide gate is for once, before committing. Prefer
-`just check` to ad-hoc flag combinations, which give each invocation a different
-fingerprint so every run invalidates the last. Kill background jobs and remove
-`mutants.out/` when you finish, and check `target/` after a session that built a
-lot.
+Keep workstation source inspection and editing lightweight; leave no background
+builds or local mutation output behind.
 
 **Never block on something you are not required to watch.** A poll loop, a
 `sleep`, a background waiter — all of it holds the turn open, keeps processes

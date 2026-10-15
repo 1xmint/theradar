@@ -969,7 +969,7 @@ mod tests {
         // details, which are present either way.
         let f = funnel(&[], 0, 0, true);
         assert!(f.stages.iter().all(|s| s.count == 0));
-        assert!(f.reasons.is_empty());
+        assert_eq!(f.reasons, [] as [crate::api::ReasonCount; 0]);
         assert_eq!(f.stages.len(), 4, "the stages are always described");
     }
 
@@ -1254,7 +1254,7 @@ mod tests {
             },
             7,
         );
-        assert!(got.decisions.is_empty());
+        assert_eq!(got.decisions, [] as [radar_store::Decision; 0]);
         assert_eq!(got.matched, 0);
         assert!(got.next.is_none());
         assert_eq!(got.as_of, 7, "the watermark is reported even with no rows");
@@ -1613,7 +1613,7 @@ mod tests {
     fn an_empty_record_is_no_buckets_rather_than_a_row_of_zeroes() {
         // A row of zeroes says the recorder ran and found nothing. Nothing ran.
         let got = activity(&[], 99, 7);
-        assert!(got.intervals.is_empty());
+        assert_eq!(got.intervals, [] as [crate::api::Interval; 0]);
         assert_eq!(got.as_of, 99);
     }
 

@@ -86,6 +86,30 @@ pub struct Codex {
 }
 
 impl Codex {
+    /// Checks persisted CLI login without reading credentials or spending an
+    /// inference call. Neither output stream is exposed or retained.
+    ///
+    /// # Errors
+    /// Returns a process failure or timeout when login state cannot be checked.
+    /// Exit one means unlinked; other unsuccessful exits remain unknown.
+    pub fn is_linked(&self) -> Result<bool, Unreachable> {
+        let child = self
+            .command(&["login", "status"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .map_err(|_| Unreachable::NoContact("starting CLI login status".to_owned()))?;
+        let output = wait_with_deadline(child, Duration::from_secs(15), 15)?;
+        match output.status.code() {
+            Some(0) => Ok(true),
+            Some(1) => Ok(false),
+            _ => Err(Unreachable::Refused {
+                status: output.status.to_string(),
+            }),
+        }
+    }
+
     /// Builds from the configured command line.
     ///
     /// # Errors
@@ -108,8 +132,8 @@ impl Codex {
     /// The command as it will be spawned, with a subcommand appended.
     ///
     /// `RADAR_MODEL_CODEX` names the **base** command and Radar supplies the
-    /// subcommand, because Radar runs two of them: `exec -` to ask a question
-    /// and `login --device-auth` to link the credential. A wrapper that dropped
+    /// subcommand: `exec -` asks a question, `login --device-auth` links the
+    /// credential, and `login status` checks persisted login. A wrapper that dropped
     /// to another user could otherwise only serve one of them, and the
     /// alternative — a second environment variable for the second subcommand —
     /// is two things to keep in step for no gain.
@@ -169,6 +193,18 @@ pub const LINK_PROMPT_TIMEOUT: Duration = Duration::from_secs(30);
 /// ordinary word in the surrounding prose.
 #[must_use]
 pub fn parse_link(output: &str) -> Option<Linking> {
+    // The non-interactive CLI still emits ANSI SGR colors. Strip those before
+    // looking for token shapes, including resets attached to the URL and code.
+    let mut parts = output.split("\u{1b}[");
+    let mut plain = parts.next().unwrap_or_default().to_owned();
+    for part in parts {
+        let text = part
+            .split_once('m')
+            .filter(|(parameters, _)| parameters.chars().all(|c| c.is_ascii_digit() || c == ';'))
+            .map_or(part, |(_, text)| text);
+        plain.push_str(text);
+    }
+    let output = plain;
     let url = output.split_whitespace().find_map(|word| {
         let trimmed = word.trim_matches(|c: char| !c.is_ascii_graphic() || "\"'.,)".contains(c));
         trimmed.starts_with("https://").then(|| trimmed.to_owned())
@@ -339,7 +375,9 @@ impl Provider for Codex {
         // The prompt goes in on stdin rather than as an argument. An argument
         // is visible in `ps` to every user on the box, and this one contains
         // token metadata a moment after a stranger chose it.
-        let prompt = request.render();
+        // The CLI has one stdin prompt rather than separate API roles. Retain
+        // Radar's trusted framing before the question and fenced observations.
+        let prompt = format!("{}\n\n{}", request.system(), request.render());
         child
             .stdin
             .take()
@@ -413,22 +451,31 @@ fn wait_with_deadline(
     deadline: Duration,
     seconds: u64,
 ) -> Result<std::process::Output, Unreachable> {
+    // Drain while the child runs: waiting first deadlocks once either pipe
+    // fills. Only stdout is the answer; credential-adjacent stderr is discarded.
+    let stdout = child.stdout.take().map(|mut pipe| {
+        std::thread::spawn(move || {
+            let mut bytes = Vec::new();
+            let _ = pipe.read_to_end(&mut bytes);
+            bytes
+        })
+    });
+    if let Some(mut pipe) = child.stderr.take() {
+        std::thread::spawn(move || {
+            let _ = std::io::copy(&mut pipe, &mut std::io::sink());
+        });
+    }
     let started = std::time::Instant::now();
     loop {
         match child.try_wait() {
             Ok(Some(status)) => {
-                let mut stdout = Vec::new();
-                let mut stderr = Vec::new();
-                if let Some(mut pipe) = child.stdout.take() {
-                    let _ = pipe.read_to_end(&mut stdout);
-                }
-                if let Some(mut pipe) = child.stderr.take() {
-                    let _ = pipe.read_to_end(&mut stderr);
-                }
+                let stdout = stdout
+                    .and_then(|reader| reader.join().ok())
+                    .unwrap_or_default();
                 return Ok(std::process::Output {
                     status,
                     stdout,
-                    stderr,
+                    stderr: Vec::new(),
                 });
             }
             Ok(None) => {
@@ -450,12 +497,61 @@ mod tests {
     use std::collections::BTreeMap;
     use std::ffi::OsStr;
 
+    #[cfg(unix)]
+    #[test]
+    fn persisted_login_status_distinguishes_linked_unlinked_and_unknown() {
+        // Mutation jobs run the changed crate's tests, so exercise the actual
+        // subprocess here as well as through the serving router's regressions.
+        for code in [0, 1, 2, 9, 127] {
+            let codex = Codex {
+                argv: vec![
+                    "/bin/sh".to_owned(),
+                    "-c".to_owned(),
+                    format!(
+                        "[ \"$#\" = 2 ] && [ \"$1\" = login ] && [ \"$2\" = status ] || exit 9; printf secret-output; printf secret-error >&2; exit {code}"
+                    ),
+                    "fixture".to_owned(),
+                ],
+                env: Vec::new(),
+            };
+            match code {
+                0 => assert!(codex.is_linked().unwrap()),
+                1 => assert!(!codex.is_linked().unwrap()),
+                _ => assert!(matches!(
+                    codex.is_linked(),
+                    Err(Unreachable::Refused { .. })
+                )),
+            }
+        }
+        let missing = Codex::from_vars("radar-no-such-cli-3f02bd", &|_| None).unwrap();
+        assert!(matches!(
+            missing.is_linked(),
+            Err(Unreachable::NoContact(_))
+        ));
+    }
+
     fn vars(pairs: &[(&str, &str)]) -> impl Fn(&str) -> Option<String> {
         let map: BTreeMap<String, String> = pairs
             .iter()
             .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
             .collect();
         move |k: &str| map.get(k).cloned()
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn trusted_framing_reaches_cli_stdin() {
+        let codex = Codex::from_vars("sh -c cat", &vars(&[("PATH", "/usr/bin:/bin")])).unwrap();
+        let request = Request::new("trusted framing", "operator question")
+            .observing("feed", "untrusted observation");
+        let answer = codex.ask(&request).unwrap();
+        assert!(
+            answer
+                .text
+                .starts_with("trusted framing\n\noperator question\n\n")
+        );
+        assert!(answer.text.contains("untrusted observation"));
+        assert_eq!(request.fences(), 2);
     }
 
     #[test]
@@ -602,6 +698,44 @@ mod tests {
     }
 
     #[test]
+    fn verbose_subprocess_finishes_without_exposing_stderr() {
+        let child = Command::new(std::env::current_exe().expect("test executable"))
+            .args([
+                "--exact",
+                "codex::tests::pipe_filling_cli_fixture",
+                "--nocapture",
+            ])
+            .env("RADAR_TEST_PIPE_FIXTURE", "1")
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("spawn fixture");
+        let output = wait_with_deadline(child, Duration::from_secs(5), 5)
+            .expect("draining both pipes lets the child exit before the deadline");
+        assert!(output.status.success());
+        assert!(output.stdout.windows(5).any(|bytes| bytes == b"READY"));
+        assert!(output.stdout.len() > 128 * 1024);
+        assert!(
+            output.stderr.is_empty(),
+            "vendor diagnostics must not escape"
+        );
+    }
+
+    #[test]
+    fn pipe_filling_cli_fixture() {
+        if std::env::var_os("RADAR_TEST_PIPE_FIXTURE").is_none() {
+            return;
+        }
+        std::io::stdout()
+            .write_all(&vec![b'x'; 128 * 1024])
+            .expect("stdout");
+        std::io::stderr()
+            .write_all(&vec![b'y'; 128 * 1024])
+            .expect("stderr");
+        std::io::stdout().write_all(b"READY\n").expect("answer");
+    }
+
+    #[test]
     fn the_deadline_is_inclusive_so_a_zero_timeout_expires_at_once() {
         // Exclusive, a deadline of zero never expires and the call hangs
         // forever -- which is the failure the timeout exists to prevent,
@@ -631,6 +765,34 @@ mod tests {
                 "from {output:?}"
             );
             assert_eq!(linking.user_code, "WDJB-MJHT", "from {output:?}");
+        }
+    }
+
+    #[test]
+    fn the_installed_cli_colored_device_prompt_is_recognised() {
+        // Captured from Codex 0.131.0 through the installed isolated bridge.
+        // Use a fictitious code: the regression is the color around both fields.
+        let output = "Welcome to Codex [v\u{1b}[90m0.131.0\u{1b}[0m]\n\
+            1. Open this link in your browser and sign in to your account\n\
+               \u{1b}[94mhttps://auth.openai.com/codex/device\u{1b}[0m\n\
+            2. Enter this one-time code \u{1b}[90m(expires in 15 minutes)\u{1b}[0m\n\
+               \u{1b}[94mABCD-EFGH6\u{1b}[0m\n";
+        assert_eq!(
+            parse_link(output),
+            Some(Linking {
+                verification_url: "https://auth.openai.com/codex/device".to_owned(),
+                user_code: "ABCD-EFGH6".to_owned(),
+            })
+        );
+        assert_eq!(
+            parse_link(&output.replace("[94m", "[1;94m").replace("[0m", "[m")),
+            parse_link(output),
+            "combined SGR parameters and an empty reset are also colors"
+        );
+        // Unfinished and other escape sequences must not consume a valid prompt.
+        for prefix in ["\u{1b}[94", "\u{1b}]title", "\u{1b}[0m"] {
+            let prompt = format!("{prefix}\nhttps://auth.openai.com/codex/device ABCD-EFGH6");
+            assert!(parse_link(&prompt).is_some(), "{prefix:?}");
         }
     }
 

@@ -13,7 +13,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use radar_store::{Event, Table};
+use radar_store::Event;
 use radar_types::Mutability;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -95,12 +95,13 @@ impl Instrument for CreatorHistory {
     }
 
     fn run(&self, input: Input, ctx: &Context<'_>) -> Result<Output, InstrumentError> {
-        let events = ctx.store.read(Table::Launches, ctx.as_of).map_err(|e| {
-            InstrumentError::OutOfRange {
+        let events = ctx
+            .store
+            .read_creator_launches(&input.creator, ctx.as_of)
+            .map_err(|e| InstrumentError::OutOfRange {
                 as_of: ctx.as_of.to_string(),
                 detail: e.to_string(),
-            }
-        })?;
+            })?;
 
         let mut slots: Vec<u64> = Vec::new();
         let mut symbols: BTreeSet<String> = BTreeSet::new();

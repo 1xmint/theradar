@@ -33,10 +33,17 @@ import { Wallet } from "./Wallet";
 import { Agent } from "./Agent";
 import { Terminal } from "./Terminal";
 import { Terms } from "./Terms";
+import { PrivateSetup } from "./PrivateSetup";
 
 export function App() {
   return (
     <Switch>
+      <Route path="/automation">
+        <div className="mx-auto max-w-6xl px-6 py-10">
+          <Link href="/" className="mb-6 inline-block text-sm underline">Back to terminal</Link>
+          <PrivateSetup />
+        </div>
+      </Route>
       <Route path="/">
         <Terminal />
       </Route>

@@ -113,7 +113,17 @@ it was written the same day, in this ADR, by the author of this amendment.**
 The signer never checks that the `Authorization` it is handed came from the
 kernel. There is no signature or MAC on it, and the `nonce` — a content hash of
 the proposal and the state it was judged against — is never verified against
-anything. So the signer's real guarantee is:
+anything at the time of this amendment. The October 7 update in
+[ADR 0008](0008-the-signer-holds-its-own-policy.md) adds durable Privy process
+reuse checks; it does not authenticate the issuer, and the library and local
+lane still lack replay checks.
+
+The later October 7 issuer-verification amendment in ADR 0008 additionally
+requires a signed exact intent and host-clock expiry in the Privy binary. It
+authenticates a configured key. The later offline issuer amendment in ADR 0008
+adds kernel evaluation and reservations over operator-provisioned evidence;
+live trusted snapshots and reconciliation remain absent. The following original
+guarantee remains the library/local lane's.
 
 > the transaction matches the authorisation **the caller supplied**
 

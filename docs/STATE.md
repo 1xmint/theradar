@@ -9,10 +9,63 @@ repository is right and this file is a bug worth fixing in the same change.
 The four most likely to be stale: the measured edge, what the trading lane
 can reach, which venues are recorded, and whether anything has traded.
 
-Radar is a Solana research and trading platform. The goal is not "a trading bot".
-It is infrastructure that can **systematically discover, measure and exploit real
-edges in Solana markets**, and expose the resulting intelligence to other agents
-over x402.
+Radar is an evidence-driven autonomous trading system. The owner's accepted
+2026-10-11 direction is **Alpaca paper stocks/ETFs first, without leverage or
+dependence on shorting**, optimizing durable profit after costs. Solana and
+Hyperliquid public-data research are secondary. See [GOAL](../GOAL.md) and
+[the accepted experiment](design/0022-alpaca-paper-first-experiment.md).
+Account/market/quote and bracket reconciliation source is integrated; exposure,
+recovery, durable claims, asset observations and setup changes still require
+verified integration. Owner-reported isolated VPS reads verified an active paper
+account with no positions and retained SPY/QQQ IEX snapshots; root-only credential
+permissions and installed reader hash were inspected independently. A bounded
+continuous research recorder is installed: direct SSH verified its enabled active
+timer, successful worker exits and consecutive reports of distinct captures.
+Installed script/unit hashes match the verified bundle; private capture contents
+were not independently read. See [plan 0038](plans/0038-alpaca-market-recorder.md)
+and the runtime handback in [plan 0040](plans/0040-alpaca-paper-scoring.md).
+Quote metadata checks and cost-aware offline outcome scoring are GitHub-verified.
+The scorer keeps size units, participation, fees and slippage as explicit research
+assumptions, never broker execution facts. Local forward-decision commands now
+freeze Enter/Wait, same-size always-enter and cash baselines, assumptions and an
+exact horizon cutoff; offline comparisons retain unscoreable cases. They are
+GitHub-verified. A separately installed subscription research CLI can request a
+strict Enter/Wait choice, retain fixed experiment size/horizon/cost assumptions
+and revalidate the quote at completion.
+GitHub subprocess tests verify framing, refusal before invalid model calls and
+strict output. The first retained actual model decision was wait; its exit
+became unscoreable because the quote was stale. No positive expectancy follows.
+Complete useful scheduled cohorts and held-out/forward evaluation remain incomplete.
+See [plan 0041](plans/0041-alpaca-forward-decision.md) and
+[plan 0042](plans/0042-alpaca-model-proposal.md).
+An optional scheduled research worker now freezes a campaign and retains each
+slot as decision, failed, missed or interrupted_unknown, without automatic retry.
+GitHub verifies its schedule/persistence/credential boundaries. The earlier
+quote-only campaign is installed and retained; its first actual wait decision
+and stale exit, plus failed attempts, do not establish useful performance.
+See [cohort reporting](plans/0045-alpaca-cohort-report.md). The separate guarded
+snapshot-context campaign is now installed. SSH at October 13 04:56 UTC verified
+active scheduling, successful service, installed hashes and the frozen twelve
+slots starting today at 10 AM Eastern. At 16:09 UTC the service reported all
+twelve slots as decisions; independently read first/last proposals are wait.
+Cost-adjusted exits remain unscored. See
+[context provisioning](plans/0050-alpaca-context-provisioning.md).
+Retained-order maintenance and its explicit history requirement passed GitHub
+at 37b56014. One-time initialization and observation provisioning passed all
+fourteen GitHub checks at 36ec9f2 and are installed. SSH verified initialization
+and initial successful observation ticks, followed by recurring failure on an
+unsupported new cash activity. History remains retained; diagnosis and repair
+are [plan 0055](plans/0055-alpaca-maintenance-diagnostics.md). A verified root-owned
+helper now grants five exact passwordless paper diagnostic/observation commands.
+The failing timer is stopped and history retained. Direct activity inspection
+identified an executed 100000 JNLC dated before initialization; controlled
+opening-history reconciliation remains required. See
+[initialization/provisioning](plans/0054-alpaca-execution-initialization.md).
+No actual broker orders, effective autonomous handover or Alpaca learning results
+have been verified. The autonomous goal remains incomplete.
+
+The measurements below describe the existing Solana research, recorder and
+execution infrastructure; they do not establish an Alpaca edge.
 
 Two facts set the tone, and both are load-bearing:
 
@@ -895,6 +948,28 @@ never as "0 queries" -- rule 9, since a silent unit and a unit that ran
 cleanly are different facts.
 
 ## What is live on radar.heyvera.org
+
+Latest limited inspection: 2026-10-10 around 05:00 UTC. Public `/health`
+returned status ok, build `3f38ee0ffaf2d1e349f54b43475f36c010bb335d`,
+`agent.configured=true`, provider `codex`, last model call `never`, and
+`policyClosed=true`. `/automation` returned HTTP 302 without credentials.
+The health field `trading=true` reports a configured trading component, not
+autonomous execution authority. The private wallet settings remain drafts.
+
+SSH to guardian-vps-tail timed out. Local Tailscale reported Running, no health
+warnings and self online; the peer at 100.105.198.39 (`clawguard`) was offline,
+last seen 2026-10-07T17:22:48.1Z. This does not mean the public service is down.
+Current host files, issuer provisioning, delegation and funding were not checked.
+
+Locally committed source through `5a65043` adds known-account history collection,
+signature/static-membership review, signed TransferChecked intents and reported
+balance consistency. Those follow-ups are unpublished and undeployed while
+CI 38023346308 attempt 2 reruns its timed-out prior-source mutation shard. Local
+proof is in [plan 0015](plans/0015-private-chatgpt-and-privy-setup.md); full new-source
+CI, complete economic reconciliation, live risk inputs and execution/recovery
+remain open. Autonomous execution remains off.
+
+### Historical September deployment snapshot
 
 As of 2026-09-27 (~15:20 UTC; build line refreshed 2026-09-28 03:07 UTC),
 checked directly rather than recalled. This replaces the 2026-09-26 snapshot

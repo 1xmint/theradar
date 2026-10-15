@@ -15,6 +15,33 @@ to the effect it is writing about, and what a replay is entitled to claim.
 **Extends:** the analyst's append-only JSONL log, which keeps its shape and its
 reason.
 
+## Reservation history ownership — 2026-10-07
+
+`OperationLog::open`, used by `radar consider`, now acquires a nonblocking
+exclusive OS file lock on a persistent `<journal>.lock` sidecar before reading
+or replaying the journal. The handle stays in the log for its entire lifetime;
+another cooperating process or instance refuses instead of reading stale
+claims. Normal drop or process death releases ownership through the OS. The
+sidecar stays on disk and is never unlinked to release a lock. Parent path
+canonicalization binds lexical directory aliases to the same sidecar.
+
+Before replay, operation history must verify as intact. Broken hashes,
+sequences, non-final malformed lines and torn tails refuse without rewriting
+history. A duplicate operation transition remains idempotent when recorded in
+a valid chain; a repeated raw JSONL line is chain corruption and now refuses.
+Generic `Journal` remains available for read-only audit, including while an
+operation owner holds the lock. It is not a writer bypass to use on operation
+history. State directories must already exist and be writable; missing or
+unusable lock state refuses rather than automatically provisioning a directory.
+
+This is cooperative ownership of one configured history path, not a wallet-wide
+lock across different journals, a hostile-host defense or an authenticated
+portfolio. Protect the directory, sidecar and journal against replacement,
+unlinking, symlink/hard-link aliases and rollback. A truncated complete valid
+prefix cannot be detected without a trusted checkpoint. Existing append/sync
+ordering is unchanged. The isolated mandate/valuation/issuer adapter remains
+unimplemented and private live trading remains disabled.
+
 ## Context
 
 Radar is about to run a money-bearing loop with no human in it: mentions in,

@@ -1,33 +1,62 @@
 // SPDX-License-Identifier: Apache-2.0
 //! The operator command line.
 //!
-//! Everything here reads live state and computes nothing it does not have. The
-//! point is that `radar-cli` can never be stale: it opens the store and reports
-//! what is actually in it, so a claim about what Radar has recorded is checkable
-//! rather than remembered.
+//! Readers report captured facts rather than remembered state. The private
+//! paper submission command additionally requires directly collected broker
+//! facts, deterministic risk and durable journal ordering before any effect.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::process::ExitCode;
 
 use radar_asof::AsOf;
 use radar_instruments::{Context, CreatorHistory, CreatorTrackRecord, Registry, SimulateExit};
+mod alpaca_activities;
+mod alpaca_assets;
+mod alpaca_cancel;
+mod alpaca_cash;
+mod alpaca_context;
+mod alpaca_decision;
+mod alpaca_exposure;
+mod alpaca_fills;
+mod alpaca_journal;
+mod alpaca_maintain;
+mod alpaca_market;
+mod alpaca_order_read;
+mod alpaca_paper_model;
+mod alpaca_positions;
+mod alpaca_preflight;
+mod alpaca_propose;
+mod alpaca_quote;
+mod alpaca_read;
+mod alpaca_reconcile;
+mod alpaca_score;
+mod alpaca_session;
+mod alpaca_submit;
 mod audit;
 mod basis;
 mod brief;
 mod consider;
 mod control;
 mod cost;
+mod curve_exit;
 mod dossier;
 mod edge;
+mod evidence_read;
 mod exits;
 mod features;
 mod graduations;
 mod model_prices;
+mod portfolio_read;
 mod replay;
 mod route;
 mod selection;
 mod session;
+mod settlement_read;
+mod sol_price_read;
 mod study;
+mod transaction_read;
+mod wallet_activity_read;
+mod wallet_read;
 
 use radar_sim::{JupiterQuoter, RpcClient};
 use radar_store::{Event, Reader, Table};
@@ -110,6 +139,51 @@ commands:
   cost --from <ts> --to <ts>     what a round trip costs, bucketed by notional;
                                  re-derives the 850 bps constant and says
                                  whether it is fixed or proportional
+  alpaca-read (paper account, positions and US equity market clock; credentials from environment)
+  alpaca-research-session --horizon-ms <positive-ms> (read-only regular-session research guard)
+  alpaca-reconcile --account-id <expected-paper-account-id>
+  alpaca-activities-read --account-id <paper-id> --max-pages <positive-u16>
+  alpaca-cash-reconcile --journal <private-file> --account-id <paper-id> --baseline <activity-report> --max-pages <positive-u16>
+  alpaca-cash-checkpoint --journal <private-file> --account-id <paper-id> --max-pages <positive-u16>
+  alpaca-opening-cash-acknowledge --journal <existing-file> --account-id <paper-id> --activity-id <selected-id> --max-pages <positive-u16> --already-in-opening-balance
+  alpaca-order-reconcile --journal <private-file> --account-id <paper-id> --client-order-id <retained-id> --max-pages <positive-u16>
+  alpaca-order-read --account-id <expected-paper-account-id> --client-order-id <retained-id> [--journal <private-file>]
+  alpaca-paper-cancel --journal <private-file> --account-id <paper-id> --client-order-id <retained-id>
+  alpaca-paper-maintain --journal <private-file> --account-id <paper-id> --max-pages <positive-u16> [--cancel-working]
+  alpaca-order-reserve --journal <private-file> --account-id <paper-id> --intent <typed-intent>
+  alpaca-order-preflight --journal <private-file> --intent <typed-intent> --policy <private-policy> --max-pages <positive-u16> [--paper-model <private-simulation-model>]
+  alpaca-paper-submit --journal <private-file> --intent <typed-intent> --policy <private-policy> --max-pages <positive-u16> [--paper-model <private-simulation-model>]
+  alpaca-order-journal --journal <private-file> --account-id <paper-id>
+  alpaca-assets-read --account-id <paper-id> --symbols SPY,QQQ
+  alpaca-market-read --symbols SPY,QQQ --output <new-capture-file>
+  alpaca-market-replay --input <capture-file> --as-of-unix-ms <N>
+  alpaca-quote --input <capture-file> --symbol SPY --as-of-unix-ms <N> --max-age-ms <N> --max-spread-bps <N>
+  alpaca-paper-score --entry <capture> --entry-as-of-unix-ms <N> --exit <capture> --exit-as-of-unix-ms <N> --symbol SPY --quantity-nanoshares <N> --assumptions <json>
+                                 offline ask-to-bid outcome under explicit cost
+                                 and participation assumptions; no orders
+  alpaca-paper-decision --capture <capture> --symbol SPY --proposal <json> --assumptions <json> --output <new-file>
+  alpaca-paper-propose --capture <capture> --symbol SPY --experiment <json> --assumptions <json> --output <new-file>
+  alpaca-paper-decision-score --decision <record> --exit <capture> --exit-as-of-unix-ms <N>
+                                 freeze research choices and compare outcomes;
+                                 no broker permissions or orders
+  wallet-read --wallet <address> --rpc <URL>
+       [--value-sol --min-slot <N> --max-age-secs <N> --max-confidence-bps <0..10000>]
+    Finalized balances/raw token verification; optional native USD band, read-only.
+  portfolio-read --wallet <address> --rpc <URL> --min-slot <N> --max-age-secs <N> --max-confidence-bps <0..10000>
+    Observed holdings with native/wrapped SOL and admitted curve exit marks; unknowns retained.
+  sol-price-read --rpc <URL> --min-slot <N> --max-age-secs <N> --max-confidence-bps <0..10000> [--output <private-file>]
+    Receiver-verified SOL/USD confidence bounds; read-only, no portfolio authority.
+  wallet-activity-read --wallet <address> --after-slot <N> --through-slot <N> --rpc <URL> [--inventory-review <path>]
+    Bounded finalized address history and raw transactions; incomplete wallet coverage.
+  curve-exit --mint <address> --raw-tokens <N> --rpc <URL>
+    One-context curve/mint/fee read; conservative hypothetical sell, no authority.
+  transaction-read --transaction <binary-file> --min-slot <N> --rpc <URL>
+    Exact unsigned legacy simulation and message fee; JSON, no signing or sending.
+  evidence-read --wallet <address> --transaction <binary-file> --min-slot <N> --rpc <URL> [--output <private-file>]
+    Collect wallet and exact transaction evidence; optional private atomic publication.
+  settlement-read --wallet <address> --transaction <signed-binary-file> --min-slot <N> --rpc <URL>
+    Exact finalized transaction and balance metadata; no claim release or USD accounting.
+
   dossier <mint> [--rpc URL] [--seconds N]
                                  everything Radar can say about one token, read
                                  from the chain on demand rather than from the
@@ -882,6 +956,33 @@ fn main() -> ExitCode {
         "study" => event_study(&args),
         "creator-index" => creator_index(&args),
         "dossier" => dossier::run(&args),
+        "alpaca-read" => alpaca_read::run(&args),
+        "alpaca-research-session" => alpaca_session::run(&args),
+        "alpaca-reconcile" => alpaca_reconcile::run(&args),
+        "alpaca-activities-read" => alpaca_activities::run(&args),
+        "alpaca-cash-reconcile" => alpaca_cash::run(&args),
+        "alpaca-cash-checkpoint" => alpaca_cash::checkpoint_run(&args),
+        "alpaca-opening-cash-acknowledge" => alpaca_cash::opening_run(&args),
+        "alpaca-order-reconcile" => alpaca_fills::run(&args),
+        "alpaca-order-read" => alpaca_order_read::run(&args),
+        "alpaca-paper-cancel" => alpaca_cancel::run(&args),
+        "alpaca-paper-maintain" => alpaca_maintain::run(&args),
+        "alpaca-order-preflight" | "alpaca-paper-submit" => alpaca_preflight::run(&args),
+        "alpaca-order-reserve" | "alpaca-order-journal" => alpaca_journal::run(&args),
+        "alpaca-assets-read" => alpaca_assets::run(&args),
+        "alpaca-market-read" | "alpaca-market-replay" => alpaca_market::run(&args),
+        "alpaca-quote" => alpaca_quote::run(&args),
+        "alpaca-paper-score" => alpaca_score::run(&args),
+        "alpaca-paper-decision" | "alpaca-paper-decision-score" => alpaca_decision::run(&args),
+        "alpaca-paper-propose" => alpaca_propose::run(&args),
+        "wallet-read" => wallet_read::run(&args),
+        "portfolio-read" => portfolio_read::run(&args),
+        "sol-price-read" => sol_price_read::run(&args),
+        "wallet-activity-read" => wallet_activity_read::run(&args),
+        "curve-exit" => curve_exit::run(&args),
+        "transaction-read" => transaction_read::run(&args),
+        "evidence-read" => evidence_read::run(&args),
+        "settlement-read" => settlement_read::run(&args),
         "audit" => audit::run(&args),
         "model-prices" => model_prices::run(&args),
         "selection" => selection_report(&args),

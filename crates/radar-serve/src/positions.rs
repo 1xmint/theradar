@@ -320,6 +320,18 @@ async fn get_inner(State(state): State<Arc<AppState>>, tenant: Tenant, uri: Uri)
             "this route reads only the signed-in wallet's own holdings, and takes no parameters",
         );
     }
+    read_for_wallet(state, *tenant.address()).await
+}
+
+/// Only a verified Privy owner proof can use the private operator lane.
+pub(crate) async fn get_for_owner(
+    state: Arc<AppState>,
+    owner: &crate::automation::OwnerWallet,
+) -> Response {
+    read_for_wallet(state, owner.address()).await
+}
+
+async fn read_for_wallet(state: Arc<AppState>, wallet: Address) -> Response {
     let Some(positions) = state.positions.as_ref() else {
         return refusal(
             StatusCode::SERVICE_UNAVAILABLE,
@@ -327,7 +339,6 @@ async fn get_inner(State(state): State<Arc<AppState>>, tenant: Tenant, uri: Uri)
             "this instance cannot read on-chain balances",
         );
     };
-    let wallet = *tenant.address();
 
     if let Some(held) = positions.cached(wallet) {
         return Json(render(&held)).into_response();

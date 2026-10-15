@@ -48,6 +48,7 @@ export interface Route {
  * and the owner's correction named only the report pages for deletion.
  */
 export const ROUTES = [
+  { path: "/automation", audience: "operator" },
   {
     path: "/",
     audience: "customer",

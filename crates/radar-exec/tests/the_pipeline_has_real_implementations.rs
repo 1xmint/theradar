@@ -68,10 +68,9 @@ fn quoting_reaches_the_real_router() {
 /// The routing stage refuses to produce a transaction, and says why.
 ///
 /// This test replaced one asserting that `Routing::build_buy` delegated to a
-/// real network call. It no longer does, because as of 2026-09-09 there is no
-/// Jupiter endpoint that returns a transaction `radar-signer` can read: the
-/// Router returns raw instructions and address lookup tables, and `lite-api`'s
-/// `asLegacyTransaction` is deprecated. The honest implementation is a refusal.
+/// real network call. Legacy assembly is now available, but readability alone
+/// does not verify routed-program semantics or protected asset spend/output.
+/// The autonomous Routing implementation remains refused until those checks exist.
 ///
 /// So this test is the successor guarantee, and it is a stronger one than "it
 /// tried the network": **the pipeline can never be handed an unsignable
@@ -86,12 +85,12 @@ fn the_routing_stage_refuses_a_transaction_rather_than_returning_an_unsignable_o
         &Address::new([0x33; 32]),
         1_000_000,
     )
-    .expect_err("the Router API cannot supply a signable transaction");
+    .expect_err("readability alone cannot authorize autonomous execution");
 
     // Not `NoRoute`. An operator reading this must not conclude the market was
     // thin and try a different token forever.
     assert!(
-        matches!(err, RouteError::Unverifiable(ref m) if m.contains("lookup tables")),
+        matches!(err, RouteError::Unverifiable(ref m) if m.contains("execution semantics") && m.contains("spend/output verification")),
         "the refusal must carry the reason, got {err}"
     );
 }

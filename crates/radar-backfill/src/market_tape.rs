@@ -504,7 +504,10 @@ mod tests {
     #[test]
     fn a_row_naming_an_unparseable_mint_is_dropped_not_guessed() {
         let rows = vec![row("not-a-real-mint", 1, SOL, "10000")];
-        assert!(fold_market_trades(&rows).is_empty());
+        assert_eq!(
+            fold_market_trades(&rows),
+            [] as [radar_store::MarketTrade; 0]
+        );
     }
 
     #[test]

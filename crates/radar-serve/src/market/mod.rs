@@ -2322,7 +2322,7 @@ mod tests {
     fn nothing_priced_names_no_quote() {
         let (quote, kept) = in_one_quote(vec![fold_trade(Some(WSOL), None)]);
         assert_eq!(quote, None);
-        assert!(kept.is_empty());
+        assert_eq!(kept, [] as [radar_backfill::market::fold::Trade; 0]);
     }
 
     /// The prices `drop_stray_prices` leaves on trades in one quote, in order.

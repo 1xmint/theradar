@@ -1379,7 +1379,10 @@ mod tests {
             "10000",
         )];
         let trades = fold_tape(&rows);
-        assert!(fold_candles(&trades, 0).is_empty());
+        assert_eq!(
+            fold_candles(&trades, 0),
+            [] as [crate::market::fold::Candle; 0]
+        );
     }
 
     fn holder_row(source: &str, destination: &str, value: &str, kind: &str) -> HolderRow {

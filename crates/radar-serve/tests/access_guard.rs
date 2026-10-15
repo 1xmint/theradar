@@ -198,6 +198,10 @@ async fn switching_access_off_serves_normally() {
     // 1.6 of the previous plan and the reason `radar brief` grew both-way
     // checks.
     assert_eq!(status(router(Mode::Off), "/health").await, StatusCode::OK);
+    assert_eq!(
+        status(router(Mode::Off), "/v1/paper/status").await,
+        StatusCode::FORBIDDEN
+    );
     assert_ne!(
         status(router(Mode::Off), "/v1/funnel").await,
         StatusCode::FORBIDDEN,

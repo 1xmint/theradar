@@ -1,15 +1,16 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # Plan 0011 — Build and measure a private autonomous trader
 
-**Status:** in progress — **P0 complete, P1 partial, P7a complete; P2 and P4-P8
-unstarted.** No live operation is authorised by this document. **Re-verified
-2026-09-26: unchanged since the last related commit, #237 (`7ef027d`,
-2026-09-10).** `git log --oneline --all` shows no further commits against
-`crates/radar-serve/src/trade.rs`'s portfolio work, the market registry, or any
-other P2/P4-P8 item since then. [Plan 0014](0014-close-the-terminal-and-measure-the-edge.md)
-lists "the private trader (plan 0011)" under "Not in scope" rather than calling
-it paused, so that word is not used here; the plan is simply not being worked
-on while 0013/0014 run.
+**Status:** in progress — **P0 complete, P1 partial, P6 preparation begun, P7a
+complete; P2, P4, P5, remaining P7 and P8 unstarted.** No live operation is
+authorised by this document. Work resumed at the owner's request in October;
+[plan 0015](0015-private-chatgpt-and-privy-setup.md) records the private ChatGPT
+subscription link, Privy wallet/balance and draft settings. Signer request binding
+at `3f38ee0` is preparation for P6; the Privy process now verifies exact issuer
+proofs, host-clock expiry and durable nonce reuse (`7899833`). The isolated
+kernel/reservation issuer and durable accounting remain incomplete. The earlier
+2026-09-26 inspection found no progress beyond
+#237 (`7ef027d`) while plans 0013/0014 ran; that is historical, not current status.
 **Date:** 2026-09-09, implementation begun 2026-09-09.
 **Branch:** merged to `main`; implementation lands there as ordinary pull requests.
 **Inspected base:** `c39aabc8aafc3fcb9da2b0bf0c1329a18f75a212`; implementation
@@ -67,15 +68,52 @@ choosing a real capital budget. Live configuration must separately supply:
 |---|---|
 | Account and wallet | Dedicated own-capital experimental identity; verified ownership and recovery path; no customer/prize funds. |
 | Capital and denominations | Maximum funded principal, base reporting currency, allowed quote assets and minimum SOL operating reserve. No assumed $1 USDC valuation. |
-| Risk mandate | Position, aggregate exposure, correlated-group exposure, trade size, turnover, session/daily loss and drawdown limits; maximum holding duration. |
+| Risk mandate | Owner-selected or explicitly agent-selected allocation and sizing; adaptive risk preference, concentration, turnover, exit and reserve rules; optional owner-enabled daily loss cap. Record the effective choices and enforce the resulting authorized policy independently. |
 | Intelligence budget | Per-job, daily and session caps across all agents, tools, retries and rejected candidates; independent from principal and protection reserve. |
 | Session | Start/end, entry stop, renewal and unwind behaviour; no silent permanent authority or automatic refill. |
 | Protection | Admitted exit routes, reduction constraints, retry/fee budget, freshness/reconciliation limits and escalation channel. |
 | Evidence policy | Strategy/model/tool versions, frozen experiment, allowed sources and cohorts, timestamps, retention and read coverage. |
 | Conflicts | Community-token exclusion and enforcement of GOAL's no-hold/comment rule across private trader and public analyst. |
 
-Numbers remain **unset**, which blocks real spending rather than inviting an agent
-to pick them. This does not block implementation of disabled live machinery.
+Numbers remain **unset**. The owner chooses manual versus Agent decides per
+option on the website; do not request the same numbers in chat. An agent-selected
+value remains a proposal until validated against the owner's mandate and verified
+wallet state, converted to an enforceable policy and independently authorized.
+Saved draft choices alone cannot enable signing. This does not block disabled
+live machinery. Unlimited subscription inference was selected separately; provider
+limits still apply, and this does not authorize paid tools or wallet spending.
+
+### Owner-approved smart-panel checklist (2026-10-10)
+
+Josh accepted adaptive risk management by default, optional daily loss limits,
+and conversational research assistance. These are required private-trader work,
+not an optional dashboard polish phase. See design 0017 section 1 for the decision.
+
+- [ ] Make the daily loss cap optional in new site drafts and persisted settings;
+  preserve older saved caps and validate enabled caps independently from who
+  chooses their amount. Carry explicit cap state into live policy construction;
+  do not implement absence as an enormous dollar sentinel.
+- [ ] Connect a risk preference to actual sizing, concentration, liquidity/exit,
+  evidence and reserve decisions. Show current effective choices and reasons.
+  Test de-risking, abstention and evidence-based recovery after deterioration;
+  prevent unsupported loss-chasing or calendar-only recovery.
+- [ ] Show verified wallet equity, available capital, open exposure, performance
+  after costs, uncertainty and current activity/waiting reasons. Missing prices
+  remain unknown. Keep direct entry-pause and revocation outside the model.
+- [ ] Connect the research chat to the autonomous supervisor: attributed user
+  leads, provenance/token/chain/liquidity/exit/cost checks, follow-up questions
+  where necessary, and actions within the existing mandate without per-trade
+  confirmation. Test malicious posts and tips that do not justify a trade.
+- [ ] Measure net outcomes against credible controls, drawdowns and recovery,
+  realistic execution costs and no-trade periods. Compare frozen risk profiles
+  in shadow before changing live behavior; promote research-tool improvements
+  through tested review rather than model edits to live authority or protections.
+
+Activation still requires live verified inputs and durable economic accounting
+(P2), the investigative consumer (P3), evidence and evaluation (P4/P5), isolated
+authority (P6), supported entries and exits (P7), recovery/protection (P8), and
+owner activation with verified funding/delegation and reconciled canaries (P9/P10).
+Passing a UI test or saving preferences proves none of those remaining gates.
 
 ## Dependency sequence
 
@@ -241,6 +279,18 @@ quietly lower the threshold.
 [signer main](../../crates/radar-signer/src/main.rs),
 [authorization-key boundary](../adr/0007-the-privy-authorization-key-lives-in-the-signer-process.md)
 and [signer's own policy](../adr/0008-the-signer-holds-its-own-policy.md).
+
+Privy preparation at `3f38ee0` adds an explicit mode with no local Solana key and
+a trusted app/wallet/address scope. Real-process tests reject caller wallet and
+RPC destination substitution; file-scoped mutation testing caught all 20 viable
+mutants. This is request binding only, not authenticated issuance, durable
+accounting or live delegation. See [plan 0015](0015-private-chatgpt-and-privy-setup.md)
+for deployment and verification status. P6 remains incomplete.
+
+Replay preparation at `225308a` adds persistent, exclusive nonce consumption in
+the Privy binary before key use. Process tests cover concurrency, restart, failed
+attempts and missing state. A fresh forged nonce or a resent Privy request is
+still possible; this is not authenticated issuance or submission accounting.
 
 - [ ] Specify the trusted authorization issuer, authenticated intent, replay
   prevention, independent expiry state and atomic reservation/consumption. Keep
