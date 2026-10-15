@@ -9,6 +9,12 @@ import tempfile
 
 directory = Path(__file__).parent
 cases = [
+    ("paper-control.py", 'if submission_refused(result, intent["client_order_id"]):', 'if False:'),
+    ("paper-control.py", 'set(value) != fields or value.get("venue") != "alpaca"', 'value.get("venue") != "alpaca"'),
+    ("paper-control.py", 'value.get("client_order_id") != client or value.get("broker_order_id") is not None', 'value.get("broker_order_id") is not None'),
+    ("paper-control.py", '"reservation_created", "network_attempted",\n                "fills_reconciled"', '"fills_reconciled"'),
+    ("paper-supervisor.py", 'if request["action"] == "submit" and shared.submission_refused(value, client):', 'if False:'),
+    ("paper-supervisor.py", 'outcome="proposal_refused" if result.get("submission") ==', 'outcome="broker_response" if result.get("submission") =='),
     ("paper-supervisor.py", 'current = observation(collected, self.account, now)', 'current = collected'),
     ("paper-supervisor.py", 'not current["handover_enabled"] or not current["market_clock"]["is_open"]', 'False'),
     ("paper-supervisor.py", 'fresh["generation"] != current["generation"]', 'False'),

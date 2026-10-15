@@ -651,7 +651,13 @@ mod tests {
                     Ok(response.to_string())
                 },
             );
-            assert_eq!(result.is_ok(), case == "same", "{case}");
+            assert_eq!(result.is_ok(), case == "same" || case == "absent", "{case}");
+            if case == "absent" {
+                assert_eq!(
+                    result.as_ref().unwrap()["submission"],
+                    "refused_before_reservation"
+                );
+            }
             assert_eq!(sent.get(), case == "same", "{case}");
             let entries: Vec<_> = log.entries().unwrap().collect();
             if case == "same" || case == "after" {
@@ -903,7 +909,7 @@ mod tests {
             },
         )
         .unwrap();
-        assert!(
+        assert_eq!(
             dispatch(
                 "alpaca-paper-submit",
                 &mut log,
@@ -913,7 +919,8 @@ mod tests {
                 || Ok(tick),
                 |_| panic!("actual unknown evidence must not submit"),
             )
-            .is_err()
+            .unwrap()["submission"],
+            "refused_before_reservation"
         );
         assert!(log.entries().unwrap().next().is_none());
         let report = dispatch(

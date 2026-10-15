@@ -56,6 +56,27 @@ def encoded(value):
     return json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
 
 
+def submission_refused(value, client):
+    # Only the pinned executor can establish this pre-reservation boundary.
+    # Missing IDs, stderr and transport errors never establish non-dispatch.
+    if not isinstance(value, dict) or value.get("submission") != "refused_before_reservation":
+        return False
+    fields = {"venue", "environment", "client_order_id", "submission", "refusal_reason", "broker_order_id",
+        "reservation_created", "network_attempted", "fills_reconciled", "retry_authorized",
+        "claim_release_authorized", "paper_execution_model"}
+    scenario = value.get("paper_execution_model")
+    if (set(value) != fields or value.get("venue") != "alpaca" or value.get("environment") != "paper"
+            or value.get("client_order_id") != client or value.get("broker_order_id") is not None
+            or value.get("refusal_reason") not in ("risk", "authorization")
+            or any(value.get(field) is not False for field in ("reservation_created", "network_attempted",
+                "fills_reconciled", "retry_authorized", "claim_release_authorized"))
+            or not isinstance(scenario, dict) or scenario.get("environment") != "paper"
+            or any(scenario.get(field) is not False for field in
+                ("live_capacity_verified", "live_costs_verified", "profit_measured"))):
+        raise ValueError("Invalid pre-reservation refusal receipt")
+    return True
+
+
 def publish(path, value, exclusive=False):
     if path.is_symlink() or (path.exists() and not path.is_file()):
         raise ValueError("Unexpected control target")
@@ -380,6 +401,8 @@ class Control:
                 result = self.invoke(["alpaca-paper-submit", "--journal", str(self.store / "orders.jsonl"),
                     "--intent", temporary, "--policy", str(self.policy_path(current["generation"])),
                     "--max-pages", "2", "--paper-model", str(MODEL)])
+                if submission_refused(result, intent["client_order_id"]):
+                    return result
                 scenario = result.get("paper_execution_model")
                 if (result.get("client_order_id") != intent["client_order_id"]
                         or result.get("submission") != "response_payload_matched"

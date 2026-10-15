@@ -142,6 +142,28 @@ class SupervisorTests(unittest.TestCase):
             self.assertEqual(first.read_bytes(), original)
             self.assertEqual(len([item for item in case.calls if item["action"] == "submit"]), 1)
 
+    def test_proven_refusal_completes_and_restart_reasons_with_a_fresh_identity(self):
+        with self.context() as case:
+            def refuse(request):
+                return dict(venue="alpaca", environment="paper", client_order_id=request["intent"]["client_order_id"],
+                    broker_order_id=None, submission="refused_before_reservation", refusal_reason="risk",
+                    reservation_created=False, network_attempted=False, fills_reconciled=False,
+                    retry_authorized=False, claim_release_authorized=False,
+                    paper_execution_model=dict(environment="paper", live_capacity_verified=False,
+                        live_costs_verified=False, profit_measured=False))
+            case.effect = refuse
+            self.assertEqual(case.instance.tick()["state"], "proposal_refused")
+            first = next(case.root.glob("attempt-*.json"))
+            original = first.read_bytes()
+            self.assertEqual(json.loads(original)["phase"], "completed")
+            case.instance = sup.Supervisor(ACCOUNT, case.root, case.instance.call, case.instance.reason, lambda:NOW + 101)
+            del case.effect
+            self.assertEqual(case.instance.tick()["state"], "broker_response")
+            submits = [item for item in case.calls if item["action"] == "submit"]
+            self.assertEqual(len(submits), 2)
+            self.assertNotEqual(submits[0]["intent"]["client_order_id"], submits[1]["intent"]["client_order_id"])
+            self.assertEqual(first.read_bytes(), original)
+
     def test_unknown_cancellation_requires_terminal_evidence_and_cannot_repeat_delete(self):
         with self.context(chosen("cancel", "radar_old")) as case:
             case.current["orders"]["working_before_cancellation"] = ["radar_old"]

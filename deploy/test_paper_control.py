@@ -70,6 +70,33 @@ class PaperControlTests(unittest.TestCase):
         return case.instance.dispatch(1100, dict(action="configure", generation=generation,
             operator=OPERATOR, preferences=prefs() if values is None else values, enabled=True))
 
+    def test_executor_refusal_receipt_is_validated_before_forwarding(self):
+        receipt = dict(venue="alpaca", environment="paper", client_order_id="radar_once", broker_order_id=None,
+            submission="refused_before_reservation", refusal_reason="risk", reservation_created=False,
+            network_attempted=False, fills_reconciled=False, retry_authorized=False, claim_release_authorized=False,
+            paper_execution_model=dict(environment="paper", live_capacity_verified=False,
+                live_costs_verified=False, profit_measured=False))
+        for field, wrong in [(None, None), ("client_order_id", "radar_other"), ("environment", "live"),
+                ("venue", "other"), ("broker_order_id", "broker-1"), ("refusal_reason", "timeout"),
+                ("reservation_created", True), ("network_attempted", True), ("fills_reconciled", True),
+                ("retry_authorized", True), ("claim_release_authorized", True), ("paper_execution_model", {}),
+                ("unexpected", False)]:
+            with self.subTest(field=field), self.context() as case:
+                self.enable(case)
+                value = receipt if field is None else dict(receipt, **{field:wrong})
+                def run(argv, **kwargs):
+                    if argv[1] == "alpaca-paper-submit":
+                        return types.SimpleNamespace(stdout=json.dumps(value))
+                    return case.run(argv, **kwargs)
+                case.instance.run = run
+                request = dict(action="submit", generation=1, intent=intent())
+                if field is None:
+                    self.assertEqual(case.instance.dispatch(1200, request), receipt)
+                else:
+                    with self.assertRaises(ValueError): case.instance.dispatch(1200, request)
+                self.assertEqual((case.root / "orders.jsonl").read_bytes(), case.original)
+        self.assertFalse(control.submission_refused({"error":"risk refused"}, "radar_once"))
+
     def test_fixed_decimal_manual_and_delegated_policy_bounds(self):
         self.assertEqual(control.amount("50.000001"), 50_000_001)
         self.assertEqual(control.amount("0", positive=False), 0)
