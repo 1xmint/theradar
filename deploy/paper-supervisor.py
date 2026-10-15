@@ -229,7 +229,8 @@ class Supervisor:
                     shared.publish(path, record)  # Durable uncertainty precedes IPC.
                     result = self.call(request)
                     result = acknowledgement(result, request)
-                    record.update(phase="completed", outcome="broker_response", result=result)
+                    record.update(phase="completed", outcome="proposal_refused" if result.get("submission") ==
+                        "refused_before_reservation" else "broker_response", result=result)
                 shared.publish(path, record)
                 return {"state":record["outcome"], "execution_authority":False, "profit_measured":False}
             except Exception:
@@ -241,6 +242,8 @@ class Supervisor:
 
 def acknowledgement(value, request):
     client = request["client_order_id"] if request["action"] == "cancel" else request["intent"]["client_order_id"]
+    if request["action"] == "submit" and shared.submission_refused(value, client):
+        return {field:value[field] for field in value if field != "paper_execution_model"}
     if (not isinstance(value, dict) or value.get("environment") != "paper" or value.get("venue") != "alpaca"
             or value.get("client_order_id") != client or not shared.text(value.get("broker_order_id"))
             or any(value.get(field) is not False for field in ("fills_reconciled", "retry_authorized", "claim_release_authorized"))):

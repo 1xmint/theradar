@@ -99,14 +99,24 @@ pub(super) fn execute(
     mut clock: impl FnMut() -> Result<u64, String>,
     send: impl FnOnce(&str) -> Result<String, String>,
 ) -> Result<Value, String> {
+    // A refusal receipt is only valid for a new identity. Previously retained
+    // claims must reconcile even when today's risk verdict would refuse them.
+    if log
+        .entries()
+        .map_err(|e| e.to_string())?
+        .any(|entry| entry.intent.client_order_id == intent.client_order_id)
+    {
+        return Err("paper client ID already retained; reconcile rather than retry".into());
+    }
     let order = super::alpaca_preflight::order(intent);
-    let authorization = equity::evaluate(&order, state, &policy()?)
-        .map_err(|_| "paper risk refused; no submission released")?;
+    let Ok(authorization) = equity::evaluate(&order, state, &policy()?) else {
+        return Ok(refused(intent, "risk"));
+    };
     let raw = body(intent).to_string();
     let decoded = decode(&raw, intent)?;
     let at = clock()?;
     if !authorization.permits(&decoded, at) {
-        return Err("paper payload or authorization time differs".into());
+        return Ok(refused(intent, "authorization"));
     }
     if log
         .reserve(intent.clone(), at / 1_000)
@@ -140,6 +150,13 @@ pub(super) fn execute(
         "broker_order_id":response.id,"submission":"response_payload_matched",
         "fills_reconciled":false,"retry_authorized":false,"claim_release_authorized":false}),
     )
+}
+
+fn refused(intent: &BrokerIntent, reason: &str) -> Value {
+    json!({"venue":"alpaca","environment":"paper","client_order_id":intent.client_order_id,
+        "submission":"refused_before_reservation","refusal_reason":reason,"broker_order_id":null,
+        "reservation_created":false,"network_attempted":false,"fills_reconciled":false,
+        "retry_authorized":false,"claim_release_authorized":false})
 }
 
 #[cfg(test)]
@@ -322,19 +339,48 @@ mod tests {
                 5 => 1_011,
                 _ => 1_000,
             };
-            assert!(
-                execute(
-                    &mut log,
-                    &intent,
-                    &current,
-                    || Ok(limits.clone()),
-                    || Ok(at),
-                    |_| panic!("refusal must not send")
-                )
-                .is_err()
+            let report = execute(
+                &mut log,
+                &intent,
+                &current,
+                || Ok(limits.clone()),
+                || Ok(at),
+                |_| panic!("refusal must not send"),
+            )
+            .unwrap();
+            assert_eq!(
+                report,
+                json!({"venue":"alpaca","environment":"paper","client_order_id":intent.client_order_id,
+                    "submission":"refused_before_reservation",
+                    "refusal_reason":if scenario < 4 { "risk" } else { "authorization" },
+                    "broker_order_id":null,"reservation_created":false,"network_attempted":false,
+                    "fills_reconciled":false,"retry_authorized":false,"claim_release_authorized":false})
             );
             assert!(log.entries().unwrap().next().is_none());
         }
+    }
+
+    #[test]
+    fn retained_identity_never_gets_a_non_dispatch_receipt_even_when_risk_refuses() {
+        let (intent, state, mut policy) = fixture();
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("orders.jsonl");
+        let mut log = BrokerLog::open(&path, "paper").unwrap();
+        log.reserve(intent.clone(), 1).unwrap();
+        let original = std::fs::read(&path).unwrap();
+        policy.enabled = false;
+        assert!(
+            execute(
+                &mut log,
+                &intent,
+                &state,
+                || Ok(policy.clone()),
+                || Ok(1_000),
+                |_| panic!("retained refusal must not send"),
+            )
+            .is_err()
+        );
+        assert_eq!(std::fs::read(&path).unwrap(), original);
     }
 
     #[test]
