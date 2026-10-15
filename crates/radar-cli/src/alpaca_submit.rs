@@ -109,9 +109,8 @@ pub(super) fn execute(
         return Err("paper client ID already retained; reconcile rather than retry".into());
     }
     let order = super::alpaca_preflight::order(intent);
-    let authorization = match equity::evaluate(&order, state, &policy()?) {
-        Ok(value) => value,
-        Err(_) => return Ok(refused(intent, "risk")),
+    let Ok(authorization) = equity::evaluate(&order, state, &policy()?) else {
+        return Ok(refused(intent, "risk"));
     };
     let raw = body(intent).to_string();
     let decoded = decode(&raw, intent)?;

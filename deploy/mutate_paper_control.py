@@ -47,7 +47,7 @@ for index, replacements in enumerate(cases):
         (target / "test_paper_control.py").write_text((directory / "test_paper_control.py").read_text())
         result = subprocess.run([sys.executable, "-m", "unittest", "discover", "-s", temporary,
             "-p", "test_paper_control.py"], capture_output=True, text=True)
-        if (result.returncode == 0 or "Ran 11 tests" not in result.stderr
+        if (result.returncode == 0 or "Ran 12 tests" not in result.stderr
                 or not any(marker in result.stderr for marker in ("FAIL: test_", "ERROR: test_"))
                 or any(marker in result.stderr for marker in ("SyntaxError", "ImportError", "ModuleNotFoundError"))):
             print(result.stdout)

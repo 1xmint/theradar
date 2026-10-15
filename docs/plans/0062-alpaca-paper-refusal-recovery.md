@@ -43,3 +43,34 @@ verification, a coordinated protected upgrade, accurate site status, explicit
 owner handover and actual paper entry/exit/cancel/reconciliation/pause. Adaptive
 learning and measured profit after costs remain unfinished. The full autonomous
 trading goal remains active; live orders remain unauthorized.
+
+## First GitHub run
+
+Source 511d9ea, draft PR 423, CI 38780392681 completed all jobs without
+cancellation. Rust tests passed 2863 and Python discovery passed 138. Tests then
+stopped at the existing controller regression harness: its hardcoded count was
+still eleven after adding the twelfth controller test. The actual injected peer
+authorization bug was caught by that twelfth-suite run; update the count, never
+weaken the assertion. New exact refusal suites were not reached in this run.
+
+Lint requested let-else for the new initial-risk branch; it is corrected.
+Cargo-deny reported newly published RUSTSEC-2026-0346 through 0349 affecting
+rustls 0.23.45, with 0.23.46 as the patched version. The official sparse registry
+at https://index.crates.io/ru/st/rustls confirms 0.23.46 is not yanked, has the
+same dependency requirements, and checksum
+48e13bd8c0e9365c43cfa5c9e8f9ad49d3c8444926c9aac819e0e4dc503c8fdf.
+The minimal lockfile version/checksum update accompanies the next verification;
+no advisory is ignored. This dependency change is necessary to pass the release
+security gate. No local Cargo process ran.
+
+All four generic mutation shards completed: two caught and two unviable, zero
+missed/timeouts. Retained diagnostics were read: replacing execute made existing
+helpers/arguments unused, while replacing refused made its arguments unused,
+both rejected under deny-warnings. Those compiler refusals are not executed
+behavioral coverage. The exact refusal reapplications still need execution.
+
+VPS inspection attempted through the existing SSH alias now requires a fresh
+Tailscale SSH check. The owner was asked to finish that browser sign-in. The
+pending SSH session was not restarted; no deployed services or permission changed
+during this turn. Full objective remains active, with source and verification
+progress rather than autonomous-trading completion.
