@@ -18,7 +18,7 @@ workspace = true
 # parquet version in the tree would be two decoders for one format.
 arrow = { version = "59", default-features = false }
 blake3.workspace = true
-parquet = { version = "59", default-features = false, features = ["arrow", "zstd"] }
+parquet = { version = "60", default-features = false, features = ["arrow", "zstd"] }
 radar-asof.workspace = true
 radar-store.workspace = true
 radar-strategy.workspace = true
