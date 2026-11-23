@@ -18,17 +18,7 @@ all-features = true
 [advisories]
 # Any known vulnerability fails the build. There is no severity threshold.
 yanked = "deny"
-ignore = [
-    # `paste` is a proc macro that expands identifiers at compile time and ships
-    # no runtime code. It arrives transitively through `parquet`, is unmaintained
-    # rather than vulnerable, and cannot be dropped without dropping Parquet.
-    #
-    # Recorded rather than suppressed silently: the risk is a compile-time
-    # supply-chain one, and the mitigation is that the crate is small, widely
-    # audited, and pinned by the committed lockfile. Revisit when `parquet` drops
-    # it, which upstream has an open issue for.
-    { id = "RUSTSEC-2024-0436", reason = "compile-time-only proc macro pulled in by parquet; unmaintained, not vulnerable" },
-]
+ignore = []
 
 [licenses]
 confidence-threshold = 0.93
